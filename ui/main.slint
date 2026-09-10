@@ -1517,8 +1517,8 @@ export component MainWindow inherits Window {
                     }
 
                     // Lazily create one stable cross-crate factory shell. The
-                    // page releases its message model while hidden, so only
-                    // the small static page/factory shell survives;
+                    // page clears message payloads while hidden, retaining
+                    // the shell and 20 lightweight delegate slots;
                     // reopening rehydrates it from the current Rust snapshot.
                     if root.messages-page-ever-opened: messages-page-host := Rectangle {
                         x: 0px;

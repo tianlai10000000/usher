@@ -22,6 +22,7 @@ import { NotificationIcons } from "../notify/icons.slint";
 import { GitHubNotificationBanner } from "../notify/actions_notify.slint";
 import { DialogManager } from "../dialog/dialog_manager.slint";
 import { GitHubMessageListItem, MessageLevel } from "../messages/github_message_components.slint";
+import { GitHubPagination } from "../navigation/github_pagination.slint";
 import { GitHubAiReviewFindingRow, GitHubAiReviewSeverityLabel } from "../ai_review/github_ai_review_components.slint";
 import { GitHubAgentResponseShowcase } from "github_agent_response_showcase.slint";
 
@@ -1292,7 +1293,7 @@ export component GitHubUiComponentsGallery inherits Rectangle {
         GitHubShowcaseSection {
             title: "Notification inbox rows";
             description: "GitHub Inbox unread hierarchy: canvas-subtle fill, accent unread disc, bold vs muted title.";
-            content-height: 176px;
+            content-height: 224px;
 
             GitHubShowcaseSampleSurface {
                 x: 0px;
@@ -1306,6 +1307,8 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                     spacing: 0px;
 
                     GitHubMessageListItem {
+                        framed: true;
+                        first-row: true;
                         item: {
                             id: "gallery-unread",
                             title: "Pull request checks completed",
@@ -1320,6 +1323,8 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                         };
                     }
                     GitHubMessageListItem {
+                        framed: true;
+                        last-row: true;
                         item: {
                             id: "gallery-read",
                             title: "Network connection restored",
@@ -1334,6 +1339,15 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                         };
                     }
                 }
+            }
+
+            GitHubPagination {
+                y: 184px;
+                width: parent.width;
+                current-page: 1;
+                page-count: 4;
+                pages: [1, 2, 3, 4];
+                page-selected(number) => { self.current-page = number; }
             }
         }
 

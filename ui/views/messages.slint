@@ -6,6 +6,7 @@ import { GitHubBlankslate } from "../components/github_blankslate.slint";
 import { GitHubButton } from "../components/settings/github_settings_controls.slint";
 import { GitHubSegmentedControl } from "../components/github_segmented_control.slint";
 import { GitHubPageHeader } from "../components/page/github_page_header.slint";
+import { GitHubPagination } from "../components/navigation/github_pagination.slint";
 import {
     GitHubMessageListItem,
     MessageListItem,
@@ -25,10 +26,15 @@ export component GitHubMessagesPage inherits Rectangle {
     in-out property <length> viewport-width: 800px;
     in-out property <length> viewport-height: 768px;
     // The small static page shell survives route changes so ComponentFactory
-    // bindings are never remounted. Rust releases the potentially large row
-    // model while inactive.
+    // bindings are never remounted. Rust clears message payloads from the 20
+    // stable row slots while inactive.
     in property <bool> active: false;
     in property <[MessageListItem]> messages: [];
+    in property <int> page-row-count: 0;
+    in property <int> current-page: 1;
+    in property <int> page-count: 1;
+    in property <[int]> page-links: [];
+    in-out property <length> scroll-y <=> message-scroll.viewport_y;
     // Counts are pushed from Rust on every snapshot. Do not derive tab badges
     // from `messages.length` string concat inside SegmentedControlItem — that
     // binding can freeze after the first paint on this ComponentFactory page.
@@ -44,8 +50,10 @@ export component GitHubMessagesPage inherits Rectangle {
     callback delete-message(string);
     callback clear-messages();
     callback activate-target(string);
+    callback change-filter(int);
+    callback change-page(int);
 
-    private property <int> selected-filter: 0;
+    in property <int> selected-filter: 0;
     private property <bool> clear-confirmation: false;
     private property <bool> unread-filter: root.selected-filter == 1;
     private property <bool> read-filter: root.selected-filter == 2;
@@ -53,10 +61,7 @@ export component GitHubMessagesPage inherits Rectangle {
         root.unread-filter ? root.unread-count == 0
         : root.read-filter ? root.read-count == 0
         : root.total-count == 0;
-    private property <int> visible-count:
-        root.unread-filter ? root.unread-count
-        : root.read-filter ? root.read-count
-        : root.total-count;
+    private property <int> visible-count: root.page-row-count;
     private property <length> row-height: root.width < 720px ? 76px : 84px;
     private property <length> page-gutter: root.width >= 1000px ? 48px : 20px;
     private property <length> available-width: max(0px, root.width - root.page-gutter * 2);
@@ -70,6 +75,13 @@ export component GitHubMessagesPage inherits Rectangle {
     height: root.viewport-height;
     background: GitHubTheme.canvas-default;
     clip: false;
+
+    public function clamp-scroll() {
+        message-scroll.viewport_y = max(
+            min(0px, message-scroll.viewport_y),
+            -max(0px, message-scroll.content_height - message-scroll.visible-height)
+        );
+    }
 
     changed active => {
         if !root.active {
@@ -94,7 +106,8 @@ export component GitHubMessagesPage inherits Rectangle {
             width: root.page-width;
             height: max(
                 message-scroll.visible-height,
-                message-list.preferred-height + root.list-y + GitHubMetrics.size-8
+                message-list.preferred-height + root.list-y
+                    + (root.page-count > 1 ? GitHubMetrics.size-64 : GitHubMetrics.size-8)
             );
             background: transparent;
             clip: false;
@@ -149,7 +162,10 @@ export component GitHubMessagesPage inherits Rectangle {
                     { label: I18n.common-read, count: root.read-count, count-suffix-offset: root.filter-count-suffix-offset, enabled: true },
                 ];
                 selected-index: root.selected-filter;
-                selection-changed(index) => { root.selected-filter = index; }
+                selection-changed(index) => {
+                    MessageTooltipOverlayState.dismiss-all();
+                    root.change-filter(index);
+                }
             }
 
             message-list := VerticalLayout {
@@ -174,49 +190,54 @@ export component GitHubMessagesPage inherits Rectangle {
                     spacious: true;
                 }
 
-                // Single bordered list chrome (GitHub Inbox).
-                if !root.filtered-empty: Rectangle {
+                // Each bounded row owns its border; only the end rows clip
+                // rounded corners. No full-document rounded offscreen texture.
+                Rectangle {
                     width: parent.width;
                     height: root.visible-count * root.row-height;
-                    border-radius: GitHubMetrics.radius-medium;
-                    border-width: GitHubMetrics.border-thin;
-                    border-color: GitHubTheme.border-default;
-                    background: GitHubTheme.canvas-default;
-                    clip: true;
+                    visible: root.visible-count > 0;
+                    background: transparent;
 
                     visible-messages := VerticalLayout {
                         width: parent.width;
                         spacing: 0px;
                         alignment: start;
 
-                        for message in root.messages: message-slot := Rectangle {
-                            private property <bool> matches-filter:
-                                root.selected-filter == 0
-                                || (root.selected-filter == 1 && !message.read)
-                                || (root.selected-filter == 2 && message.read);
+                        for message[index] in root.messages: GitHubMessageListItem {
                             width: parent.width;
-                            height: self.matches-filter ? root.row-height : 0px;
-                            clip: !self.matches-filter;
-
-                            GitHubMessageListItem {
-                                width: parent.width;
-                                height: parent.height;
-                                item: message;
-                                compact: root.width < 720px;
-                                tip-enabled: message-slot.matches-filter;
-                                activated(id) => {
-                                    if !message.read {
-                                        root.set-read(id, true);
-                                    }
-                                    if message.target != "" {
-                                        root.activate-target(message.target);
-                                    }
+                            height: index < root.visible-count ? root.row-height : 0px;
+                            visible: index < root.visible-count;
+                            item: message;
+                            compact: root.width < 720px;
+                            framed: true;
+                            first-row: index == 0;
+                            last-row: index == root.visible-count - 1;
+                            activated(id) => {
+                                if !message.read {
+                                    root.set-read(id, true);
                                 }
-                                read-changed(id, read) => { root.set-read(id, read); }
-                                delete-requested(id) => { root.delete-message(id); }
+                                if message.target != "" {
+                                    root.activate-target(message.target);
+                                }
                             }
+                            read-changed(id, read) => { root.set-read(id, read); }
+                            delete-requested(id) => { root.delete-message(id); }
                         }
                     }
+                }
+            }
+
+            GitHubPagination {
+                visible: root.page-count > 1;
+                x: 0px;
+                y: root.list-y + message-list.preferred-height + GitHubMetrics.size-16;
+                width: parent.width;
+                current-page: root.current-page;
+                page-count: root.page-count;
+                pages: root.page-links;
+                page-selected(number) => {
+                    MessageTooltipOverlayState.dismiss-all();
+                    root.change-page(number);
                 }
             }
         }

@@ -7,8 +7,8 @@ use chrono::Local;
 use slint::{ComponentFactory, ComponentHandle, Global, Model, ModelRc, VecModel};
 use usher_messages::{
     AppState as MessagesAppState, GitHubMessagesPage, LanguageOption as MessagesLanguageOption,
-    MessageCenter, MessageLevel, MessageListItem, MessageSeverity, MessageSnapshot,
-    NotifyRustDesktopNotifier, Subscription,
+    MESSAGE_PAGE_SIZE, MessageCenter, MessageLevel, MessageListItem, MessageReadFilter,
+    MessageSeverity, MessageSnapshot, NotifyRustDesktopNotifier, Subscription,
 };
 
 use crate::{AppState, MainWindow, app_paths, app_runtime, startup};
@@ -141,7 +141,9 @@ impl MessagePageBridge {
         let snapshot = self.center.snapshot();
         self.with_page(|page| {
             sync_page_language(page, preference);
-            apply_page_snapshot(page, snapshot);
+            if page.get_active() {
+                apply_page_snapshot(page, snapshot);
+            }
         });
     }
 
@@ -150,13 +152,13 @@ impl MessagePageBridge {
             let snapshot = self.center.snapshot();
             self.with_page(|page| {
                 // Rehydrate from the authoritative current snapshot before the
-                // conditional page tree is instantiated. Messages published
+                // stable page tree becomes visible. Messages published
                 // while another route was visible are therefore included.
                 apply_page_snapshot(page, snapshot);
                 page.set_active(true);
                 log::debug!(
                     "[Messages][Lifecycle] active=true projected_rows={}",
-                    page.get_messages().row_count()
+                    page.get_page_row_count()
                 );
             });
         } else {
@@ -182,15 +184,33 @@ impl MessagePageBridge {
 }
 
 fn release_page_rows(page: &GitHubMessagesPage) {
-    let current = page.get_messages();
-    if let Some(model) = current.as_any().downcast_ref::<VecModel<MessageListItem>>() {
-        model.set_vec(Vec::new());
-    } else {
-        page.set_messages(ModelRc::new(VecModel::default()));
-    }
+    update_page_rows(page, Vec::new());
 }
 
 fn bind_page_callbacks(center: &MessageCenter, page: &GitHubMessagesPage) {
+    let center_for_filter = center.clone();
+    let weak_page = page.as_weak();
+    page.on_change_filter(move |filter| {
+        if let Some(page) = weak_page.upgrade() {
+            page.set_selected_filter(filter.clamp(0, 2));
+            page.set_current_page(1);
+            apply_page_snapshot(&page, center_for_filter.snapshot());
+        }
+    });
+
+    let center_for_page = center.clone();
+    let weak_page = page.as_weak();
+    page.on_change_page(move |number| {
+        if let Some(page) = weak_page.upgrade() {
+            let number = number.clamp(1, page.get_page_count().max(1));
+            if number != page.get_current_page() {
+                page.set_current_page(number);
+                apply_page_snapshot(&page, center_for_page.snapshot());
+                page.set_scroll_y(0.0);
+            }
+        }
+    });
+
     let center_for_read = center.clone();
     page.on_set_read(move |id, read| {
         if let Err(error) = center_for_read.set_read(id.as_str(), read) {
@@ -255,9 +275,23 @@ fn sync_page_language(page: &GitHubMessagesPage, preference: &str) {
 
 fn apply_page_snapshot(page: &GitHubMessagesPage, snapshot: MessageSnapshot) {
     let locale = usher_i18n::active_locale().id;
-    let rows = snapshot
+    let filter = match page.get_selected_filter() {
+        1 => MessageReadFilter::Unread,
+        2 => MessageReadFilter::Read,
+        _ => MessageReadFilter::All,
+    };
+    let result = snapshot.page(filter, page.get_current_page().max(1) as usize);
+    let page_changed = page.get_current_page() != saturating_i32(result.number);
+    page.set_current_page(saturating_i32(result.number));
+    page.set_page_count(saturating_i32(result.page_count));
+    let links = pagination_links(result.number, result.page_count);
+    let current_links = page.get_page_links();
+    if current_links.iter().ne(links.iter().copied()) {
+        page.set_page_links(ModelRc::new(VecModel::from(links)));
+    }
+    let rows = result
         .messages
-        .iter()
+        .into_iter()
         .cloned()
         .map(|message| MessageListItem {
             id: message.id.into(),
@@ -298,7 +332,7 @@ fn apply_page_snapshot(page: &GitHubMessagesPage, snapshot: MessageSnapshot) {
             target: message.target.unwrap_or_default().into(),
         })
         .collect::<Vec<_>>();
-    let total = rows.len();
+    let total = snapshot.messages.len();
     let unread = snapshot.unread_count.min(total);
     let read = total.saturating_sub(unread);
     // Push filter badges as ints before the model mutates. Tab labels bind to
@@ -310,32 +344,59 @@ fn apply_page_snapshot(page: &GitHubMessagesPage, snapshot: MessageSnapshot) {
     // Header sentence is still a complete Rust string — int concat in Slint
     // freezes the same way on this ComponentFactory page.
     page.set_status_description(status_description(unread).into());
-    // Keep the VecModel identity across read-state updates. Replacing ModelRc
-    // remounts every All-tab row and makes Slint reshuffle scroll/order so a
-    // body click looks like a delete or reorder even though storage is stable.
+    update_page_rows(page, rows);
+    if page_changed {
+        page.set_scroll_y(0.0);
+    } else {
+        page.invoke_clamp_scroll();
+    }
+}
+
+fn update_page_rows(page: &GitHubMessagesPage, mut rows: Vec<MessageListItem>) {
+    // Keep exactly 20 delegate slots, including on route exit and empty pages.
+    // Recreating factory delegates can reuse stale renderer text bindings.
+    // Unused slots contain no message payload and remain invisible at zero height.
+    let visible_count = rows.len().min(MESSAGE_PAGE_SIZE);
+    rows.resize_with(MESSAGE_PAGE_SIZE, MessageListItem::default);
     let current = page.get_messages();
     if let Some(model) = current.as_any().downcast_ref::<VecModel<MessageListItem>>() {
-        let same_identity = model.row_count() == rows.len()
-            && (0..rows.len()).all(|index| {
-                model
-                    .row_data(index)
-                    .is_some_and(|existing| existing.id == rows[index].id)
-            });
-        if same_identity {
-            for (index, row) in rows.into_iter().enumerate() {
-                let unchanged = model
-                    .row_data(index)
-                    .is_some_and(|existing| message_row_equivalent(&existing, &row));
-                if !unchanged {
-                    model.set_row_data(index, row);
-                }
+        for (index, row) in rows.into_iter().enumerate() {
+            if index == model.row_count() {
+                model.push(row);
+            } else if model
+                .row_data(index)
+                .is_none_or(|existing| !message_row_equivalent(&existing, &row))
+            {
+                model.set_row_data(index, row);
             }
-            return;
         }
-        model.set_vec(rows);
-        return;
+    } else {
+        page.set_messages(ModelRc::new(VecModel::from(rows)));
     }
-    page.set_messages(ModelRc::new(VecModel::from(rows)));
+    page.set_page_row_count(saturating_i32(visible_count));
+}
+
+/// Primer's first/last links and two neighbors, with edge windows expanded.
+fn pagination_links(current: usize, total: usize) -> Vec<i32> {
+    if total <= 9 {
+        return (1..=total).map(saturating_i32).collect();
+    }
+    let start = current.saturating_sub(2).clamp(1, total - 6);
+    let end = (current + 2).max(7).min(total);
+    let mut links = vec![1];
+    if start > 3 {
+        links.push(0);
+    } else if start == 3 {
+        links.push(2);
+    }
+    links.extend((start.max(2)..=end.min(total - 1)).map(saturating_i32));
+    if end < total - 2 {
+        links.push(0);
+    } else if end == total - 2 {
+        links.push(saturating_i32(total - 1));
+    }
+    links.push(saturating_i32(total));
+    links
 }
 
 const DIAGNOSTIC_TITLE_KEYS: &[&str] = &["diagnostics.previous_run_title"];
@@ -431,6 +492,10 @@ fn category_label_for(locale: &str, category: &str) -> String {
             .join(" "),
     }
 }
+
+#[cfg(test)]
+#[path = "message_center/paging_tests.rs"]
+mod paging_tests;
 
 #[cfg(test)]
 mod tests {

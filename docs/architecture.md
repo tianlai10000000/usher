@@ -446,10 +446,21 @@ page-local drafts from the last committed host/Store snapshot before the stable
 factory host paints, never from independent selector fields. Thus leaving and
 returning without Save discards edits without remounting the visual tree.
 
-Messages likewise keeps its factory root and visual tree stable after the first
-visit. Its bridge clears the
-row model on exit and hydrates the latest Store snapshot before reactivation,
-so an inactive Inbox retains no projected rows. Rebuilding the visual tree per
+Messages likewise keeps its factory root and page shell stable after the first
+visit. `MessageSnapshot::page` filters the immutable history before selecting a
+20-record page; `src/message_center.rs` converts only that page to Slint rows.
+Total/unread/read counts still describe the complete Store. Filtering resets to
+page one while preserving scroll position, clamping only when the filtered
+content is shorter than the current offset. Explicit pagination resets scroll
+to the top; deletion clamps an invalid page to the new last page. The page
+owns only its filter/page/scroll presentation, with Primer pagination below the
+list. Per-row borders form one outline with four 6px corners; rounded clipping
+is limited to the first and last rows, never the full list texture. The bridge
+retains 20 lightweight delegate slots and updates their records individually to
+avoid stale factory text bindings when delegates are recreated. Unused slots
+have zero height and empty payloads. On exit the bridge clears every payload and
+queries the latest snapshot before reactivation, so an inactive Inbox retains no
+projected message data. Rebuilding the page shell per
 visit was rejected after a release A/B showed no material RSS saving and mixed
 physical-footprint regressions. Both factory pages reuse the
 same anchor-based offset/flip/shift/size implementation as `MainWindow` without

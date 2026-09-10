@@ -1,0 +1,158 @@
+import { I18n } from "@i18n";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+
+// Primer Pagination links have their own current-page and directional styling.
+// https://primer.style/product/components/pagination/
+component GitHubPaginationLink inherits FocusScope {
+    in property <string> label;
+    in property <string> accessible-name: root.label;
+    in property <bool> current: false;
+    in property <bool> link-enabled: true;
+    in property <bool> previous: false;
+    in property <bool> next: false;
+    private property <bool> keyboard-focus-visible: false;
+    private property <bool> directional: root.previous || root.next;
+    private property <color> foreground: !root.link-enabled
+        ? GitHubTheme.control-disabled-fg
+        : root.current ? GitHubTheme.fg-on-emphasis
+        : root.directional ? GitHubTheme.accent-fg : GitHubTheme.fg-default;
+    callback activated();
+
+    width: max(GitHubMetrics.control-medium-size,
+        label-measure.preferred-width + GitHubMetrics.size-12
+        + (root.directional ? GitHubMetrics.icon-small + GitHubMetrics.size-4 : 0px));
+    height: GitHubMetrics.control-medium-size;
+    enabled: root.link-enabled;
+    focus-on-click: false;
+    accessible-role: button;
+    accessible-label: root.accessible-name;
+    accessible-enabled: root.link-enabled;
+    accessible-checkable: root.current;
+    accessible-checked: root.current;
+
+    function activate() {
+        if root.link-enabled {
+            root.focus();
+            root.activated();
+        }
+    }
+    key-pressed(event) => {
+        root.keyboard-focus-visible = true;
+        if event.text == Key.Return || event.text == " " {
+            root.activate();
+            return accept;
+        }
+        return reject;
+    }
+    focus-gained(reason) => {
+        root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+    }
+    focus-lost => { root.keyboard-focus-visible = false; }
+
+    label-measure := Text {
+        visible: false;
+        text: root.label;
+        font-size: GitHubMetrics.text-medium;
+    }
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: GitHubMetrics.radius-medium;
+        background: root.current ? GitHubTheme.accent-emphasis
+            : (hit.has-hover && root.link-enabled
+                ? GitHubTheme.control-transparent-hover : transparent);
+        border-width: root.has-focus && root.keyboard-focus-visible
+            ? GitHubMetrics.focus-outline-width : 0px;
+        border-color: root.current ? GitHubTheme.fg-on-emphasis : GitHubTheme.focus-outline;
+
+        HorizontalLayout {
+            padding-left: GitHubMetrics.size-6;
+            padding-right: GitHubMetrics.size-6;
+            spacing: GitHubMetrics.size-4;
+            alignment: center;
+            if root.previous: Image {
+                width: GitHubMetrics.icon-small;
+                height: parent.height;
+                source: @image-url("../../assets/icons/octicon-chevron-left-16.svg");
+                image-fit: contain;
+                colorize: root.foreground;
+            }
+            Text {
+                text: root.label;
+                font-size: GitHubMetrics.text-medium;
+                color: root.foreground;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            if root.next: Image {
+                width: GitHubMetrics.icon-small;
+                height: parent.height;
+                source: @image-url("../../assets/icons/octicon-chevron-right-16.svg");
+                image-fit: contain;
+                colorize: root.foreground;
+            }
+        }
+    }
+    hit := TouchArea {
+        width: 100%;
+        height: 100%;
+        enabled: root.link-enabled;
+        mouse-cursor: self.enabled ? pointer : default;
+        clicked => {
+            root.keyboard-focus-visible = false;
+            root.activate();
+        }
+    }
+}
+
+export component GitHubPagination inherits Rectangle {
+    in property <int> current-page: 1;
+    in property <int> page-count: 1;
+    // Zero is a noninteractive truncation indicator; the bridge bounds the set.
+    in property <[int]> pages: [];
+    callback page-selected(int);
+    private property <bool> show-pages: root.width >= previous-link.width + next-link.width
+        + root.pages.length * (GitHubMetrics.control-medium-size + GitHubMetrics.size-4)
+        + GitHubMetrics.size-8;
+
+    height: GitHubMetrics.control-medium-size;
+    background: transparent;
+
+    HorizontalLayout {
+        spacing: GitHubMetrics.size-4;
+        alignment: center;
+
+        previous-link := GitHubPaginationLink {
+            label: I18n.common-previous;
+            previous: true;
+            link-enabled: root.current-page > 1;
+            activated => { root.page-selected(root.current-page - 1); }
+        }
+        HorizontalLayout {
+            spacing: 0px;
+            // Stable slots avoid stale text when a factory page changes its
+            // page count or temporarily hides the numbered links.
+            for index in 9: Rectangle {
+                private property <int> page: index < root.pages.length ? root.pages[index] : -1;
+                private property <bool> shown: root.show-pages && self.page >= 0;
+                width: self.shown ? page-link.width + (index < root.pages.length - 1 ? GitHubMetrics.size-4 : 0px) : 0px;
+                height: GitHubMetrics.control-medium-size;
+                visible: self.shown;
+                background: transparent;
+                page-link := GitHubPaginationLink {
+                    label: parent.page == 0 ? "\u{2026}" : "" + parent.page;
+                    accessible-name: parent.page <= 0 ? "" : I18n.common-page + " " + parent.page;
+                    current: parent.page == root.current-page;
+                    link-enabled: parent.shown && parent.page > 0;
+                    activated => { root.page-selected(parent.page); }
+                }
+            }
+        }
+        next-link := GitHubPaginationLink {
+            label: I18n.common-next;
+            next: true;
+            link-enabled: root.current-page < root.page-count;
+            activated => { root.page-selected(root.current-page + 1); }
+        }
+    }
+}

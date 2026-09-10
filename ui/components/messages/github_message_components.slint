@@ -30,6 +30,9 @@ export struct MessageListItem {
 // canvas-subtle resting fill, 8px accent unread indicator, bold default title;
 // read rows stay transparent with muted title. Hover uses accent-subtle.
 export component GitHubMessageListItem inherits Rectangle {
+    in property <bool> framed: false;
+    in property <bool> first-row: false;
+    in property <bool> last-row: false;
     in property <MessageListItem> item;
     in property <bool> compact: false;
     in property <bool> tip-enabled: true;
@@ -82,6 +85,10 @@ export component GitHubMessageListItem inherits Rectangle {
     width: 100%;
     height: root.row-height;
     clip: true;
+    border-top-left-radius: root.framed && root.first-row ? GitHubMetrics.radius-medium : 0px;
+    border-top-right-radius: root.framed && root.first-row ? GitHubMetrics.radius-medium : 0px;
+    border-bottom-left-radius: root.framed && root.last-row ? GitHubMetrics.radius-medium : 0px;
+    border-bottom-right-radius: root.framed && root.last-row ? GitHubMetrics.radius-medium : 0px;
     background: row-touch.pressed
         ? GitHubTheme.control-transparent-active
         : root.row-hot
@@ -184,10 +191,25 @@ export component GitHubMessageListItem inherits Rectangle {
         clicked => { root.delete-requested(root.item.id); }
     }
 
-    Rectangle {
+    if !root.framed: Rectangle {
         y: parent.height - GitHubMetrics.border-thin;
         width: parent.width;
         height: GitHubMetrics.border-thin;
         background: GitHubTheme.border-muted;
+    }
+
+    // Draw the continuous outline above hover/read fills. Middle rows omit
+    // their top stroke so adjacent rows share exactly one separator.
+    if root.framed: Rectangle {
+        y: root.first-row ? 0px : -GitHubMetrics.border-thin;
+        width: parent.width;
+        height: parent.height + (root.first-row ? 0px : GitHubMetrics.border-thin);
+        border-width: GitHubMetrics.border-thin;
+        border-color: GitHubTheme.border-default;
+        border-top-left-radius: root.first-row ? GitHubMetrics.radius-medium : 0px;
+        border-top-right-radius: root.first-row ? GitHubMetrics.radius-medium : 0px;
+        border-bottom-left-radius: root.last-row ? GitHubMetrics.radius-medium : 0px;
+        border-bottom-right-radius: root.last-row ? GitHubMetrics.radius-medium : 0px;
+        background: transparent;
     }
 }

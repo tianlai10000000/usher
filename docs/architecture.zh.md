@@ -356,8 +356,16 @@ Save 经 `src/ai/settings_state.rs` 把完整草稿 dispatch 为一个强类型 
 宿主/Store 快照覆盖这些页面局部草稿，不能再分别读取多个选择器字段。因此未点击 Save
 就离开再返回时，编辑会被丢弃，但视觉树不会重挂载。
 
-Messages 同样在首次访问后保留稳定 factory 根与视觉树。退出时 bridge 清空行 model，重新进入时先从最新
-Store 快照 hydration 再激活，因此非活动 Inbox 不保留投影行。逐次重建视觉树的
+Messages 同样在首次访问后保留稳定 factory 根与页面外壳。`MessageSnapshot::page`
+先筛选不可变历史，再选取每页 20 条；`src/message_center.rs` 只把当前页转换为
+Slint 行。总数/未读/已读计数仍描述完整 Store。切换筛选回到第一页但保留滚动位置，
+仅在筛选后内容变短导致位置越界时校正；主动翻页滚动到顶部。删除导致页码
+越界时回退到新的末页。页面只持有筛选、页码与滚动展示状态，列表下方使用 Primer
+分页控件。逐行边框拼成完整外框并保留四个 6px 圆角；圆角裁剪仅用于首末行，禁止
+生成整表离屏纹理。保留 20 个轻量 delegate 槽位并逐行更新，避免重建 delegate
+导致 factory 文字 binding 残留；未使用槽位高度为零且数据为空。退出时 bridge
+清空全部消息数据，重新进入时查询最新 Store 快照再激活，因此非活动 Inbox 不保留
+投影消息数据。逐次重建页面外壳的
 Release A/B 没有测得实质 RSS 节省，且 physical footprint 出现混合回退，因此该
 候选被拒绝。两个 factory
 页面都复用与 `MainWindow` 相同的锚点式 offset/flip/shift/size 实现，但不尝试跨

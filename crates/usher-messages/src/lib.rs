@@ -7,10 +7,12 @@
 mod center;
 mod desktop;
 mod model;
+mod paging;
 mod storage;
 
 pub use center::{MessageCenter, MessageCenterError, MessageSnapshot, Subscription};
 pub use desktop::{DesktopNotifier, NoopDesktopNotifier, NotifyRustDesktopNotifier};
 pub use model::{Message, MessageDraft, MessageSeverity, NativeDelivery, categories};
+pub use paging::{MESSAGE_PAGE_SIZE, MessagePage, MessageReadFilter};
 
 slint::include_modules!();

@@ -46,7 +46,7 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
   pushed from Rust on each snapshot for the same ComponentFactory freeze reason.
 - `ui/main.slint` lazily creates one stable factory/page shell on the first
   Inbox visit. Route changes hide rather than remount that shell; while hidden,
-  the bridge releases the potentially large Slint row model and skips page
+  the bridge clears all message payloads from its 20 stable slots and skips page
   projection while the Store keeps accepting Actions and updating the global
   unread selector. Re-entry rehydrates the row model from the latest Store
   snapshot before making the page active. The stable visual tree remains
@@ -83,7 +83,7 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
   禁止拼成单一字符串）。页头状态句由 Rust 在每次快照中下发完整字符串，原因
   同为 ComponentFactory 页面上动态字符串拼接会在首次绘制后冻结。
 - `ui/main.slint` 在首次进入 Inbox 时才懒创建一个稳定 factory/page shell；路由
-  切换只隐藏、不重新挂载该 shell。隐藏期间 bridge 释放可能很大的 Slint 行 model，
+  切换只隐藏、不重新挂载该 shell。隐藏期间 bridge 清空 20 个稳定槽位的消息数据，
   并跳过页面投影；Store 仍继续接收 Action、更新全局未读 selector。重新进入时先从
   最新 Store 快照 hydration 行 model，再激活页面。视觉树保持稳定挂载：三轮 Release
   A/B 未测得逐次重建带来的实质 RSS 节省，且 physical footprint 结果出现混合回退。
@@ -174,6 +174,54 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
 8. 关闭时通过高优先级 pre-shutdown 阶段处理已排队命令并 Join Worker。
 
 ## Inbox and unread behavior / Inbox 与未读行为
+
+- The domain snapshot's `page` query filters before pagination and borrows at
+  most 20 records in the existing newest-first order. Only these records are
+  converted to Slint rows; the Store and persistence keep the complete bounded
+  history. All/Unread/Read badges and the header's unread count are global,
+  never counts of the current page. No history model is rebuilt while scrolling.
+  The model retains 20 lightweight delegate slots across page/filter changes,
+  empty results, and route exits. Update individual rows without resetting the
+  model or recreating delegates, which can leave factory renderer text bindings
+  stale. Unused slots have zero height and default empty payloads; route exit
+  clears all message payloads. Unchanged rows receive no notification.
+- Pagination follows [Primer Pagination](https://primer.style/product/components/pagination/):
+  below the list, Previous/Next with chevrons, a highlighted current page,
+  first/last and neighboring page links, and noninteractive ellipses for gaps.
+  Disable unavailable directions; omit pagination for zero or one page. When
+  the group cannot fit, retain Previous/Next without overflowing. Keyboard
+  activation and visible focus are required. Changing filters resets to page
+  one while preserving the current scroll offset, clamped only to the new
+  content bounds; explicit page changes reset scroll to the top. Store updates preserve
+  the page unless it is out of range, then clamp to the new last page. Mark all
+  as read and confirmed Clear all still apply to the entire durable history.
+  The pagination surface and its nine link slots stay mounted when hidden to
+  avoid stale factory labels after single-page/multi-page transitions.
+  Known validation gap (UI-120): native macOS factory focus does not transfer
+  from a sidebar control on a pagination click; keyboard acceptance is pending.
+- The list keeps its continuous 1px outline and all four Primer medium (6px)
+  corners, including hover/unread fills. Only the first and last rows use
+  rounded clipping; middle rows use rectangular clipping. Never place the
+  complete list inside a rounded clip that allocates a full-document GPU layer.
+
+- 领域快照的 `page` 查询先筛选再分页，按既有最新优先顺序借用最多 20 条记录；
+  只有这些记录转换为 Slint 行，Store 与持久化仍保留完整有界历史。All/Unread/Read
+  徽标与页头未读数始终是全局计数，不是当前页计数；滚动不得重建历史 model。
+  翻页、筛选、空结果和离开路由时保留 20 个轻量 delegate 槽位，逐行更新，避免
+  重置 model 或重建 delegate 导致 factory renderer 沿用旧文字 binding。
+  未使用槽位高度为零且数据为空；离开路由时清空全部消息数据，没有变化的行不发送通知。
+- 分页遵循 [Primer Pagination](https://primer.style/product/components/pagination/)：
+  位于列表下方，上一页/下一页带 Chevron，当前页高亮，保留首页/末页与相邻页码，
+  省略区域为不可交互的省略号。边界方向禁用，空结果或单页隐藏分页；宽度不足时只
+  显示上一页/下一页，不能溢出。支持键盘激活与可见焦点。切换筛选回到第一页，
+  保留当前滚动位置，仅在超出新内容范围时校正；
+  主动翻页回到顶部；Store 更新保留页码，越界则回退到新的末页。全部已读与确认后的
+  清空全部仍作用于完整持久历史。
+  隐藏时保留分页控件与九个页码槽位，避免单页/多页切换后 factory 页码文字残留。
+  已知验证缺口（UI-120）：macOS 原生 factory 中点击分页未能转移侧栏焦点，键盘验收待完成。
+- 列表保留连续 1px 外框与四个 Primer medium（6px）圆角，包括 Hover/未读底色。
+  只有首末行使用圆角裁剪，中间行采用矩形裁剪；禁止把完整列表放进会分配整表 GPU
+  图层的圆角裁剪容器。
 
 - The bell in both the sidebar and status bar opens `Route.Messages` from every
   ordinary route. The status badge shows unread count 1–99 and `99+`; zero hides it.
@@ -276,6 +324,23 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
 
 ## Regression checklist / 回归清单
 
+- Check 0/1/20/21/78/1,000 records: each projected page has at most 20 rows,
+  all pages cover the filtered history once, and badges retain global counts.
+  Verify first/last direction disabling, numbered jumps, ellipses and narrow
+  Previous/Next layout. Delete the last item on the last page and mark all read
+  while viewing Unread; neither may leave an invalid empty page. Re-enter after
+  off-page publications and verify the current query uses the latest snapshot.
+- Inspect all four corners at the top/bottom, read/unread and hovered rows,
+  one-row pages, light/dark themes, and minimum/wide window sizes. Compare
+  footprint/RSS with the same synthetic data and renderer; corner layers must
+  be row-sized, not sized to all stored messages.
+- 检查 0/1/20/21/78/1,000 条：当前页最多 20 行，所有页恰好覆盖筛选后的历史，
+  徽标仍是全局计数。验证首页/末页方向禁用、页码跳转、省略号与窄屏上一页/下一页。
+  删除末页最后一条、在未读筛选中全部已读都不能留下越界空页。离页发布消息后重新
+  进入，当前查询必须使用最新快照。
+- 检查顶部/底部四角、已读/未读/Hover、单行页、明暗主题及最小/宽窗口；在相同
+  合成数据与渲染器下对比 footprint/RSS，圆角图层必须限制在行大小而非完整历史。
+
 - Publish from a non-message route and verify Banner, OS notification (when
   permission is granted), durable Inbox row, and unread badge.
 - Restart and verify messages/read state reload newest-first.
@@ -287,7 +352,7 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
   rows and counts on the first visible frame.
 - With memory diagnostics enabled, leave Messages and verify the lifecycle log
   reports `active=false projected_rows=0`; repeat enter/leave and verify the
-  projected row model remains empty while inactive and rehydrates before the
+  slots retain no message payloads while inactive and rehydrate before the
   first visible frame after re-entry.
 - From a non-Messages route, publish a permanent Banner, delete or Clear all its
   Inbox row, leave Messages, and verify the Banner is gone from the queue.
@@ -327,7 +392,7 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
 - Messages 关闭期间从其他页面发布多条消息，再打开/重新打开 Messages，确认 Store
   自动 hydration 在首个可见帧展示最新消息行与计数。
 - 启用内存诊断后离开 Messages，确认生命周期日志显示
-  `active=false projected_rows=0`；重复进入/离开，确认非活动期间投影行 model 保持
+  `active=false projected_rows=0`；重复进入/离开，确认非活动期间所有槽位消息数据
   为空，并在重新进入后的首个可见帧前完成 hydration。
 - 在非 Messages 路由发布一条常驻 Banner，删除或 Clear all 对应 Inbox 行后离开
   Messages，确认 Banner 已从队列消失。
