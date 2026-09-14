@@ -550,6 +550,7 @@ pub(super) async fn get_pull_request_diff(
         }
     };
     Ok(PullRequestDiffDetail {
+        author_identity: super::PullRequestAuthorIdentity::from_user(&detail["author"]),
         added_lines: files.iter().map(|file| file.added_lines).sum(),
         removed_lines: files.iter().map(|file| file.removed_lines).sum(),
         commit_count,
@@ -603,6 +604,7 @@ pub(super) async fn get_commit_range_diff(
         .ok_or_else(|| "GitLab commit comparison response has no diff list.".to_string())?;
     let files = values.iter().map(decode_diff_file).collect::<Vec<_>>();
     Ok(PullRequestDiffDetail {
+        author_identity: Default::default(),
         added_lines: files.iter().map(|file| file.added_lines).sum(),
         removed_lines: files.iter().map(|file| file.removed_lines).sum(),
         commit_count,

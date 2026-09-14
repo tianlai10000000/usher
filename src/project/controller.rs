@@ -73,6 +73,7 @@ pub fn setup_project(ui: &MainWindow) -> ProjectController {
     .expect("failed to start project persistence worker");
     let _ = state_slot.set(state.clone());
     super::state::register(&state);
+    super::hook_selection::bind(ui, state.clone());
     ui.set_project_list_loading(true);
 
     let projection = Arc::new(super::projection::ProjectProjection::start(
@@ -135,6 +136,7 @@ pub fn setup_project(ui: &MainWindow) -> ProjectController {
                     logo,
                     project_tags,
                     is_pr_auto_update,
+                    hook_ids: super::hook_selection::selected_ids(&ui),
                 },
                 ui.as_weak(),
                 state_add.clone(),
@@ -208,6 +210,7 @@ pub fn setup_project(ui: &MainWindow) -> ProjectController {
                     logo,
                     project_tags,
                     is_pr_auto_update,
+                    hook_ids: super::hook_selection::selected_ids(&ui),
                 },
                 ui.as_weak(),
                 state_update.clone(),
@@ -351,7 +354,35 @@ fn start_project_save(
         let result = if !state.begin_save(pending_key.clone()) {
             Err("projects.save_in_progress".to_owned())
         } else {
-            let result = match crate::git::get_repo_detail(&draft.remote_repo).await {
+            let saved_details = match &action {
+                ProjectSaveAction::Update { original_alias } => state
+                    .snapshot()
+                    .state()
+                    .projects
+                    .iter()
+                    .find(|project| project.project_alias == original_alias.as_str())
+                    .filter(|project| project.remote_repo == draft.remote_repo)
+                    .and_then(|project| {
+                        let repo_type = match project.repo_type.as_str() {
+                            "gitee" => crate::git::RepoType::Gitee,
+                            "gitlab" => crate::git::RepoType::GitLab,
+                            "github" => crate::git::RepoType::GitHub,
+                            _ => return None,
+                        };
+                        if project.repo_project_id.trim().is_empty() {
+                            return None;
+                        }
+                        Some(crate::git::RepoDetail {
+                            repo_project_id: project.repo_project_id.clone(),
+                            repo_type,
+                        })
+                    }),
+                ProjectSaveAction::Add => None,
+            };
+            let result = match match saved_details {
+                Some(details) => Ok(details),
+                None => crate::git::get_repo_detail(&draft.remote_repo).await,
+            } {
                 Ok(details) => {
                     let config = ProjectConfig {
                         project_name: draft.project_name,
@@ -359,6 +390,7 @@ fn start_project_save(
                         local_repo: draft.local_repo,
                         remote_repo: draft.remote_repo,
                         repo_project_id: details.repo_project_id,
+                        hook_ids: draft.hook_ids,
                         repo_type: details.repo_type.as_str().to_owned(),
                         logo: normalize_project_logo(&draft.logo),
                         project_tags: draft.project_tags,
@@ -438,7 +470,7 @@ fn show_error(ui: &MainWindow, message: &str) {
     manager.invoke_error(ToastOptions {
         message: message.into(),
         duration: 2600,
-        position: "middle".into(),
+        position: "bottom".into(),
         icon: "".into(),
         overlay: false,
         close_on_click: false,

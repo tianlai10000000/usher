@@ -12,20 +12,41 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | [Internationalization](i18n.md) | Implementation current; full-route visual QA pending / 实现当前，全路由视觉验收待完成 | `i18n/`, `crates/usher-i18n/`, `src/i18n.rs`, all user-facing copy |
 | [AI Agent configuration](ai-agent.md) | Current / 当前 | `src/settings.rs`, `src/ai/agent.rs`, `ui/views/settings.slint` |
 | [AI Code Review](ai-code-review.md) | Current: bounded task persistence and UI delivery / 当前：有界任务持久化与 UI 投递 | `crates/usher-ai-review/`, `src/ai_review/` (controller, sessions, task persistence), `src/agent_response/`, PR list/detail and Settings bridges |
-| [Diagnostic logging](diagnostics.md) | Current / 当前 | `src/diagnostics.rs`, `src/logger/`, `src/memory_diagnostics.rs`, `src/terminal/`, Settings UI and bridges |
-| [Chat behavior](chat.md) | Current: history boundary anchoring and bidirectional viewport coverage / 当前：历史边界锚定与双向视口覆盖 | `src/chat/` (interactive, viewport policy, message model), `ui/views/chat.slint`, `ui/components/chat/`, `ui/main.slint` |
+| [Diagnostic logging](diagnostics.md) | Current: grouped settings and legacy-key migration / 当前：配置分类与旧键迁移 | `src/settings.rs`, `src/diagnostics.rs`, `src/logger/`, `src/memory_diagnostics.rs`, `src/terminal/`, Settings UI and bridges |
+| [Chat behavior](chat.md) | Current: history boundary anchoring, bidirectional viewport coverage, and mode-switch tail mounting / 当前：历史边界锚定、双向视口覆盖与模式切换尾部挂载 | `src/chat/` (interactive, viewport policy, message model), `ui/views/chat.slint`, `ui/components/chat/`, `ui/main.slint` |
 | [Artifact preview framework](artifact-preview.md) | Current: cancellable exact worker layout and virtual code lines / 当前：可取消的后台精确布局与代码行虚拟化 | `crates/usher-preview/`, `src/artifact_preview/`, `ui/components/artifact_preview/`, Settings and all preview callers |
-| [Project repository metadata](project-repository.md) | Current: bounded Logo retries and projection / 当前：Logo 有界重试与投影 | `src/project/mod.rs`, `src/git/`, `src/codereview/api/` |
+| [Project repository metadata](project-repository.md) | Current: explicit Hook opt-in with disabled-row restoration, bounded Logo retries and projection / 当前：Hook 显式选择与禁用行恢复、Logo 有界重试与投影 | `src/project/mod.rs`, `src/git/`, `src/codereview/api/` |
 | [Pull request workflow](pr-review.md) | Current / 当前 | `src/workflow/pr_list.rs`, `src/workflow/pr_review.rs`, `src/workflow/pr_review/`, `src/git/`, `ui/features/pr_review/`, `ui/views/workflow/`, `ui/components/workflow/` |
-| [Reusable job runs](jobs.md) | Current: typed lifecycle/durations, bounded output, virtualized logs / 当前：类型化生命周期/耗时、有界输出与日志虚拟化 | `src/jobs/`, `ui/views/job_run.slint`, `ui/components/jobs/`, feature controllers |
+| [Reusable job runs](jobs.md) | Current: typed lifecycle/durations, bounded output, virtualized logs with explicit wrapped-line pitch / 当前：类型化生命周期/耗时、有界输出与日志虚拟化、显式换行行高 | `src/jobs/`, `ui/views/job_run.slint`, `ui/components/jobs/`, feature controllers |
+| [Application Hooks](hooks.md) | Current: bounded syntax text and native cursor/selection; macOS cursor visual QA passed / 当前：有界语法文本与原生光标/选区，macOS 光标视觉验收通过 | `src/hooks/`, `src/project/`, Settings, PR/AI completion sources, notifications and shutdown drains |
 | [Tag workflow](tag.md) | Current / 当前 | `src/workflow/tag.rs`, `src/workflow/tag/`, `src/workflow/state.rs`, `ui/views/workflow/` |
 | [Terminal behavior](terminal.md) | Current / 当前 | `src/terminal/`, `ui/components/drawer/terminal_drawer.slint`, `ui/main.slint` |
 | [Application keyboard shortcuts](shortcuts.md) | Current / 当前 | `src/shortcuts/`, `ui/main.slint`, `src/platform/` |
 | [Application status bar](status-bar.md) | Current / 当前 | `ui/components/status_bar.slint`, `ui/main.slint`, shortcut/notification/network/update state owners |
 | [Application message center](messages.md) | Current: 20-record pages, filter scroll preservation and row-bounded corner clipping / 当前：每页 20 条、筛选保留滚动位置与行级圆角裁剪 | `crates/usher-messages/`, `src/message_center.rs`, `src/notification.rs`, message/status UI |
 | [GitHub/Primer UI design](ui-design.md) | Current / 当前 | `ui/theme/github_theme.slint`, `ui/`, `ui/assets/icons/`, all UI contributors |
+| [Tooltip implementation contract](tooltips.md) | Mandatory: factory isolation, centered text/anchor and viewport avoidance / 强制阅读：工厂隔离、文字与锚点居中、视口避让 | Shared Tooltip/Float/IconButton, factory-owned actions and root portals |
+
+The UI design specification includes the shared small Primer Label geometry,
+transparent neutral variants and Hook status usage. / UI 设计规范包含共享 small
+Primer Label 的几何、透明中性变体及 Hook 状态用法。
+
+The UI design specification also covers window-wide text-input outside-click blur,
+embedded page coordinates, viewport clipping and selection-drag focus preservation.
+/ UI 设计规范也定义全窗口输入框外部点击失焦、嵌入页面坐标、视口裁剪和拖选焦点保留。
+
+The UI design specification also defines the shared wide split-page navigation
+contract: sticky navigation and section-top alignment on section switches,
+including short content. Settings implements this contract, with
+unchanged compact in-flow navigation. / UI 设计规范统一定义宽屏双栏页导航吸顶、
+切换分组时内容顶部对齐吸顶留白（含短内容）；设置页遵循该规则，窄屏保持原有滚动行为。
 
 The UI design specification defines `GitHub*` component naming,
+content-sized Select menus with upward placement at bottom edges, isolated
+selector models, owner-scoped option focus, verified grouped-trigger anchors,
+and repeat-trigger dismissal / 按内容定高、底部向上展开、选项焦点按归属隔离、
+分组触发器锚点验证、
+选项模型隔离、再次点击触发器收起的 Select 浮层，
 `GitHubTheme`/`GitHubMetrics` ownership, Primer layout and interaction
 contracts, shared Button/IconButton/Link/Tooltip/CounterLabel/Copy/Spinner/form-control
 foundations, shared shell/title-bar breadcrumb/PageHeader/ScrollView/Progress foundations,

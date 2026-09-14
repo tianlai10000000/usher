@@ -1099,6 +1099,8 @@ fn macos_shortcut_key(key_code: u16) -> Option<&'static str> {
         33 => Some("["),
         30 => Some("]"),
         43 => Some(","),
+        36 | 76 => Some("\u{000a}"), // Return / keypad Enter, Slint Key::Return
+        53 => Some("\u{001b}"),      // Escape
         _ => None,
     }
 }
@@ -1162,6 +1164,14 @@ fn install_app_event_monitor(window: *mut Object) -> bool {
         let click_y = (window_frame.size.height - location.y) as f32;
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(ui) = TITLEBAR_UI.get().and_then(slint::Weak::upgrade) {
+                // Classify the press, not its release: text selection may be
+                // dragged outside the field while retaining keyboard focus.
+                if event_type == 1 {
+                    crate::transient_input::clear_text_input_focus_outside(
+                        ui.window(),
+                        slint::LogicalPosition::new(click_x, click_y),
+                    );
+                }
                 if event_type == 2 {
                     ui.invoke_post_dispatch_pointer_released(click_x, click_y);
                 } else if titlebar_clicked {
@@ -1656,6 +1666,9 @@ unsafe fn align_standard_window_buttons(window: *mut Object) {
     unsafe {
         let _: () = msg_send![controls, setFrameOrigin: origin];
     }
+    if let Some(ui) = TITLEBAR_UI.get().and_then(slint::Weak::upgrade) {
+        sync_titlebar_modal_geometry(&ui);
+    }
 }
 
 /// Whether the startup-critical native chrome is fully installed: the Menu
@@ -1922,6 +1935,74 @@ pub(crate) fn install_titlebar_settings_button(window: &MainWindow) {
     log::info!("[TitleBar] Added native sidebar and history controls to macOS title bar");
 }
 
+fn sync_titlebar_modal_geometry(window: &MainWindow) {
+    unsafe {
+        if TITLEBAR_CONTROLS_CONTAINER.is_null() {
+            return;
+        }
+        let bounds: NSRect = msg_send![TITLEBAR_CONTROLS_CONTAINER, bounds];
+        let nil: *mut Object = std::ptr::null_mut();
+        let frame: NSRect = msg_send![
+            TITLEBAR_CONTROLS_CONTAINER, convertRect: bounds toView: nil
+        ];
+        let height = window
+            .window()
+            .size()
+            .to_logical(window.window().scale_factor())
+            .height;
+        window.set_native_titlebar_modal_x(frame.origin.x as f32);
+        window.set_native_titlebar_modal_y(height - (frame.origin.y + frame.size.height) as f32);
+        window.set_native_titlebar_modal_width(frame.size.width as f32);
+        window.set_native_titlebar_modal_height(frame.size.height as f32);
+    }
+}
+
+// Capture only the 92x28 pt application-owned control strip, preserving native
+// symbol rendering and backing scale. PNG normalizes AppKit bitmap layout and
+// alpha before conversion to Slint; no files or full-window capture are involved.
+fn titlebar_modal_image() -> Option<slint::Image> {
+    unsafe {
+        if TITLEBAR_CONTROLS_CONTAINER.is_null() {
+            return None;
+        }
+        let bounds: NSRect = msg_send![TITLEBAR_CONTROLS_CONTAINER, bounds];
+        let bitmap: *mut Object = msg_send![
+            TITLEBAR_CONTROLS_CONTAINER, bitmapImageRepForCachingDisplayInRect: bounds
+        ];
+        if bitmap.is_null() {
+            return None;
+        }
+        let _: () = msg_send![
+            TITLEBAR_CONTROLS_CONTAINER, cacheDisplayInRect: bounds toBitmapImageRep: bitmap
+        ];
+        let dictionary = Class::get("NSDictionary")?;
+        let properties: *mut Object = msg_send![dictionary, dictionary];
+        let png: *mut Object =
+            msg_send![bitmap, representationUsingType: 4u64 properties: properties];
+        if png.is_null() {
+            return None;
+        }
+        let length: usize = msg_send![png, length];
+        let bytes: *const u8 = msg_send![png, bytes];
+        if bytes.is_null() || length == 0 || length > 1024 * 1024 {
+            return None;
+        }
+        let rgba = image::load_from_memory_with_format(
+            std::slice::from_raw_parts(bytes, length),
+            image::ImageFormat::Png,
+        )
+        .ok()?
+        .to_rgba8();
+        Some(slint::Image::from_rgba8(slint::SharedPixelBuffer::<
+            slint::Rgba8Pixel,
+        >::clone_from_slice(
+            rgba.as_raw(),
+            rgba.width(),
+            rgba.height(),
+        )))
+    }
+}
+
 pub(crate) fn update_titlebar_navigation_controls(window: &MainWindow) {
     unsafe {
         if TITLEBAR_TOGGLE_BUTTON.is_null()
@@ -1932,6 +2013,24 @@ pub(crate) fn update_titlebar_navigation_controls(window: &MainWindow) {
         }
 
         let modal_visible = window.get_modal_overlay_visible();
+        // Hand off the original appearance before disabling native controls.
+        // Slint now composites these pixels underneath the real modal backdrop.
+        if modal_visible && window.get_native_titlebar_modal_image().size().width == 0 {
+            if let Some(image) = titlebar_modal_image() {
+                window.set_native_titlebar_modal_image(image);
+            } else {
+                log::warn!("[TitleBar] Could not capture native controls for modal composition");
+            }
+        }
+        sync_titlebar_modal_geometry(window);
+        let composited = modal_visible && window.get_native_titlebar_modal_image().size().width > 0;
+        for button in [
+            TITLEBAR_TOGGLE_BUTTON,
+            TITLEBAR_BACK_BUTTON,
+            TITLEBAR_FORWARD_BUTTON,
+        ] {
+            let _: () = msg_send![button, setHidden: composited];
+        }
         let _: () = msg_send![TITLEBAR_TOGGLE_BUTTON, setEnabled: !modal_visible];
         let _: () = msg_send![
             TITLEBAR_BACK_BUTTON,
@@ -1953,6 +2052,9 @@ pub(crate) fn update_titlebar_navigation_controls(window: &MainWindow) {
             TITLEBAR_DELEGATE,
             sel!(usherToggleSidebar:),
         );
+        if !modal_visible {
+            window.set_native_titlebar_modal_image(slint::Image::default());
+        }
     }
 }
 
@@ -2147,6 +2249,9 @@ mod tests {
         assert_eq!(macos_shortcut_key(33), Some("["));
         assert_eq!(macos_shortcut_key(30), Some("]"));
         assert_eq!(macos_shortcut_key(43), Some(","));
+        assert_eq!(macos_shortcut_key(36), Some("\n"));
+        assert_eq!(macos_shortcut_key(76), Some("\n"));
+        assert_eq!(macos_shortcut_key(53), Some("\u{001b}"));
         assert_eq!(macos_shortcut_key(0), None);
     }
 

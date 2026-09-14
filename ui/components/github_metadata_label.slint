@@ -2,8 +2,11 @@ import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
 
 // Primer-style neutral Label for concise, non-interactive contextual metadata.
 // Keep it content-sized so callers can place multiple labels in a single row.
+export enum GitHubMetadataLabelVariant { Default, Primary, Secondary }
+
 export component GitHubMetadataLabel inherits Rectangle {
     in property <string> text: "";
+    in property <GitHubMetadataLabelVariant> variant: Default;
     // A zero value keeps the natural width; callers can bound long aliases.
     in property <length> max-label-width: 0px;
 
@@ -16,7 +19,8 @@ export component GitHubMetadataLabel inherits Rectangle {
     }
 
     private property <length> natural-width:
-        label-measure.preferred-width + GitHubMetrics.size-12;
+        Math.ceil(label-measure.preferred-width / 1px) * 1px
+        + GitHubMetrics.size-12 + 2 * GitHubMetrics.border-thin;
     width: root.max-label-width > 0px
         ? min(root.natural-width, root.max-label-width)
         : root.natural-width;
@@ -25,21 +29,23 @@ export component GitHubMetadataLabel inherits Rectangle {
     // radius to half the fixed height so this remains a capsule, not an oval.
     border-radius: root.height / 2;
     border-width: GitHubMetrics.border-thin;
-    border-color: GitHubTheme.border-default;
-    background: GitHubTheme.canvas-subtle;
+    border-color: root.variant == GitHubMetadataLabelVariant.Primary ? GitHubTheme.fg-default
+        : root.variant == GitHubMetadataLabelVariant.Secondary ? GitHubTheme.label-border-secondary
+        : GitHubTheme.border-default;
+    background: transparent;
     vertical-stretch: 0;
 
     Text {
-        x: GitHubMetrics.size-6;
-        // Keep the optical correction inside the label so elision and the
-        // rounded border cannot be disturbed by an overflowing text box.
-        y: GitHubMetrics.size-2;
-        width: parent.width - GitHubMetrics.size-12;
-        height: parent.height - GitHubMetrics.size-2;
+        // Primer padding is inside the border; center in its content box.
+        x: GitHubMetrics.border-thin + GitHubMetrics.size-6;
+        y: GitHubMetrics.border-thin;
+        width: max(0px, parent.width - 2 * self.x);
+        height: parent.height - 2 * GitHubMetrics.border-thin;
         text: root.text;
         font-size: GitHubMetrics.text-small;
         font-weight: 500;
-        color: GitHubTheme.fg-default;
+        color: root.variant == GitHubMetadataLabelVariant.Secondary
+            ? GitHubTheme.fg-muted : GitHubTheme.fg-default;
         horizontal-alignment: left;
         vertical-alignment: center;
         wrap: no-wrap;

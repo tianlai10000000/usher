@@ -30,6 +30,8 @@ export global GitHubTheme {
     // Borders and focus.
     out property <color> border-default: root.dark-mode ? #3d444d : #d1d9e0;
     out property <color> border-muted: root.dark-mode ? #30363d : #d8dee4;
+    // Primer borderColor.muted for Label; preserve existing application separators.
+    out property <color> label-border-secondary: root.border-default.with-alpha(0.7);
     out property <color> border-subtle: root.dark-mode ? #21262d : #e6eaef;
     out property <color> border-strong: root.dark-mode ? #6e7681 : #8c959f;
     // App-shell separators are softer than content/component borders, matching
@@ -66,6 +68,15 @@ export global GitHubTheme {
     out property <color> done-muted: root.dark-mode ? #a371f71a : #fbefff;
     out property <color> open-fg: root.success-fg;
     out property <color> closed-fg: root.danger-fg;
+
+    // Primer syntax roles. Keep editor token colors centralized so light and
+    // dark themes retain the same semantic hierarchy.
+    out property <color> syntax-comment: root.dark-mode ? #8b949e : #6e7781;
+    out property <color> syntax-keyword: root.dark-mode ? #ff7b72 : #cf222e;
+    out property <color> syntax-string: root.dark-mode ? #a5d6ff : #0a3069;
+    out property <color> syntax-constant: root.dark-mode ? #79c0ff : #0550ae;
+    out property <color> syntax-entity: root.dark-mode ? #d2a8ff : #8250df;
+    out property <color> syntax-variable: root.dark-mode ? #ffa657 : #953800;
 
     // Default, primary, danger, and transparent control state layers.
     out property <color> control-default-rest: root.dark-mode ? #21262d : #f6f8fa;

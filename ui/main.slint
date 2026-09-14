@@ -15,7 +15,7 @@ import { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffRowMetric, Workfl
 import { JobLogLineItem, JobStepItem } from "./components/jobs/job.slint";
 
 import { GitHubProjectPage as ProjectPage, ProjectItem } from "./views/project.slint";
-import { GitHubProjectDialog } from "./components/project/github_project_dialog.slint";
+import { GitHubProjectDialog, ProjectHookChoice } from "./components/project/github_project_dialog.slint";
 import { GitHubChatPage as ChatPage, ChatMessage, ChatSelectionRect, MessageRole, MessageStatus } from "./views/chat.slint";
 import { Route } from "./route/routeMap.slint";
 import { AppState, LanguageOption } from "./state/app_state.slint";
@@ -55,7 +55,7 @@ export { ToastManager, ToastType, ToastOptions } from "./components/toast/toast_
 export { DialogManager, DialogOptions } from "./components/dialog/dialog_manager.slint";
 export { UpdateLogic } from "./components/update/update.slint";
 export { ChatMessage, ChatSelectionRect, MessageRole, MessageStatus } from "./views/chat.slint";
-export { JobLogLineItem, JobStepItem } from "./components/jobs/job.slint";
+export { JobLogLayout, JobLogLineItem, JobStepItem } from "./components/jobs/job.slint";
 export { WorkflowPullRequestItem } from "./components/workflow/github_pr_flow.slint";
 export { AiReviewTaskItem, AiReviewRuleChoice, AiReviewFindingItem, AiReviewConversationItem, AiReviewResponseVisualRow, AgentResponseBlockKind, AgentResponseBlock } from "@ai-review";
 export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
@@ -97,6 +97,11 @@ export component MainWindow inherits Window {
         root.message-window-activity-changed(root.native-window-active);
     }
     in-out property <bool> native-sidebar-vibrancy-ready: false;
+    in property <image> native-titlebar-modal-image;
+    in property <length> native-titlebar-modal-x;
+    in property <length> native-titlebar-modal-y;
+    in property <length> native-titlebar-modal-width;
+    in property <length> native-titlebar-modal-height;
     // Display-only labels come from the Rust shortcut registry so tooltips and
     // executable bindings cannot drift apart.
     in property <string> shortcut-toggle-sidebar-label: "";
@@ -296,6 +301,7 @@ export component MainWindow inherits Window {
                 || root.workflow-pr-commit-range-dialog-open);
     out property <bool> modal-overlay-visible:
         root.project-show-add-modal
+            || (root.current-route == Route.Settings && root.settings-hook-dialog-open)
             || root.pr-review-dialog-visible
             || (DialogManager.visible && DialogManager.overlay)
             || UpdateLogic.is-downloading
@@ -323,6 +329,7 @@ export component MainWindow inherits Window {
     // One root-window key boundary. Rust owns normalization, scope, conflict
     // detection, command lookup, and dispatch for application shortcuts.
     callback app-shortcut-key-pressed(string, bool, bool, bool, bool) -> bool;
+    callback settings-hook-dialog-key-pressed(string, bool, bool, bool, bool) -> bool;
 
     // 更新相关回调
     callback install();
@@ -577,6 +584,12 @@ export component MainWindow inherits Window {
     in property <string> workflow-project-logo: "";
     in property <image> workflow-project-logo-image: @image-url("../logo.png");
     in property <[ProjectItem]> project-items: [];
+    in property <[ProjectHookChoice]> project-hook-choices: [];
+    in property <int> project-selected-hook-count: 0;
+    in property <int> project-selectable-hook-count: 0;
+    in property <bool> project-hook-list-expanded: false;
+    in property <bool> project-hooks-ready: false;
+    in property <string> project-hooks-status: "";
     in-out property <bool> project-show-add-modal: false;
     in-out property <string> project-new-name: "";
     in-out property <string> project-new-alias: "";
@@ -599,6 +612,16 @@ export component MainWindow inherits Window {
     in-out property <bool> settings-ai-agent-saved: false;
     in-out property <bool> settings-ai-agent-testing: false;
     in property <component-factory> settings-page-factory;
+    in property <bool> settings-hook-dialog-open: false;
+    out property <length> settings-window-width: root.width;
+    out property <length> settings-window-height: root.height;
+    changed settings-window-width => { root.settings-window-geometry-changed(); }
+    changed settings-window-height => { root.settings-window-geometry-changed(); }
+    out property <length> settings-page-origin-x: page-stack.absolute-position.x;
+    out property <length> settings-page-origin-y: page-stack.absolute-position.y;
+    callback settings-window-geometry-changed();
+    changed settings-page-origin-x => { root.settings-window-geometry-changed(); }
+    changed settings-page-origin-y => { root.settings-window-geometry-changed(); }
     out property <length> settings-page-viewport-width:
         page-stack.width;
     out property <length> settings-page-viewport-height:
@@ -615,12 +638,14 @@ export component MainWindow inherits Window {
         root.settings-select-dismiss();
     }
     changed settings-page-viewport-width => {
+        root.settings-window-geometry-changed();
         root.settings-page-viewport-changed(
             root.settings-page-viewport-width,
             root.settings-page-viewport-height
         );
     }
     changed settings-page-viewport-height => {
+        root.settings-window-geometry-changed();
         root.settings-page-viewport-changed(
             root.settings-page-viewport-width,
             root.settings-page-viewport-height
@@ -875,6 +900,9 @@ export component MainWindow inherits Window {
     callback project-add-project(string, string, string, string, string, string, bool);
     callback project-preview-logo(string);
     callback project-update-project(string, string, string, string, string, string, string, bool);
+    callback project-prepare-hooks(string);
+    callback project-toggle-hook(string, bool);
+    callback project-toggle-all-hooks(bool);
     callback project-delete-project(string);
     callback project-search-projects(string);
     callback project-reload-projects();
@@ -1073,9 +1101,7 @@ export component MainWindow inherits Window {
     post-dispatch-pointer-released(x, y) => {
         GitHubSelectState.pointer-released(x, y);
         if root.current-route == Route.Settings {
-            root.settings-select-pointer-released(
-                x - page-stack.absolute-position.x,
-                y - page-stack.absolute-position.y);
+            root.settings-select-pointer-released(x, y);
         }
     }
 
@@ -1482,6 +1508,7 @@ export component MainWindow inherits Window {
                             preview-logo(logo) => {
                                 root.project-preview-logo(logo);
                             }
+                            prepare-hooks(alias) => { root.project-prepare-hooks(alias); }
                             search-projects(query) => {
                                 root.project-search-projects(query);
                             }
@@ -1493,27 +1520,6 @@ export component MainWindow inherits Window {
                             }
                         }
                     }
-                    }
-
-                    // Settings owns its own scroll viewport in an independently
-                    // generated crate. Keep one stable factory product after the
-                    // first visit, but hide the host outside the route. Mount it
-                    // beside (not inside) the shell Flickable so wheel events
-                    // cannot bubble into a nested outer scroller.
-                    if root.settings-page-ever-opened: settings-page-host := Rectangle {
-                        x: 0px;
-                        y: 0px;
-                        width: root.settings-page-viewport-width;
-                        height: root.settings-page-viewport-height;
-                        visible: root.current-route == Route.Settings && root.show-page-scroll-view;
-                        background: transparent;
-                        clip: true;
-
-                        ComponentContainer {
-                            width: parent.width;
-                            height: parent.height;
-                            component-factory: root.settings-page-factory;
-                        }
                     }
 
                     // Lazily create one stable cross-crate factory shell. The
@@ -1871,7 +1877,7 @@ export component MainWindow inherits Window {
         clip: false;
         // Route-owned full-window overlays (PR review uses z:800) must be able
         // to paint dialog surfaces across the docked sidebar. The temporary
-        // sidebar preview remains a separate z:880 root overlay.
+        // sidebar preview remains a separate z:1300 root overlay.
         z: 700;
 
         GitHubNavigationSidebar {
@@ -1930,6 +1936,19 @@ export component MainWindow inherits Window {
             visible: root.sidebar-layout-progress > 0.001;
             z: 1;
         }
+    }
+
+    // Native accessories normally paint above the GPU surface. During a modal,
+    // composite their original pixels here so both the scrim and Dialog cover them.
+    Image {
+        visible: root.platform-is-macos && root.modal-overlay-visible;
+        source: root.native-titlebar-modal-image;
+        x: root.native-titlebar-modal-x;
+        y: root.native-titlebar-modal-y;
+        width: root.native-titlebar-modal-width;
+        height: root.native-titlebar-modal-height;
+        image-fit: fill;
+        z: 750;
     }
 
     // Keep the trailing title-bar action at the window root. If it remains
@@ -1994,8 +2013,10 @@ export component MainWindow inherits Window {
         height: root.height;
         enabled: root.show-navigation-drawer
             && !root.navigation-drawer-expanded
-            && !root.docked-sidebar-column-visible;
-        z: 878;
+            && !root.docked-sidebar-column-visible
+            && !root.modal-overlay-visible;
+        // Above full-window route factories, including Settings (z:1200).
+        z: 1298;
         changed has-hover => {
             if self.has-hover {
                 root.sidebar-preview-dismiss-pending = false;
@@ -2007,6 +2028,7 @@ export component MainWindow inherits Window {
     }
 
     sidebar-preview := Rectangle {
+        visible: !root.modal-overlay-visible;
         x: root.show-navigation-drawer
                 && !root.navigation-drawer-expanded
                 && !root.docked-sidebar-column-visible
@@ -2026,7 +2048,9 @@ export component MainWindow inherits Window {
                 && root.sidebar-preview-visible
             ? 1
             : 0;
-        z: 880;
+        // Global navigation must cover page-local sticky navigation and menus.
+        // Modal visibility above suppresses this surface while dialogs are open.
+        z: 1300;
         animate x { duration: 300ms; easing: cubic-bezier(0.19, 1, 0.22, 1); }
         animate opacity { duration: 150ms; easing: ease-in-out; }
 
@@ -2166,6 +2190,19 @@ export component MainWindow inherits Window {
         }
     }
 
+    // A full-window factory host lets Settings-owned Dialogs share their draft
+    // globals and cover all chrome. The page keeps its scroll viewport inset.
+    if root.settings-page-ever-opened: settings-page-host := Rectangle {
+        x: 0px; y: 0px; width: root.width; height: root.height;
+        z: 1200;
+        visible: root.current-route == Route.Settings && root.show-page-scroll-view;
+        background: transparent;
+        ComponentContainer {
+            width: parent.width; height: parent.height;
+            component-factory: root.settings-page-factory;
+        }
+    }
+
     GitHubProjectDialog {
         x: 0;
         y: 0;
@@ -2184,6 +2221,14 @@ export component MainWindow inherits Window {
         logo <=> root.project-new-logo;
         project-tags <=> root.project-new-tags;
         is-pr-auto-update <=> root.project-new-pr-auto-update;
+        hook-choices: root.project-hook-choices;
+        selected-hook-count: root.project-selected-hook-count;
+        selectable-hook-count: root.project-selectable-hook-count;
+        hook-list-expanded: root.project-hook-list-expanded;
+        hooks-ready: root.project-hooks-ready;
+        hooks-status: root.project-hooks-status;
+        toggle-hook(id, value) => { root.project-toggle-hook(id, value); }
+        toggle-all-hooks(value) => { root.project-toggle-all-hooks(value); }
         logo-preview-image: root.project-logo-preview-image;
         logo-preview-status: root.project-logo-preview-status;
         error-text <=> root.project-add-error;
@@ -2865,7 +2910,8 @@ export component MainWindow inherits Window {
         y: GitHubMetrics.size-16;
         width: min(400px, root.width - GitHubMetrics.size-32);
         height: notification-overlay-item.height;
-        z: 900;
+        // Execution feedback must remain visible above Dialogs and their scrims.
+        z: 4000;
         background: transparent;
 
         notification-overlay-item := GitHubNotificationItem {
@@ -2902,7 +2948,7 @@ export component MainWindow inherits Window {
         width: 100%;
         height: 100%;
         background: transparent;
-        z: 1000;
+        z: 4100;
 
         GitHubToast {
             width: parent.width;

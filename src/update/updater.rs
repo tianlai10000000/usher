@@ -43,7 +43,12 @@ enum UpdateChannel {
 
 impl UpdateChannel {
     fn configured() -> Self {
-        if crate::settings::get_settings_manager().get().update_channel == "alpha" {
+        if crate::settings::get_settings_manager()
+            .get()
+            .update
+            .update_channel
+            == "alpha"
+        {
             Self::Alpha
         } else {
             Self::Stable

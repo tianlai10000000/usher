@@ -1273,6 +1273,8 @@ impl ControllerInner {
             .unwrap_or_default();
         let model_name = request.model_name.clone();
         let target = ReviewTarget {
+            author_name: None,
+            author_email: None,
             project_key: request.project_key.clone(),
             project_name: request.project_name.clone(),
             pull_request_number: request.number.clone(),
@@ -1370,6 +1372,21 @@ impl ControllerInner {
                 let projection =
                     SessionProjection::from_review(&session, self.as_ref(), mount_generation);
                 let finding_count = session.result.findings.len() as u32;
+                let mut hook_event = crate::hooks::HookTrigger::new(
+                    crate::hooks::AI_REVIEW_COMPLETED,
+                    "ai.review",
+                    serde_json::json!({ "task_id": id.0, "number": session.task.target.pull_request_number,
+                        "title": session.task.target.pull_request_title,
+                        "source_branch": session.task.target.source_branch,
+                        "target_branch": session.task.target.target_branch,
+                        "author": session.task.target.author,
+                        "author_name": session.task.target.author_name,
+                        "author_email": session.task.target.author_email,
+                        "head_sha": session.task.target.head_sha, "finding_count": finding_count }),
+                );
+                hook_event.event_id = format!("ai-review-completed-{}", id.0);
+                hook_event.project = Some(session.task.target.project_key.0.clone());
+                hook_event.cwd = session.input.repository_context.local_repo.clone();
                 match persist_session(self.session_path(&id), session).await {
                     Ok(()) => {
                         self.task_store.dispatch(ReviewTaskAction::Complete {
@@ -1381,6 +1398,9 @@ impl ControllerInner {
                             self.apply_projection_if_visible(projection);
                         }
                         self.publish_terminal_message(&id, true, finding_count, "");
+                        if let Err(error) = crate::hooks::emit(hook_event).await {
+                            log::warn!("[Hooks] AI review completion dispatch failed: {error}");
+                        }
                     }
                     Err(error) => {
                         self.fail_task(&id, error.as_str());
@@ -2929,6 +2949,8 @@ fn target_from_detail(
     detail: &crate::git::PullRequestDiffDetail,
 ) -> ReviewTarget {
     ReviewTarget {
+        author_name: detail.author_identity.name.clone(),
+        author_email: detail.author_identity.email.clone(),
         project_key: request.project_key.clone(),
         project_name: request.project_name.clone(),
         pull_request_number: request.number.clone(),
@@ -3084,6 +3106,8 @@ fn response_fixture_session(
     let task = ReviewTaskSummary {
         id: ReviewTaskId("response-fixture-task".to_string()),
         target: ReviewTarget {
+            author_name: None,
+            author_email: None,
             project_key: ProjectReviewKey("response-fixture-project".to_string()),
             project_name: "Usher".to_string(),
             pull_request_number: "648".to_string(),
@@ -3287,6 +3311,8 @@ fn fixture_diff(request: &PendingReviewRequest) -> (ReviewTarget, String) {
     }
     (
         ReviewTarget {
+            author_name: None,
+            author_email: None,
             project_key: request.project_key.clone(),
             project_name: request.project_name.clone(),
             pull_request_number: request.number.clone(),
@@ -3369,6 +3395,8 @@ mod tests {
     fn chat_test_input() -> ReviewInput {
         ReviewInput {
             target: ReviewTarget {
+                author_name: None,
+                author_email: None,
                 project_key: ProjectReviewKey("project-1".to_string()),
                 project_name: "Usher".to_string(),
                 pull_request_number: "42".to_string(),
@@ -3752,6 +3780,7 @@ mod tests {
     #[test]
     fn provider_diff_is_normalized_to_unified_diff() {
         let detail = crate::git::PullRequestDiffDetail {
+            author_identity: Default::default(),
             files: vec![PullRequestDiffFile {
                 path: "src/lib.rs".to_string(),
                 old_path: "src/lib.rs".to_string(),
@@ -3793,6 +3822,7 @@ mod tests {
     #[test]
     fn body_lines_starting_with_hunk_marker_keep_their_change_prefix() {
         let detail = crate::git::PullRequestDiffDetail {
+            author_identity: Default::default(),
             files: vec![PullRequestDiffFile {
                 path: "src/lib.rs".to_string(),
                 old_path: "src/lib.rs".to_string(),

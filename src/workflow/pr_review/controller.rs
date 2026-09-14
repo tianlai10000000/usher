@@ -2859,6 +2859,7 @@ fn ai_review_fixture_enabled() -> bool {
 #[cfg(any(test, feature = "test-fixtures"))]
 fn ai_review_fixture_diff_detail(pull_request_number: &str) -> PullRequestDiffDetail {
     PullRequestDiffDetail {
+        author_identity: Default::default(),
         files: vec![PullRequestDiffFile {
             path: "src/fixture_0000.rs".to_string(),
             old_path: "src/fixture_0000.rs".to_string(),
@@ -2974,6 +2975,7 @@ fn memory_benchmark_diff_detail(seed: usize) -> PullRequestDiffDetail {
         })
         .collect();
     PullRequestDiffDetail {
+        author_identity: Default::default(),
         files,
         added_lines: TOTAL_LINES as u32,
         removed_lines: 0,
@@ -3375,6 +3377,7 @@ mod tests {
     fn shares_selected_base_files_and_clones_only_expanded_context() {
         let original = file("src/lib.rs");
         let base_detail = Arc::new(SharedDiffDetail::from(PullRequestDiffDetail {
+            author_identity: Default::default(),
             files: vec![original.clone(), file("src/main.rs")],
             added_lines: 2,
             removed_lines: 0,
@@ -3438,6 +3441,7 @@ mod tests {
     #[test]
     fn memory_stats_count_unique_full_and_range_details() {
         let full_detail = Arc::new(SharedDiffDetail::from(PullRequestDiffDetail {
+            author_identity: Default::default(),
             files: vec![file("src/lib.rs")],
             added_lines: 1,
             removed_lines: 0,
@@ -3450,6 +3454,7 @@ mod tests {
             files_truncated: false,
         }));
         let range_detail = Arc::new(SharedDiffDetail::from(PullRequestDiffDetail {
+            author_identity: Default::default(),
             files: vec![file("src/range.rs")],
             added_lines: 1,
             removed_lines: 0,
@@ -3615,6 +3620,7 @@ mod tests {
             total_lines
         );
         PullRequestDiffDetail {
+            author_identity: Default::default(),
             files,
             added_lines: total_lines as u32,
             removed_lines: 0,

@@ -242,6 +242,10 @@ pub struct ReviewTarget {
     #[serde(default)]
     pub author: String,
     #[serde(default)]
+    pub author_name: Option<String>,
+    #[serde(default)]
+    pub author_email: Option<String>,
+    #[serde(default)]
     pub source_branch: String,
     #[serde(default)]
     pub target_branch: String,
@@ -1191,10 +1195,26 @@ mod tests {
         .expect("legacy review session");
 
         assert_eq!(session.prompt, PromptProvenance::default());
+        assert_eq!(session.task.target.author_name, None);
+        assert_eq!(session.task.target.author_email, None);
+        assert_eq!(session.input.target.author_name, None);
+        assert_eq!(session.input.target.author_email, None);
+    }
+
+    #[test]
+    fn review_target_round_trips_pr_author_identity() {
+        let mut target = target("42");
+        target.author_name = Some("Example User".into());
+        target.author_email = Some("user@example.com".into());
+        let json = serde_json::to_value(&target).unwrap();
+        let restored: ReviewTarget = serde_json::from_value(json).unwrap();
+        assert_eq!(restored, target);
     }
 
     fn target(number: &str) -> ReviewTarget {
         ReviewTarget {
+            author_name: None,
+            author_email: None,
             project_key: ProjectReviewKey("github:42".into()),
             project_name: "Usher".into(),
             pull_request_number: number.into(),

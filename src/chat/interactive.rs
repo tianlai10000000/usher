@@ -703,13 +703,22 @@ fn schedule_chat_ui_mount(
         LAST_RENDER_SIGNATURE.with(|last| {
             *last.borrow_mut() = None;
         });
-        apply_chat_state_to_ui(
+        let window_policy = scroll_to_latest.then(|| {
+            let policy = if crate::chat::performance::variant().is_optimized() {
+                VirtualWindowPolicy::optimized()
+            } else {
+                VirtualWindowPolicy::baseline()
+            };
+            policy.for_latest_messages()
+        });
+        apply_chat_state_to_ui_with_policy(
             &ui,
             &session,
             mode,
             ui.get_chat_is_sending(),
             Some(active_wrap_width_px(&ui)),
             false,
+            window_policy,
         );
         ui.set_chat_history_restoring(false);
         if scroll_to_latest {

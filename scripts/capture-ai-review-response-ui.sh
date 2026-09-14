@@ -103,13 +103,17 @@ write_settings() {
   mkdir -p "$state_dir"
   cat >"$state_dir/settings.toml" <<EOF
 theme_mode = $theme_mode
+ui_sound_effects = false
+navigation_drawer_expanded = true
+
+[update]
 auto_update = false
+
+[diagnostics]
 application_console_logging = true
 application_file_logging = false
 tracing_logger_active = false
 memory_diagnostics_logging = false
-ui_sound_effects = false
-navigation_drawer_expanded = true
 
 [preview]
 presentation_mode = "$presentation_mode"

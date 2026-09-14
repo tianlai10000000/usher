@@ -366,6 +366,15 @@ pub(super) async fn get_pull_request_diff(
         );
     }
     let mut decoded = decode_pull_request_diff(&payload)?;
+    if let Ok(detail) = &detail {
+        let detail = enterprise_data_object(detail);
+        decoded.author_identity = super::PullRequestAuthorIdentity::from_user(
+            detail
+                .get("author")
+                .or_else(|| detail.get("user"))
+                .unwrap_or(&Value::Null),
+        );
+    }
     // Enterprise Conversation includes ordinary notes plus one current-state
     // summary for every active approved/rejected reviewer in MR detail.
     let active_review_count = detail
@@ -497,6 +506,7 @@ async fn get_public_pull_request_diff(
             .unwrap_or(0),
     };
     Ok(PullRequestDiffDetail {
+        author_identity: super::PullRequestAuthorIdentity::from_user(&detail["user"]),
         added_lines: files.iter().map(|file| file.added_lines).sum(),
         removed_lines: files.iter().map(|file| file.removed_lines).sum(),
         commit_count,
@@ -565,6 +575,7 @@ pub(super) async fn get_commit_range_diff(
         .map(decode_compare_diff_file)
         .collect::<Vec<_>>();
     Ok(PullRequestDiffDetail {
+        author_identity: Default::default(),
         added_lines: files.iter().map(|file| file.added_lines).sum(),
         removed_lines: files.iter().map(|file| file.removed_lines).sum(),
         commit_count,

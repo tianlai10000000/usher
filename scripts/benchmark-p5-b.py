@@ -41,7 +41,7 @@ def main():
 
     def seed(directory, scenario, port):
         directory.mkdir(parents=True)
-        (directory / "settings.toml").write_text('theme_mode = 0\nlanguage = "en"\nterminal_verbose_logging = ' + str(args.diagnostics).lower() + '\n')
+        (directory / "settings.toml").write_text('theme_mode = 0\nlanguage = "en"\n[diagnostics]\nterminal_verbose_logging = ' + str(args.diagnostics).lower() + '\n')
         if args.task == "57":
             images = directory / "images"
             images.mkdir()

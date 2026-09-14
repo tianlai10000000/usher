@@ -1,0 +1,264 @@
+import { I18n } from "@i18n";
+import { GitHubIconButton } from "../button/github_icon_button.slint";
+import { GitHubTooltipSurface } from "../github_tooltip.slint";
+import { GitHubFloatingOverlayHost } from "../github_floating_overlay.slint";
+import { GitHubTooltipAlignment } from "../../state/tooltip_overlay_state.slint";
+
+export enum HookTooltipKind { None, Edit, Delete, Stop, ViewRun, ClearHistory }
+export global HookTooltipState {
+    in-out property <HookTooltipKind> kind: HookTooltipKind.None;
+    in-out property <length> anchor-x;
+    in-out property <length> anchor-y;
+    in-out property <length> anchor-width;
+    in-out property <length> anchor-height;
+    in-out property <int> lease: 0;
+    public function show(kind: HookTooltipKind, x: length, y: length, width: length, height: length) {
+        root.kind = kind;
+        root.anchor-x = x; root.anchor-y = y;
+        root.anchor-width = width; root.anchor-height = height;
+        root.lease += 1;
+    }
+    public function hide(kind: HookTooltipKind, x: length, y: length) {
+        if root.kind == kind && root.anchor-x == x && root.anchor-y == y {
+            root.kind = HookTooltipKind.None;
+        }
+    }
+    public function dismiss() { root.kind = HookTooltipKind.None; }
+}
+
+// UI-103: each factory action publishes a literal kind. Never pass a tooltip
+// string through a recycled list delegate or conditionally remount its surface.
+
+export component GitHubHookEditAction inherits GitHubIconButton {
+    private property <bool> published-position: false;
+    private property <bool> detached: root.published-position
+        && root.absolute-position.x == 0px && root.absolute-position.y == 0px;
+    show-tooltip: false;
+    tooltip-text: I18n.hooks-edit;
+    icon: @image-url("../../assets/icons/octicon-pencil-16.svg");
+    private property <bool> tip-active: root.tooltip-active && root.visible && root.button-enabled && !root.detached;
+    changed tip-active => { root.publish-tip(); }
+    changed absolute-position => { root.publish-tip(); }
+    function publish-tip() {
+        if root.tip-active && root.width > 0px && root.height > 0px {
+            HookTooltipState.show(HookTooltipKind.Edit, root.absolute-position.x,
+                root.absolute-position.y, root.width, root.height);
+            if root.absolute-position.x != 0px || root.absolute-position.y != 0px { root.published-position = true; }
+        } else {
+            HookTooltipState.hide(HookTooltipKind.Edit, root.absolute-position.x, root.absolute-position.y);
+        }
+    }
+    Timer {
+        interval: 32ms; running: root.tip-active;
+        triggered => {
+            if HookTooltipState.kind == HookTooltipKind.Edit
+                    && HookTooltipState.anchor-x == root.absolute-position.x
+                    && HookTooltipState.anchor-y == root.absolute-position.y {
+                HookTooltipState.lease += 1;
+            }
+        }
+    }
+}
+
+export component GitHubHookDeleteAction inherits GitHubIconButton {
+    private property <bool> published-position: false;
+    private property <bool> detached: root.published-position
+        && root.absolute-position.x == 0px && root.absolute-position.y == 0px;
+    show-tooltip: false;
+    tooltip-text: I18n.common-delete;
+    icon: @image-url("../../assets/icons/octicon-trash-16.svg");
+    private property <bool> tip-active: root.tooltip-active && root.visible && root.button-enabled && !root.detached;
+    changed tip-active => { root.publish-tip(); }
+    changed absolute-position => { root.publish-tip(); }
+    function publish-tip() {
+        if root.tip-active && root.width > 0px && root.height > 0px {
+            HookTooltipState.show(HookTooltipKind.Delete, root.absolute-position.x,
+                root.absolute-position.y, root.width, root.height);
+            if root.absolute-position.x != 0px || root.absolute-position.y != 0px { root.published-position = true; }
+        } else {
+            HookTooltipState.hide(HookTooltipKind.Delete, root.absolute-position.x, root.absolute-position.y);
+        }
+    }
+    Timer {
+        interval: 32ms; running: root.tip-active;
+        triggered => {
+            if HookTooltipState.kind == HookTooltipKind.Delete
+                    && HookTooltipState.anchor-x == root.absolute-position.x
+                    && HookTooltipState.anchor-y == root.absolute-position.y {
+                HookTooltipState.lease += 1;
+            }
+        }
+    }
+}
+
+export component GitHubHookStopAction inherits GitHubIconButton {
+    private property <bool> published-position: false;
+    private property <bool> detached: root.published-position
+        && root.absolute-position.x == 0px && root.absolute-position.y == 0px;
+    show-tooltip: false;
+    tooltip-text: I18n.hooks-stop;
+    icon: @image-url("../../assets/icons/octicon-stop-16.svg");
+    private property <bool> tip-active: root.tooltip-active && root.visible && root.button-enabled && !root.detached;
+    changed tip-active => { root.publish-tip(); }
+    changed absolute-position => { root.publish-tip(); }
+    function publish-tip() {
+        if root.tip-active && root.width > 0px && root.height > 0px {
+            HookTooltipState.show(HookTooltipKind.Stop, root.absolute-position.x,
+                root.absolute-position.y, root.width, root.height);
+            if root.absolute-position.x != 0px || root.absolute-position.y != 0px { root.published-position = true; }
+        } else {
+            HookTooltipState.hide(HookTooltipKind.Stop, root.absolute-position.x, root.absolute-position.y);
+        }
+    }
+    Timer {
+        interval: 32ms; running: root.tip-active;
+        triggered => {
+            if HookTooltipState.kind == HookTooltipKind.Stop
+                    && HookTooltipState.anchor-x == root.absolute-position.x
+                    && HookTooltipState.anchor-y == root.absolute-position.y {
+                HookTooltipState.lease += 1;
+            }
+        }
+    }
+}
+
+export component GitHubHookViewRunAction inherits GitHubIconButton {
+    private property <bool> published-position: false;
+    private property <bool> detached: root.published-position
+        && root.absolute-position.x == 0px && root.absolute-position.y == 0px;
+    show-tooltip: false;
+    tooltip-text: I18n.hooks-view-run;
+    icon: @image-url("../../assets/icons/octicon-link-external-16.svg");
+    private property <bool> tip-active: root.tooltip-active && root.visible && root.button-enabled && !root.detached;
+    changed tip-active => { root.publish-tip(); }
+    changed absolute-position => { root.publish-tip(); }
+    function publish-tip() {
+        if root.tip-active && root.width > 0px && root.height > 0px {
+            HookTooltipState.show(HookTooltipKind.ViewRun, root.absolute-position.x,
+                root.absolute-position.y, root.width, root.height);
+            if root.absolute-position.x != 0px || root.absolute-position.y != 0px { root.published-position = true; }
+        } else {
+            HookTooltipState.hide(HookTooltipKind.ViewRun, root.absolute-position.x, root.absolute-position.y);
+        }
+    }
+    Timer {
+        interval: 32ms; running: root.tip-active;
+        triggered => {
+            if HookTooltipState.kind == HookTooltipKind.ViewRun
+                    && HookTooltipState.anchor-x == root.absolute-position.x
+                    && HookTooltipState.anchor-y == root.absolute-position.y {
+                HookTooltipState.lease += 1;
+            }
+        }
+    }
+}
+
+export component GitHubHookClearHistoryAction inherits GitHubIconButton {
+    private property <bool> published-position: false;
+    private property <bool> detached: root.published-position
+        && root.absolute-position.x == 0px && root.absolute-position.y == 0px;
+    show-tooltip: false;
+    tooltip-text: I18n.hooks-clear-history;
+    icon: @image-url("../../assets/icons/octicon-trash-16.svg");
+    private property <bool> tip-active: root.tooltip-active && root.visible && root.button-enabled && !root.detached;
+    changed tip-active => { root.publish-tip(); }
+    changed absolute-position => { root.publish-tip(); }
+    function publish-tip() {
+        if root.tip-active && root.width > 0px && root.height > 0px {
+            HookTooltipState.show(HookTooltipKind.ClearHistory, root.absolute-position.x,
+                root.absolute-position.y, root.width, root.height);
+            if root.absolute-position.x != 0px || root.absolute-position.y != 0px { root.published-position = true; }
+        } else {
+            HookTooltipState.hide(HookTooltipKind.ClearHistory, root.absolute-position.x, root.absolute-position.y);
+        }
+    }
+    Timer {
+        interval: 32ms; running: root.tip-active;
+        triggered => {
+            if HookTooltipState.kind == HookTooltipKind.ClearHistory
+                    && HookTooltipState.anchor-x == root.absolute-position.x
+                    && HookTooltipState.anchor-y == root.absolute-position.y {
+                HookTooltipState.lease += 1;
+            }
+        }
+    }
+}
+
+export component GitHubHookTooltipOverlay inherits Rectangle {
+    width: 100%; height: 100%; background: transparent; clip: false;
+    private property <int> observed-lease: 0;
+
+    edit-host := GitHubFloatingOverlayHost {
+        opacity: HookTooltipState.kind == HookTooltipKind.Edit ? 1 : 0;
+        anchor-x: HookTooltipState.anchor-x; anchor-y: HookTooltipState.anchor-y;
+        anchor-width: HookTooltipState.anchor-width; anchor-height: HookTooltipState.anchor-height;
+        floating-width: edit-surface.width; floating-height: edit-surface.height;
+        alignment: GitHubTooltipAlignment.Center;
+        edit-surface := GitHubTooltipSurface {
+            text: I18n.hooks-edit;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+    }
+
+    delete-host := GitHubFloatingOverlayHost {
+        opacity: HookTooltipState.kind == HookTooltipKind.Delete ? 1 : 0;
+        anchor-x: HookTooltipState.anchor-x; anchor-y: HookTooltipState.anchor-y;
+        anchor-width: HookTooltipState.anchor-width; anchor-height: HookTooltipState.anchor-height;
+        floating-width: delete-surface.width; floating-height: delete-surface.height;
+        alignment: GitHubTooltipAlignment.Center;
+        delete-surface := GitHubTooltipSurface {
+            text: I18n.common-delete;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+    }
+
+    stop-host := GitHubFloatingOverlayHost {
+        opacity: HookTooltipState.kind == HookTooltipKind.Stop ? 1 : 0;
+        anchor-x: HookTooltipState.anchor-x; anchor-y: HookTooltipState.anchor-y;
+        anchor-width: HookTooltipState.anchor-width; anchor-height: HookTooltipState.anchor-height;
+        floating-width: stop-surface.width; floating-height: stop-surface.height;
+        alignment: GitHubTooltipAlignment.Center;
+        stop-surface := GitHubTooltipSurface {
+            text: I18n.hooks-stop;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+    }
+
+    viewrun-host := GitHubFloatingOverlayHost {
+        opacity: HookTooltipState.kind == HookTooltipKind.ViewRun ? 1 : 0;
+        anchor-x: HookTooltipState.anchor-x; anchor-y: HookTooltipState.anchor-y;
+        anchor-width: HookTooltipState.anchor-width; anchor-height: HookTooltipState.anchor-height;
+        floating-width: viewrun-surface.width; floating-height: viewrun-surface.height;
+        alignment: GitHubTooltipAlignment.Center;
+        viewrun-surface := GitHubTooltipSurface {
+            text: I18n.hooks-view-run;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+    }
+
+    clearhistory-host := GitHubFloatingOverlayHost {
+        opacity: HookTooltipState.kind == HookTooltipKind.ClearHistory ? 1 : 0;
+        anchor-x: HookTooltipState.anchor-x; anchor-y: HookTooltipState.anchor-y;
+        anchor-width: HookTooltipState.anchor-width; anchor-height: HookTooltipState.anchor-height;
+        floating-width: clearhistory-surface.width; floating-height: clearhistory-surface.height;
+        alignment: GitHubTooltipAlignment.Center;
+        clearhistory-surface := GitHubTooltipSurface {
+            text: I18n.hooks-clear-history;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+    }
+
+    Timer {
+        interval: 48ms; running: HookTooltipState.kind != HookTooltipKind.None;
+        triggered => {
+            if HookTooltipState.lease == root.observed-lease {
+                HookTooltipState.dismiss();
+            } else { root.observed-lease = HookTooltipState.lease; }
+        }
+    }
+}

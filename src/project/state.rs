@@ -91,6 +91,12 @@ pub(super) fn register(state: &ProjectStateFacade) {
     let _ = REGISTERED_STATE.set(state.clone());
 }
 
+pub(crate) fn hook_selected(project_id: &str, hook_id: &str) -> bool {
+    REGISTERED_STATE
+        .get()
+        .is_some_and(|state| state.hook_selected(project_id, hook_id))
+}
+
 pub(crate) fn load_repository_metadata(
     project_alias: &str,
 ) -> Result<ProjectRepositoryMetadata, String> {
@@ -118,6 +124,24 @@ pub(crate) fn load_repository_metadata(
 }
 
 impl ProjectStateFacade {
+    fn hook_selected(&self, project_id: &str, hook_id: &str) -> bool {
+        let snapshot = self.snapshot();
+        if !snapshot.state().hydrated {
+            return false;
+        }
+        let mut matches = snapshot.state().projects.iter().filter(|project| {
+            crate::workflow::state::normalize_project_id(
+                &project.project_alias,
+                &project.project_name,
+            ) == project_id
+        });
+        // Ambiguous legacy aliases must not grant another project's opt-in.
+        let selected = matches
+            .next()
+            .is_some_and(|project| project.hook_ids.iter().any(|id| id == hook_id));
+        selected && matches.next().is_none()
+    }
+
     pub(super) fn open_deferred(
         on_success: Arc<PersistenceSuccess>,
         on_failure: Arc<PersistenceFailure>,
@@ -529,6 +553,7 @@ pub(super) fn registries_match_persisted(left: &[ProjectConfig], right: &[Projec
                 && left.logo == right.logo
                 && left.project_tags == right.project_tags
                 && left.is_pr_auto_update == right.is_pr_auto_update
+                && left.hook_ids == right.hook_ids
         })
 }
 
@@ -547,8 +572,36 @@ mod tests {
             logo: String::new(),
             project_tags: Vec::new(),
             is_pr_auto_update: false,
+            hook_ids: Vec::new(),
             pr_overview: ProjectPrOverview::default(),
         }
+    }
+
+    #[test]
+    fn hook_selection_is_durable_isolated_and_ambiguous_ids_fail_closed() {
+        let state = ProjectStateFacade::memory(vec![project("Alpha"), project("beta")]);
+        assert!(!state.hook_selected("alpha", "hook-one"));
+        let mut enabled = project("Alpha");
+        enabled.hook_ids = vec!["hook-one".into()];
+        state.update("Alpha".into(), enabled.clone()).unwrap();
+        assert!(state.hook_selected("alpha", "hook-one"));
+        assert!(!state.hook_selected("beta", "hook-one"));
+        assert!(!state.hook_selected("missing", "hook-one"));
+        assert!(!state.hook_selected("alpha", "hook-new"));
+        assert!(!registries_match_persisted(
+            &[enabled.clone()],
+            &[project("Alpha")]
+        ));
+        let serialized = serde_json::to_vec(state.snapshot().state().projects.as_ref()).unwrap();
+        let restored = ProjectStateFacade::memory(serde_json::from_slice(&serialized).unwrap());
+        assert!(restored.hook_selected("alpha", "hook-one"));
+        state.update("Alpha".into(), project("Alpha")).unwrap();
+        assert!(!state.hook_selected("alpha", "hook-one"));
+        let ambiguous = ProjectStateFacade::memory(vec![enabled, project("alpha")]);
+        assert!(!ambiguous.hook_selected("alpha", "hook-one"));
+        state.shutdown();
+        restored.shutdown();
+        ambiguous.shutdown();
     }
 
     #[test]

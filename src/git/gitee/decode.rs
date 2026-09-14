@@ -30,6 +30,7 @@ pub(super) fn decode_pull_request_diff(payload: &Value) -> Result<PullRequestDif
     let files = diffs.iter().map(decode_diff_file).collect::<Vec<_>>();
     let refs = payload.get("diff_refs").unwrap_or(&Value::Null);
     Ok(PullRequestDiffDetail {
+        author_identity: Default::default(),
         added_lines: value_u32(payload, "added_lines")
             .unwrap_or_else(|| files.iter().map(|file| file.added_lines).sum()),
         removed_lines: value_u32(payload, "removed_lines")

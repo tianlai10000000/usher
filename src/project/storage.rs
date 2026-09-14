@@ -73,8 +73,28 @@ mod tests {
             logo: String::new(),
             project_tags: Vec::new(),
             is_pr_auto_update: false,
+            hook_ids: Vec::new(),
             pr_overview: ProjectPrOverview::default(),
         }
+    }
+
+    #[test]
+    fn legacy_projects_default_to_no_hooks_and_selection_survives_disk_round_trip() {
+        let legacy = serde_json::json!({"project_name":"legacy", "project_alias":"legacy", "local_repo":"", "remote_repo":""});
+        let mut project: ProjectConfig = serde_json::from_value(legacy).unwrap();
+        assert!(project.hook_ids.is_empty());
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("projects.json");
+        project.hook_ids = vec!["hook-one".into(), "hook-two".into()];
+        write_projects_to(&path, &[project.clone()]).unwrap();
+        let restored: Vec<ProjectConfig> =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(restored[0].hook_ids, project.hook_ids);
+        project.hook_ids.clear();
+        write_projects_to(&path, &[project]).unwrap();
+        let restored: Vec<ProjectConfig> =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert!(restored[0].hook_ids.is_empty());
     }
 
     #[test]

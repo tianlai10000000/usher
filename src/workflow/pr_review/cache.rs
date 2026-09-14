@@ -82,6 +82,7 @@ pub(super) struct ReviewCache {
 
 #[derive(Debug)]
 pub(super) struct SharedDiffDetail {
+    pub(super) author_identity: crate::git::PullRequestAuthorIdentity,
     pub(super) files: Vec<Arc<PullRequestDiffFile>>,
     pub(super) added_lines: u32,
     pub(super) removed_lines: u32,
@@ -96,6 +97,7 @@ pub(super) struct SharedDiffDetail {
 impl From<PullRequestDiffDetail> for SharedDiffDetail {
     fn from(detail: PullRequestDiffDetail) -> Self {
         Self {
+            author_identity: detail.author_identity,
             files: detail.files.into_iter().map(Arc::new).collect(),
             added_lines: detail.added_lines,
             removed_lines: detail.removed_lines,

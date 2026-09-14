@@ -2,27 +2,54 @@ import { AppState, LanguageOption } from "../state/app_state.slint";
 export { AppState, LanguageOption } from "../state/app_state.slint";
 import { I18n } from "@i18n";
 import { GitHubScrollView } from "../components/github_scroll_view.slint";
-import { GitHubTheme } from "../theme/github_theme.slint";
+import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
 import { GitHubTooltipOverlayHost } from "../components/github_tooltip_overlay.slint";
+import { GitHubHookTooltipOverlay, HookTooltipState } from "../components/settings/github_hook_tooltip.slint";
+export { HookTooltipState, HookTooltipKind } from "../components/settings/github_hook_tooltip.slint";
 import {
     GitHubSettingsNavItem,
     GitHubSettingsSectionMenuButton
 } from "../components/settings/github_settings_controls.slint";
 import { GitHubSettingsPane } from "../components/settings/github_settings_layout.slint";
 import { ManifestInterfaceLanguagePickerOverlay, ManifestReplyLanguagePickerOverlay } from "@language-picker";
-import { GitHubSelectState } from "../components/input/github_select.slint";
+import { GitHubSelectState, GitHubSelectPopup, GitHubSelectOption } from "../components/input/github_select.slint";
 import { AiReviewRuleItem } from "@ai-review-settings";
 export { AiReviewRuleItem } from "@ai-review-settings";
+export { HookSettingsState, HookChoice, HookEventChoice, HookSummary, HookLanguageDraft, HookCodeToken, HookCodeLine } from "../components/settings/github_hook_settings.slint";
+import { HookSettingsState, GitHubHookSettingsOverlay, GitHubHookDialog } from "../components/settings/github_hook_settings.slint";
 
-export component GitHubSettingsPage inherits Rectangle {
+// ComponentFactory embeds this Window without showing a second native window.
+// An implicit Window wrapper would paint the style's opaque default background.
+export component GitHubSettingsPage inherits Window {
     // ComponentContainer clips an external tree but does not rewrite these
     // public geometry properties. The Rust bridge keeps them synchronized with
     // the host viewport so responsive layout and scrolling use the real size.
     in-out property <length> viewport-width: 800px;
     in-out property <length> viewport-height: 768px;
-    width: root.viewport-width;
-    height: root.viewport-height;
-    background: GitHubTheme.canvas-default;
+    in-out property <length> window-width: root.viewport-width;
+    in-out property <length> window-height: root.viewport-height;
+    in-out property <length> content-origin-x: 0px;
+    in-out property <length> content-origin-y: 0px;
+    width: root.window-width;
+    height: root.window-height;
+    background: transparent;
+    callback hook-dialog-visibility-changed(bool);
+    callback close-hook-editor();
+    callback dismiss-hook-menu() -> bool;
+    dismiss-hook-menu => {
+        if GitHubSelectState.open {
+            GitHubSelectState.close(true);
+            return true;
+        }
+        return false;
+    }
+    close-hook-editor => {
+        draft-reset-focus.focus();
+        GitHubSelectState.close(false);
+        HookSettingsState.dialog-mode = "";
+    }
+    private property <bool> hook-dialog-open: HookSettingsState.dialog-mode != "";
+    changed hook-dialog-open => { HookTooltipState.dismiss(); root.hook-dialog-visibility-changed(root.hook-dialog-open); }
     callback check-update();
     callback simulate-crash();
     callback open-log-directory();
@@ -59,23 +86,30 @@ export component GitHubSettingsPage inherits Rectangle {
     private property <int> selected-section: -1;
     private property <int> hosting-config-tab: -1;
     private property <bool> initial-tab-sync-pending: true;
-    private property <bool> compact-navigation-open: false;
-    private property <int> compact-navigation-selection: -1;
-    private property <length> page-gutter: root.width >= 1000px ? 48px : 16px;
-    private property <length> available-width: max(0px, root.width - root.page-gutter * 2);
+    private property <bool> compact-navigation-open:
+        GitHubSelectState.open && GitHubSelectState.owner == "settings-section";
+    private property <length> page-gutter: root.viewport-width >= 1000px ? 48px : 16px;
+    private property <length> available-width: max(0px, root.viewport-width - root.page-gutter * 2);
     private property <length> page-width: min(1120px, root.available-width);
     private property <bool> compact-layout: root.page-width < 768px;
     private property <length> nav-width: 180px;
     private property <length> nav-content-gap: 32px;
+    private property <length> section-scroll-offset: settings-title.preferred-height + page-column.spacing;
 
-    changed selected-section => { GitHubSelectState.open = false; }
+    changed selected-section => {
+        GitHubSelectState.open = false;
+        if !root.compact-layout {
+            settings-scroll.viewport_y = -root.section-scroll-offset;
+        }
+    }
     changed viewport-width => { GitHubSelectState.open = false; }
     changed viewport-height => { GitHubSelectState.open = false; }
+    changed window-width => { GitHubSelectState.close(false); }
+    changed window-height => { GitHubSelectState.close(false); }
 
     changed route-entry-revision => {
         draft-reset-focus.focus();
-        root.compact-navigation-open = false;
-        root.compact-navigation-selection = root.selected-section;
+        GitHubSelectState.close(false);
         root.simulate-crash-active = false;
         root.reveal-git-tokens = false;
         root.reveal-ai-agent-api-key = false;
@@ -100,8 +134,10 @@ export component GitHubSettingsPage inherits Rectangle {
     }
 
     settings-scroll := GitHubScrollView {
-        width: root.width;
-        height: root.height;
+        x: root.content-origin-x;
+        y: root.content-origin-y;
+        width: root.viewport-width;
+        height: root.viewport-height;
         viewport_x: 0px;
         changed viewport_y => { GitHubSelectState.open = false; }
 
@@ -110,7 +146,9 @@ export component GitHubSettingsPage inherits Rectangle {
             // Keep the 16px top inset plus a deliberate 24px end margin. This
             // is vertical breathing room below the final setting, not a
             // horizontal-scroll gutter.
-            height: max(settings-scroll.visible_height, page-column.preferred-height + 40px);
+            height: max(settings-scroll.visible_height
+                + (root.compact-layout ? 0px : root.section-scroll-offset),
+                page-column.preferred-height + 40px);
             background: GitHubTheme.canvas-default;
 
                     page-column := VerticalLayout {
@@ -121,7 +159,7 @@ export component GitHubSettingsPage inherits Rectangle {
                         spacing: 24px;
                         alignment: start;
 
-                        Text {
+                        settings-title := Text {
                             width: parent.width;
                             text: I18n.settings-title;
                             font-size: 24px;
@@ -129,45 +167,67 @@ export component GitHubSettingsPage inherits Rectangle {
                             color: GitHubTheme.fg-default;
                         }
 
-                        if !root.compact-layout: HorizontalLayout {
+                        if !root.compact-layout: wide-layout := HorizontalLayout {
                             width: parent.width;
-                            height: max(140px, wide-settings-pane.height);
+                            height: max(wide-navigation.preferred-height, wide-settings-pane.height);
                             spacing: root.nav-content-gap;
                             alignment: start;
 
-                            VerticalLayout {
+                            Rectangle {
                                 width: root.nav-width;
-                                spacing: 4px;
-                                alignment: start;
+                                height: parent.height;
+                                background: transparent;
 
-                                GitHubSettingsNavItem {
-                                    text: I18n.settings-general-title;
-                                    selected: root.selected-section == 0;
-                                    clicked => { root.selected-section = 0; }
+                                wide-navigation := VerticalLayout {
+                                    width: parent.width;
+                                    height: self.preferred-height;
+                                    // Sticky within the existing scroll chain; keep the
+                                    // navigation inside its column at the document end.
+                                    y: min(
+                                        max(0px, parent.height - self.height),
+                                        max(0px, -settings-scroll.viewport_y
+                                            - page-column.y - wide-layout.y + 16px)
+                                    );
+                                    spacing: 4px;
+                                    alignment: start;
+
+                                    GitHubSettingsNavItem {
+                                        text: I18n.settings-general-title;
+                                        selected: root.selected-section == 0;
+                                        clicked => { root.selected-section = 0; }
+                                    }
+                                    GitHubSettingsNavItem {
+                                        text: I18n.settings-code-hosting-title;
+                                        selected: root.selected-section == 1;
+                                        clicked => { root.selected-section = 1; }
+                                    }
+                                    GitHubSettingsNavItem {
+                                        text: I18n.settings-ai-agent-title;
+                                        selected: root.selected-section == 2;
+                                        clicked => { root.selected-section = 2; }
+                                    }
+                                    GitHubSettingsNavItem {
+                                        text: I18n.settings-ai-review-title;
+                                        selected: root.selected-section == 3;
+                                        clicked => { root.selected-section = 3; }
+                                    }
+                                    GitHubSettingsNavItem {
+                                        text: I18n.hooks-title;
+                                        selected: root.selected-section == 4;
+                                        clicked => { root.selected-section = 4; }
+                                    }
+                                    GitHubSettingsNavItem {
+                                        text: I18n.settings-diagnostics-title;
+                                        selected: root.selected-section == 5;
+                                        clicked => { root.selected-section = 5; }
+                                    }
                                 }
-                                GitHubSettingsNavItem {
-                                    text: I18n.settings-code-hosting-title;
-                                    selected: root.selected-section == 1;
-                                    clicked => { root.selected-section = 1; }
-                                }
-                                GitHubSettingsNavItem {
-                                    text: I18n.settings-ai-agent-title;
-                                    selected: root.selected-section == 2;
-                                    clicked => { root.selected-section = 2; }
-                                }
-                                GitHubSettingsNavItem {
-                                    text: I18n.settings-ai-review-title;
-                                    selected: root.selected-section == 3;
-                                    clicked => { root.selected-section = 3; }
-                                }
-                                GitHubSettingsNavItem {
-                                    text: I18n.settings-diagnostics-title;
-                                    selected: root.selected-section == 4;
-                                    clicked => { root.selected-section = 4; }
-                                }
+
                             }
 
                             wide-settings-pane := GitHubSettingsPane {
+                                viewport-origin-x: root.absolute-position.x + settings-scroll.x + page-column.x + root.nav-width + root.nav-content-gap;
+                                viewport-origin-y: root.absolute-position.y + settings-scroll.y + settings-scroll.viewport_y + page-column.y + wide-layout.y;
                                 width: root.page-width - root.nav-width - root.nav-content-gap;
                                 selected-section: root.selected-section;
                                 route-entry-revision: root.route-entry-revision;
@@ -196,10 +256,9 @@ export component GitHubSettingsPage inherits Rectangle {
                             }
                         }
 
-                        if root.compact-layout: VerticalLayout {
+                        if root.compact-layout: compact-column := VerticalLayout {
                             width: parent.width;
-                            height: compact-settings-pane.height
-                                + (root.compact-navigation-open ? 242px : 56px);
+                            height: compact-settings-pane.height + 56px;
                             spacing: 16px;
                             alignment: start;
 
@@ -208,122 +267,95 @@ export component GitHubSettingsPage inherits Rectangle {
                                 height: 40px;
                                 background: transparent;
 
-                                GitHubSettingsSectionMenuButton {
+                                general-section-trigger := GitHubSettingsSectionMenuButton {
                                     width: parent.width;
                                     visible: root.selected-section == 0;
                                     text: I18n.settings-general-title;
                                     open: root.compact-navigation-open;
+                                    restore-focus-on-close: GitHubSelectState.restore-focus;
                                     clicked => {
-                                        root.compact-navigation-selection = root.selected-section;
-                                        root.compact-navigation-open = !root.compact-navigation-open;
+                                        if self.open { GitHubSelectState.close(true); } else {
+                                            GitHubSelectState.show("settings-section", "0", 0,
+                                                self.absolute-position.x, self.absolute-position.y,
+                                                self.width, self.height);
+                                        }
                                     }
                                 }
-                                GitHubSettingsSectionMenuButton {
+                                hosting-section-trigger := GitHubSettingsSectionMenuButton {
                                     width: parent.width;
                                     visible: root.selected-section == 1;
                                     text: I18n.settings-code-hosting-title;
                                     open: root.compact-navigation-open;
+                                    restore-focus-on-close: GitHubSelectState.restore-focus;
                                     clicked => {
-                                        root.compact-navigation-selection = root.selected-section;
-                                        root.compact-navigation-open = !root.compact-navigation-open;
+                                        if self.open { GitHubSelectState.close(true); } else {
+                                            GitHubSelectState.show("settings-section", "1", 1,
+                                                self.absolute-position.x, self.absolute-position.y,
+                                                self.width, self.height);
+                                        }
                                     }
                                 }
-                                GitHubSettingsSectionMenuButton {
+                                ai-agent-section-trigger := GitHubSettingsSectionMenuButton {
                                     width: parent.width;
                                     visible: root.selected-section == 2;
                                     text: I18n.settings-ai-agent-title;
                                     open: root.compact-navigation-open;
+                                    restore-focus-on-close: GitHubSelectState.restore-focus;
                                     clicked => {
-                                        root.compact-navigation-selection = root.selected-section;
-                                        root.compact-navigation-open = !root.compact-navigation-open;
+                                        if self.open { GitHubSelectState.close(true); } else {
+                                            GitHubSelectState.show("settings-section", "2", 2,
+                                                self.absolute-position.x, self.absolute-position.y,
+                                                self.width, self.height);
+                                        }
                                     }
                                 }
-                                GitHubSettingsSectionMenuButton {
+                                ai-review-section-trigger := GitHubSettingsSectionMenuButton {
                                     width: parent.width;
                                     visible: root.selected-section == 3;
                                     text: I18n.settings-ai-review-title;
                                     open: root.compact-navigation-open;
+                                    restore-focus-on-close: GitHubSelectState.restore-focus;
                                     clicked => {
-                                        root.compact-navigation-selection = root.selected-section;
-                                        root.compact-navigation-open = !root.compact-navigation-open;
+                                        if self.open { GitHubSelectState.close(true); } else {
+                                            GitHubSelectState.show("settings-section", "3", 3,
+                                                self.absolute-position.x, self.absolute-position.y,
+                                                self.width, self.height);
+                                        }
                                     }
                                 }
-                                GitHubSettingsSectionMenuButton {
+                                hooks-section-trigger := GitHubSettingsSectionMenuButton {
                                     width: parent.width;
                                     visible: root.selected-section == 4;
-                                    text: I18n.settings-diagnostics-title;
+                                    text: I18n.hooks-title;
                                     open: root.compact-navigation-open;
+                                    restore-focus-on-close: GitHubSelectState.restore-focus;
                                     clicked => {
-                                        root.compact-navigation-selection = root.selected-section;
-                                        root.compact-navigation-open = !root.compact-navigation-open;
+                                        if self.open { GitHubSelectState.close(true); } else {
+                                            GitHubSelectState.show("settings-section", "4", 4,
+                                                self.absolute-position.x, self.absolute-position.y,
+                                                self.width, self.height);
+                                        }
                                     }
                                 }
-                            }
-
-                            Rectangle {
-                                width: parent.width;
-                                height: root.compact-navigation-open ? 170px : 0px;
-                                visible: root.compact-navigation-open;
-                                border-radius: 6px;
-                                border-width: 1px;
-                                border-color: GitHubTheme.border-default;
-                                background: GitHubTheme.canvas-default;
-
-                                VerticalLayout {
-                                    x: 4px;
-                                    y: 4px;
-                                    width: parent.width - 8px;
-                                    spacing: 0px;
-
-                                    GitHubSettingsNavItem {
-                                        text: I18n.settings-general-title;
-                                        selected: root.compact-navigation-selection == 0;
-                                        clicked => {
-                                            root.compact-navigation-selection = 0;
-                                            root.selected-section = 0;
-                                            root.compact-navigation-open = false;
-                                        }
-                                    }
-                                    GitHubSettingsNavItem {
-                                        text: I18n.settings-code-hosting-title;
-                                        selected: root.compact-navigation-selection == 1;
-                                        clicked => {
-                                            root.compact-navigation-selection = 1;
-                                            root.selected-section = 1;
-                                            root.compact-navigation-open = false;
-                                        }
-                                    }
-                                    GitHubSettingsNavItem {
-                                        text: I18n.settings-ai-agent-title;
-                                        selected: root.compact-navigation-selection == 2;
-                                        clicked => {
-                                            root.compact-navigation-selection = 2;
-                                            root.selected-section = 2;
-                                            root.compact-navigation-open = false;
-                                        }
-                                    }
-                                    GitHubSettingsNavItem {
-                                        text: I18n.settings-ai-review-title;
-                                        selected: root.compact-navigation-selection == 3;
-                                        clicked => {
-                                            root.compact-navigation-selection = 3;
-                                            root.selected-section = 3;
-                                            root.compact-navigation-open = false;
-                                        }
-                                    }
-                                    GitHubSettingsNavItem {
-                                        text: I18n.settings-diagnostics-title;
-                                        selected: root.compact-navigation-selection == 4;
-                                        clicked => {
-                                            root.compact-navigation-selection = 4;
-                                            root.selected-section = 4;
-                                            root.compact-navigation-open = false;
+                                diagnostics-section-trigger := GitHubSettingsSectionMenuButton {
+                                    width: parent.width;
+                                    visible: root.selected-section == 5;
+                                    text: I18n.settings-diagnostics-title;
+                                    open: root.compact-navigation-open;
+                                    restore-focus-on-close: GitHubSelectState.restore-focus;
+                                    clicked => {
+                                        if self.open { GitHubSelectState.close(true); } else {
+                                            GitHubSelectState.show("settings-section", "5", 5,
+                                                self.absolute-position.x, self.absolute-position.y,
+                                                self.width, self.height);
                                         }
                                     }
                                 }
                             }
 
                             compact-settings-pane := GitHubSettingsPane {
+                                viewport-origin-x: root.absolute-position.x + settings-scroll.x + page-column.x;
+                                viewport-origin-y: root.absolute-position.y + settings-scroll.y + settings-scroll.viewport_y + page-column.y + compact-column.y + self.y;
                                 width: root.page-width;
                                 selected-section: root.selected-section;
                                 route-entry-revision: root.route-entry-revision;
@@ -355,8 +387,62 @@ export component GitHubSettingsPage inherits Rectangle {
         }
     }
 
+    settings-section-popup := GitHubSelectPopup {
+        z: 7900;
+        owner: "settings-section";
+        option-count: 6;
+        selected(index) => {
+            root.selected-section = index;
+            GitHubSelectState.close(true);
+        }
+        GitHubSelectOption {
+            x: 0px; y: 0px; width: settings-section-popup.option-width;
+            text: I18n.settings-general-title;
+            selected: root.selected-section == 0;
+            active: root.compact-navigation-open && GitHubSelectState.active-index == 0;
+            activated => { settings-section-popup.selected(0); }
+        }
+        GitHubSelectOption {
+            x: 0px; y: GitHubMetrics.size-32; width: settings-section-popup.option-width;
+            text: I18n.settings-code-hosting-title;
+            selected: root.selected-section == 1;
+            active: root.compact-navigation-open && GitHubSelectState.active-index == 1;
+            activated => { settings-section-popup.selected(1); }
+        }
+        GitHubSelectOption {
+            x: 0px; y: GitHubMetrics.size-32 * 2; width: settings-section-popup.option-width;
+            text: I18n.settings-ai-agent-title;
+            selected: root.selected-section == 2;
+            active: root.compact-navigation-open && GitHubSelectState.active-index == 2;
+            activated => { settings-section-popup.selected(2); }
+        }
+        GitHubSelectOption {
+            x: 0px; y: GitHubMetrics.size-32 * 3; width: settings-section-popup.option-width;
+            text: I18n.settings-ai-review-title;
+            selected: root.selected-section == 3;
+            active: root.compact-navigation-open && GitHubSelectState.active-index == 3;
+            activated => { settings-section-popup.selected(3); }
+        }
+        GitHubSelectOption {
+            x: 0px; y: GitHubMetrics.size-32 * 4; width: settings-section-popup.option-width;
+            text: I18n.hooks-title;
+            selected: root.selected-section == 4;
+            active: root.compact-navigation-open && GitHubSelectState.active-index == 4;
+            activated => { settings-section-popup.selected(4); }
+        }
+        GitHubSelectOption {
+            x: 0px; y: GitHubMetrics.size-32 * 5; width: settings-section-popup.option-width;
+            text: I18n.settings-diagnostics-title;
+            selected: root.selected-section == 5;
+            active: root.compact-navigation-open && GitHubSelectState.active-index == 5;
+            activated => { settings-section-popup.selected(5); }
+        }
+    }
+
+    GitHubHookDialog { x: 0px; y: 0px; width: root.width; height: root.height; z: 8000; }
     ManifestInterfaceLanguagePickerOverlay { z: 9000; }
     ManifestReplyLanguagePickerOverlay { z: 9000; }
+    GitHubHookSettingsOverlay { width: parent.width; height: parent.height; z: 9000; }
 
     // Settings is also an independent ComponentFactory/global graph. Mount a
     // local root portal so present and future shared controls keep full Tooltip
@@ -366,4 +452,5 @@ export component GitHubSettingsPage inherits Rectangle {
         height: parent.height;
         z: 10000;
     }
+    GitHubHookTooltipOverlay { x: 0px; y: 0px; width: root.width; height: root.height; z: 10001; }
 }

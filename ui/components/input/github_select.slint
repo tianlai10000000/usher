@@ -36,6 +36,15 @@ export global GitHubSelectState {
         }
     }
 
+    public function toggle(owner: string, value: string, index: int,
+            x: length, y: length, width: length, height: length) {
+        if root.open && root.owner == owner {
+            root.close(true);
+        } else {
+            root.show(owner, value, index, x, y, width, height);
+        }
+    }
+
     public function show(owner: string, value: string, index: int,
             x: length, y: length, width: length, height: length) {
         root.owner = owner;
@@ -55,16 +64,22 @@ export global GitHubSelectState {
 export component GitHubSelectPopup inherits FocusScope {
     in property <string> owner;
     in property <int> option-count;
+    // Group headings participate in layout but not option indexing.
+    in property <length> list-content-height:
+        root.option-count * GitHubMetrics.size-32;
+    in property <length> active-option-offset:
+        GitHubSelectState.active-index * GitHubMetrics.size-32;
     callback selected(int);
     private property <bool> open: GitHubSelectState.open && GitHubSelectState.owner == root.owner;
     private property <length> popup-width:
         max(0px, min(GitHubSelectState.anchor-width, root.width - GitHubMetrics.size-16));
     private property <length> anchor-top: GitHubSelectState.anchor-y - root.absolute-position.y;
-    private property <length> available-height: max(0px, max(
-        root.anchor-top - GitHubMetrics.size-12,
-        root.height - root.anchor-top - GitHubSelectState.anchor-height - GitHubMetrics.size-12));
+    private property <length> space-above: max(0px, root.anchor-top - GitHubMetrics.size-12);
+    private property <length> space-below: max(0px,
+        root.height - root.anchor-top - GitHubSelectState.anchor-height - GitHubMetrics.size-12);
+    private property <length> available-height: max(root.space-above, root.space-below);
     private property <length> popup-height: min(264px, root.available-height,
-        root.option-count * GitHubMetrics.size-32 + GitHubMetrics.size-8);
+        root.list-content-height + GitHubMetrics.size-8);
     out property <length> option-width: max(0px, root.popup-width - GitHubMetrics.size-8);
     private property <GitHubSelectGeometry> surface-geometry: {
         x: menu.absolute-position.x, y: menu.absolute-position.y,
@@ -87,6 +102,9 @@ export component GitHubSelectPopup inherits FocusScope {
     focus-on-tab-navigation: false;
 
     capture-key-pressed(event) => {
+        if !root.open {
+            return reject;
+        }
         if event.text == Key.Escape || event.text == Key.Tab {
             GitHubSelectState.close(event.text == Key.Escape);
             return event.text == Key.Escape ? accept : reject;
@@ -120,7 +138,8 @@ export component GitHubSelectPopup inherits FocusScope {
         anchor-height: GitHubSelectState.anchor-height;
         floating-width: root.popup-width;
         floating-height: root.popup-height;
-        preferred-placement: GitHubTooltipPlacement.Bottom;
+        preferred-placement: root.space-below < root.popup-height && root.space-above > root.space-below
+            ? GitHubTooltipPlacement.Top : GitHubTooltipPlacement.Bottom;
         alignment: GitHubTooltipAlignment.Start;
 
       // The shared floating host positions the surface. ActionMenu supplies
@@ -139,8 +158,8 @@ export component GitHubSelectPopup inherits FocusScope {
         anchor-height: GitHubSelectState.anchor-height;
         menu-width: GitHubSelectState.anchor-width;
         menu-max-height: 264px;
-        content-height: root.option-count * GitHubMetrics.size-32 + GitHubMetrics.size-8;
-        reveal-offset: GitHubSelectState.active-index * GitHubMetrics.size-32;
+        content-height: root.list-content-height + GitHubMetrics.size-8;
+        reveal-offset: root.active-option-offset;
         reveal-height: GitHubMetrics.size-32 + GitHubMetrics.size-8;
         dismiss-requested => { GitHubSelectState.close(false); }
 
@@ -148,7 +167,7 @@ export component GitHubSelectPopup inherits FocusScope {
             x: GitHubMetrics.size-4;
             y: GitHubMetrics.size-4;
             width: root.option-width;
-            height: root.option-count * GitHubMetrics.size-32;
+            height: root.list-content-height;
             @children
         }
       }
@@ -157,10 +176,67 @@ export component GitHubSelectPopup inherits FocusScope {
 
 export component GitHubSelectOption inherits GitHubActionListItem {
     in property <bool> active: false;
+    in property <string> group-label: "";
     selectable: true;
     selected-visual-color: GitHubTheme.fg-default;
     keyboard-active: root.active && GitHubSelectState.keyboard-navigation;
+    accessible-description: root.group-label;
     changed active => {
         if root.active { root.focus(); }
+    }
+}
+
+// Primer ActionList group heading used by grouped Select/SelectPanel content.
+// It stays outside option indexing so pointer and keyboard selection remain
+// aligned even when callers mix any number of groups and options.
+export component GitHubSelectGroupHeading inherits Rectangle {
+    in property <string> text;
+    in property <string> auxiliary-text: "";
+    in property <bool> filled: false;
+
+    width: 100%;
+    height: GitHubMetrics.size-28;
+    background: root.filled ? GitHubTheme.control-muted-rest : transparent;
+
+    if root.filled: Rectangle {
+        y: 0px;
+        width: parent.width;
+        height: GitHubMetrics.border-thin;
+        background: GitHubTheme.border-muted;
+    }
+
+    Text {
+        x: GitHubMetrics.size-8;
+        width: parent.width - GitHubMetrics.size-16
+            - (root.auxiliary-text == "" ? 0px : GitHubMetrics.size-48);
+        height: parent.height;
+        text: root.text;
+        accessible-label: root.auxiliary-text == ""
+            ? root.text
+            : root.text + ". " + root.auxiliary-text;
+        font-size: GitHubMetrics.text-small;
+        font-weight: 600;
+        color: GitHubTheme.fg-muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.auxiliary-text != "": Text {
+        x: parent.width - GitHubMetrics.size-56;
+        width: GitHubMetrics.size-48;
+        height: parent.height;
+        text: root.auxiliary-text;
+        font-size: GitHubMetrics.text-small;
+        color: GitHubTheme.fg-muted;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.filled: Rectangle {
+        y: parent.height - GitHubMetrics.border-thin;
+        width: parent.width;
+        height: GitHubMetrics.border-thin;
+        background: GitHubTheme.border-muted;
     }
 }

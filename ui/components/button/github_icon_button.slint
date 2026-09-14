@@ -57,6 +57,8 @@ export component GitHubIconButton inherits FocusScope {
         : GitHubTheme.control-default-active;
     in property <color> selected-hover-background: root.selected-background;
     out property <bool> has-hover: button-touch.has-hover;
+    out property <bool> tooltip-active: root.force-tooltip
+        || ((button-touch.has-hover || root.keyboard-focus-visible) && !root.tooltip-dismissed);
     private property <bool> keyboard-focus-visible: false;
     private property <bool> tooltip-dismissed: false;
     private property <color> resolved-foreground: root.selected
@@ -225,10 +227,7 @@ export component GitHubIconButton inherits FocusScope {
             : (root.tooltip-align-left
                 ? GitHubTooltipAlignment.Start
                 : GitHubTooltipAlignment.Center);
-        text: (root.force-tooltip
-                || ((button-touch.has-hover || root.keyboard-focus-visible)
-                    && !root.tooltip-dismissed))
-            ? root.tooltip-text
+        text: root.tooltip-active ? root.tooltip-text
             : "";
     }
 }

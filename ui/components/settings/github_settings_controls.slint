@@ -348,11 +348,13 @@ export component GitHubToggle inherits Rectangle {
     // cannot leave the switch's visual state behind.
     in property <bool> checked: false;
     in property <bool> enabled: true;
+    // Allows callers to pause input without applying the disabled appearance.
+    in property <bool> interaction-enabled: root.enabled;
     in property <bool> loading: false;
     private property <bool> keyboard-focus-visible: false;
     callback toggled(bool);
 
-    private property <bool> interactive: root.enabled && !root.loading;
+    private property <bool> interactive: root.interaction-enabled && !root.loading;
 
     width: 48px;
     height: 24px;
@@ -446,9 +448,11 @@ export component GitHubToggle inherits Rectangle {
 }
 
 export component GitHubTextField inherits Rectangle {
+    out property <bool> input-has-focus: field-input.has-focus;
     in property <string> label;
     in-out property <string> text;
     in property <string> placeholder;
+    in property <bool> show-placeholder: true;
     in property <string> caption: "";
     in property <bool> secret: false;
     in property <bool> reveal: false;
@@ -522,7 +526,7 @@ export component GitHubTextField inherits Rectangle {
             edited => { root.edited(self.text); }
         }
 
-        if root.text == "" && !field-input.has-focus: Text {
+        if root.show-placeholder && root.text == "" && !field-input.has-focus: Text {
             x: 12px;
             width: parent.width - 24px;
             height: parent.height;

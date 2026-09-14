@@ -91,6 +91,7 @@ use logger::{debug_logger, setup_debug_logger, setup_tracing_logger};
 mod router;
 use router::{Router, route_for_navigation_index};
 
+mod hooks;
 mod jobs;
 mod shutdown;
 mod single_instance;
@@ -114,7 +115,7 @@ fn ui(
     let loaded_settings = settings::load_settings();
     startup_timeline.checkpoint("settings_loaded");
     let benchmark_offline = app_paths::benchmark_offline_mode();
-    memory_diagnostics::set_logging_enabled(loaded_settings.memory_diagnostics_logging);
+    memory_diagnostics::set_logging_enabled(loaded_settings.diagnostics.memory_diagnostics_logging);
     memory_diagnostics::initialize_baseline();
     log::info!("Usher v{} starting...", env!("CARGO_PKG_VERSION"));
 
@@ -159,8 +160,8 @@ fn ui(
     // Initialize debug logger after window is created (needs app for callbacks)
     setup_debug_logger(
         &app,
-        loaded_settings.application_console_logging,
-        loaded_settings.application_file_logging,
+        loaded_settings.diagnostics.application_console_logging,
+        loaded_settings.diagnostics.application_file_logging,
     )
     .unwrap_or_else(|e| eprintln!("Debug Logger init failed: {}", e)); // eprintln here since logger not yet initialized
     startup_timeline.logger_ready();
@@ -169,7 +170,7 @@ fn ui(
     memory_diagnostics::log_checkpoint("startup.debug_logger_ready");
 
     // ========= Trace Logger Initialization ========= //
-    setup_tracing_logger(&app, loaded_settings.tracing_logger_active)
+    setup_tracing_logger(&app, loaded_settings.diagnostics.tracing_logger_active)
         .unwrap_or_else(|e| eprintln!("Tracing Logger init failed: {}", e));
     memory_diagnostics::log_checkpoint("startup.tracing_logger_ready");
 
@@ -201,7 +202,7 @@ fn ui(
 
     // ========= Auto Update ========= //
     // Initialize auto-update based on loaded settings
-    if loaded_settings.auto_update && !benchmark_offline {
+    if loaded_settings.update.auto_update && !benchmark_offline {
         start_auto_update(
             app.as_weak(),
             updater_ctx.state.clone(),
@@ -740,6 +741,7 @@ fn ui(
 
     // ========= Application-wide Job Run ========= //
     jobs::setup_job_run(&app);
+    hooks::setup(&app, &settings_page, message_center.clone())?;
 
     // ========= Workflow ========= //
     setup_workflow(&app);
@@ -1019,6 +1021,7 @@ pub fn main() {
             log::error!("[ArtifactPreview::Performance] failed to write trace: {error}")
         }
     }
+    app_runtime::shared_runtime().block_on(shutdown::drain_async_tasks());
     shutdown::run_cleanup_once("event-loop-exit");
     drop(ui);
     log::info!("[Shutdown] MainWindow dropped, native resources released");

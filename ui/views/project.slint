@@ -37,6 +37,7 @@ export component GitHubProjectPage {
     callback open-terminal(string, string, string);
     callback add-project(string, string, string, string, string, string, bool);
     callback preview-logo(string);
+    callback prepare-hooks(string);
     callback search-projects(string);
     callback reload-projects();
 
@@ -113,6 +114,7 @@ export component GitHubProjectPage {
                     primary: true;
                     clicked => {
                         root.modal-mode = "add";
+                        root.prepare-hooks("");
                         root.modal-original-alias = "";
                         root.new-project-name = "";
                         root.new-project-alias = "";
@@ -221,6 +223,7 @@ export component GitHubProjectPage {
                     primary-label: root.search-query == "" ? I18n.projects-new-project : "";
                     primary-clicked => {
                         root.modal-mode = "add";
+                        root.prepare-hooks("");
                         root.modal-original-alias = "";
                         root.new-project-name = "";
                         root.new-project-alias = "";
@@ -253,6 +256,7 @@ export component GitHubProjectPage {
                     }
                     edit-requested => {
                         root.modal-mode = "edit";
+                        root.prepare-hooks(project.project_alias);
                         root.modal-original-alias = project.project_alias;
                         root.new-project-name = project.project_name;
                         root.new-project-alias = project.project_alias;
@@ -305,6 +309,7 @@ export component GitHubProjectPage {
                         }
                         edit-requested => {
                             root.modal-mode = "edit";
+                            root.prepare-hooks(self.project.project_alias);
                             root.modal-original-alias = self.project.project_alias;
                             root.new-project-name = self.project.project_name;
                             root.new-project-alias = self.project.project_alias;

@@ -22,6 +22,64 @@ On macOS, entering or leaving full screen re-aligns native title-bar controls af
 
 ## System context
 
+PR and AI review Hooks share PR title, source/target branch, author label, and
+nullable author name/email in their payloads. Git adapters retain explicitly
+returned PR author identity in diff details; the PR cache and persisted AI target
+carry it to completion without profile requests or commit-author inference.
+
+Application-wide custom Hooks are owned by `src/hooks/`. Feature workers publish
+versioned domain events after successful operations. PR Approve and actual merge
+are separate events: only Approve emits the former, while merge commit, squash,
+rebase, and fast-forward emit the latter only after the provider confirms success.
+Comment and Request changes emit neither. AI Review publishes after session
+persistence and task completion. `HookStateFacade` hides the shared state-store engine and
+automatically persists configuration and bounded run summaries. Separate bounded
+JSONL journals preserve ordered lifecycle/output events. Shell and external Node.js
+run as cancellable subprocesses on the shared runtime. The independent Settings
+page has a Hooks tab immediately before Diagnostics, including unsaved-draft
+testing in shared New/Edit dialogs. Its saved-definition list owns a directly
+persisted row Switch plus Edit/Delete actions. Code-owned event registrations
+also declare a stable module category; the bridge projects those categories into
+grouped definition rows and grouped event Select options, so later modules extend
+the same layout without UI name matching. The global switch disables row
+interaction without losing configured values. Cancel discards drafts, Save closes after persistence, and Delete opens
+a confirmation that retains history. Tests show concrete failure details.
+New/Edit paints the Dialog before hydrating a saved script after a short UI timer,
+then builds a bounded syntax projection after a reusable debounce. One permanently
+mounted native `StyledText` supplies Primer syntax colors below an editable
+`TextInput`; both use the same monospace font and standard `ScrollView` content
+geometry. No per-token UI subtree is created. The styled projection must preserve
+the source exactly, otherwise native plain text remains visible. Editing or
+changing runtime clears stale colors immediately; closing drops the rich-text
+projection. The native input stays on top for pointer/editing ownership. While
+syntax colors are shown its text brush retains alpha 1/255, rather than zero,
+so FemtoVG still draws the built-in cursor and selection. macOS uses its separate
+selection-colored caret; text-colored-caret platforms use opaque native plain
+text while focused and restore syntax colors on blur. No highlighter engine or
+language cache remains resident.
+Its UI bridge owns start/end notification delivery,
+deep links and the reusable Job Run projection. Registered asynchronous shutdown
+drains finish processes before existing prioritized cleanup, with a shared barrier
+for explicit shutdown and event-loop exit. See [Hooks](specs/hooks.md).
+
+Project Add/Edit owns default-empty Hook opt-in (`hook_ids`) in its automatically
+persisted registry. `project/hook_selection.rs` projects the catalog into a
+transient form. Shared `GitHubCheckbox` supplies parent/child selection, mixed
+state and keyboard interaction, with examples in UI Components. Enabled rows own
+the visual selection count and parent state. Disabled rows render unchecked with
+disabled interaction while the form retains their prior selection intent for
+restoration after re-enabling. The parent selects enabled rows, clears all retained
+selections, and hides the list when empty. Hook admission and pre-spawn
+execution consult the Project facade by normalized Workflow ID. Registered
+project-scoped events require an ID; unselected or unresolved projects never run
+scripts. Settings draft tests bypass project membership.
+The selector presents an inline parent/count header, divided list rows, localized
+event captions and shared status Labels; checkbox hover stays on the box outline.
+
+At compact widths, Settings section navigation uses the shared root-mounted
+Select popup. Its trigger remains in the scrolling content, while opening the
+option surface never changes the form height or moves the selected settings pane.
+
 ```text
 User
   -> Slint window and reusable components
@@ -148,9 +206,10 @@ bounds or replace manual input/paint validation.
 | `ui/components/artifact_preview/` | Shared application-level preview shell, width-independent Markdown/text/image surfaces, docked panel, and detached native window. It owns no parsing or I/O. |
 | `ui/components/agent_response/` | Compact native block renderer for agent responses. It consumes prepared structure and emits link/action callbacks; it owns no Markdown parsing, repository resolution, or file I/O. |
 | `ui/components/about/`, `ai_review/`, `chat/`, `project/`, `workflow/` | Feature-owned GitHub/Primer visual building blocks extracted from route views; they own no I/O or route transitions. |
-| `ui/components/showcase/` | Interactive GitHub/Primer property matrices and the registry linking model-dependent feature composites to their live routes. Its opt-in Preview fixtures emit fixture ids rather than bypassing providers or hosts. New or materially changed visual components must be registered here. |
+| `ui/components/showcase/` | Interactive GitHub/Primer property matrices and the registry linking model-dependent feature composites to their live routes. Select samples share a constrained column width, stack below the shared small breakpoint, and derive section height from the controls. Its opt-in Preview fixtures emit fixture ids rather than bypassing providers or hosts. New or materially changed visual components must be registered here. |
 | `ui/components/button/github_icon_button.slint` | Shared `GitHubIconButton` foundation for icon-only, floating, terminal, project-card, and copy actions, including keyboard focus, Tooltip, loading, and semantic variants. |
 | `ui/components/label/github_counter_label.slint` | Shared typed Primer CounterLabel with default/primary/secondary schemes, optional upper limit, compact overlay geometry, and zero-count hiding; status notification badges and future navigation/action counts reuse it. |
+| `ui/components/github_metadata_label.slint` | Shared small Primer Label: transparent background, border-inclusive padding, centered content and typed Default/Primary/Secondary variants; Hook status metadata uses Secondary. |
 | `ui/components/github_link.slint` | Shared Primer text-link states and keyboard interaction. |
 | `ui/components/github_spinner.slint` | Single application-owned Primer indeterminate spinner used by controls and loading surfaces. |
 | `ui/components/github_progress_bar.slint` | Shared semantic determinate/indeterminate progress track for status and update surfaces. |
@@ -370,8 +429,9 @@ window and ordinary route tree are generated by the `usher-ui` workspace crate;
 the Settings and Messages routes are generated independently by
 `usher-ui-settings` and `usher-messages` in library-module mode, then mounted
 through Slint's experimental `ComponentContainer`/component-factory boundary.
-This generates embeddable non-Window components without relying on Slint's
-deprecated application-root fallback. The application crate re-exports
+Settings declares a transparent Window root embedded by the factory, without
+opening another native window. This avoids the opaque style background of Slint's
+implicit Window wrapper. The application crate re-exports
 the main public API and owns explicit bridges in `src/settings_page.rs` and
 `src/message_center.rs`. A component created by a
 cross-crate factory has its own Slint global graph, so the bridge must copy the
@@ -387,6 +447,23 @@ their first visit. Slint 1.17.1 can reuse the wrong control text or placeholder
 when a cross-crate product is destroyed and remounted, so route exit only hides
 these hosts; feature bridges own the separate state-reset lifecycle.
 
+The Settings factory host occupies the root window above the status bar; its
+ordinary ScrollView retains the content pane's origin and viewport dimensions.
+`src/settings_page.rs` mirrors both geometries and Hook dialog visibility to the
+main window so native chrome participates in modality. Dialogs and their picker
+overlays share the factory's Hook draft globals and cover the whole window.
+The global hover sidebar and its edge trigger sit above this factory, including
+page-local sticky navigation and menus. Modal visibility hides the hover sidebar
+and disables its edge trigger while a dialog is open.
+Global notification/Toast hosts paint above Dialog surfaces and scrims so Hook
+test feedback remains visible. On macOS, modal entry captures only the native
+92x28 pt sidebar/history control strip at its backing scale. A display-only Slint
+image at the original window coordinates composites below Dialogs and scrims,
+so buttons remain visible through the backdrop and are covered by opaque dialog
+content. Native drawing is suppressed while this image is active; the input
+shield remains mounted. Native layout updates mirror its geometry. Closing
+releases the image and restores native controls with current navigation state.
+
 Within a Settings factory product, Slint 1.17.1 selector bodies must use fixed
 mounted leaves and select them with `visible` plus an explicit active height.
 Do not recreate mutually exclusive section or provider forms with `if` nodes:
@@ -395,7 +472,27 @@ placeholder, value, or selected state. Route-local selector indices start at a
 sentinel and transition to their default on the next UI tick so a newly built
 tree invalidates cached bindings. A selector label, its selected appearance, and
 its displayed fields must derive from the same state source. This rule covers
-the Settings section menu, Git hosting providers, and AI Agent provider presets.
+the Settings section menu, Git hosting providers, AI Agent provider presets, and
+Hook runtime selection. Hooks use shared mutually exclusive `GitHubRadio`
+controls and keep literal Shell/Node interpreter leaves mounted. The bridge
+owns isolated temporary language drafts and projects only the selected source and
+interpreter for Save/Test; durable definitions still own one language/source.
+Edits invalidate test feedback. Hook action tooltips use literal leaves and fixed
+surfaces at the Settings factory root (UI-103). Tooltip text is centered, and
+Hook tips center over their anchor unless viewport collision handling shifts them.
+The history clear operation removes
+completed summaries/journals on workers while retaining active runners. Add/Edit
+opts into shared Dialog primary-modifier+Enter saving, with plain Enter reserved
+for source newlines and Escape for cancellation. The root shortcut boundary
+forwards modal keys through `SettingsPageBridge` when focus is outside the
+factory; macOS normalizes Return/Escape at its existing native input monitor.
+The fixed test area shows a compact status and inline
+error details below its actions. New tests use temporary directories; legacy
+project/outcome constraints remain compatible without editable filter inputs.
+
+Every Tooltip addition/change must first follow [the Tooltip implementation contract](specs/tooltips.md),
+including factory isolation and native paint verification. This is a mandatory
+repository entry gate in `AGENTS.md`.
 The compact section menu uses one fixed trigger leaf per section and snapshots
 the active section whenever it opens, so both its collapsed label and selected
 row survive factory reuse without retaining the previous route's section.
@@ -413,6 +510,9 @@ option surface is hidden.
 Both language pickers use the shared `GitHubSelectPopup`/`GitHubSelectOption`
 form-control foundation. Only the 40 px trigger contributes to form layout;
 the Settings factory root mounts the overlay outside the scrolling form.
+Select triggers toggle their own menu: a second activation closes without
+committing a value and restores trigger focus. Hook event/history triggers use
+`GitHubSelectState.toggle()` for the same contract.
 `GitHubFloatingOverlayHost`, also used by Tooltips, owns flip/shift and
 pixel-aligned placement; Select bounds the width and available vertical height,
 while `GitHubActionMenu` provides the surface, scrolling, and focus lifecycle.
@@ -423,6 +523,10 @@ window context is separate from the visible host. Escape cancels, arrow/Home/End
 Enter/Space commits it. Options use a leading Check rather than navigation-row
 selection styling. UI Components exercises the same popup with an adjacent
 field and a disabled trigger, with its overlay mounted at `MainWindow` root.
+The grouped showcase trigger resolves its anchor from the zero-offset plain
+trigger's viewport origin plus its own local offset, avoiding duplicated
+component offsets in Slint 1.17.1's inherited `absolute-position`. Both showcase
+menus scope active-option focus to their open owner.
 There is no full-page input scrim. The existing window pointer observer reports
 outside releases after the target handles its click; the Settings bridge forwards page-local
 coordinates into its isolated global graph. The Select excludes its trigger and
@@ -430,6 +534,18 @@ resolved surface from dismissal, forwards native/chrome dismissal as well, and
 does not restore trigger focus after an outside click. The full-window keyboard
 scope disables pointer focus acquisition, so other controls act on the first
 click. Escape and selection retain trigger focus restoration.
+
+The window pointer bridge restores text-field blur semantics across ordinary and
+independently generated page trees. On a primary press, it clears a focused
+`TextInput` only outside its visible field bounds, including the clipped field's
+padding. `src/transient_input.rs` walks down the mounted item tree, carrying local
+pointer coordinates through container offsets, transforms and viewport clips;
+mapping upward from an independent factory product can omit its host offset.
+This remains reliable when a `Flickable` consumes blank presses and preserves
+first-click focus transfer. macOS queues the same classifier from its local
+mouse-down monitor; other platforms use the post-dispatch window event hook.
+Mouse-up does not clear text focus, so dragging a selection outside the field
+preserves keyboard focus.
 
 Credential, endpoint, and AI Agent text fields use page-local edit ownership
 while Settings is open. The code-hosting groups commit their complete drafts only
@@ -471,6 +587,24 @@ still rebuilds the main generated crate. When `SLINT_LIVE_PREVIEW` is enabled,
 both isolated build scripts deliberately keep factory products static because Slint 1.17's
 `ComponentFactory` cannot accept the live-preview dynamic handle; the main
 window and UI Components route remain live-reloadable.
+
+Settings keeps its wide navigation sticky with a 16 px viewport top inset,
+bounded by the navigation column's bottom. `ui/views/settings.slint` derives the
+offset from the existing scroll viewport without rebuilding navigation nodes or
+adding a second scroll chain. Switching wide navigation sections aligns the
+section top with the sticky navigation's 16 px inset, leaving the page title
+above the viewport. Short sections retain enough scroll extent for this anchor.
+Compact navigation remains in the document flow with its
+existing scroll behavior.
+
+Hook picker overlays position each option at its index times the shared
+32 px row height so history and event choices have separate hit targets.
+Each selector keeps its own mounted model subtree. The shared Select chooses
+above/below from available viewport space before floating placement; one plain
+option occupies 40 px including the two 4 px padding edges.
+Settings passes the pane's viewport origin, including the Flickable offset,
+to Hook controls; opening adds the trigger's local layout position before
+collision checks rather than using stale factory absolute-position values.
 
 An independently mounted route owns one viewport and one scroll chain. It must
 be a sibling of the shell `Flickable`, receive the exact host width and height,
@@ -636,6 +770,12 @@ lossless delivery semantics.
 
 ### Settings
 
+`[diagnostics]` owns `application_console_logging`, `application_file_logging`,
+`tracing_logger_active`, `terminal_verbose_logging`, and `memory_diagnostics_logging`.
+`[update]` owns `auto_update` and `update_channel`. Loading migrates legacy root
+keys per field, with explicit section values taking precedence. Missing fields
+retain existing defaults; the next save writes only the nested sections.
+
 `AppSettings` is persisted as TOML in the platform config directory. It contains theme mode, the `auto` or canonical locale-id language preference, auto-update, independent console/`usher.log`/`usher_tracing.log` destinations, Terminal verbose and memory diagnostics, UI sound-effect preference, navigation drawer state, Git platform tokens, plus per-provider enterprise API URLs and names under `[git.platform.<provider>]`, OpenAI-compatible AI Agent connection values under `[ai.agent]`, and an optional HTTPS RAG endpoint under `[ai.chat]` (with `USHER_RAG_API_URL` as the environment fallback). AI Agent edits are reduced and auto-persisted by its feature Store; other settings retain their existing immediate or explicit-save entry points. Saves are serialized, write and sync a unique same-directory temporary file, and atomically replace the destination. A parse failure preserves the source as `settings.toml.corrupt-*` before defaults may be saved; if preservation fails, settings writes remain disabled for that process. Logger destinations use runtime atomic filters; `usher.log` opens lazily on the first enabled write, and Settings exposes GitHub-style `Enable all` / `Disable all` actions while retaining every independent state. Gitee stores public `token` and `enterprise_token` separately. A legacy single Gitee token is migrated to the enterprise field only when an enterprise API root was already configured; credentials never fall back across profiles. `AppState` mirrors values required by Slint. API keys, enterprise names, and configured URLs are local configuration and must not be logged. Provider API code uses an enterprise API URL only when its host matches the repository remote; users may supply the host or the complete API root, with the provider version path added if omitted. Public-provider defaults remain remote-derived. Auto theme resolves through AppKit on macOS, the Windows per-user application-theme setting, and the XDG Desktop Portal on Linux. While Auto is selected, Usher watches OS appearance changes: macOS uses `AppleInterfaceThemeChangedNotification` plus a 1s poll fallback; Windows and Linux poll the same detectors every 1s. Selecting Auto clears any forced AppKit appearance so the process can track the system; explicit Light/Dark lock Aqua/DarkAqua. When UI sound effects are enabled, breadcrumb Back uses `platform::play_ui_click`: macOS plays `Tink`, Windows queues the user-configured default sound, and Linux plays the desktop sound-theme event on a worker thread with common PipeWire/PulseAudio/ALSA command-line fallbacks.
 
 Within `[ai.agent]`, `reply_language` is either `auto` or a canonical locale id.
@@ -656,7 +796,7 @@ MainWindow, Settings, and Messages compile the same complete generated catalog
 instead of owning page-local `@tr()` indexes. Rust-owned dynamic state retains a
 semantic key, structured kind, or `LocalizedText` until its UI projection is
 built; locale changes therefore re-project mounted Preview, Terminal, Project,
-Chat, Workflow, and AI Review state without text matching. Provider, PTY, and
+Chat, Workflow, Hooks, and AI Review state without text matching. Provider, PTY, and
 filesystem details remain in logs while the UI resolves stable catalog errors.
 Rust-only messages set `slint = false`: they remain in the semantic and PO
 catalogs without entering or perturbing Slint's live UI translation indexes.
@@ -846,6 +986,9 @@ one transition. A source feature publishes a `JobRunDescriptor` plus that snapsh
 and lazy-log actions under a stable source key. `Route.JobRun` is outside the Workflow lifecycle
 domain, so any page may enter it and global Router history returns to the exact source. The route
 reads only generic Job Run properties; it never reads Workflow or Tag properties.
+`jobs/log_layout.rs` shapes mounted log rows with Parley into visual lines;
+the UI paints them at a 20 px pitch with one number per source row. Source-row
+padding remains independent, and resizing does not rebuild the source log model.
 `ui/components/jobs/job.slint` renders the selected Job snapshot, while
 `github_job_run.slint` provides the GitHub Actions-style header, Jobs region, and responsive log
 layout. Both own no I/O or timing. Git
@@ -1020,7 +1163,10 @@ one pixel of virtual blank during either drag or release.
 Chat presentation is split between route composition in `ui/views/chat.slint`
 and reusable message/welcome components in `ui/components/chat/`. It uses the
 application-owned GitHub ScrollView, Spinner, Button/IconButton, tokens, and
-focus contracts. Each message body has one permanent wrapped plain-text layout.
+focus contracts. Initial entry and AI/RAG mode switches project the destination
+history's tail before revealing the viewport and scrolling to its actual bottom;
+the old mode's offset does not select the new mode's initial window.
+Each message body has one permanent wrapped plain-text layout.
 A Chat-owned Parley cache, pointer surface, and coalesced visual-line overlay
 provide selection without mounting `TextInput`, changing preferred height, or
 replacing the message model. Clipboard work occurs only for the active

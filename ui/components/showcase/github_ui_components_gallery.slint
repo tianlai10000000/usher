@@ -2,12 +2,14 @@ import { Route } from "../../route/routeMap.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { GitHubPageHeader } from "../page/github_page_header.slint";
 import { GitHubButton, GitHubToggle, GitHubTextField, GitHubSettingsNavItem, GitHubSettingsSectionMenuButton } from "../settings/github_settings_controls.slint";
-import { GitHubSelectState, GitHubSelectPopup, GitHubSelectOption } from "../input/github_select.slint";
+import { GitHubSelectState, GitHubSelectPopup, GitHubSelectOption, GitHubSelectGroupHeading } from "../input/github_select.slint";
 import { GitHubCompactTextField } from "../input/compact_text_field.slint";
+import { GitHubCheckbox } from "../input/github_checkbox.slint";
+import { GitHubRadio } from "../input/github_radio.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubCopyButton } from "../button/github_copy_button.slint";
 import { GitHubLink } from "../github_link.slint";
-import { GitHubMetadataLabel } from "../github_metadata_label.slint";
+import { GitHubMetadataLabel, GitHubMetadataLabelVariant } from "../github_metadata_label.slint";
 import { GitHubCounterLabel, GitHubCounterScheme } from "../label/github_counter_label.slint";
 import { GitHubSpinner } from "../github_spinner.slint";
 import { GitHubProgressBar } from "../github_progress_bar.slint";
@@ -137,25 +139,81 @@ component GitHubShowcaseStateBadge inherits Rectangle {
 
 global GitHubSelectDemoState {
     in-out property <int> value: 1;
+    in-out property <int> grouped-value: 0;
 }
 
-export component GitHubSelectDemoOverlay inherits GitHubSelectPopup {
-    owner: "showcase";
-    option-count: 3;
-    selected(index) => {
-        GitHubSelectDemoState.value = index;
-        GitHubSelectState.open = false;
-    }
-    for label[index] in ["System default", "English", "Chinese (Simplified)"]: GitHubSelectOption {
-        x: 0px;
-        y: index * GitHubMetrics.size-32;
-        width: root.option-width;
-        text: label;
-        selected: GitHubSelectDemoState.value == index;
-        active: GitHubSelectState.open && GitHubSelectState.active-index == index;
-        activated => {
+export component GitHubSelectDemoOverlay inherits Rectangle {
+    background: transparent;
+
+    plain-popup := GitHubSelectPopup {
+        owner: "showcase";
+        option-count: 3;
+        selected(index) => {
             GitHubSelectDemoState.value = index;
-            GitHubSelectState.open = false;
+            GitHubSelectState.close(true);
+        }
+        for label[index] in ["System default", "English", "Chinese (Simplified)"]: GitHubSelectOption {
+            x: 0px;
+            y: index * GitHubMetrics.size-32;
+            width: plain-popup.option-width;
+            text: label;
+            selected: GitHubSelectDemoState.value == index;
+            active: GitHubSelectState.open && GitHubSelectState.owner == "showcase"
+                && GitHubSelectState.active-index == index;
+            activated => {
+                GitHubSelectDemoState.value = index;
+                GitHubSelectState.close(true);
+            }
+        }
+    }
+
+    grouped-popup := GitHubSelectPopup {
+        owner: "showcase-grouped";
+        option-count: 4;
+        list-content-height: 4 * GitHubMetrics.size-32 + 2 * GitHubMetrics.size-28;
+        active-option-offset: GitHubSelectState.active-index < 2
+            ? GitHubMetrics.size-28 + GitHubSelectState.active-index * GitHubMetrics.size-32
+            : GitHubMetrics.size-56 + GitHubSelectState.active-index * GitHubMetrics.size-32;
+        selected(index) => {
+            GitHubSelectDemoState.grouped-value = index;
+            GitHubSelectState.close(true);
+        }
+        GitHubSelectGroupHeading {
+            x: 0px; y: 0px; width: grouped-popup.option-width;
+            text: "Code review";
+        }
+        for label[index] in ["Pull request review submitted", "AI review completed"]: GitHubSelectOption {
+            x: 0px; y: GitHubMetrics.size-28 + index * GitHubMetrics.size-32;
+            width: grouped-popup.option-width;
+            text: label;
+            group-label: index == 0 ? "Code review" : "";
+            selected: GitHubSelectDemoState.grouped-value == index;
+            active: GitHubSelectState.open && GitHubSelectState.owner == "showcase-grouped"
+                && GitHubSelectState.active-index == index;
+            activated => {
+                GitHubSelectDemoState.grouped-value = index;
+                GitHubSelectState.close(true);
+            }
+        }
+        GitHubSelectGroupHeading {
+            x: 0px;
+            y: GitHubMetrics.size-28 + 2 * GitHubMetrics.size-32;
+            width: grouped-popup.option-width;
+            text: "Delivery";
+        }
+        for label[index] in ["Tag created", "Deployment completed"]: GitHubSelectOption {
+            x: 0px;
+            y: 2 * GitHubMetrics.size-28 + (index + 2) * GitHubMetrics.size-32;
+            width: grouped-popup.option-width;
+            text: label;
+            group-label: index == 0 ? "Delivery" : "";
+            selected: GitHubSelectDemoState.grouped-value == index + 2;
+            active: GitHubSelectState.open && GitHubSelectState.owner == "showcase-grouped"
+                && GitHubSelectState.active-index == index + 2;
+            activated => {
+                GitHubSelectDemoState.grouped-value = index + 2;
+                GitHubSelectState.close(true);
+            }
         }
     }
 }
@@ -165,6 +223,9 @@ export component GitHubUiComponentsGallery inherits Rectangle {
     callback open-artifact-preview-fixture(string);
 
     private property <bool> toggle-checked: true;
+    private property <bool> checkbox-first: false;
+    private property <int> radio-choice: 0;
+    private property <bool> checkbox-second: false;
     private property <int> selected-segment: 0;
     private property <int> selected-icon-segment: 1;
     private property <int> selected-tab: 0;
@@ -181,6 +242,7 @@ export component GitHubUiComponentsGallery inherits Rectangle {
     private property <string> filter-owner: "any";
     private property <string> filter-sort: "newest";
     private property <int> select-value: GitHubSelectDemoState.value;
+    private property <int> grouped-select-value: GitHubSelectDemoState.grouped-value;
 
     function show-toast-example(action: int) {
         if action == 0 {
@@ -484,9 +546,9 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 spacing: GitHubMetrics.size-8;
                 alignment: start;
 
-                for label-text in ["GitHub", "ID 1130209340", "production"]: GitHubMetadataLabel {
-                    text: label-text;
-                }
+                GitHubMetadataLabel { text: "Default"; }
+                GitHubMetadataLabel { text: "Primary"; variant: GitHubMetadataLabelVariant.Primary; }
+                GitHubMetadataLabel { text: "Secondary"; variant: GitHubMetadataLabelVariant.Secondary; }
             }
 
             GitHubShowcaseLabel { x: 0px; y: 68px; width: 180px; height: 20px; label: "Bounded metadata"; }
@@ -605,14 +667,55 @@ export component GitHubUiComponentsGallery inherits Rectangle {
         }
 
         GitHubShowcaseSection {
+            title: "Checkbox";
+            description: "";
+            content-height: 224px;
+            VerticalLayout {
+                width: parent.width;
+                spacing: 0px;
+                GitHubCheckbox {
+                    text: "Select all";
+                    checked: root.checkbox-first && root.checkbox-second;
+                    indeterminate: root.checkbox-first != root.checkbox-second;
+                    toggled(value) => { root.checkbox-first = value; root.checkbox-second = value; }
+                }
+                GitHubCheckbox { text: "Pull request review"; checked: root.checkbox-first; toggled(value) => { root.checkbox-first = value; } }
+                GitHubCheckbox { text: "AI review"; checked: root.checkbox-second; toggled(value) => { root.checkbox-second = value; } }
+                GitHubCheckbox { text: "Partially selected"; indeterminate: true; }
+                GitHubCheckbox { text: "Disabled"; control-enabled: false; }
+                GitHubCheckbox { text: "Disabled selected"; checked: true; control-enabled: false; }
+                GitHubCheckbox { text: "Disabled mixed"; indeterminate: true; control-enabled: false; }
+            }
+        }
+
+        GitHubShowcaseSection {
+            title: "Radio";
+            description: "";
+            content-height: 128px;
+            VerticalLayout {
+                width: parent.width; spacing: 0px;
+                GitHubRadio { text: "Shell"; checked: root.radio-choice == 0; chosen => { root.radio-choice = 0; } stepped(delta) => { root.radio-choice = mod(root.radio-choice + delta + 3, 3); } }
+                GitHubRadio { text: "JavaScript"; checked: root.radio-choice == 1; chosen => { root.radio-choice = 1; } stepped(delta) => { root.radio-choice = mod(root.radio-choice + delta + 3, 3); } }
+                GitHubRadio { text: "TypeScript"; checked: root.radio-choice == 2; chosen => { root.radio-choice = 2; } stepped(delta) => { root.radio-choice = mod(root.radio-choice + delta + 3, 3); } }
+                GitHubRadio { text: "Disabled"; checked: true; control-enabled: false; }
+            }
+        }
+
+        select-section := GitHubShowcaseSection {
             title: "Select";
             description: "";
-            content-height: 120px;
+            private property <bool> compact: self.width < GitHubMetrics.breakpoint-small;
+            private property <length> column-width: min(320px,
+                self.compact ? self.width : (self.width - GitHubMetrics.stack-gap-normal) / 2);
+            private property <length> second-column-x:
+                self.compact ? 0px : self.width / 2 + GitHubMetrics.size-8;
+            content-height: max(select-name.y + select-name.height,
+                select-disabled.y + select-disabled.height);
 
             select-trigger := GitHubSettingsSectionMenuButton {
                 x: 0px;
                 y: 0px;
-                width: min(320px, parent.width / 2 - GitHubMetrics.size-8);
+                width: select-section.column-width;
                 text: root.select-value == 0 ? "System default"
                     : (root.select-value == 1 ? "English" : "Chinese (Simplified)");
                 open: GitHubSelectState.open && GitHubSelectState.owner == "showcase";
@@ -632,16 +735,59 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 }
             }
             select-disabled := GitHubSettingsSectionMenuButton {
-                x: parent.width / 2 + GitHubMetrics.size-8;
-                y: 0px;
-                width: min(320px, parent.width / 2 - GitHubMetrics.size-8);
+                x: select-section.second-column-x;
+                y: select-section.compact
+                    ? select-name.y + select-name.height + GitHubMetrics.stack-gap-normal
+                    : select-name.y + select-name.height - GitHubMetrics.control-medium-size;
+                width: select-section.column-width;
                 text: "Disabled";
                 enabled: false;
             }
+            grouped-select-trigger := GitHubSettingsSectionMenuButton {
+                // The inherited absolute-position duplicates nonzero component
+                // offsets; use the zero-offset peer's origin for both axes.
+                private property <length> viewport-anchor-x:
+                    select-trigger.absolute-position.x + self.x - select-trigger.x;
+                private property <length> viewport-anchor-y:
+                    select-trigger.absolute-position.y + self.y - select-trigger.y;
+                x: select-section.second-column-x;
+                y: select-section.compact
+                    ? select-trigger.height + GitHubMetrics.stack-gap-normal : 0px;
+                width: select-section.column-width;
+                text: root.grouped-select-value == 0 ? "Pull request review submitted"
+                    : root.grouped-select-value == 1 ? "AI review completed"
+                    : root.grouped-select-value == 2 ? "Tag created" : "Deployment completed";
+                open: GitHubSelectState.open && GitHubSelectState.owner == "showcase-grouped";
+                restore-focus-on-close: GitHubSelectState.restore-focus;
+                changed viewport-anchor-x => {
+                    if self.open && self.viewport-anchor-x != GitHubSelectState.anchor-x {
+                        GitHubSelectState.close(false);
+                    }
+                }
+                changed viewport-anchor-y => {
+                    if self.open && self.viewport-anchor-y != GitHubSelectState.anchor-y {
+                        GitHubSelectState.close(false);
+                    }
+                }
+                changed width => {
+                    if self.open { GitHubSelectState.close(false); }
+                }
+                clicked => {
+                    if self.open { GitHubSelectState.close(true); } else {
+                        GitHubSelectState.show("showcase-grouped", "" + root.grouped-select-value,
+                            root.grouped-select-value,
+                            grouped-select-trigger.viewport-anchor-x,
+                            grouped-select-trigger.viewport-anchor-y,
+                            grouped-select-trigger.width, grouped-select-trigger.height);
+                    }
+                }
+            }
             select-name := GitHubTextField {
                 x: 0px;
-                y: 56px;
-                width: min(320px, parent.width);
+                y: select-section.compact
+                    ? grouped-select-trigger.y + grouped-select-trigger.height + GitHubMetrics.stack-gap-normal
+                    : select-trigger.height + GitHubMetrics.stack-gap-normal;
+                width: select-section.column-width;
                 label: "Name";
                 placeholder: "Project name";
             }

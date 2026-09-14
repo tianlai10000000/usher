@@ -112,7 +112,7 @@ system-configuration = "0.7.0"
 rustix = { version = "1.1.4", features = ["fs"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 # Native system-theme detection. On Linux this uses the XDG Desktop Portal,

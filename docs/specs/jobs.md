@@ -213,6 +213,12 @@ References:
 
 ## Output and viewport budgets / 输出与视口预算
 
+- Wrapped visual lines within one source row use a 20 px pitch at 12 px font
+  size. Parley shapes the mounted rows; Slint paints each visual line separately.
+  The source number appears once, with existing padding between source rows.
+- 同一源行内的换行文本采用 12px 字号、20px 视觉行高，由 Parley 对已挂载行排版，
+  Slint 分行绘制。源行号仅显示一次，不同行号之间保留既有留白。
+
 - Worker log mutations prepare semantic lines incrementally, reusing unchanged
   lines; the event loop only converts requested visible rows. Step/log model
   identities remain stable across progress, append and tail eviction.

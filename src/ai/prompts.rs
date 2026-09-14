@@ -480,6 +480,8 @@ mod tests {
     fn review_input() -> ReviewInput {
         ReviewInput {
             target: ReviewTarget {
+                author_name: None,
+                author_email: None,
                 project_key: ProjectReviewKey("github:usher".into()),
                 project_name: "Usher".into(),
                 pull_request_number: "42".into(),

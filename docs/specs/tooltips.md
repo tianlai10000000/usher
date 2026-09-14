@@ -1,0 +1,123 @@
+# Tooltip Implementation Contract / Tooltip 实现规范
+
+## Required reading / 强制阅读
+
+Read this document **before adding, changing or migrating any Tooltip** in Usher.
+This includes icon actions, list delegates, modal controls and independently
+compiled ComponentFactory pages. `AGENTS.md` makes this a repository-wide gate.
+
+项目内**新增、修改、迁移任何 Tooltip 前必须先阅读本文**，包括图标按钮、列表操作、
+弹窗操作及独立 ComponentFactory 页面。此要求已接入根 `AGENTS.md`。
+
+## Failure modes / 反复出现的原因
+
+| 症状 / Symptom | 原因 / Cause | 正确处理 / Required treatment |
+| --- | --- | --- |
+| 编辑按钮显示删除或查看流程文案 | 独立 factory/复用 delegate 曾串用兄弟节点的动态字符串绑定 | 操作叶子发布固定 action kind，文字留在根层固定 Surface |
+| 文案正确但被短框截断 | 测量节点保留上一个短文案的 preferred-width，绘制文案已更新 | 每种固定操作常驻独立测量/绘制节点，不能只加固定宽度 |
+| 靠窗口边缘或滚动区被裁切 | Tooltip 在带 clip 的按钮、行、ScrollView 内绘制 | 根窗口或所属 factory 的全窗口 Portal，复用 flip/shift/size |
+| 点击、关闭弹窗或离开页面后残留 | Anchor 消失，未释放所有权或失去续租 | 点击/关闭主动 dismiss，保留 lease 过期兜底 |
+| 层级提高仍然被裁切 | z 只改变当前合成层，不能越过祖先 clip | 修复 Portal 挂载和视口坐标，不堆叠更大的 z |
+
+History: UI-033 (ancestor clipping), UI-103 (factory label/measurement aliasing),
+UI-111 (literal leaf binding isolation), UI-124 (Hook recurrence), in
+[`bug-history.md`](../../bug-history.md). These are observed application/runtime
+failures, not proof that every Slint string binding is broken. Fixed factory
+actions must use the isolated path below; do not assume the generic portal's
+alternating nodes solve the factory case.
+
+## Ownership / 组件选择
+
+| 场景 / Context | 使用路径 / Implementation |
+| --- | --- |
+| 普通主窗口树中的标准图标按钮 | `GitHubIconButton` 的 `tooltip-text`，宿主 `GitHubTooltipOverlayHost` |
+| 普通非按钮锚点 | `GitHubTooltip` 定位器 + 根层 `GitHubTooltipOverlayHost` |
+| 独立 factory 或复用列表中的固定操作 | 独立固定操作叶子 + action-kind 状态 + 根层常驻固定文案 Surface |
+| 键位提示 | 从 `src/shortcuts/` 注册表取标签，执行与展示共用来源 |
+
+Checked implementation references:
+
+- [`GitHubIconButton`](../../ui/components/button/github_icon_button.slint):
+  mounted hit target, keyboard focus, click dismissal, `tooltip-active`.
+- [`GitHubTooltip`](../../ui/components/github_tooltip.slint): locator, lease,
+  shared themed surface and matching text measurement.
+- [`GitHubFloatingOverlayHost`](../../ui/components/github_floating_overlay.slint):
+  content-neutral placement, offset/flip/shift and pixel snapping.
+- [`GitHubTooltipOverlayHost`](../../ui/components/github_tooltip_overlay.slint):
+  generic root portal; **not the fixed-action factory isolation recipe**.
+- [`Message actions`](../../ui/components/messages/github_message_actions.slint),
+  [`Message Tooltip portal`](../../ui/components/messages/github_message_tooltip.slint),
+  [`Message state`](../../ui/state/message_tooltip_overlay_state.slint): existing
+  literal action/enum-only portal pattern.
+- [`Hook actions and portal`](../../ui/components/settings/github_hook_tooltip.slint),
+  [`Settings root`](../../ui/views/settings.slint): fixed action types, literal
+  surfaces and a full-window portal inside the independent Settings factory.
+
+## Factory recipe / 工厂内正确做法
+
+1. Locate the actual compiled UI root and its clipping ancestors. Each independent
+   factory owns its local state and full-window portal; MainWindow globals are
+   not implicitly shared with that product.
+2. Keep separate component types for semantically distinct actions. Each leaf
+   directly publishes its literal kind, such as `HookTooltipKind.Edit`. Do not
+   consolidate them into a delegate receiving a dynamic text/kind input.
+3. Reuse button chrome and focus/hover state. Suppress its generic visual Tooltip
+   with `show-tooltip: false`; do not leave two tooltip publishers active.
+4. Publish only action identity and the complete anchor rectangle. Text remains
+   an I18n binding at a fixed root Surface. Each action owns separate, permanently
+   mounted measure and paint nodes. Select their opacity; do not remount the
+   text with `if kind` or share a `kind ? label-a : label-b` measured Surface.
+5. Use `GitHubFloatingOverlayHost` for viewport positioning. Pass the actual
+   window bounds, root-relative anchor geometry, and matching measured surface
+   dimensions. Labels must wrap within the viewport, including longer locales.
+   Default to centered placement over the anchor and center text inside the
+   surface. Only viewport collision handling should shift Hook tips sideways;
+   do not use End alignment as a blanket workaround for edge clipping.
+   默认提示框对准锚点中心，框内文字水平及垂直居中；Hook 提示仅在碰撞视口边界时
+   自动偏移，不能把右对齐作为所有按钮防裁切的通用处理。
+6. Hide on hover/focus departure and activation. Closing a modal or changing
+   route must dismiss its tooltip; lease expiry handles detached publishers.
+   An old anchor must not clear a newer anchor's claim.
+
+中文执行要点：先确认 factory 根及 clip；不同动作使用不同固定叶子；复用按钮外观
+但关闭通用 Tooltip；跨 delegate 只传动作身份与锚点几何；文案和测量在根层每动作
+独立常驻；使用共享浮层定位；离开、点击、关闭和卸载均检查失效与续租。
+
+## Prohibited fixes / 禁止的修法
+
+- Do not fix swapped labels by changing translations or appending spaces.
+- Do not use fixed pixel widths to hide stale text measurement.
+- Do not mount Tooltip surfaces inside scrolling/clipped rows or dialogs.
+- Do not change vendored Material sources.
+- Do not recreate hover hit targets conditionally.
+- Do not infer correctness from accessible labels alone: accessibility, painted
+  text, measured width and action callback must agree.
+- Do not report resolution based only on `cargo check` or one stationary hover.
+
+禁止靠改翻译、补空格、写死宽度、堆 z 值掩盖串文案；禁止只看 AX 文案或编译通过。
+
+## Acceptance matrix / 交付验收
+
+For the affected root/factory, verify all applicable rows. State any unexecuted
+checks at handoff; do not label them passed.
+
+| Check / 检查 | Expected / 期望 |
+| --- | --- |
+| 相邻动作 A → B → A，至少三轮，跨列表行 | 文案和按钮动作一致，不残留上一动作 |
+| 短文案 → 长文案 → 短文案；中文、英文 | 测量与绘制一致，无截字或不必要留白 |
+| 无边界碰撞时悬浮图标按钮 | 提示框与按钮中心对齐，框内文字居中 |
+| 窄 → 宽 → 窄，窗口四边/底边附近 | 全文在视口内，合理避让，不受滚动区裁切 |
+| 滚动、切 Tab、离开路由再进入 | 锚点随实际位置更新，无悬空残留 |
+| 打开/关闭/再次打开 Dialog，测试后返回列表 | 查看流程、停止、编辑、删除文案不相互污染 |
+| Tab 聚焦、Enter/Space 点击、禁用/忙碌状态 | 状态与交互一致，点击后的提示正确撤销 |
+| 多语言重新切换后重复 hover | 不保留旧语言或旧宽度 |
+
+Add focused regressions for action identity, source ownership and bounds where
+possible. Compile the full root UI, then inspect the **real compiled factory**
+on the native app, using isolated test configuration. Testing backend assertions
+cannot by themselves prove native ComponentFactory text painting is correct.
+Run the repository checks from `AGENTS.md`, and record recurring defects in the
+bug ledger with their regression coverage.
+
+关键区别：单元测试负责身份、状态和几何，真实 native factory 截图负责最终绘制。
+两者都要检查；验收时记录实际执行范围，未验证的平台或场景明确列出。

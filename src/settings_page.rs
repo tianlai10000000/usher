@@ -56,7 +56,26 @@ pub(crate) struct SettingsPageBridge {
 }
 
 impl SettingsPageBridge {
+    pub(crate) fn apply_hooks(&self, state: &crate::hooks::HookState) {
+        self.with_page(|page| crate::hooks::apply_settings(page, state));
+    }
+
     pub(crate) fn install(&self, window: &MainWindow) {
+        let bridge = self.clone();
+        window.on_settings_hook_dialog_key_pressed(move |text, primary, alt, shift, secondary| {
+            let mut handled = false;
+            bridge.with_page(|page| {
+                handled = crate::hooks::handle_dialog_key(
+                    page,
+                    text.as_str(),
+                    primary,
+                    alt,
+                    shift,
+                    secondary,
+                );
+            });
+            handled
+        });
         let page_slot = self.page.clone();
         let ai_agent_settings = self.ai_agent_settings.clone();
         #[cfg(feature = "ai-code-review")]
@@ -84,6 +103,13 @@ impl SettingsPageBridge {
                 apply_ai_agent_snapshot_to_page(&page, settings.snapshot().state());
             }
             bind_callbacks(&window, &page, ai_agent_settings);
+            let weak = window.as_weak();
+            page.on_hook_dialog_visibility_changed(move |visible| {
+                if let Some(window) = weak.upgrade() {
+                    window.set_settings_hook_dialog_open(visible);
+                }
+            });
+            crate::hooks::bind_settings(&window, &page);
             #[cfg(feature = "ai-code-review")]
             if let Some(config) = ai_review_config
                 .lock()
@@ -117,6 +143,13 @@ impl SettingsPageBridge {
                 page.set_viewport_width(width);
                 page.set_viewport_height(height);
             });
+        });
+        let bridge = self.clone();
+        let weak = window.as_weak();
+        window.on_settings_window_geometry_changed(move || {
+            if let Some(window) = weak.upgrade() {
+                bridge.with_page(|page| sync_window_geometry(&window, page));
+            }
         });
         let bridge = self.clone();
         window.on_settings_select_pointer_released(move |x, y| {
@@ -164,6 +197,7 @@ impl SettingsPageBridge {
                 .to_string();
             sync_language_state(page, preference);
             sync_ai_reply_language_state(page, &reply_language);
+            crate::hooks::sync_language(page);
             #[cfg(feature = "ai-code-review")]
             apply_ai_review_validation_errors(page, &self.ai_review_validation_errors);
         });
@@ -435,7 +469,15 @@ fn apply_ai_review_validation_errors(
     );
 }
 
+fn sync_window_geometry(window: &MainWindow, page: &GitHubSettingsPage) {
+    page.set_window_width(window.get_settings_window_width());
+    page.set_window_height(window.get_settings_window_height());
+    page.set_content_origin_x(window.get_settings_page_origin_x());
+    page.set_content_origin_y(window.get_settings_page_origin_y());
+}
+
 fn sync_state_from_window(window: &MainWindow, page: &GitHubSettingsPage) {
+    sync_window_geometry(window, page);
     let source = AppState::get(window);
     let target = SettingsAppState::get(page);
 
@@ -947,6 +989,7 @@ mod tests {
             "代码托管",
             "AI Agent",
             "AI Review",
+            "Hooks",
             "Diagnostics",
             "诊断",
         ]
@@ -1000,6 +1043,124 @@ mod tests {
             .find(|element| element.accessible_checked().is_some())
             .unwrap_or_else(|| panic!("settings section {label:?}"))
             .mock_single_click(PointerEventButton::Left);
+    }
+
+    #[test]
+    fn compact_section_select_floats_without_reflowing_settings_content() {
+        let _locale_guard = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let page = GitHubSettingsPage::new().expect("settings page");
+        crate::i18n::apply_preference("en").expect("English labels");
+        page.set_viewport_width(550.0);
+        page.set_viewport_height(600.0);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(2));
+
+        let pane =
+            ElementHandle::find_by_element_id(&page, "GitHubSettingsPage::compact-settings-pane")
+                .next()
+                .expect("compact settings pane");
+        let content = ElementHandle::find_by_element_id(&page, "GitHubSettingsPage::content-host")
+            .next()
+            .expect("settings scroll content");
+        let pane_before = pane.absolute_position();
+        let content_height_before = content.size().height;
+
+        open_section_picker(&page);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        let menu = ElementHandle::find_by_element_id(&page, "GitHubSelectPopup::menu")
+            .next()
+            .expect("settings section popup");
+        assert_eq!(pane.absolute_position(), pane_before);
+        assert_eq!(content.size().height, content_height_before);
+        assert!(menu.absolute_position().y >= 8.0);
+        assert!(menu.absolute_position().y + menu.size().height <= 592.5);
+        for label in [
+            "General",
+            "Code hosting",
+            "AI Agent",
+            "AI Review",
+            "Hooks",
+            "Diagnostics",
+        ] {
+            assert!(
+                ElementHandle::find_by_accessible_label(&page, label)
+                    .any(|element| element.accessible_checked().is_some()),
+                "section popup must contain {label:?}"
+            );
+        }
+
+        open_section_picker(&page);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        assert_eq!(
+            ElementHandle::find_by_accessible_label(&page, "General")
+                .find(|element| element.accessible_expandable().is_some())
+                .expect("section trigger")
+                .accessible_expanded(),
+            Some(false),
+            "second trigger click closes the section options"
+        );
+        open_section_picker(&page);
+        select_settings_section(&page, "Hooks");
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        assert_eq!(section_picker_trigger_label(&page), "Hooks");
+        assert_eq!(pane.absolute_position(), pane_before);
+        crate::i18n::apply_preference(usher_i18n::fallback_locale().id)
+            .expect("restore fallback language");
+    }
+
+    #[test]
+    fn wide_section_switch_aligns_content_with_sticky_navigation() {
+        let _locale_guard = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let window = MainWindow::new().expect("main window");
+        let bridge = SettingsPageBridge::default();
+        crate::i18n::apply_preference("en-US").expect("select English");
+        crate::i18n::sync_main_window(&window, "en-US");
+        bridge.install(&window);
+        window.set_current_route(Route::Settings);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        let page = mounted_page(&bridge);
+        page.set_viewport_width(1200.0);
+        page.set_viewport_height(600.0);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        let content_y = || {
+            ElementHandle::find_by_element_id(&page, "GitHubSettingsPage::content-host")
+                .next()
+                .expect("settings scroll content")
+                .absolute_position()
+                .y
+        };
+        for section in ["Code hosting", "AI Agent", "General", "Diagnostics"] {
+            let before_scroll = content_y();
+            page.window()
+                .dispatch_event(slint::platform::WindowEvent::PointerScrolled {
+                    position: slint::LogicalPosition::new(600.0, 300.0),
+                    delta_x: 0.0,
+                    delta_y: -300.0,
+                });
+            i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(20));
+            assert!(
+                content_y() < before_scroll - 1.0,
+                "content must scroll before switching to {section}: before={before_scroll}, after={}",
+                content_y()
+            );
+            select_settings_section(&page, section);
+            i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+            let pane =
+                ElementHandle::find_by_element_id(&page, "GitHubSettingsPage::wide-settings-pane")
+                    .next()
+                    .expect("wide settings pane");
+            assert!(
+                (pane.absolute_position().y - 16.0).abs() < 1.0,
+                "{section} must align with the sticky navigation"
+            );
+            assert!(
+                content_y() < -1.0,
+                "page title must stay above the viewport"
+            );
+        }
+        crate::i18n::apply_preference(usher_i18n::fallback_locale().id)
+            .expect("restore fallback language");
     }
 
     fn select_ai_agent_provider(page: &GitHubSettingsPage, label: &str) {
@@ -1098,6 +1259,10 @@ mod tests {
                     before,
                     "opening must not move following fields"
                 );
+                open_language_picker(&page);
+                assert_eq!(popup_count(), 0, "second trigger click dismisses");
+                open_language_picker(&page);
+                assert_eq!(popup_count(), 1, "next trigger click reopens");
                 click_settings_position(&page, slint::LogicalPosition::new(4.0, 4.0));
                 assert_eq!(popup_count(), 0, "blank outside click dismisses");
                 assert_eq!(
@@ -1228,6 +1393,72 @@ mod tests {
 
         crate::i18n::apply_preference(usher_i18n::fallback_locale().id)
             .expect("restore fallback language");
+    }
+
+    #[test]
+    fn hook_dialog_factory_covers_the_window_and_mirrors_modality() {
+        use usher_ui_settings::HookSettingsState;
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let window = MainWindow::new().unwrap();
+        window.set_navigation_drawer_expanded(true);
+        // Pin the docked geometry without requiring a display animation clock.
+        window.set_window_live_resizing(true);
+        let bridge = SettingsPageBridge::default();
+        bridge.install(&window);
+        window.set_current_route(Route::Settings);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        let page = mounted_page(&bridge);
+        let g = page.global::<HookSettingsState>();
+        g.set_ready(true);
+        g.set_dialog_mode("add".into());
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        assert!(window.get_modal_overlay_visible());
+        let surface = ElementHandle::find_by_element_id(&page, "GitHubDialog::dialog-surface")
+            .next()
+            .unwrap();
+        assert!(
+            (surface.absolute_position().x + surface.size().width / 2.0
+                - page.get_window_width() / 2.0)
+                .abs()
+                < 1.0
+        );
+        assert!(
+            (surface.absolute_position().y + surface.size().height / 2.0
+                - page.get_window_height() / 2.0)
+                .abs()
+                < 1.0
+        );
+        assert!(page.get_content_origin_x() > 0.0);
+        assert!(surface.absolute_position().x < page.get_content_origin_x());
+        let saves = std::rc::Rc::new(std::cell::Cell::new(0));
+        let saved = saves.clone();
+        g.on_save(move || saved.set(saved.get() + 1));
+        assert!(crate::shortcuts::handle_key_pressed(
+            &window, "\n", true, false, false, false
+        ));
+        assert_eq!(saves.get(), 1);
+        g.set_busy(true);
+        assert!(crate::shortcuts::handle_key_pressed(
+            &window, "\n", true, false, false, false
+        ));
+        assert_eq!(saves.get(), 1);
+        g.set_busy(false);
+        assert!(!crate::shortcuts::handle_key_pressed(
+            &window, "\n", false, false, false, false
+        ));
+        page.invoke_close_hook_editor();
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        assert!(!window.get_modal_overlay_visible());
+        window.set_current_route(Route::Home);
+        window.set_current_route(Route::Settings);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        assert_eq!(
+            mounted_page(&bridge)
+                .global::<HookSettingsState>()
+                .get_dialog_mode(),
+            ""
+        );
     }
 
     #[test]

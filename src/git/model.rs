@@ -197,6 +197,7 @@ pub(crate) struct PullRequestDiffFile {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PullRequestDiffDetail {
+    pub(crate) author_identity: PullRequestAuthorIdentity,
     pub(crate) files: Vec<PullRequestDiffFile>,
     pub(crate) added_lines: u32,
     pub(crate) removed_lines: u32,
@@ -209,6 +210,28 @@ pub(crate) struct PullRequestDiffDetail {
     pub(crate) start_sha: String,
     pub(crate) too_many_commits: bool,
     pub(crate) files_truncated: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct PullRequestAuthorIdentity {
+    pub(crate) name: Option<String>,
+    pub(crate) email: Option<String>,
+}
+
+impl PullRequestAuthorIdentity {
+    pub(crate) fn from_user(user: &serde_json::Value) -> Self {
+        let field = |key| {
+            user.get(key)
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+        };
+        Self {
+            name: field("name"),
+            email: field("email").or_else(|| field("public_email")),
+        }
+    }
 }
 
 pub(crate) struct PageCollector<T> {
@@ -1011,6 +1034,28 @@ mod tests {
         PageCollector, PullRequestMergeMethod, PullRequestReviewAction, PullRequestState,
         split_commit_message,
     };
+
+    #[test]
+    fn pr_author_identity_preserves_only_explicit_profile_fields() {
+        let identity = super::PullRequestAuthorIdentity::from_user(&serde_json::json!({
+            "name": " Example User ", "email": null, "public_email": "user@example.com",
+            "login": "example-user"
+        }));
+        assert_eq!(identity.name.as_deref(), Some("Example User"));
+        assert_eq!(identity.email.as_deref(), Some("user@example.com"));
+        for user in [
+            serde_json::Value::Null,
+            serde_json::json!({
+                "login": "example-user", "email": " ", "name": 42,
+                "commit": {"author": {"email": "commit@example.com"}}
+            }),
+        ] {
+            assert_eq!(
+                super::PullRequestAuthorIdentity::from_user(&user),
+                Default::default()
+            );
+        }
+    }
 
     #[test]
     fn page_collector_distinguishes_short_completion_from_a_full_hard_limit() {

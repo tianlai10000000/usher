@@ -9,6 +9,9 @@ export component GitHubScrollView inherits Rectangle {
     out property <length> visible_height: scroll-area.height;
     out property <length> content_height: content-column.preferred-height;
     in property <bool> interactive: true;
+    // Disable wheel/touchpad scrolling while retaining the optional scrollbar
+    // for nested editors that own their own standard ScrollView.
+    in property <bool> wheel-enabled: true;
     in property <bool> show-scrollbar: true;
     // Benchmark-only legacy mode keeps the previous live-geometry mapping.
     // Production freezes the mapping for the complete direct drag gesture.
@@ -129,6 +132,15 @@ export component GitHubScrollView inherits Rectangle {
             + max(0px, -root.viewport_y) / root.scroll-range * root.thumb-range;
     }
 
+    function clamp-viewport-to-content() {
+        if !root.dragging {
+            root.viewport_y = -max(
+                0px,
+                min(-root.viewport_y, root.content_height - root.visible_height)
+            );
+        }
+    }
+
     background: transparent;
     clip: true;
 
@@ -155,6 +167,8 @@ export component GitHubScrollView inherits Rectangle {
             pre-flick-wheel-expiry.restart();
         }
     }
+    changed content_height => { root.clamp-viewport-to-content(); }
+    changed visible_height => { root.clamp-viewport-to-content(); }
 
     pre-flick-wheel-expiry := Timer {
         interval: 0ms;
@@ -169,7 +183,9 @@ export component GitHubScrollView inherits Rectangle {
         width: parent.width;
         height: parent.height;
         viewport-width: self.width;
-        viewport-height: max(self.height, content-column.preferred-height);
+        viewport-height: root.wheel-enabled
+            ? max(self.height, content-column.preferred-height)
+            : self.height;
         interactive: root.interactive;
         flicked => {
             root.user-scroll-started();

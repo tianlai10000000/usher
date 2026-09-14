@@ -1,48 +1,58 @@
 import { GitHubIconButton } from "./github_icon_button.slint";
+import { GitHubMetrics } from "../../theme/github_theme.slint";
 import { I18n } from "@i18n";
 
 export component GitHubProjectCardActions inherits Rectangle {
-    out property <bool> has-hover: terminal-btn.has-hover || settings-btn.has-hover || delete-btn.has-hover;
+    in property <bool> tooltip-above: true;
+    in property <bool> tooltip-align-right: true;
+    in property <length> control-size: GitHubMetrics.control-medium-size;
+    out property <bool> has-hover: terminal-btn.has-hover || edit-btn.has-hover || delete-btn.has-hover;
     callback request-open-terminal();
-    callback request-open-settings();
+    callback request-edit();
     callback request-delete();
 
-    width: 96px;
-    height: 28px;
+    width: root.control-size * 3;
+    height: root.control-size;
     background: transparent;
 
     HorizontalLayout {
         width: parent.width;
         height: parent.height;
-        spacing: 2px;
-        alignment: center;
+        spacing: 0px;
+        alignment: end;
 
         terminal-btn := GitHubIconButton {
             icon: @image-url("../../assets/icons/octicon-terminal-16.svg");
             tooltip-text: I18n.tooltip-open-terminal;
-            control-size: 28px;
-            glyph-size: 16px;
+            tooltip-above: root.tooltip-above;
+            tooltip-align-right: root.tooltip-align-right;
+            control-size: root.control-size;
+            glyph-size: GitHubMetrics.icon-medium;
             clicked => {
                 root.request-open-terminal();
             }
         }
 
-        settings-btn := GitHubIconButton {
+        edit-btn := GitHubIconButton {
             icon: @image-url("../../assets/icons/octicon-pencil-16.svg");
-            tooltip-text: I18n.common-settings;
-            control-size: 28px;
-            glyph-size: 16px;
+            tooltip-text: I18n.tooltip-edit-project;
+            tooltip-above: root.tooltip-above;
+            tooltip-align-right: root.tooltip-align-right;
+            control-size: root.control-size;
+            glyph-size: GitHubMetrics.icon-medium;
             clicked => {
-                root.request-open-settings();
+                root.request-edit();
             }
         }
 
         delete-btn := GitHubIconButton {
             icon: @image-url("../../assets/icons/octicon-trash-16.svg");
-            tooltip-text: I18n.common-delete;
+            tooltip-text: I18n.projects-delete-project;
+            tooltip-above: root.tooltip-above;
+            tooltip-align-right: root.tooltip-align-right;
             danger: true;
-            control-size: 28px;
-            glyph-size: 16px;
+            control-size: root.control-size;
+            glyph-size: GitHubMetrics.icon-medium;
             clicked => {
                 root.request-delete();
             }

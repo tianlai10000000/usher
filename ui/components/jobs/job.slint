@@ -5,6 +5,10 @@ import { GitHubSpinner } from "../github_spinner.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { I18n } from "@i18n";
 
+export global JobLogLayout {
+    pure callback wrap-lines(string, float) -> [string];
+}
+
 export struct JobLogLineItem {
     text: string,
     prefix: string,
@@ -43,26 +47,27 @@ component GitHubActionsLogLineRow inherits Rectangle {
     in property <color> foreground;
     in property <color> muted-foreground;
     private property <string> display-text: root.line.prefix + root.line.text;
+    private property <[string]> visual-lines: JobLogLayout.wrap-lines(root.display-text, root.text-width / 1px);
+    private property <length> visual-line-pitch: 20px;
     private property <length> text-width: max(1px, root.width - 80px);
     private property <color> hover-background: GitHubTheme.control-muted-rest;
     private property <color> attention-background: GitHubTheme.attention-muted;
     private property <color> danger-background: GitHubTheme.diff-deletion-bg;
     private property <color> accent-background: GitHubTheme.accent-subtle;
-    // GitHub Actions hover wash has clearer vertical padding than a bare
-    // 20 px glyph box; 28 px min + measured centering matches that density.
-    private property <length> min-line-height: 28px;
-    private property <length> pad-y: 7px;
+    // Keep source-row padding separate from the pitch of wrapped visual lines.
+    private property <length> min-line-height: 32px;
+    // Extra vertical breathing room keeps wrapped output readable, especially
+    // for CJK and long JSON lines, without changing source-line numbering.
+    private property <length> pad-y: 9px;
     // Slint's preferred height is the shaped advance, not a paint-safe glyph
     // box. FemtoVG can otherwise clip CJK and punctuation at the lower edge.
     private property <length> glyph-safety-height: 4px;
     private property <length> measured-content-height: max(
         1px,
-        line-measure.preferred-height
+        root.measured-single-line-height + max(0, root.visual-lines.length - 1) * root.visual-line-pitch
     );
     private property <length> measured-single-line-height:
         max(1px, single-line-measure.preferred-height);
-    private property <length> content-height:
-        root.measured-content-height + root.glyph-safety-height;
     private property <length> single-line-height:
         root.measured-single-line-height + root.glyph-safety-height;
     private property <bool> wraps:
@@ -91,15 +96,6 @@ component GitHubActionsLogLineRow inherits Rectangle {
         font-family: "monospace";
     }
 
-    line-measure := Text {
-        visible: false;
-        width: root.text-width;
-        text: root.display-text;
-        wrap: word-wrap;
-        font-size: 12px;
-        font-family: "monospace";
-    }
-
     Text {
         x: 16px;
         y: root.number-y;
@@ -114,13 +110,13 @@ component GitHubActionsLogLineRow inherits Rectangle {
         font-family: "monospace";
     }
 
-    Text {
+    for visual-line[index] in root.visual-lines: Text {
         x: 64px;
-        y: root.content-y;
+        y: root.content-y + index * root.visual-line-pitch;
         width: root.text-width;
-        height: root.content-height;
-        text: root.display-text;
-        wrap: word-wrap;
+        height: root.single-line-height;
+        text: visual-line;
+        wrap: no-wrap;
         vertical-alignment: top;
         color: root.line.kind == "debug" ? root.muted-foreground : root.foreground;
         font-size: 12px;
@@ -474,6 +470,7 @@ export component GitHubActionsJob inherits Rectangle {
                 width: parent.width - 32px;
                 height: 22px;
                 text: root.summary;
+                wrap: no-wrap;
                 vertical-alignment: center;
                 font-size: 12px;
                 font-weight: 400;

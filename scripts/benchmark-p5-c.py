@@ -28,7 +28,7 @@ def main():
     output.mkdir(parents=True, exist_ok=False)
     def seed(directory, scenario, port):
         directory.mkdir(parents=True)
-        (directory / "settings.toml").write_text('theme_mode = 0\nlanguage = "en"\nterminal_verbose_logging = false\n')
+        (directory / "settings.toml").write_text('theme_mode = 0\nlanguage = "en"\n[diagnostics]\nterminal_verbose_logging = false\n')
     p5a.seed = seed
     os.environ["USHER_P5_BENCHMARK"] = args.task
     os.environ["USHER_P5_PREVIEW_SCENARIO"] = args.scenario

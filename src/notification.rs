@@ -281,7 +281,9 @@ fn push_notification(
     shared_queue: &Option<Arc<RwLock<SharedQueue>>>,
     message_center: &MessageCenter,
 ) {
-    if let Some(message_id) = record_message(message_center, &notification) {
+    if notification.message_id.is_empty()
+        && let Some(message_id) = record_message(message_center, &notification)
+    {
         notification.message_id = message_id.into();
     }
 
@@ -352,6 +354,42 @@ fn record_message(message_center: &MessageCenter, notification: &Notification) -
             None
         }
     }
+}
+
+/// Present an already persisted message without duplicating Inbox/native delivery.
+/// The caller enters on the Slint event loop.
+pub(crate) fn show_recorded_message(
+    ui: &MainWindow,
+    center: &MessageCenter,
+    message: &usher_messages::Message,
+) {
+    let kind = match message.severity {
+        MessageSeverity::Info => NotificationType::Info,
+        MessageSeverity::Success => NotificationType::Success,
+        MessageSeverity::Warning => NotificationType::Warning,
+        MessageSeverity::Error => NotificationType::Error,
+    };
+    let target = message.target.clone().unwrap_or_default();
+    let mut notification = create_notification_with_defaults(
+        kind,
+        NotificationOptions {
+            title: message.title.clone().into(),
+            message: message.body.clone().into(),
+            source: message.source.clone().into(),
+            category: message.category.clone().into(),
+            tag: target.into(),
+            duration: 5000,
+            native_delivery: NotificationDelivery::Never,
+            actions: ModelRc::new(VecModel::from(vec![
+                i18n::tr("hooks.view_run").into_owned().into(),
+            ])),
+            ..Default::default()
+        },
+    );
+    notification.message_id = message.id.clone().into();
+    let id = notification.id;
+    push_notification(&NotificationManager::get(ui), notification, &None, center);
+    start_auto_close_timer(ui.as_weak(), id, Duration::from_secs(5), None);
 }
 
 fn clear_banner_queue(
@@ -1011,6 +1049,9 @@ pub fn setup_notifications(
             );
 
             // Handle different actions based on tag
+            if crate::hooks::open_target(&ui, &tag) {
+                return;
+            }
             // Users can add their own business logic here
             let ui_weak_for_action = ui_weak.clone();
             match tag.as_str() {

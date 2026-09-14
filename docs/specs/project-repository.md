@@ -160,6 +160,25 @@ This specification covers provider metadata resolved on the Project page and the
     截止时间，不为每个等待 URL 创建任务/定时器。关闭 Project 持久化前取消 HTTP
     future。下载失败继续静默并显示默认 Logo。
 
+## Hook selection / Hook 选择
+
+Project Add/Edit persists `hook_ids` through typed registry actions and automatic
+worker persistence. Absent fields migrate to empty. The shared three-state
+**Trigger Hooks** checkbox starts unchecked/collapsed, selects all and expands on
+check, shows mixed for a subset, and clears all/collapses on uncheck. Parent state
+is derived only from enabled rows. Disabled or removed rows are visibly unchecked
+and non-interactive, while their prior selection intent remains in `hook_ids` and
+the open form so re-enabling restores the prior state. Edit restores saved IDs;
+later Hooks never automatically opt a project in. Execution reads the Project
+facade before admission and after queueing. See [Hooks](hooks.md).
+
+项目新增/编辑通过注册表 Action 和 Worker 自动持久化 `hook_ids`，缺失字段为空选。
+“触发 Hook”复用三态复选框，默认未选且收起；勾选全选并展开，子项部分选择
+显示半选，取消清空并收起；父项状态只从可用行推导。禁用或已删除行在界面中显示
+为未选中且不可交互，但 `hook_ids` 与已打开表单保留原选择意图，重新启用后恢复
+原状态。编辑恢复 ID，新建 Hook 不自动加入项目。执行通过 Project 门面读取选择，
+排队后再次检查。详见 [Hooks](hooks.md)。
+
 ## Deferred enhancement / 后续优化
 
 The persisted `is_pr_auto_update` setting is a future candidate for a true

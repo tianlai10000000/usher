@@ -21,33 +21,11 @@ pub struct AppSettings {
     #[serde(default = "default_language")]
     pub language: String,
 
-    /// Auto update enabled
-    #[serde(default = "default_auto_update")]
-    pub auto_update: bool,
+    #[serde(default)]
+    pub update: UpdateSettings,
 
-    /// Update release channel: `stable` or `alpha`.
-    #[serde(default = "default_update_channel")]
-    pub update_channel: String,
-
-    /// Standard-output application logs
-    #[serde(default = "default_application_console_logging")]
-    pub application_console_logging: bool,
-
-    /// Plain-text application file logs (`usher.log`)
-    #[serde(default = "default_application_file_logging")]
-    pub application_file_logging: bool,
-
-    /// Structured tracing file logs (`usher_tracing.log`)
-    #[serde(default = "default_tracing_logger_active")]
-    pub tracing_logger_active: bool,
-
-    /// Verbose terminal logging active
-    #[serde(default = "default_terminal_verbose_logging")]
-    pub terminal_verbose_logging: bool,
-
-    /// Periodic process and UI memory diagnostics
-    #[serde(default = "default_memory_diagnostics_logging")]
-    pub memory_diagnostics_logging: bool,
+    #[serde(default)]
+    pub diagnostics: DiagnosticsSettings,
 
     /// Play system UI click sounds (breadcrumb Back for now)
     #[serde(default = "default_ui_sound_effects")]
@@ -68,6 +46,40 @@ pub struct AppSettings {
     /// OpenAI-compatible AI Agent settings, serialized as `[ai.agent]`.
     #[serde(default)]
     pub ai: AiSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateSettings {
+    /// Auto update enabled
+    #[serde(default = "default_auto_update")]
+    pub auto_update: bool,
+
+    /// Update release channel: `stable` or `alpha`.
+    #[serde(default = "default_update_channel")]
+    pub update_channel: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiagnosticsSettings {
+    /// Standard-output application logs
+    #[serde(default = "default_application_console_logging")]
+    pub application_console_logging: bool,
+
+    /// Plain-text application file logs (`usher.log`)
+    #[serde(default = "default_application_file_logging")]
+    pub application_file_logging: bool,
+
+    /// Structured tracing file logs (`usher_tracing.log`)
+    #[serde(default = "default_tracing_logger_active")]
+    pub tracing_logger_active: bool,
+
+    /// Verbose terminal logging active
+    #[serde(default = "default_terminal_verbose_logging")]
+    pub terminal_verbose_logging: bool,
+
+    /// Periodic process and UI memory diagnostics
+    #[serde(default = "default_memory_diagnostics_logging")]
+    pub memory_diagnostics_logging: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -278,13 +290,8 @@ impl Default for AppSettings {
         Self {
             theme_mode: default_theme_mode(),
             language: default_language(),
-            auto_update: default_auto_update(),
-            update_channel: default_update_channel(),
-            application_console_logging: default_application_console_logging(),
-            application_file_logging: default_application_file_logging(),
-            tracing_logger_active: default_tracing_logger_active(),
-            terminal_verbose_logging: default_terminal_verbose_logging(),
-            memory_diagnostics_logging: default_memory_diagnostics_logging(),
+            update: UpdateSettings::default(),
+            diagnostics: DiagnosticsSettings::default(),
             ui_sound_effects: default_ui_sound_effects(),
             navigation_drawer_expanded: default_navigation_drawer_expanded(),
             preview: PreviewSettings::default(),
@@ -292,6 +299,63 @@ impl Default for AppSettings {
             ai: AiSettings::default(),
         }
     }
+}
+
+impl Default for UpdateSettings {
+    fn default() -> Self {
+        Self {
+            auto_update: default_auto_update(),
+            update_channel: default_update_channel(),
+        }
+    }
+}
+
+impl Default for DiagnosticsSettings {
+    fn default() -> Self {
+        Self {
+            application_console_logging: default_application_console_logging(),
+            application_file_logging: default_application_file_logging(),
+            tracing_logger_active: default_tracing_logger_active(),
+            terminal_verbose_logging: default_terminal_verbose_logging(),
+            memory_diagnostics_logging: default_memory_diagnostics_logging(),
+        }
+    }
+}
+
+fn deserialize_settings(config: Config) -> Result<AppSettings, String> {
+    let mut value = config
+        .try_deserialize::<toml::Value>()
+        .map_err(|error| error.to_string())?;
+    let root = value.as_table_mut().ok_or("Settings must be a table")?;
+    for (section, keys) in [
+        ("update", &["auto_update", "update_channel"][..]),
+        (
+            "diagnostics",
+            &[
+                "application_console_logging",
+                "application_file_logging",
+                "tracing_logger_active",
+                "terminal_verbose_logging",
+                "memory_diagnostics_logging",
+            ][..],
+        ),
+    ] {
+        for key in keys {
+            if let Some(legacy) = root.remove(*key) {
+                let target = root
+                    .entry(section)
+                    .or_insert_with(|| toml::Value::Table(Default::default()));
+                let table = target
+                    .as_table_mut()
+                    .ok_or("Settings section must be a table")?;
+                // Explicit section values take precedence over legacy root keys.
+                table.entry(*key).or_insert(legacy);
+            }
+        }
+    }
+    value
+        .try_into()
+        .map_err(|error: toml::de::Error| error.to_string())
 }
 
 /// Settings manager - handles all configuration operations
@@ -373,7 +437,7 @@ impl SettingsManager {
             .add_source(ConfigFile::from(config_path).format(FileFormat::Toml))
             .build()
         {
-            Ok(config) => match config.try_deserialize::<AppSettings>() {
+            Ok(config) => match deserialize_settings(config) {
                 Ok(mut settings) => {
                     migrate_legacy_gitee_token(&mut settings);
                     settings.ai.agent = normalize_ai_agent_settings(settings.ai.agent);
@@ -463,13 +527,13 @@ impl SettingsManager {
     /// Update auto update setting
     pub fn set_auto_update(&self, enabled: bool) {
         if let Ok(mut settings) = self.settings.write() {
-            settings.auto_update = enabled;
+            settings.update.auto_update = enabled;
         }
     }
 
     pub fn set_update_channel(&self, channel: &str) {
         if let Ok(mut settings) = self.settings.write() {
-            settings.update_channel = if channel == "alpha" {
+            settings.update.update_channel = if channel == "alpha" {
                 "alpha".to_string()
             } else {
                 "stable".to_string()
@@ -479,33 +543,33 @@ impl SettingsManager {
 
     pub fn set_application_console_logging(&self, enabled: bool) {
         if let Ok(mut settings) = self.settings.write() {
-            settings.application_console_logging = enabled;
+            settings.diagnostics.application_console_logging = enabled;
         }
     }
 
     pub fn set_application_file_logging(&self, enabled: bool) {
         if let Ok(mut settings) = self.settings.write() {
-            settings.application_file_logging = enabled;
+            settings.diagnostics.application_file_logging = enabled;
         }
     }
 
     /// Update tracing logger active setting
     pub fn set_tracing_logger_active(&self, enabled: bool) {
         if let Ok(mut settings) = self.settings.write() {
-            settings.tracing_logger_active = enabled;
+            settings.diagnostics.tracing_logger_active = enabled;
         }
     }
 
     /// Update terminal verbose logging setting
     pub fn set_terminal_verbose_logging(&self, enabled: bool) {
         if let Ok(mut settings) = self.settings.write() {
-            settings.terminal_verbose_logging = enabled;
+            settings.diagnostics.terminal_verbose_logging = enabled;
         }
     }
 
     pub fn set_memory_diagnostics_logging(&self, enabled: bool) {
         if let Ok(mut settings) = self.settings.write() {
-            settings.memory_diagnostics_logging = enabled;
+            settings.diagnostics.memory_diagnostics_logging = enabled;
         }
     }
 
@@ -828,13 +892,13 @@ pub fn setup_settings(app: &MainWindow, settings: &AppSettings) {
     let app_state = AppState::get(app);
     app_state.set_theme_mode(settings.theme_mode);
     crate::i18n::sync_main_window(app, &settings.language);
-    app_state.set_auto_update(settings.auto_update);
-    app_state.set_update_channel(settings.update_channel.clone().into());
-    app_state.set_application_console_logging(settings.application_console_logging);
-    app_state.set_application_file_logging(settings.application_file_logging);
-    app_state.set_tracing_logger_active(settings.tracing_logger_active);
-    app_state.set_terminal_verbose_logging(settings.terminal_verbose_logging);
-    app_state.set_memory_diagnostics_logging(settings.memory_diagnostics_logging);
+    app_state.set_auto_update(settings.update.auto_update);
+    app_state.set_update_channel(settings.update.update_channel.clone().into());
+    app_state.set_application_console_logging(settings.diagnostics.application_console_logging);
+    app_state.set_application_file_logging(settings.diagnostics.application_file_logging);
+    app_state.set_tracing_logger_active(settings.diagnostics.tracing_logger_active);
+    app_state.set_terminal_verbose_logging(settings.diagnostics.terminal_verbose_logging);
+    app_state.set_memory_diagnostics_logging(settings.diagnostics.memory_diagnostics_logging);
     app_state.set_ui_sound_effects(settings.ui_sound_effects);
     app_state.set_artifact_preview_presentation_mode(
         if settings.preview.presentation_mode == "detached" {
@@ -872,12 +936,12 @@ pub fn setup_settings(app: &MainWindow, settings: &AppSettings) {
     log::info!(
         "[Settings] Applied settings: theme_mode={}, auto_update={}, application_console_logging={}, application_file_logging={}, tracing_logger_active={}, terminal_verbose_logging={}, memory_diagnostics_logging={}, ui_sound_effects={}, navigation_drawer_expanded={}, git_tokens=({}/{}/{}), ai.agent=({}/{}/{})",
         settings.theme_mode,
-        settings.auto_update,
-        settings.application_console_logging,
-        settings.application_file_logging,
-        settings.tracing_logger_active,
-        settings.terminal_verbose_logging,
-        settings.memory_diagnostics_logging,
+        settings.update.auto_update,
+        settings.diagnostics.application_console_logging,
+        settings.diagnostics.application_file_logging,
+        settings.diagnostics.tracing_logger_active,
+        settings.diagnostics.terminal_verbose_logging,
+        settings.diagnostics.memory_diagnostics_logging,
         settings.ui_sound_effects,
         settings.navigation_drawer_expanded,
         if settings.git.platform.github.token.is_empty() {
@@ -993,12 +1057,18 @@ auto_update = false
         assert!(settings.preview.providers.markdown);
         assert!(settings.preview.providers.image);
         assert!(settings.preview.providers.plain_text);
-        assert!(settings.application_console_logging);
-        assert_eq!(settings.application_file_logging, cfg!(debug_assertions));
-        assert!(settings.tracing_logger_active);
-        assert!(!settings.terminal_verbose_logging);
-        assert_eq!(settings.memory_diagnostics_logging, cfg!(debug_assertions));
-        assert_eq!(settings.update_channel, default_update_channel());
+        assert!(settings.diagnostics.application_console_logging);
+        assert_eq!(
+            settings.diagnostics.application_file_logging,
+            cfg!(debug_assertions)
+        );
+        assert!(settings.diagnostics.tracing_logger_active);
+        assert!(!settings.diagnostics.terminal_verbose_logging);
+        assert_eq!(
+            settings.diagnostics.memory_diagnostics_logging,
+            cfg!(debug_assertions)
+        );
+        assert_eq!(settings.update.update_channel, default_update_channel());
     }
 
     #[test]
@@ -1015,19 +1085,21 @@ auto_update = false
         );
 
         manager.set_update_channel("alpha");
-        assert_eq!(manager.get().update_channel, "alpha");
+        assert_eq!(manager.get().update.update_channel, "alpha");
         manager.set_update_channel("nightly");
-        assert_eq!(manager.get().update_channel, "stable");
+        assert_eq!(manager.get().update.update_channel, "stable");
     }
 
     #[test]
     fn writes_granular_logging_settings() {
         let settings = AppSettings {
-            application_console_logging: false,
-            application_file_logging: false,
-            tracing_logger_active: false,
-            terminal_verbose_logging: false,
-            memory_diagnostics_logging: false,
+            diagnostics: DiagnosticsSettings {
+                application_console_logging: false,
+                application_file_logging: false,
+                tracing_logger_active: false,
+                terminal_verbose_logging: false,
+                memory_diagnostics_logging: false,
+            },
             ..Default::default()
         };
 
@@ -1037,6 +1109,89 @@ auto_update = false
         assert!(serialized.contains("tracing_logger_active = false"));
         assert!(serialized.contains("terminal_verbose_logging = false"));
         assert!(serialized.contains("memory_diagnostics_logging = false"));
+        let document: toml::Value = toml::from_str(&serialized).unwrap();
+        assert!(document.get("application_console_logging").is_none());
+        assert!(document.get("auto_update").is_none());
+        assert_eq!(
+            document["diagnostics"]["application_console_logging"].as_bool(),
+            Some(false)
+        );
+        assert_eq!(document["update"]["auto_update"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn migrates_legacy_sections_and_preserves_values_on_save() {
+        let directory = unique_test_directory("settings-sections");
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("settings.toml");
+        fs::write(
+            &path,
+            r#"
+theme_mode = 1
+auto_update = false
+update_channel = "alpha"
+application_console_logging = false
+application_file_logging = false
+tracing_logger_active = false
+terminal_verbose_logging = true
+memory_diagnostics_logging = false
+"#,
+        )
+        .unwrap();
+        let manager = SettingsManager::with_config_path(path.clone());
+        let settings = manager.get();
+        assert!(!settings.update.auto_update);
+        assert_eq!(settings.update.update_channel, "alpha");
+        assert!(!settings.diagnostics.application_console_logging);
+        assert!(!settings.diagnostics.application_file_logging);
+        assert!(!settings.diagnostics.tracing_logger_active);
+        assert!(settings.diagnostics.terminal_verbose_logging);
+        assert!(!settings.diagnostics.memory_diagnostics_logging);
+        manager.save().unwrap();
+        let saved: toml::Value = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        for key in [
+            "auto_update",
+            "update_channel",
+            "application_console_logging",
+            "application_file_logging",
+            "tracing_logger_active",
+            "terminal_verbose_logging",
+            "memory_diagnostics_logging",
+        ] {
+            assert!(saved.get(key).is_none(), "legacy key remains: {key}");
+        }
+        let reloaded = SettingsManager::with_config_path(path).get();
+        assert_eq!(
+            toml::to_string(&settings).unwrap(),
+            toml::to_string(&reloaded).unwrap()
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn section_values_override_legacy_keys_with_per_field_fallback() {
+        let config = Config::builder()
+            .add_source(ConfigFile::from_str(
+                r#"
+auto_update = true
+update_channel = "alpha"
+application_console_logging = true
+terminal_verbose_logging = true
+[update]
+auto_update = false
+[diagnostics]
+application_console_logging = false
+"#,
+                FileFormat::Toml,
+            ))
+            .build()
+            .unwrap();
+        let settings = deserialize_settings(config).unwrap();
+        assert!(!settings.update.auto_update);
+        assert_eq!(settings.update.update_channel, "alpha");
+        assert!(!settings.diagnostics.application_console_logging);
+        assert!(settings.diagnostics.terminal_verbose_logging);
+        assert!(settings.diagnostics.tracing_logger_active);
     }
 
     #[test]

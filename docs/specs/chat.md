@@ -174,6 +174,10 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
 34. Incremental message-row identity includes both mode and persisted message
     ID. Switching to an empty mode still commits an empty render signature and
     removes every row mounted by the previous mode.
+    First entry and mode switches that reveal the latest messages must mount
+    the destination history's tail before revealing the viewport and pinning
+    its actual bottom. Never select that window using the previous mode's
+    scroll offset or depend on a later wheel/scroll callback to mount the tail.
 35. Every submitted AI or RAG turn starts one real elapsed timer. The pending
     assistant row updates once per second, and the terminal assistant or error
     row persists the measured `elapsed_ms` and renders a compact frozen label.
@@ -299,6 +303,9 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
     revision，只有其模式和 revision 都仍与可见 Chat 状态一致时才能提交。
 34. 增量消息行身份必须同时包含模式和持久化消息 ID。切换到空历史模式时仍必须提交空的
     render signature，并删除上一模式挂载的全部消息行。
+    首次进入或模式切换需要展示最新消息时，必须先挂载目标历史的尾部窗口，再显示消息
+    视口并按真实布局贴底；禁止沿用上一模式的滚动偏移选择窗口，或依赖后续滚动回调
+    才挂载末尾消息。
 35. 每次提交 AI 或 RAG 对话都会启动一个真实耗时计时器；等待中的 assistant 行每秒更新，
     完成或失败的 assistant 行持久化实测 `elapsed_ms` 并显示紧凑的冻结标签。缺少
     `elapsed_ms` 的旧 JSONL 记录继续兼容读取且不显示耗时。
@@ -316,6 +323,24 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
     轨道顶部。
 
 ## Regression checklist / 回归检查
+
+- Switch repeatedly between a short history and a history already paged beyond
+  32 rows. Check the first revealed frame and the settled frame without wheel
+  input: the latest message is visible, the bottom spacer is zero, the model
+  stays bounded, and a history shorter than the viewport has zero scroll offset.
+  / 在短历史与已加载超过 32 行的历史之间反复切换；不输入滚轮，分别检查首个显示帧
+  和稳定帧：最新消息可见、底部 spacer 为零、挂载行数有界，短历史滚动偏移为零。
+
+- Compiled-UI pagination sweeps must dispatch real wheel events through the
+  message viewport so Flickable owns the scroll limits and input callbacks.
+  Do not assign offsets up to an estimated document extent: estimates may
+  exceed the rendered tail. Check both AI/RAG modes, first/last-message
+  visibility at the actual boundaries, at most 32 mounted rows, and no more
+  than 1 px of virtual blank throughout both directions.
+  / 编译后 UI 的分页回归通过消息视口派发真实滚轮事件，由 Flickable 负责滚动
+  边界及输入回调；不能按估算文档高度直接赋值滚动位置，因为估算可能超过真实
+  尾部。覆盖 AI/RAG 两种模式、实际边界处首末消息可见、最多挂载 32 行，以及
+  双向滚动过程中虚拟空白不超过 1px。
 
 - Load a pre-status JSONL history and verify it remains visible.
 - Verify a legacy `❌ message` renders as an error icon plus selectable `message`

@@ -19,6 +19,7 @@ pub(super) struct VirtualWindowPolicy {
     overscan_px: f32,
     fill_window: bool,
     prefer_rows_before: bool,
+    align_to_latest: bool,
 }
 
 impl VirtualWindowPolicy {
@@ -29,6 +30,7 @@ impl VirtualWindowPolicy {
             overscan_px: 1_200.0,
             fill_window: true,
             prefer_rows_before: false,
+            align_to_latest: false,
         }
     }
 
@@ -39,6 +41,7 @@ impl VirtualWindowPolicy {
             overscan_px: 2_400.0,
             fill_window: false,
             prefer_rows_before: false,
+            align_to_latest: false,
         }
     }
 
@@ -49,7 +52,14 @@ impl VirtualWindowPolicy {
             overscan_px: 0.0,
             fill_window: false,
             prefer_rows_before: !moving_down,
+            align_to_latest: false,
         }
+    }
+
+    pub(super) fn for_latest_messages(mut self) -> Self {
+        self.align_to_latest = true;
+        self.prefer_rows_before = true;
+        self
     }
 }
 
@@ -112,6 +122,13 @@ pub(super) fn compute_virtual_window_with_estimates(
         let mut cache = cache.borrow_mut();
         let sampled_average = cache.ensure(messages, wrap_width_px);
         let prefix = cache.prefix_slice();
+        // A new mode must mount its tail before the UI scrolls to the actual
+        // bottom; the previous mode's offset does not locate this history.
+        let scroll_offset_px = if policy.align_to_latest {
+            (prefix[total] - viewport_height_px).max(0.0)
+        } else {
+            scroll_offset_px
+        };
         let visible_rows = ((viewport_height_px / row_estimate_px.max(72.0)).ceil() as usize)
             .max(policy.min_visible_rows)
             .min(policy.max_window_rows);

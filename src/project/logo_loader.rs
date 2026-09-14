@@ -174,6 +174,7 @@ mod tests {
             logo: url,
             project_tags: Vec::new(),
             is_pr_auto_update: false,
+            hook_ids: Vec::new(),
             pr_overview: ProjectPrOverview::default(),
         }]
     }

@@ -125,7 +125,9 @@ impl Default for TerminalDrawerState {
 
 pub fn setup_terminal(ui: &MainWindow) {
     TERMINAL_VERBOSE_LOGGING.store(
-        crate::settings::load_settings().terminal_verbose_logging,
+        crate::settings::load_settings()
+            .diagnostics
+            .terminal_verbose_logging,
         Ordering::Relaxed,
     );
     let shared_state = Arc::new(Mutex::new(TerminalDrawerState::default()));

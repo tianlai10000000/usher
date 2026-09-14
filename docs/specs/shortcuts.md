@@ -78,6 +78,10 @@ Command/Ctrl+, 打开设置。
    the active input method or keyboard layout.
 5. A modal overlay owns input. Application shortcuts reject while one is
    visible, allowing the focused dialog to handle Escape and editing keys.
+   Hook Add/Edit opts into shared Dialog Cmd+Enter (macOS) / Ctrl+Enter saving;
+   plain Enter remains a source newline, and busy or destructive dialogs reject submission.
+   Modal keys are forwarded through the root callback to `SettingsPageBridge`
+   before application-command resolution, including when focus leaves the factory.
 6. A disabled command rejects instead of swallowing the event. Back/Forward
    require Router history; Settings rejects on Settings itself.
 7. Unmatched events return to the focused child. Standard text editing and
@@ -108,6 +112,9 @@ Command/Ctrl+, 打开设置。
    必须与当前输入法或键盘布局无关。
 5. Modal Overlay 拥有输入；显示期间应用快捷键全部拒绝，让当前 Dialog 继续处理
    Escape 和编辑键。
+   Hook 新增/编辑支持 Cmd/Ctrl+Enter 保存；普通 Enter 换行，忙碌及破坏性确认
+   不提交。主窗口在应用命令解析前经 SettingsPageBridge 转发弹窗按键，覆盖焦点
+   离开独立 factory 的情况。
 6. 不可用命令必须拒绝而不是吞键；Back/Forward 依赖 Router 历史，Settings 页面
    自身不重复执行 Open Settings。
 7. 未匹配事件返回当前焦点控件，文本编辑与无障碍键盘行为必须保持不变。

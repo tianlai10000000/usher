@@ -1,0 +1,54 @@
+import { GitHubTheme } from "../../theme/github_theme.slint";
+
+export component GitHubRadio inherits FocusScope {
+    in property <string> text;
+    in property <bool> checked: false;
+    in property <bool> control-enabled: true;
+    callback chosen();
+    callback stepped(int);
+    private property <bool> keyboard-focus: false;
+    width: label.preferred-width + 32px;
+    height: 32px;
+    enabled: root.control-enabled;
+    accessible-role: radio-button;
+    accessible-label: root.text;
+    accessible-enabled: root.control-enabled;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    focus-gained(reason) => { root.keyboard-focus = reason == FocusReason.tab-navigation; }
+    focus-lost => { root.keyboard-focus = false; }
+    key-pressed(event) => {
+        root.keyboard-focus = true;
+        if !root.control-enabled { return reject; }
+        if event.text == " " || event.text == Key.Return { root.chosen(); return accept; }
+        if event.text == Key.LeftArrow || event.text == Key.UpArrow { root.stepped(-1); return accept; }
+        if event.text == Key.RightArrow || event.text == Key.DownArrow { root.stepped(1); return accept; }
+        return reject;
+    }
+    Rectangle {
+        x: 1px; y: 5px; width: 22px; height: 22px; border-radius: 11px;
+        background: transparent; border-width: 2px; border-color: GitHubTheme.accent-fg;
+        visible: root.has-focus && root.keyboard-focus;
+    }
+    Rectangle {
+        x: 4px; y: 8px; width: 16px; height: 16px; border-radius: 8px;
+        border-width: 1px;
+        border-color: root.checked || touch.has-hover ? GitHubTheme.accent-emphasis : GitHubTheme.border-strong;
+        background: GitHubTheme.canvas-default;
+        opacity: root.control-enabled ? 1 : 0.5;
+        Rectangle {
+            x: 4px; y: 4px; width: 8px; height: 8px; border-radius: 4px;
+            background: GitHubTheme.accent-emphasis; visible: root.checked;
+        }
+    }
+    label := Text {
+        x: 28px; height: parent.height; width: parent.width - 28px;
+        text: root.text; font-size: 14px; vertical-alignment: center;
+        color: root.control-enabled ? GitHubTheme.fg-default : GitHubTheme.control-disabled-fg;
+    }
+    touch := TouchArea {
+        width: parent.width; height: parent.height; enabled: root.control-enabled;
+        mouse-cursor: pointer;
+        clicked => { root.focus(); root.keyboard-focus = false; root.chosen(); }
+    }
+}

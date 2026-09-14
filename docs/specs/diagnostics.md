@@ -8,6 +8,16 @@ This specification defines user-controlled application log destinations, optiona
 
 ## Controls / 控制项
 
+The five diagnostic settings are stored under `[diagnostics]` in `settings.toml`.
+Legacy root keys are accepted on load as per-field fallbacks; explicit section
+values win. Saving emits only the section keys and preserves existing values
+and defaults. Update preferences `auto_update` and `update_channel` use `[update]`
+with the same migration rules.
+
+五个诊断设置统一保存在 `settings.toml` 的 `[diagnostics]` 下。加载时旧顶层键作为
+逐字段回退，分类内显式值优先；保存只写分类内键，保留已有值与默认值。
+更新设置 `auto_update` 和 `update_channel` 使用 `[update]`，迁移规则相同。
+
 - Console output controls standard application log output.
 - Application file logs control plain-text `usher.log` writes.
 - Structured tracing controls `usher_tracing.log` writes.

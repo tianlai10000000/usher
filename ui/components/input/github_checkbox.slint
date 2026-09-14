@@ -1,0 +1,87 @@
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { I18n } from "@i18n";
+
+// Controlled Primer checkbox. The owner derives mixed state from its children.
+export component GitHubCheckbox inherits FocusScope {
+    in property <string> text;
+    in property <string> description: "";
+    in property <bool> checked: false;
+    in property <bool> indeterminate: false;
+    in property <bool> control-enabled: true;
+    in property <int> label-font-weight: 400;
+    callback toggled(bool);
+    private property <bool> keyboard-focus-visible: false;
+    private property <bool> marked: root.checked || root.indeterminate;
+
+    width: 100%;
+    height: root.description == "" ? 32px : 52px;
+    enabled: root.control-enabled;
+    accessible-role: checkbox;
+    accessible-label: root.text;
+    accessible-description: root.indeterminate
+        ? I18n.common-partially-selected + ". " + root.description : root.description;
+    accessible-enabled: root.control-enabled;
+    accessible-checkable: true;
+    accessible-checked: root.marked;
+
+    key-pressed(event) => {
+        root.keyboard-focus-visible = true;
+        if root.control-enabled && (event.text == " " || event.text == Key.Return) {
+            root.toggled(!root.marked);
+            return accept;
+        }
+        return reject;
+    }
+    focus-gained(reason) => { root.keyboard-focus-visible = reason == FocusReason.tab-navigation; }
+    focus-lost => { root.keyboard-focus-visible = false; }
+
+    Rectangle {
+        x: 5px; y: 5px; width: 22px; height: 22px;
+        border-radius: 5px; border-width: 2px;
+        border-color: GitHubTheme.accent-fg;
+        background: transparent;
+        visible: root.has-focus && root.keyboard-focus-visible;
+    }
+    Rectangle {
+        x: 8px; y: 8px; width: 16px; height: 16px;
+        border-radius: 3px; border-width: 1px;
+        border-color: root.marked || (touch.has-hover && root.control-enabled)
+            ? GitHubTheme.accent-emphasis : GitHubTheme.border-strong;
+        background: root.marked ? GitHubTheme.accent-emphasis : GitHubTheme.control-input-bg;
+        opacity: root.control-enabled ? 1 : 0.5;
+        Image {
+            width: 16px; height: 16px;
+            source: @image-url("../../assets/icons/octicon-check-16.svg");
+            colorize: GitHubTheme.fg-on-emphasis;
+            visible: root.checked && !root.indeterminate;
+        }
+        Rectangle {
+            x: 4px; y: 7px; width: 8px; height: 2px;
+            background: GitHubTheme.fg-on-emphasis;
+            visible: root.indeterminate;
+        }
+    }
+    Text {
+        x: 32px; y: 0px; width: parent.width - 40px; height: 32px;
+        text: root.text; font-size: 14px;
+        font-weight: root.label-font-weight;
+        color: root.control-enabled ? GitHubTheme.fg-default : GitHubTheme.control-disabled-fg;
+        vertical-alignment: center; overflow: elide;
+    }
+    Text {
+        x: 32px; y: 30px; width: parent.width - 40px; height: 18px;
+        visible: root.description != "";
+        text: root.description; font-size: 12px;
+        color: GitHubTheme.fg-muted; overflow: elide;
+    }
+    touch := TouchArea {
+        width: parent.width; height: parent.height;
+        enabled: root.control-enabled;
+        mouse-cursor: pointer;
+        clicked => {
+            root.focus();
+            root.keyboard-focus-visible = false;
+            root.toggled(!root.marked);
+        }
+    }
+}

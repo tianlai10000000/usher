@@ -1,3 +1,4 @@
+mod log_layout;
 mod log_model;
 mod model;
 mod presenter;
@@ -53,6 +54,7 @@ thread_local! {
 }
 
 pub(crate) fn setup_job_run(ui: &MainWindow) {
+    log_layout::setup(ui);
     let ui_weak = ui.as_weak();
     ui.on_job_run_stop(move || {
         let Some(ui) = ui_weak.upgrade() else {
@@ -116,7 +118,11 @@ pub(crate) fn apply_job_run(
     ui.set_job_run_context_name(descriptor.context_name.clone().into());
     ui.set_job_run_job_name(descriptor.job_name.clone().into());
     ui.set_job_run_trigger_detail(descriptor.trigger_detail.resolve().into());
-    ui.set_job_run_summary(summary.resolve().into());
+    // The summary occupies a fixed single-line header row. Keep multiline
+    // hook errors in the expanded log instead of letting newline characters
+    // paint over the title and disclosure rows.
+    let summary = summary.resolve().replace(['\r', '\n'], " ");
+    ui.set_job_run_summary(summary.into());
     ui.set_job_run_status(snapshot.status.as_str().into());
     ui.set_job_run_conclusion(
         snapshot

@@ -336,6 +336,7 @@ pub(super) async fn get_pull_request_diff(
         .unwrap_or(0)
         .saturating_add(review_count.unwrap_or(0));
     Ok(PullRequestDiffDetail {
+        author_identity: super::PullRequestAuthorIdentity::from_user(&detail["user"]),
         added_lines: files.iter().map(|file| file.added_lines).sum(),
         removed_lines: files.iter().map(|file| file.removed_lines).sum(),
         commit_count,
@@ -370,6 +371,7 @@ pub(super) async fn get_commit_range_diff(
         .ok_or_else(|| "GitHub commit comparison response has no file list.".to_string())?;
     let files = values.iter().map(decode_diff_file).collect::<Vec<_>>();
     Ok(PullRequestDiffDetail {
+        author_identity: Default::default(),
         added_lines: files.iter().map(|file| file.added_lines).sum(),
         removed_lines: files.iter().map(|file| file.removed_lines).sum(),
         commit_count,

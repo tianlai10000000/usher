@@ -33,6 +33,7 @@ export component GitHubDialog inherits FocusScope {
     in property <string> primary-label: "";
     in property <bool> primary-enabled: true;
     in property <bool> primary-busy: false;
+    in property <bool> submit-on-primary-enter: false;
     in property <bool> primary-danger: false;
     in property <bool> primary-success: false;
     in property <bool> fullscreen-on-narrow: true;
@@ -104,6 +105,12 @@ export component GitHubDialog inherits FocusScope {
     // Intercept Esc before nested TextInputs so the dialog closes even while
     // a field inside @children has focus (matches github.com Dialog).
     capture-key-pressed(event) => {
+        if root.dialog-visible && root.submit-on-primary-enter
+                && event.text == Key.Return && event.modifiers.control
+                && !event.modifiers.alt && !event.modifiers.shift && !event.modifiers.meta {
+            if root.primary-enabled && !root.primary-busy { root.primary-clicked(); }
+            return accept;
+        }
         if root.escape-dismisses && event.text == Key.Escape {
             root.close-requested();
             return accept;

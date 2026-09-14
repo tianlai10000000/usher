@@ -2,6 +2,15 @@
 
 ## 1. Scope / 范围
 
+Before adding or changing any Tooltip, read [Tooltip implementation contract](tooltips.md).
+新增或修改任何 Tooltip 前，必须先阅读 [Tooltip 实现规范](tooltips.md)，并完成其验收矩阵。
+
+Before every UI change, read [Internationalization](i18n.md). All user-facing
+copy must use the shared semantic catalog, and already-mounted Rust projections
+must repaint in the active locale without requiring a remount.
+每次 UI 改动前必须先阅读[国际化规范](i18n.md)。所有用户可见文案都必须进入共享
+语义 catalog；已经挂载的 Rust 动态投影必须直接按当前语言刷新，不能依赖重新挂载。
+
 This specification is the stable visual and interaction contract for every
 user-facing Slint page and application-owned reusable component under `ui/`.
 It covers naming, tokens, layout, controls, overlays, feedback, accessibility,
@@ -209,6 +218,19 @@ expanded/collapsed, and success confirmation.
   consequence is difficult to reverse.
 - Loading prevents duplicate starts and preserves the control's dimensions.
 - Disabled state must prevent input, not only lower opacity.
+- A primary pointer click outside the currently focused text editor must clear
+  that editor's focus, caret, and pointer focus outline, including when a
+  `Flickable`/scroll viewport consumes the blank press. Pressing inside the
+  current editor or another editor must preserve or transfer focus normally;
+  the window observer must not intercept the target's first click. / 鼠标主键在
+  当前文本编辑器之外按下时，必须清除该编辑器的焦点、光标和鼠标焦点描边，即使
+  空白点击被 `Flickable`/滚动视口消费也一样。点击当前或另一个编辑器时应正常
+  保持或转移焦点；窗口观察器不得拦截目标控件的第一次点击。
+  Bounds include field padding and must account for embedded factory host offsets
+  and viewport clipping. Releasing a text-selection drag outside the field must
+  retain focus. Verify ordinary and independently generated pages. / 边界包括字段
+  内边距，并必须计入独立 factory 宿主偏移与视口裁剪；框内开始拖选、框外松开
+  必须保留焦点。验收覆盖普通页面和独立生成页面。
 - Shared controls expose Slint accessibility roles, enabled/checked/value
   state, and a label derived from visible text or the required IconButton
   tooltip. Buttons, links, tabs, disclosure rows, and choices support
@@ -303,6 +325,9 @@ expanded/collapsed, and success confirmation.
   mode) border-only overlay with a restrained 10 px rounded trailing edge, no
   right-edge shadow, and Codex's neutral `#dfdfe0` light-mode hairline. Both remain above ordinary route
   surfaces; modal backdrops remain above them.
+  The global hover sidebar and its edge trigger must also sit above full-window
+  page factories and their sticky navigation/menus. While a modal is visible,
+  hide the hover sidebar and disable its trigger.
   Native live resize settles shared shell geometry to the current docked target
   instead of exposing an intermediate sidebar animation position.
   Route content must never cover the sidebar, this edge, or an escaping
@@ -384,7 +409,9 @@ expanded/collapsed, and success confirmation.
   侧栏主体自身不得绘制独立的右侧容器阴影；固定态使用根层清晰边框与克制的内向
   Elevation，临时 Hover 态使用不透明白色（浅色模式 `#ffffff`）、只有边框、尾部上下
   10px 圆角且没有右边界阴影的浮层；浅色边框使用 Codex 的中性 `#dfdfe0`。
-  两者均位于普通路由表面之上、Modal 遮罩之下。原生 Live Resize 期间，共享 Shell
+  两者均位于普通路由表面之上、Modal 遮罩之下。全局 Hover 侧栏及边缘触发区
+  还须高于全窗口页面 factory 及其吸顶导航/菜单；
+  模态窗口显示时隐藏 Hover 侧栏并禁用触发区。原生 Live Resize 期间，共享 Shell
   几何必须收敛到当前固定目标，不得暴露侧栏动画中间位置。窗口 Resize 或路由专属组合期间，页面内容
   不得覆盖侧栏、右边界或越过侧栏边界显示的 Tooltip。
   macOS 固定侧栏使用固定 240px 宽、仅随高度缩放的原生 Effect View，材质为 Menu、
@@ -450,6 +477,23 @@ expanded/collapsed, and success confirmation.
   factory-local state 和相互独立的字面量 surface，任何标签字符串或共享动态 tip-label
   属性都不得穿过列表 delegate。局部 Tooltip Rectangle、指针相对的内置 `Tooltip` 和提高局部
   `z` 均不是允许的替代方案。
+- `GitHubMetadataLabel`: the small, non-interactive Primer Product UI Label.
+  Match [official Label CSS](https://github.com/primer/react/blob/main/packages/react/src/Label/Label.module.css)
+  (checked 2026-09-11): 20 px outer height, 12 px/500 text, transparent background,
+  1 px border, 6 px inline padding inside each border, full capsule radius and
+  vertically centered content without an extra baseline offset. Width includes
+  both borders. Default uses default foreground/border; Primary uses default
+  foreground for both; Secondary uses muted foreground and `label-border-secondary`
+  (default border at 70% alpha, matching the official
+  [borderColor.muted token](https://github.com/primer/primitives/blob/main/src/tokens/functional/color/borderColor.json5)). Hook disabled
+  and unavailable metadata uses Secondary; this is a contextual choice, not an
+  official rule that all statuses must use Secondary. Preserve row centering.
+  UI Components shows all three supported neutral variants and bounded text.
+  / 共享元数据标签对齐 Primer Product UI 的 small Label：外高 20px，字号 12px、
+  字重 500，透明底、1px 描边、边框内左右各 6px 留白，胶囊圆角，内容垂直居中，
+  不额外偏移基线。自然宽度包含两侧边框。Default 使用默认前景/边框；Primary
+  使用默认前景作为文字及边框；Secondary 使用弱化前景/边框。Hook 禁用与不可用
+  状态选用 Secondary，这是项目的场景选择。演练场展示三种中性变体与截断样例。
 - `GitHubCounterLabel`: the typed Primer CounterLabel counterpart for counts
   adjacent to navigation text or actions. It provides Default, Primary, and
   Secondary schemes, optional upper-limit formatting, a compact overlay mode,
@@ -505,9 +549,33 @@ expanded/collapsed, and success confirmation.
 - `GitHubCopyButton`: 32×32 invisible icon button, centered 16 px Copy
   Octicon, persistent tooltip, and Copy→Check confirmation only after the
   clipboard callback returns success.
+- Form Select geometry: shared `GitHubSelectPopup`/`GitHubSelectOption` use
+  explicit 32 px option rows, 4 px padding per edge,
+  and content-sized height (40 px for one plain option, capped for scrolling).
+  When the full menu cannot fit below and more room is available above, open
+  above the trigger with a 4 px gap and retain an 8 px viewport margin; do not
+  clamp a downward menu over its trigger. Convert the trigger's content position
+  to viewport coordinates after scrolling and before collision checks.
+  Independent selectors must not reuse
+  each other's option model subtree in a Settings factory. Verify one/multiple
+  options, top/bottom anchors, changing selectors, and row-to-value selection.
+  These dimensions are the application's shared Primer-style geometry.
+  / 共享选择浮层使用明确的 32px 选项行、每边 4px 内边距，按内容决定高度
+  （单个普通选项 40px，长列表限制高度并滚动）。下方不足且上方更宽裕时向上
+  展开，距触发框 4px、距视口边缘至少 8px，不能向下展开后挤压到触发框上。
+  滚动后先将触发框内容坐标换算为视口坐标，再进行边界判断。
+  Settings factory 中不同选择器的选项模型子树必须隔离，避免文案残留。
+  验收覆盖单/多选项、顶部/底部锚点、选择器切换和选项值对应关系。
+  这些尺寸是本应用统一的 Primer 风格几何约定。
+
 - Form Select: `GitHubSelectPopup` and `GitHubSelectOption` pair with the shared
   `GitHubSettingsSectionMenuButton` trigger. Opening never changes form height
-  or pushes following fields. Mount the menu at the owning window/factory root
+  or commits a value. Activating an already-open selector's trigger closes its
+  menu without changing the selection and restores trigger focus; activating
+  another selector opens that selector on the same click. Trigger handlers may
+  use the shared `GitHubSelectState.toggle()` to keep this behavior consistent.
+  This follows [Primer SelectPanel nonmodal dismissal](https://primer.style/product/components/select-panel/guidelines/).
+  Opening never pushes following fields. Mount the menu at the owning window/factory root
   outside scrolling layouts, using the Tooltip's `GitHubFloatingOverlayHost`
   for bounded flip/shift placement and `GitHubActionMenu` for its surface, with outside-click
   dismissal, Escape cancellation, restored trigger focus, bounded internal
@@ -515,8 +583,16 @@ expanded/collapsed, and success confirmation.
   option has a default-foreground Check with no navigation stripe or persistent
   selected fill. The trigger reports expanded/disabled accessibility state.
   Keep Settings' manifest-generated fixed language leaves. UI Components must
-  exercise this same Select with a following field and a disabled trigger.
+  exercise this same Select with a following field, a disabled trigger, and a
+  grouped example. Grouped Select content uses `GitHubSelectGroupHeading`; headings
+  contribute to content/reveal geometry but never to the selectable option index.
+  The first option in each group exposes its heading as an accessible description.
   Option rows must use the actual menu-content width and explicit coordinates.
+  Active-option focus must be scoped to the open selector's owner; hidden peer
+  menus must not focus their options. For offset showcase triggers, derive
+  viewport anchors from a verified zero-offset origin plus local offsets rather
+  than inherited coordinates that count the component offset twice. Test pointer
+  release on both plain and grouped triggers over multiple layout frames.
   Outside dismissal observes pointer release after the target handles its click, including
   sidebar/title/status chrome and the isolated Settings factory; it must not
   intercept that click or restore focus away from the clicked control. The
@@ -525,13 +601,21 @@ expanded/collapsed, and success confirmation.
   and [SelectPanel dismissal](https://primer.style/product/components/select-panel/).
 - 表单 Select 使用共享 `GitHubSelectPopup`、`GitHubSelectOption` 与
   `GitHubSettingsSectionMenuButton` 触发器；展开不得改变表单高度或挤压后续字段。
+  再次激活已展开的触发器必须收起选项，保留当前值并恢复触发器焦点；点击其他
+  选择器须在同一次点击中切换。触发回调可复用 `GitHubSelectState.toggle()`。
   浮层在所属窗口/factory 根层挂载，复用 `GitHubActionMenu`，负责外部关闭和焦点恢复，支持 Escape 取消、方向键/Home/End 导航、
   Enter/Space 选择和有界内部滚动。选中项使用默认前景色勾选标记，不使用导航条或
   常驻选中底色。Settings 保留 manifest 生成的固定语言叶子；UI Components 必须
-  展示同一 Select、后续字段与禁用触发器。
+  展示同一 Select、后续字段、禁用触发器和分组示例。分组 Select 使用
+  `GitHubSelectGroupHeading`；标题计入内容与滚动定位，但不得计入可选项索引；每组
+  首个选项通过无障碍说明提供分组标题。
   定位复用 Tooltip 的 `GitHubFloatingOverlayHost`，支持上下翻转、边缘约束和有界
-  内部滚动。选项必须使用菜单内容宽度与明确坐标。窗口级鼠标释放在目标处理完点击后通知关闭，
-  覆盖侧栏、标题栏、状态栏与 Settings factory；全窗口键盘作用域关闭鼠标自动获取焦点，
+  内部滚动。选项必须使用菜单内容宽度与明确坐标。
+  活动选项焦点必须限定到当前展开的选择器，隐藏菜单不得抢焦点。带偏移的示例触发器从
+  已验证的零偏移原点加局部偏移计算视口锚点，避免继承坐标重复计入组件偏移；验收普通
+  与分组触发器在鼠标释放后跨多个布局帧保持展开。
+  窗口级鼠标释放在目标处理完点击后通知关闭，覆盖侧栏、标题栏、状态栏与 Settings
+  factory；全窗口键盘作用域关闭鼠标自动获取焦点，
   不得拦截首次点击或抢走目标焦点。
 - `GitHubActionMenu`: ActionList inside an AnchoredOverlay; 12 px overlay
   radius, semantic border/shadow, 4 px anchor gap, viewport collision handling,
@@ -569,6 +653,16 @@ expanded/collapsed, and success confirmation.
   examples.
 - `GitHubPageHeader`: the shared Primer PageHeader foundation for page title,
   description, leading visual, optional divider, and trailing actions.
+- `GitHubRadio`: controlled single-choice input with radio accessibility,
+  Space/Return selection and arrow-step callbacks. Hook runtimes share one mounted
+  editor with separate temporary language drafts; only the selected draft is
+  saved or tested. The radio states are mutually exclusive. UI Components demonstrates
+  selected/unselected/disabled states. Hook test feedback stays beside its action,
+  with bounded inline error details below, following Primer Forms feedback.
+  Hook actions use literal tooltip leaves and permanently mounted surfaces at the
+  factory root (UI-103), with shared floating geometry. `GitHubDialog` supports
+  opt-in primary-modifier+Enter submission; Hook Add/Edit enables it, preserving
+  ordinary source newlines, Escape cancellation, and busy-state guards.
 - `GitHubUnderlineNavItem`: the shared UnderlineNav/UnderlinePanels tab item
   for route and in-page navigation. It owns optional leading Octicon,
   descriptive label, selected underline, hover, disabled, Enter/Space, and
@@ -635,6 +729,27 @@ expanded/collapsed, and success confirmation.
 - `GitHubToggle`: immediate-save boolean setting only; permanently visible
   external label/caption supplied by its owner, 24 px minimum target, loading
   and disabled protection, Enter/Space activation, and keyboard-visible focus.
+- `GitHubCheckbox` (`ui/components/input/github_checkbox.slint`) is the shared
+  controlled form checkbox: fixed 16 px box, full labeled row hit target,
+  unchecked/checked/indeterminate/disabled states, Enter/Space and visible keyboard
+  focus. It follows [Primer Checkbox](https://primer.style/product/components/checkbox/).
+  Slint exposes a boolean accessibility check state; mixed state additionally uses
+  a localized accessibility description. Owners derive parent state from children;
+  activating a marked/mixed parent clears its children. Project Hook selection
+  defaults empty/collapsed; checking the parent selects all enabled rows and expands.
+  Disabled Hook rows are unchecked and use disabled checkbox, label, pointer, and
+  keyboard interaction while retaining selection intent outside the visual checked
+  state. UI Components includes interactive parent/children and disabled state examples.
+  Project selection keeps the count on the parent row and uses one bordered,
+  divided list with readable event captions and separate status Labels. Hover
+  changes the checkbox outline instead of painting a full-row background.
+  / 共享复选框固定 16 px 方框，整行命中，支持未选、全选、半选、禁用与键盘焦点。
+  Slint 无障碍勾选值为布尔，半选额外使用本地化描述。父项从子项推导状态；取消
+  全选或半选父项清空子项。项目 Hook 默认空选并收起，勾选时只全选可用行并展开；
+  禁用 Hook 行显示为未选中，复选框、文字、鼠标及键盘交互均使用 disabled 状态，
+  选择意图保留在视觉勾选状态之外。UI Components 展示父子联动和禁用矩阵。
+  项目选择将数量与父项同行显示，子项采用单一边框分隔列表、可读事件说明和独立
+  状态 Label；悬浮只改变复选框描边，不使用整行灰色底色。
 - `GitHubSegment`: one of 2–5 mutually exclusive, instantly applied choices;
   labels do not wrap and the group has a visible or contextual label.
 - `GitHubDialog`: root-layer modal/non-modal overlay with owned backdrop input,
@@ -651,11 +766,18 @@ expanded/collapsed, and success confirmation.
   must not shift the Dialog center. On macOS, the standard
   close/minimize/zoom traffic lights remain above the
   backdrop and clickable; application-owned sidebar/back/forward title-bar
-  accessories remain below it and must expose no hover, Tooltip, or click
-  interaction while the backdrop is visible. Native-title-bar clicks also
+  accessories remain visible underneath the actual backdrop. During a modal,
+  their native control-strip image is composited in Slint at the original window
+  coordinates, below Dialog surfaces and scrims; the native drawing is temporarily
+  hidden because AppKit otherwise paints above Slint. Closing releases the image
+  and restores native rendering. Their native input shield remains mounted
+  to prevent hover, Tooltip, or click interaction. Native-title-bar clicks also
   participate in the shared outside-dismiss contract: a Dialog closes only if
   its ordinary backdrop click would close it; hard/modal forms keep their
   existing non-dismissible behavior.
+  macOS 侧栏/前进/后退按钮在弹窗期间仍可透过遮罩看到；原生控件条图像按原位置
+  合成在 Slint 遮罩下方，Dialog 正文覆盖到的部分正常遮挡。原生绘制临时交给
+  Slint，输入屏蔽层继续拦截交互；关闭后释放图像并恢复原生绘制。
 - `GitHubToast`: compact transient feedback using the current Primer Banner
   anatomy and semantic status icon/background/border, never the retired
   rail-style Toast pattern. A single-line message, leading icon/spinner, and
@@ -663,7 +785,9 @@ expanded/collapsed, and success confirmation.
   icon/spinner and dismiss glyph align with its first line; the message block
   must never be centered against its complete multi-line height.
 - `GitHubNotificationBanner`: queued persistent feedback with at most two
-  shared GitHub actions plus a dismiss control. Render only the newest queue
+  shared GitHub actions plus a dismiss control. Global notifications and Toasts
+  paint above Dialog surfaces and scrims, including isolated Settings dialogs.
+  Render only the newest queue
   head so one Banner is visible at a time; dismissing it reveals the next older
   item. The transient Banner queue is capped at three (newest-first; older
   tails drop from the overlay). Its in-card footer distinguishes
@@ -690,10 +814,50 @@ expanded/collapsed, and success confirmation.
   (indent guides, expandable directories, current file), while icon-only file
   actions reuse `GitHubIconButton`. Diff source remains virtualized and
   monospace; all surrounding prose and controls use application typography.
+- Wide split-page navigation / 宽屏双栏页导航：
+  Primer reference: [SplitPageLayout](https://primer.style/product/components/split-page-layout/)
+  supports a sticky navigation pane (enabled by default), and
+  [Navigation](https://primer.style/product/ui-patterns/navigation/) describes
+  NavList parent-detail navigation. The exact 16 px anchor, section-switch scroll
+  policy, and single scroll chain below are Usher conventions, not upstream
+  Primer mandates. / Primer 提供默认吸顶的 Pane 和 NavList 父子视图导航模式；
+  以下 16px 锚点、分组切换滚动策略及单一滚动链是 Usher 的应用约定，
+  不是 Primer 官方硬性要求。
+  Pages with a left section navigation and right content pane must keep the
+  navigation mounted and sticky at a 16 px viewport top inset while content
+  scrolls. Selecting another section aligns its content top with that same
+  inset; do not retain the previous section's deep scroll offset or scroll back
+  to the page-level title. Derive the anchor from layout geometry, and provide
+  enough scroll extent even for short sections. Keep a single scroll chain and
+  bound sticky navigation by its column bottom. Preserve each page's compact
+  layout behavior unless a separate compact interaction change is specified.
+  Regression checks cover long-to-long and long-to-short switches, switching
+  after wheel and scrollbar scrolling, both scroll ends, and breakpoint resize.
+  This contract applies to Settings and other pages adopting this layout;
+  it does not assert that all existing pages have already been migrated.
+  / 左侧分组导航、右侧内容的宽屏双栏布局统一遵守：导航节点常驻，内容滚动时
+  在视口顶部 16px 处吸顶；切换分组时，新内容顶部对齐同一留白，不继承上一分组
+  的深层滚动位置，也不回到页面大标题。锚点从实际布局计算，短内容也须有足够
+  滚动范围。保持单一滚动链，吸顶导航受列底部约束。除非另有窄屏交互需求，
+  保留各页面原有窄屏行为。验收覆盖长分组之间及长到短分组切换、滚轮和滚动条
+  滚动后切换、到顶到底、跨断点缩放。本规则适用于设置及其他采用同类布局的页面，
+  不表示现有页面已全部完成迁移。
 - Settings uses SplitPage/NavList at regular widths and a
   `GitHubSettingsSectionMenuButton` at compact widths. Both paths expose the
   same sections and keyboard contract; form controls remain shared components
   under `ui/components/settings/`.
+  At regular widths, the navigation sticks 16 px below the viewport top while
+  the form scrolls, bounded by its column bottom. At compact widths the trigger
+  keeps its in-flow scrolling, but the options use the shared root-mounted Select
+  popup and never change form height. Verify wheel/scrollbar scrolling to both ends,
+  section switching while scrolled (the new wide section aligns at the 16 px
+  sticky inset, with the page title above the viewport, including short sections),
+  and resizing across the 768 px page-width
+  breakpoint. / 宽屏导航随表单滚动在视口顶部 16px 处吸顶，并受列底部约束；
+  窄屏触发器随内容滚动，选项复用根层 Select 浮层且不得改变表单高度。宽屏切换分组（含短分组）须将分组顶部对齐吸顶的
+  16px 留白，页面大标题留在视口上方。
+  验收覆盖滚轮/滚动条到顶到底、滚动后切换分组，
+  以及跨越 768px 页面宽度断点的缩放。
 - Chat uses an unframed work surface, the complete currently loaded history,
   `GitHubScrollView`, compact bordered message surfaces, and a responsive
   bordered composer. Its in-flow history pagination action uses the small 28 px

@@ -6,6 +6,210 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
+msgctxt "hooks.runtime"
+msgid "Run with"
+msgstr "运行方式"
+
+msgctxt "hooks.clear_history"
+msgid "Clear execution history"
+msgstr "清空执行历史"
+
+msgctxt "hooks.clear_history_confirmation"
+msgid "Clear completed Hook runs and their logs? Queued and running Hooks will be kept."
+msgstr "清空已结束的 Hook 执行记录及日志？排队和运行中的 Hook 将保留。"
+
+msgctxt "hooks.status_passed"
+msgid "Passed"
+msgstr "测试通过"
+
+msgctxt "hooks.status_failed"
+msgid "Failed"
+msgstr "测试失败"
+
+msgctxt "hooks.status_cancelled"
+msgid "Cancelled"
+msgstr "已取消"
+
+msgctxt "common.partially_selected"
+msgid "Partially selected"
+msgstr "部分选中"
+
+msgctxt "projects.trigger_hooks"
+msgid "Trigger Hooks"
+msgstr "触发 Hook"
+
+msgctxt "projects.no_hooks"
+msgid "No Hooks configured"
+msgstr "尚未配置 Hook"
+
+msgctxt "projects.hooks_loading"
+msgid "Loading Hooks..."
+msgstr "正在加载 Hook..."
+
+msgctxt "projects.hook_disabled"
+msgid "Disabled"
+msgstr "已禁用"
+
+msgctxt "projects.hook_unavailable"
+msgid "Unavailable"
+msgstr "不可用"
+
+msgctxt "hooks.title"
+msgid "Hooks"
+msgstr "Hooks"
+
+msgctxt "hooks.event_pr_approved"
+msgid "Pull request approved"
+msgstr "Pull Request 审核通过后"
+
+msgctxt "hooks.event_pr_merged"
+msgid "Pull request merged"
+msgstr "Pull Request 合并完成后"
+
+msgctxt "hooks.event_ai_review"
+msgid "AI review completed"
+msgstr "AI 评审完成后"
+
+msgctxt "hooks.category_pr_review"
+msgid "Pull request review"
+msgstr "Pull Request 评审"
+
+msgctxt "hooks.category_ai_review"
+msgid "AI code review"
+msgstr "AI 代码评审"
+
+msgctxt "hooks.category_other"
+msgid "Other"
+msgstr "其他"
+
+msgctxt "hooks.stop"
+msgid "Stop"
+msgstr "停止"
+
+msgctxt "hooks.new"
+msgid "New Hook"
+msgstr "新建 Hook"
+
+msgctxt "hooks.edit"
+msgid "Edit Hook"
+msgstr "编辑 Hook"
+
+msgctxt "hooks.delete_title"
+msgid "Delete Hook"
+msgstr "删除 Hook"
+
+msgctxt "hooks.delete_confirmation"
+msgid "Delete this Hook? Existing execution history will be kept."
+msgstr "删除此 Hook？已有执行历史将保留。"
+
+msgctxt "hooks.name"
+msgid "Name"
+msgstr "名称"
+
+msgctxt "hooks.enabled"
+msgid "Enable this Hook"
+msgstr "启用此 Hook"
+
+msgctxt "hooks.event"
+msgid "Trigger event"
+msgstr "触发事件"
+
+msgctxt "hooks.project"
+msgid "Project ID filter"
+msgstr "项目 ID 筛选"
+
+msgctxt "hooks.all_projects"
+msgid "All projects"
+msgstr "所有项目"
+
+msgctxt "hooks.outcome"
+msgid "Outcome filter"
+msgstr "结果筛选"
+
+msgctxt "hooks.all_outcomes"
+msgid "All outcomes"
+msgstr "所有结果"
+
+msgctxt "hooks.interpreter"
+msgid "Interpreter executable"
+msgstr "解释器可执行文件"
+
+msgctxt "hooks.system_shell"
+msgid "System shell"
+msgstr "系统 Shell"
+
+msgctxt "hooks.node_runtime"
+msgid "node"
+msgstr "node"
+
+msgctxt "hooks.timeout"
+msgid "Timeout (seconds)"
+msgstr "超时（秒）"
+
+msgctxt "hooks.script"
+msgid "Script"
+msgstr "脚本"
+
+msgctxt "hooks.test_cwd"
+msgid "Test working directory"
+msgstr "测试工作目录"
+
+msgctxt "hooks.temporary_directory"
+msgid "Temporary directory"
+msgstr "临时目录"
+
+msgctxt "hooks.test"
+msgid "Test Hook"
+msgstr "测试 Hook"
+
+msgctxt "hooks.view_run"
+msgid "View execution"
+msgstr "查看执行流程"
+
+msgctxt "hooks.history"
+msgid "Execution history"
+msgstr "执行历史"
+
+msgctxt "hooks.saved"
+msgid "Hook saved"
+msgstr "Hook 已保存"
+
+msgctxt "hooks.deleted"
+msgid "Hook deleted"
+msgstr "Hook 已删除"
+
+msgctxt "hooks.testing"
+msgid "Hook test in progress"
+msgstr "Hook 测试进行中"
+
+msgctxt "hooks.started"
+msgid "Hook started: {name}"
+msgstr "Hook 开始执行：{name}"
+
+msgctxt "hooks.finished"
+msgid "Hook finished: {name}"
+msgstr "Hook 执行结束：{name}"
+
+msgctxt "hooks.test_prefix"
+msgid "[Test] {name}"
+msgstr "[测试] {name}"
+
+msgctxt "hooks.queued"
+msgid "Queued"
+msgstr "排队中"
+
+msgctxt "hooks.running"
+msgid "Running"
+msgstr "执行中"
+
+msgctxt "hooks.test_passed"
+msgid "Hook test passed"
+msgstr "Hook 测试通过"
+
+msgctxt "hooks.test_failed"
+msgid "Hook test failed"
+msgstr "Hook 测试失败"
+
 msgctxt "common.add_rule"
 msgid "Add rule"
 msgstr "添加规则"

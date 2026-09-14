@@ -14,6 +14,7 @@ import {
     ManifestReplyLanguagePicker
 } from "@language-picker";
 import { GitHubAiReviewSettingsSection, AiReviewRuleItem } from "@ai-review-settings";
+import { GitHubHookSettingsSection } from "./github_hook_settings.slint";
 
 export component GitHubSettingsSectionHeader inherits Rectangle {
     in property <string> title;
@@ -131,6 +132,8 @@ export component GitHubProviderNavigation inherits Rectangle {
 }
 
 export component GitHubSettingsPane inherits Rectangle {
+    in property <length> viewport-origin-x;
+    in property <length> viewport-origin-y;
     in property <int> selected-section: 0;
     in property <int> route-entry-revision: 0;
     in-out property <bool> simulate-crash-active: false;
@@ -181,12 +184,21 @@ export component GitHubSettingsPane inherits Rectangle {
 
     pane-content := Rectangle {
         width: root.width;
-        height: root.selected-section == 1 ? code-hosting-section.preferred-height
+        height: root.selected-section == 4 ? hooks-section.height : root.selected-section == 1 ? code-hosting-section.preferred-height
             : (root.selected-section == 2 ? ai-agent-section.preferred-height
                 : (root.selected-section == 3 ? ai-review-section.preferred-height
-                    : (root.selected-section == 4 ? diagnostics-section.preferred-height
+                    : (root.selected-section == 5 ? diagnostics-section.preferred-height
                         : general-section.preferred-height)));
         background: transparent;
+
+        hooks-section := GitHubHookSettingsSection {
+            x: 0px;
+            y: 0px;
+            viewport-origin-x: root.viewport-origin-x;
+            viewport-origin-y: root.viewport-origin-y;
+            width: parent.width;
+            visible: root.selected-section == 4;
+        }
 
         // Fixed leaves avoid stale sibling bindings when the factory page is
         // rebuilt or a section changes under Slint 1.17.1.
@@ -910,7 +922,7 @@ export component GitHubSettingsPane inherits Rectangle {
 
         diagnostics-section := VerticalLayout {
             height: parent.height;
-            visible: root.selected-section == 4;
+            visible: root.selected-section == 5;
             width: parent.width;
             spacing: 8px;
             alignment: start;

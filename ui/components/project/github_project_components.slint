@@ -1,5 +1,6 @@
 import { GitHubSpinner } from "../github_spinner.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
+import { GitHubProjectCardActions } from "../button/project_card_actions.slint";
 import { GitHubMetadataLabel } from "../github_metadata_label.slint";
 import { GitHubSegmentedControlIconOnly } from "../github_segmented_control.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
@@ -360,33 +361,13 @@ export component GitHubProjectListRow inherits Rectangle {
         project: root.project;
     }
 
-    actions := HorizontalLayout {
+    actions := GitHubProjectCardActions {
         x: Math.floor((parent.width - 176px) / 1px) * 1px;
         y: 12px;
-        width: 96px;
-        height: 32px;
-        spacing: 0px;
-        alignment: end;
-
-        GitHubProjectIconButton {
-            icon: @image-url("../../assets/icons/octicon-terminal-16.svg");
-            tooltip: I18n.tooltip-open-terminal;
-            tooltip-end: true;
-            clicked => { root.terminal-requested(); }
-        }
-        GitHubProjectIconButton {
-            icon: @image-url("../../assets/icons/octicon-pencil-16.svg");
-            tooltip: I18n.tooltip-edit-project;
-            tooltip-end: true;
-            clicked => { root.edit-requested(); }
-        }
-        GitHubProjectIconButton {
-            icon: @image-url("../../assets/icons/octicon-trash-16.svg");
-            tooltip: I18n.projects-delete-project;
-            tooltip-end: true;
-            danger: true;
-            clicked => { root.delete-requested(); }
-        }
+        tooltip-above: false;
+        request-open-terminal => { root.terminal-requested(); }
+        request-edit => { root.edit-requested(); }
+        request-delete => { root.delete-requested(); }
     }
 
     row-focus := FocusScope {
@@ -602,38 +583,14 @@ export component GitHubProjectGridCard inherits Rectangle {
         }
     }
 
-    HorizontalLayout {
+    GitHubProjectCardActions {
         // parent.width is the floored grid card width; keep the trailing
         // action cluster on the same whole-pixel grid.
         x: Math.floor((parent.width - 112px) / 1px) * 1px;
         y: 164px;
-        width: 96px;
-        height: 32px;
-        spacing: 0px;
-        alignment: end;
-
-        GitHubProjectIconButton {
-            icon: @image-url("../../assets/icons/octicon-terminal-16.svg");
-            tooltip: I18n.tooltip-open-terminal;
-            tooltip-above: true;
-            tooltip-end: true;
-            clicked => { root.terminal-requested(); }
-        }
-        GitHubProjectIconButton {
-            icon: @image-url("../../assets/icons/octicon-pencil-16.svg");
-            tooltip: I18n.tooltip-edit-project;
-            tooltip-above: true;
-            tooltip-end: true;
-            clicked => { root.edit-requested(); }
-        }
-        GitHubProjectIconButton {
-            icon: @image-url("../../assets/icons/octicon-trash-16.svg");
-            tooltip: I18n.projects-delete-project;
-            tooltip-above: true;
-            tooltip-end: true;
-            danger: true;
-            clicked => { root.delete-requested(); }
-        }
+        request-open-terminal => { root.terminal-requested(); }
+        request-edit => { root.edit-requested(); }
+        request-delete => { root.delete-requested(); }
     }
 
     if card-focus.has-focus && root.keyboard-focus-visible: Rectangle {

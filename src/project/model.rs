@@ -21,6 +21,8 @@ pub(super) struct ProjectConfig {
     pub(super) project_tags: Vec<String>,
     #[serde(default)]
     pub(super) is_pr_auto_update: bool,
+    #[serde(default)]
+    pub(super) hook_ids: Vec<String>,
     #[serde(skip, default)]
     pub(super) pr_overview: ProjectPrOverview,
 }
@@ -49,6 +51,7 @@ pub(super) struct ProjectDraft {
     pub(super) logo: String,
     pub(super) project_tags: Vec<String>,
     pub(super) is_pr_auto_update: bool,
+    pub(super) hook_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

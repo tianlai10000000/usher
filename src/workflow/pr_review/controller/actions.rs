@@ -14,11 +14,91 @@ use slint::ComponentHandle;
 use std::future::Future;
 use std::sync::atomic::Ordering;
 
+#[derive(Clone)]
+struct PrHookContext {
+    metadata: ProjectRepositoryMetadata,
+    request: super::ReviewRequest,
+    author_identity: crate::git::PullRequestAuthorIdentity,
+    project: String,
+    cwd: String,
+}
+
+fn pull_request_hook_event(
+    context: &PrHookContext,
+    name: &str,
+    source: &str,
+    action: &str,
+) -> crate::hooks::HookTrigger {
+    let mut event = crate::hooks::HookTrigger::new(
+        name,
+        source,
+        serde_json::json!({
+            "number": context.request.number,
+            "provider": context.metadata.repo_type,
+            "repository": context.metadata.remote_repo,
+            "action": action,
+            "title": context.request.title,
+            "source_branch": context.request.source_branch,
+            "target_branch": context.request.target_branch,
+            "author": context.request.author,
+            "author_name": context.author_identity.name,
+            "author_email": context.author_identity.email,
+        }),
+    );
+    event.project = Some(context.project.clone());
+    event.cwd = (!context.cwd.is_empty()).then(|| context.cwd.clone().into());
+    event
+}
+
+fn review_hook_event(
+    context: &PrHookContext,
+    action: PullRequestReviewAction,
+) -> Option<crate::hooks::HookTrigger> {
+    (action == PullRequestReviewAction::Approve).then(|| {
+        let mut event = pull_request_hook_event(
+            context,
+            crate::hooks::PR_REVIEW_APPROVED,
+            "pr.review",
+            "approved",
+        );
+        event.outcome = "approved".into();
+        event
+    })
+}
+
+fn merged_hook_event(
+    context: &PrHookContext,
+    method: PullRequestMergeMethod,
+    remove_source_branch: bool,
+) -> crate::hooks::HookTrigger {
+    let mut event = pull_request_hook_event(context, crate::hooks::PR_MERGED, "pr.merge", "merged");
+    let payload = event
+        .payload
+        .as_object_mut()
+        .expect("PR Hook payload must be an object");
+    payload.insert("merge_method".into(), method.as_str().into());
+    payload.insert("remove_source_branch".into(), remove_source_branch.into());
+    event
+}
+
 impl WorkflowPrReviewController {
     fn action_context(&self) -> Option<(ProjectRepositoryMetadata, String)> {
         self.cache.lock().ok().and_then(|guard| {
             let cache = guard.as_ref()?;
             Some((cache.metadata.clone(), cache.request.number.clone()))
+        })
+    }
+
+    fn hook_context(&self, ui: &MainWindow) -> Option<PrHookContext> {
+        self.cache.lock().ok().and_then(|guard| {
+            let cache = guard.as_ref()?;
+            Some(PrHookContext {
+                metadata: cache.metadata.clone(),
+                request: cache.request.clone(),
+                author_identity: cache.all_detail.author_identity.clone(),
+                project: ui.get_workflow_project_id().to_string(),
+                cwd: ui.get_workflow_project_local_repo().to_string(),
+            })
         })
     }
 
@@ -146,18 +226,21 @@ impl WorkflowPrReviewController {
             show_error(ui, crate::i18n::tr("pr_review.comment_required").as_ref());
             return;
         }
-        let Some((metadata, pull_request_iid)) = self.action_context() else {
+        let Some(context) = self.hook_context(ui) else {
             show_error(
                 ui,
                 crate::i18n::tr("pr_review.repository_context_unavailable").as_ref(),
             );
             return;
         };
+        let pull_request_iid = context.request.number.clone();
         let body = body.to_string();
+        let hook_event = review_hook_event(&context, action);
+        let metadata = context.metadata;
         self.run_action(
             ui,
             async move {
-                submit_pull_request_review(
+                let result = submit_pull_request_review(
                     metadata.repo_type.as_str(),
                     metadata.repo_project_id.as_str(),
                     metadata.remote_repo.as_str(),
@@ -165,7 +248,15 @@ impl WorkflowPrReviewController {
                     action,
                     body.as_str(),
                 )
-                .await
+                .await;
+                if result.is_ok()
+                    && let Some(hook_event) = hook_event
+                {
+                    if let Err(error) = crate::hooks::emit(hook_event).await {
+                        log::warn!("[Hooks] PR approval dispatch failed: {error}");
+                    }
+                }
+                result
             },
             move |controller, ui, result| match result {
                 Ok(()) => {
@@ -283,17 +374,20 @@ impl WorkflowPrReviewController {
             );
             return;
         }
-        let Some((metadata, pull_request_iid)) = self.action_context() else {
+        let Some(context) = self.hook_context(ui) else {
             show_error(
                 ui,
                 crate::i18n::tr("pr_review.repository_context_unavailable").as_ref(),
             );
             return;
         };
+        let pull_request_iid = context.request.number.clone();
+        let hook_event = merged_hook_event(&context, method, remove_source_branch);
+        let metadata = context.metadata;
         self.run_action(
             ui,
             async move {
-                merge_pull_request(
+                let result = merge_pull_request(
                     metadata.repo_type.as_str(),
                     metadata.repo_project_id.as_str(),
                     metadata.remote_repo.as_str(),
@@ -301,7 +395,13 @@ impl WorkflowPrReviewController {
                     method,
                     remove_source_branch,
                 )
-                .await
+                .await;
+                if result.is_ok()
+                    && let Err(error) = crate::hooks::emit(hook_event).await
+                {
+                    log::warn!("[Hooks] PR merge dispatch failed: {error}");
+                }
+                result
             },
             |controller, ui, result| match result {
                 Ok(()) => {
@@ -524,4 +624,65 @@ pub(super) fn reset_action_ui(ui: &MainWindow) {
     );
     ui.set_workflow_pr_revert_confirmation("".into());
     reset_action_capabilities(ui);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn context() -> PrHookContext {
+        PrHookContext {
+            metadata: ProjectRepositoryMetadata {
+                repo_project_id: "repo-1".into(),
+                repo_type: "github".into(),
+                remote_repo: "https://github.com/example/repo".into(),
+            },
+            request: super::super::ReviewRequest {
+                number: "42".into(),
+                title: "Separate approval and merge".into(),
+                author: "author".into(),
+                source_branch: "feature/hooks".into(),
+                target_branch: "main".into(),
+                updated_at: String::new(),
+                ignore_whitespace: false,
+            },
+            author_identity: crate::git::PullRequestAuthorIdentity {
+                name: Some("Example Author".into()),
+                email: Some("author@example.com".into()),
+            },
+            project: "project-1".into(),
+            cwd: "/tmp/project-1".into(),
+        }
+    }
+
+    #[test]
+    fn only_approve_builds_a_review_hook_event() {
+        let context = context();
+        assert!(review_hook_event(&context, PullRequestReviewAction::Comment).is_none());
+        assert!(review_hook_event(&context, PullRequestReviewAction::RequestChanges).is_none());
+        let event = review_hook_event(&context, PullRequestReviewAction::Approve).unwrap();
+        assert_eq!(event.name, crate::hooks::PR_REVIEW_APPROVED);
+        assert_eq!(event.source_module, "pr.review");
+        assert_eq!(event.outcome, "approved");
+        assert_eq!(event.payload["action"], "approved");
+    }
+
+    #[test]
+    fn every_successful_merge_method_uses_the_merged_hook_event() {
+        let context = context();
+        for method in [
+            PullRequestMergeMethod::Merge,
+            PullRequestMergeMethod::Squash,
+            PullRequestMergeMethod::Rebase,
+            PullRequestMergeMethod::FastForward,
+        ] {
+            let event = merged_hook_event(&context, method, true);
+            assert_eq!(event.name, crate::hooks::PR_MERGED);
+            assert_eq!(event.source_module, "pr.merge");
+            assert_eq!(event.outcome, "success");
+            assert_eq!(event.payload["action"], "merged");
+            assert_eq!(event.payload["merge_method"], method.as_str());
+            assert_eq!(event.payload["remove_source_branch"], true);
+        }
+    }
 }

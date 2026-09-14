@@ -79,7 +79,7 @@ impl MessagePageBridge {
             sync_language(&window, &page);
             page.set_viewport_width(window.get_messages_page_viewport_width());
             page.set_viewport_height(window.get_messages_page_viewport_height());
-            bind_page_callbacks(&center, &page);
+            bind_page_callbacks(&center, &page, &window);
             apply_page_snapshot(&page, center.snapshot());
             page.set_active(window.get_messages_page_active());
             *page_slot.lock().expect("message page bridge poisoned") = Some(page.as_weak());
@@ -187,7 +187,7 @@ fn release_page_rows(page: &GitHubMessagesPage) {
     update_page_rows(page, Vec::new());
 }
 
-fn bind_page_callbacks(center: &MessageCenter, page: &GitHubMessagesPage) {
+fn bind_page_callbacks(center: &MessageCenter, page: &GitHubMessagesPage, window: &MainWindow) {
     let center_for_filter = center.clone();
     let weak_page = page.as_weak();
     page.on_change_filter(move |filter| {
@@ -239,7 +239,13 @@ fn bind_page_callbacks(center: &MessageCenter, page: &GitHubMessagesPage) {
         }
     });
 
-    page.on_activate_target(|target| {
+    let window = window.as_weak();
+    page.on_activate_target(move |target| {
+        if let Some(window) = window.upgrade() {
+            if crate::hooks::open_target(&window, target.as_str()) {
+                return;
+            }
+        }
         // Target dispatch is intentionally open for feature-owned resolvers.
         // The first version records generic notifications without deep links.
         log::debug!("[Messages] No route resolver registered for target '{target}'");

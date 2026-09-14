@@ -2,6 +2,211 @@
 # keys; translators only edit locale PO files under i18n/locales/.
 
 [[messages]]
+key = "hooks.runtime"
+text = "Run with"
+
+[[messages]]
+key = "hooks.status_passed"
+text = "Passed"
+
+[[messages]]
+key = "hooks.status_failed"
+text = "Failed"
+
+[[messages]]
+key = "hooks.status_cancelled"
+text = "Cancelled"
+
+[[messages]]
+key = "common.partially_selected"
+text = "Partially selected"
+
+[[messages]]
+key = "projects.trigger_hooks"
+text = "Trigger Hooks"
+
+[[messages]]
+key = "projects.no_hooks"
+text = "No Hooks configured"
+
+[[messages]]
+key = "projects.hooks_loading"
+text = "Loading Hooks..."
+
+[[messages]]
+key = "projects.hook_disabled"
+text = "Disabled"
+
+[[messages]]
+key = "projects.hook_unavailable"
+text = "Unavailable"
+
+[[messages]]
+key = "hooks.title"
+text = "Hooks"
+
+[[messages]]
+key = "hooks.event_pr_approved"
+text = "Pull request approved"
+
+[[messages]]
+key = "hooks.event_pr_merged"
+text = "Pull request merged"
+
+[[messages]]
+key = "hooks.event_ai_review"
+text = "AI review completed"
+
+[[messages]]
+key = "hooks.category_pr_review"
+text = "Pull request review"
+
+[[messages]]
+key = "hooks.category_ai_review"
+text = "AI code review"
+
+[[messages]]
+key = "hooks.category_other"
+text = "Other"
+
+[[messages]]
+key = "hooks.stop"
+text = "Stop"
+
+[[messages]]
+key = "hooks.new"
+text = "New Hook"
+
+[[messages]]
+key = "hooks.edit"
+text = "Edit Hook"
+
+[[messages]]
+key = "hooks.delete_title"
+text = "Delete Hook"
+
+[[messages]]
+key = "hooks.delete_confirmation"
+text = "Delete this Hook? Existing execution history will be kept."
+
+[[messages]]
+key = "hooks.name"
+text = "Name"
+
+[[messages]]
+key = "hooks.enabled"
+text = "Enable this Hook"
+
+[[messages]]
+key = "hooks.event"
+text = "Trigger event"
+
+[[messages]]
+key = "hooks.project"
+text = "Project ID filter"
+
+[[messages]]
+key = "hooks.all_projects"
+text = "All projects"
+
+[[messages]]
+key = "hooks.outcome"
+text = "Outcome filter"
+
+[[messages]]
+key = "hooks.all_outcomes"
+text = "All outcomes"
+
+[[messages]]
+key = "hooks.interpreter"
+text = "Interpreter executable"
+
+[[messages]]
+key = "hooks.system_shell"
+text = "System shell"
+
+[[messages]]
+key = "hooks.node_runtime"
+text = "node"
+
+[[messages]]
+key = "hooks.timeout"
+text = "Timeout (seconds)"
+
+[[messages]]
+key = "hooks.script"
+text = "Script"
+
+[[messages]]
+key = "hooks.test_cwd"
+text = "Test working directory"
+
+[[messages]]
+key = "hooks.temporary_directory"
+text = "Temporary directory"
+
+[[messages]]
+key = "hooks.test"
+text = "Test Hook"
+
+[[messages]]
+key = "hooks.view_run"
+text = "View execution"
+
+[[messages]]
+key = "hooks.history"
+text = "Execution history"
+
+[[messages]]
+key = "hooks.clear_history"
+text = "Clear execution history"
+
+[[messages]]
+key = "hooks.clear_history_confirmation"
+text = "Clear completed Hook runs and their logs? Queued and running Hooks will be kept."
+
+[[messages]]
+key = "hooks.saved"
+text = "Hook saved"
+
+[[messages]]
+key = "hooks.deleted"
+text = "Hook deleted"
+
+[[messages]]
+key = "hooks.testing"
+text = "Hook test in progress"
+
+[[messages]]
+key = "hooks.started"
+text = "Hook started: {name}"
+
+[[messages]]
+key = "hooks.finished"
+text = "Hook finished: {name}"
+
+[[messages]]
+key = "hooks.test_prefix"
+text = "[Test] {name}"
+
+[[messages]]
+key = "hooks.queued"
+text = "Queued"
+
+[[messages]]
+key = "hooks.running"
+text = "Running"
+
+[[messages]]
+key = "hooks.test_passed"
+text = "Hook test passed"
+
+[[messages]]
+key = "hooks.test_failed"
+text = "Hook test failed"
+
+
+[[messages]]
 key = "common.add_rule"
 text = "Add rule"
 

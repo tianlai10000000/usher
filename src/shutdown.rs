@@ -28,10 +28,35 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
+use std::{future::Future, pin::Pin};
 
 use crate::constants::shutdown_priority::PRIORITY_NORMAL;
 
 type CleanupFn = Box<dyn Fn() + Send + Sync + 'static>;
+type AsyncCleanupFn = Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send>;
+static ASYNC_DRAINS: Mutex<Vec<(&'static str, AsyncCleanupFn)>> = Mutex::new(Vec::new());
+static ASYNC_DRAIN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Drain process-owning producers before synchronous persistence/UI teardown.
+/// Callbacks run on the shared runtime; the event loop remains responsive.
+pub(crate) fn register_async_drain(
+    name: &'static str,
+    callback: impl FnOnce() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + 'static,
+) {
+    ASYNC_DRAINS
+        .lock()
+        .unwrap()
+        .push((name, Box::new(callback)));
+}
+
+pub(crate) async fn drain_async_tasks() {
+    let _drain = ASYNC_DRAIN_LOCK.lock().await;
+    let tasks = std::mem::take(&mut *ASYNC_DRAINS.lock().unwrap());
+    for (name, callback) in tasks.into_iter().rev() {
+        log::info!("[Shutdown] Draining {name}");
+        callback().await;
+    }
+}
 
 struct CleanupTask {
     name: &'static str,
@@ -323,12 +348,15 @@ pub fn request_shutdown(trigger: &str) {
         trigger
     );
     let trigger_owned = trigger.to_string();
-    if slint::invoke_from_event_loop(move || perform_shutdown(&trigger_owned)).is_err() {
-        log::error!("[Shutdown] Failed to dispatch shutdown to UI loop, running fallback path");
-        run_cleanup_once_with_mode(trigger, CleanupMode::BackgroundFallback);
-        log::warn!("[Shutdown] Fallback shutdown: process::exit(0)");
-        std::process::exit(0);
-    }
+    crate::app_runtime::shared_runtime().spawn(async move {
+        drain_async_tasks().await;
+        let fallback_trigger = trigger_owned.clone();
+        if slint::invoke_from_event_loop(move || perform_shutdown(&trigger_owned)).is_err() {
+            log::error!("[Shutdown] Failed to dispatch shutdown to UI loop, running fallback path");
+            run_cleanup_once_with_mode(&fallback_trigger, CleanupMode::BackgroundFallback);
+            std::process::exit(0);
+        }
+    });
 }
 
 fn perform_shutdown(trigger: &str) {

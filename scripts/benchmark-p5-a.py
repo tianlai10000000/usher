@@ -25,7 +25,7 @@ def fingerprint(path):
 def seed(directory, scenario, port):
     directory.mkdir(parents=True)
     (directory / "settings.toml").write_text(
-        'theme_mode = 0\nlanguage = "en"\nterminal_verbose_logging = false\n'
+        'theme_mode = 0\nlanguage = "en"\n[diagnostics]\nterminal_verbose_logging = false\n'
     )
     if scenario == "tasks":
         tasks = {}

@@ -1,0 +1,706 @@
+import { I18n } from "@i18n";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { GitHubButton, GitHubToggle, GitHubTextField, GitHubSettingsSectionMenuButton } from "./github_settings_controls.slint";
+import { GitHubRadio } from "../input/github_radio.slint";
+import { GitHubCheckbox } from "../input/github_checkbox.slint";
+import { GitHubSpinner } from "../github_spinner.slint";
+import { GitHubScrollView } from "../github_scroll_view.slint";
+import { GitHubSelectState, GitHubSelectPopup, GitHubSelectOption, GitHubSelectGroupHeading } from "../input/github_select.slint";
+import { GitHubDialog } from "../dialog/github_dialog.slint";
+import { GitHubHookEditAction, GitHubHookDeleteAction, GitHubHookStopAction, GitHubHookViewRunAction, GitHubHookClearHistoryAction } from "./github_hook_tooltip.slint";
+import { ScrollView } from "std-widgets.slint";
+
+export struct HookChoice { value: string, label: string }
+export struct HookEventChoice {
+    value: string,
+    label: string,
+    group-label: string,
+    group-index: int,
+    group-start: bool,
+    group-size: int,
+}
+export struct HookSummary {
+    id: string,
+    name: string,
+    description: string,
+    enabled: bool,
+    category: string,
+    category-index: int,
+    category-start: bool,
+    category-end: bool,
+    category-size: int,
+}
+export struct HookLanguageDraft { script: string, interpreter: string }
+export struct HookCodeToken { text: string, style: int }
+export struct HookCodeLine { text: string, tokens: [HookCodeToken] }
+export struct HookCodeColors {
+    comment: color, keyword: color, literal: color,
+    constant: color, entity: color, variable: color,
+}
+
+export global HookSettingsState {
+    in-out property <bool> ready: false;
+    in-out property <bool> enabled: false;
+    in-out property <bool> busy: false;
+    in-out property <bool> enable-busy: false;
+    in-out property <string> row-enable-busy-id: "";
+    in-out property <bool> result-error: false;
+    in-out property <string> result: "";
+    in-out property <string> test-status: "";
+    in-out property <string> test-run: "";
+    in-out property <[HookChoice]> hooks: [];
+    in-out property <[HookSummary]> summaries: [];
+    in-out property <string> dialog-mode: "";
+    in-out property <[HookEventChoice]> events: [];
+    in-out property <[HookChoice]> history: [];
+    in-out property <string> draft-id: "";
+    in-out property <string> draft-name: "";
+    in-out property <bool> draft-enabled: false;
+    in-out property <string> draft-event: "pr.review.approved.v1";
+    in-out property <string> draft-event-label: "";
+    in-out property <int> draft-event-index: 0;
+    in-out property <string> draft-project: "";
+    in-out property <string> draft-outcome: "";
+    in-out property <int> draft-language: -1;
+    in-out property <string> draft-interpreter: "";
+    in-out property <string> draft-script: "";
+    in-out property <bool> draft-script-loading: false;
+    in-out property <string> draft-timeout: "60";
+    in-out property <HookLanguageDraft> shell-draft;
+    in-out property <HookLanguageDraft> node-draft;
+    in-out property <styled-text> code-highlight;
+    in-out property <bool> code-highlight-ready: false;
+    in-out property <bool> native-cursor-uses-selection-color: false;
+    in-out property <string> code-font-family: "monospace";
+    out property <HookCodeColors> code-colors: {
+        comment: GitHubTheme.syntax-comment,
+        keyword: GitHubTheme.syntax-keyword,
+        literal: GitHubTheme.syntax-string,
+        constant: GitHubTheme.syntax-constant,
+        entity: GitHubTheme.syntax-entity,
+        variable: GitHubTheme.syntax-variable,
+    };
+    changed code-colors => { root.refresh-highlight(); }
+    callback refresh-highlight();
+    in-out property <bool> can-clear-history: false;
+    callback draft-edited();
+    callback enable(bool);
+    callback set-hook-enabled(string, bool);
+    callback create();
+    callback cancel();
+    callback request-delete(string);
+    callback choose(string, string);
+    callback select-language(int);
+    callback save();
+    callback delete();
+    callback test();
+    callback stop();
+    callback open-run(string);
+    callback request-clear-history();
+    callback clear-history();
+}
+
+// UI-111: literal placeholder leaves stay mounted across Settings factory updates.
+component GitHubHookShellInterpreter inherits GitHubTextField {
+    show-placeholder: false;
+    label: I18n.hooks-interpreter;
+    Text {
+        x: 12px; y: 26px; width: parent.width - 24px; height: 32px;
+        visible: root.text == "" && !root.input-has-focus;
+        text: I18n.hooks-system-shell;
+        font-size: 14px; color: GitHubTheme.fg-muted;
+        vertical-alignment: center; overflow: elide;
+    }
+}
+
+component GitHubHookNodeInterpreter inherits GitHubTextField {
+    show-placeholder: false;
+    label: I18n.hooks-interpreter;
+    Text {
+        x: 12px; y: 26px; width: parent.width - 24px; height: 32px;
+        visible: root.text == "" && !root.input-has-focus;
+        text: I18n.hooks-node-runtime;
+        font-size: 14px; color: GitHubTheme.fg-muted;
+        vertical-alignment: center; overflow: elide;
+    }
+}
+
+component GitHubHookPicker inherits GitHubSettingsSectionMenuButton {
+    in property <string> kind;
+    in property <[HookChoice]> items;
+    enabled: HookSettingsState.ready && !HookSettingsState.busy && root.items.length > 0;
+    open: GitHubSelectState.open && GitHubSelectState.owner == "hooks-" + root.kind;
+    restore-focus-on-close: GitHubSelectState.restore-focus;
+}
+
+component GitHubHookEventPicker inherits GitHubSettingsSectionMenuButton {
+    in property <[HookEventChoice]> items;
+    enabled: HookSettingsState.ready && !HookSettingsState.busy && root.items.length > 0;
+    open: GitHubSelectState.open && GitHubSelectState.owner == "hooks-event";
+    restore-focus-on-close: GitHubSelectState.restore-focus;
+}
+
+// Keep each selector's model in its own factory subtree.
+component GitHubHookPickerPopup inherits GitHubSelectPopup {
+        in property <string> kind;
+        in property <[HookChoice]> items;
+        owner: "hooks-" + root.kind;
+        option-count: root.items.length;
+        selected(index) => {
+            HookSettingsState.choose(root.kind, root.items[index].value);
+            GitHubSelectState.close(true);
+        }
+        for item[index] in root.items: GitHubSelectOption {
+            x: 0px;
+            y: index * GitHubMetrics.size-32;
+            width: root.option-width;
+            text: item.label;
+            active: GitHubSelectState.active-index == index;
+            activated => {
+                HookSettingsState.choose(root.kind, item.value);
+                GitHubSelectState.close(true);
+            }
+        }
+}
+
+component GitHubHookEventPickerPopup inherits GitHubSelectPopup {
+    in property <[HookEventChoice]> items;
+    owner: "hooks-event";
+    option-count: root.items.length;
+    list-content-height: root.items.length == 0 ? 0px
+        : root.items.length * GitHubMetrics.size-32
+            + (root.items[root.items.length - 1].group-index + 1) * GitHubMetrics.size-28;
+    active-option-offset: root.items.length == 0 ? 0px
+        : GitHubSelectState.active-index * GitHubMetrics.size-32
+            + (root.items[GitHubSelectState.active-index].group-index + 1) * GitHubMetrics.size-28;
+    selected(index) => {
+        HookSettingsState.choose("event", root.items[index].value);
+        GitHubSelectState.close(true);
+    }
+    for item[index] in root.items: Rectangle {
+        x: 0px;
+        y: index * GitHubMetrics.size-32
+            + (item.group-index + (item.group-start ? 0 : 1)) * GitHubMetrics.size-28;
+        width: root.option-width;
+        height: GitHubMetrics.size-32 + (item.group-start ? GitHubMetrics.size-28 : 0px);
+
+        if item.group-start: GitHubSelectGroupHeading {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            text: item.group-label;
+        }
+        GitHubSelectOption {
+            x: 0px;
+            y: item.group-start ? GitHubMetrics.size-28 : 0px;
+            width: parent.width;
+            text: item.label;
+            group-label: item.group-start ? item.group-label : "";
+            selected: HookSettingsState.draft-event == item.value;
+            active: GitHubSelectState.active-index == index;
+            activated => {
+                HookSettingsState.choose("event", item.value);
+                GitHubSelectState.close(true);
+            }
+        }
+    }
+}
+
+export component GitHubHookSettingsOverlay inherits Rectangle {
+    background: transparent;
+    GitHubHookPickerPopup { kind: "hook"; items: HookSettingsState.hooks; }
+    GitHubHookEventPickerPopup { items: HookSettingsState.events; }
+    GitHubHookPickerPopup { kind: "history"; items: HookSettingsState.history; }
+}
+
+// The standard ScrollView/Flickable owns touchpad and wheel gestures. Native
+// text and the visual token projection share one content rectangle, so their
+// first/last lines and both scroll axes cannot drift apart.
+component HookCodeEditor inherits Rectangle {
+    in-out property <string> text;
+    in property <bool> enabled: true;
+    private property <bool> suppress-auto-scroll: false;
+    private property <length> content-padding-x: 12px;
+    private property <length> content-padding-y: 10px;
+    private property <bool> show-syntax: HookSettingsState.code-highlight-ready
+        && (HookSettingsState.native-cursor-uses-selection-color || !text-input.has-focus);
+    accessible-role: AccessibleRole.text-input;
+    out property <bool> has-focus: text-input.has-focus;
+    in-out property <length> viewport-x <=> scroll-view.viewport-x;
+    in-out property <length> viewport-y <=> scroll-view.viewport-y;
+    callback edited(string);
+
+    public function begin-viewport-reset() {
+        root.suppress-auto-scroll = true;
+        root.viewport-x = 0px;
+        root.viewport-y = 0px;
+    }
+
+    public function finish-viewport-reset() {
+        root.viewport-x = 0px;
+        root.viewport-y = 0px;
+        root.suppress-auto-scroll = false;
+    }
+
+    scroll-view := ScrollView {
+        x: 0px; y: 0px; width: parent.width; height: parent.height;
+        viewport-width: max(self.visible-width,
+            text-input.preferred-width + 2 * root.content-padding-x);
+        viewport-height: max(self.visible-height,
+            text-input.preferred-height + 2 * root.content-padding-y);
+
+        code-content := Rectangle {
+            width: scroll-view.viewport-width;
+            height: scroll-view.viewport-height;
+            background: transparent;
+
+            text-input := TextInput {
+                z: 2;
+                x: root.content-padding-x;
+                y: root.content-padding-y;
+                width: max(scroll-view.visible-width - 2 * root.content-padding-x,
+                    self.preferred-width);
+                height: max(scroll-view.visible-height - 2 * root.content-padding-y,
+                    self.preferred-height);
+                text <=> root.text;
+                enabled: root.enabled;
+                single-line: false;
+                wrap: no-wrap;
+                font-size: 13px;
+                font-family: HookSettingsState.code-font-family;
+                // Alpha zero skips the entire native draw pass, including caret
+                // and selection. Alpha 1/255 preserves it without visible glyphs.
+                // Platforms whose caret uses text color edit in native plain text.
+                color: root.show-syntax
+                    ? GitHubTheme.fg-default.with-alpha(1.0 / 255.0)
+                    : GitHubTheme.fg-default;
+                text-cursor-width: 2px;
+                selection-background-color: GitHubTheme.accent-fg.with-alpha(0.25);
+                selection-foreground-color: GitHubTheme.fg-default;
+                page-height: scroll-view.visible-height;
+
+                cursor-position-changed(cpos) => {
+                    // TextInput restores its cursor after an external text binding
+                    // changes. During dialog reopen that callback must not undo the
+                    // explicit top-of-file viewport reset; normal editing keeps
+                    // the familiar cursor-following behavior.
+                    if (root.suppress-auto-scroll) {
+                        return;
+                    }
+                    if (cpos.x + root.content-padding-x + root.viewport-x < 0px) {
+                        root.viewport-x = min(0px,
+                            max(scroll-view.visible-width - scroll-view.viewport-width,
+                                -cpos.x - root.content-padding-x));
+                    } else if (cpos.x + root.content-padding-x + root.viewport-x
+                            > scroll-view.visible-width) {
+                        root.viewport-x = min(0px,
+                            max(scroll-view.visible-width - scroll-view.viewport-width,
+                                scroll-view.visible-width - cpos.x - root.content-padding-x));
+                    }
+                    if (cpos.y + root.content-padding-y + root.viewport-y < 0px) {
+                        root.viewport-y = min(
+                            0px,
+                            scroll-view.visible-height - cpos.y - root.content-padding-y - 20px,
+                            max(scroll-view.visible-height - scroll-view.viewport-height,
+                                -cpos.y - root.content-padding-y),
+                        );
+                    } else if (cpos.y + root.content-padding-y + root.viewport-y
+                            > scroll-view.visible-height - 20px) {
+                        root.viewport-y = min(0px,
+                            max(scroll-view.visible-height - scroll-view.viewport-height,
+                                scroll-view.visible-height - cpos.y
+                                    - root.content-padding-y - 20px));
+                    }
+                }
+                edited => { root.edited(self.text); }
+            }
+
+            // Keep one native rich-text node mounted. Rebuilding dynamic token
+            // Text subtrees in the Settings factory can retain old glyph runs.
+            script-highlight := StyledText {
+                x: text-input.x;
+                y: text-input.y;
+                width: text-input.width;
+                height: text-input.preferred-height;
+                z: 1;
+                visible: root.show-syntax;
+                text: HookSettingsState.code-highlight;
+                default-font-family: HookSettingsState.code-font-family;
+                default-font-size: 13px;
+                default-color: GitHubTheme.fg-default;
+                vertical-alignment: top;
+            }
+        }
+    }
+}
+
+component GitHubHookEditorForm inherits Rectangle {
+    in property <length> viewport-origin-x;
+    in property <length> viewport-origin-y;
+    // The dialog keeps the test feedback strip fixed.  Reserve only the
+    // remaining body height for the editor so the code viewport never extends
+    // underneath that strip on compact windows.
+    in property <length> available-height: 0px;
+    private property <string> script-label: HookSettingsState.draft-language == 1 ? "JavaScript/TypeScript" : "Shell";
+    private property <length> form-section-gap: GitHubMetrics.stack-gap-normal;
+    private property <length> code-section-offset: 236px + root.form-section-gap * 4;
+    height: column.preferred-height;
+    background: transparent;
+
+    // A TextEdit keeps its viewport while the surrounding dialog is hidden.
+    // Reset it whenever a different draft is opened so the native text and
+    // the bounded syntax projection always start from the same origin.
+    public function reset-code-viewport() {
+        script-input.begin-viewport-reset();
+    }
+
+    public function finish-code-viewport-reset() {
+        script-input.finish-viewport-reset();
+    }
+
+    column := VerticalLayout {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        spacing: root.form-section-gap;
+        alignment: start;
+        Rectangle {
+            height: 58px;
+            GitHubTextField { x: 0px; y: 0px; width: parent.width - 172px; label: I18n.hooks-name; text <=> HookSettingsState.draft-name; enabled: HookSettingsState.ready && !HookSettingsState.busy; edited(_) => { HookSettingsState.draft-edited(); } }
+            GitHubCheckbox { x: parent.width - 156px; y: 26px; width: 156px; text: I18n.hooks-enabled; checked: HookSettingsState.draft-enabled; control-enabled: !HookSettingsState.busy; toggled(value) => { HookSettingsState.draft-enabled = value; } }
+        }
+        Rectangle {
+            height: 66px;
+            Text { x: 0px; y: 0px; width: parent.width; text: I18n.hooks-event; height: 20px; font-size: 14px; font-weight: 600; color: GitHubTheme.fg-default; }
+            event-picker := GitHubHookEventPicker {
+                x: 0px; y: 26px; width: parent.width;
+                text: HookSettingsState.draft-event-label; items: HookSettingsState.events;
+                clicked => { GitHubSelectState.toggle("hooks-event", HookSettingsState.draft-event,
+                    HookSettingsState.draft-event-index, root.viewport-origin-x + parent.x + self.x,
+                    root.viewport-origin-y + parent.y + self.y, self.width, self.height); }
+            }
+        }
+        Rectangle {
+            height: 54px;
+            accessible-role: radio-group; accessible-label: I18n.hooks-runtime;
+            Text { x: 0px; y: 0px; width: parent.width; text: I18n.hooks-runtime; height: 20px; font-size: 14px; font-weight: 600; color: GitHubTheme.fg-default; }
+            HorizontalLayout {
+                x: 0px; y: 22px; width: parent.width; height: 32px; spacing: 16px; alignment: start;
+                GitHubRadio { text: "Shell"; checked: HookSettingsState.draft-language == 0; control-enabled: !HookSettingsState.busy; chosen => { HookSettingsState.select-language(0); } stepped(delta) => { HookSettingsState.select-language(mod(HookSettingsState.draft-language + delta + 2, 2)); } }
+                GitHubRadio { text: "JavaScript/TypeScript"; checked: HookSettingsState.draft-language == 1; control-enabled: !HookSettingsState.busy; chosen => { HookSettingsState.select-language(1); } stepped(delta) => { HookSettingsState.select-language(mod(HookSettingsState.draft-language + delta + 2, 2)); } }
+            }
+        }
+        HorizontalLayout {
+            spacing: 16px;
+            Rectangle {
+                height: 58px;
+            shell-interpreter := GitHubHookShellInterpreter {
+                x: 0px; y: 0px; width: parent.width;
+                visible: HookSettingsState.draft-language == 0;
+                height: self.visible ? 58px : 0px;
+                text <=> HookSettingsState.draft-interpreter;
+                enabled: HookSettingsState.ready && !HookSettingsState.busy;
+                edited(_) => { HookSettingsState.draft-edited(); }
+            }
+            node-interpreter := GitHubHookNodeInterpreter {
+                x: 0px; y: 0px; width: parent.width;
+                visible: HookSettingsState.draft-language == 1;
+                height: self.visible ? 58px : 0px;
+                text <=> HookSettingsState.draft-interpreter;
+                enabled: HookSettingsState.ready && !HookSettingsState.busy;
+                edited(_) => { HookSettingsState.draft-edited(); }
+            }
+            }
+            GitHubTextField { width: 156px; label: I18n.hooks-timeout; text <=> HookSettingsState.draft-timeout; enabled: !HookSettingsState.busy; edited(_) => { HookSettingsState.draft-edited(); } }
+        }
+        code-section := Rectangle {
+            // TextInput owns the code viewport and its native ScrollView. The
+            // section uses the available body height (up to 286px) so long
+            // scripts scroll inside the code box without being covered by the
+            // fixed feedback strip.
+            height: root.available-height > 0px
+                ? max(26px, min(286px, root.available-height - root.code-section-offset))
+                : 286px;
+            Text { x: 0px; y: 0px; width: parent.width; text: root.script-label; height: 20px; font-size: 14px; font-weight: 600; color: GitHubTheme.fg-default; }
+            Rectangle {
+                x: 0px; y: 26px; width: parent.width; height: parent.height - 26px;
+                border-radius: GitHubMetrics.radius-medium;
+                border-width: 1px;
+                border-color: script-input.has-focus ? GitHubTheme.focus-outline : GitHubTheme.border-default;
+                background: GitHubTheme.control-input-bg;
+                clip: true;
+                script-input := HookCodeEditor {
+                    x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px;
+                    text <=> HookSettingsState.draft-script;
+                    enabled: HookSettingsState.ready && !HookSettingsState.busy
+                        && !HookSettingsState.draft-script-loading;
+                    accessible-label: root.script-label;
+                    edited(_) => { HookSettingsState.draft-edited(); }
+                }
+            }
+        }
+}
+}
+
+component GitHubHookTestFeedback inherits Rectangle {
+    private property <length> action-padding: GitHubMetrics.stack-padding-normal;
+    private property <length> action-row-height:
+        root.action-padding * 2 + GitHubMetrics.control-medium-size;
+    background: GitHubTheme.canvas-default;
+    height: root.action-row-height
+        + (HookSettingsState.result != "" ? min(96px, error-measure.preferred-height) + GitHubMetrics.size-12 : 0px);
+    test-button := GitHubButton {
+        x: root.action-padding; y: root.action-padding;
+        text: I18n.hooks-test;
+        leading-icon: @image-url("../../assets/icons/octicon-play-16.svg");
+        disabled: !HookSettingsState.ready || HookSettingsState.busy;
+        clicked => { HookSettingsState.test(); }
+    }
+    status := Rectangle {
+        x: test-button.x + test-button.width + GitHubMetrics.size-12;
+        y: root.action-padding;
+        width: max(0px, parent.width - self.x - 100px); height: 32px;
+        visible: HookSettingsState.test-status != "";
+        private property <color> status-color: HookSettingsState.test-status == "success" ? GitHubTheme.success-fg
+            : HookSettingsState.test-status == "failure" ? GitHubTheme.danger-fg : GitHubTheme.fg-muted;
+        GitHubSpinner { x: 0px; y: 8px; visible: HookSettingsState.test-status == "running"; spinning: self.visible; }
+        Image {
+            x: 0px; y: 8px; width: 16px; height: 16px;
+            visible: HookSettingsState.test-status != "running";
+            source: HookSettingsState.test-status == "success" ? @image-url("../../assets/icons/octicon-check-circle-16.svg") : @image-url("../../assets/icons/octicon-x-circle-fill-16.svg");
+            colorize: parent.status-color;
+        }
+        Text {
+            x: 24px; width: parent.width - 24px; height: 32px;
+            text: HookSettingsState.test-status == "success" ? I18n.hooks-status-passed
+                : HookSettingsState.test-status == "failure" ? I18n.hooks-status-failed
+                : HookSettingsState.test-status == "cancelled" ? I18n.hooks-status-cancelled : I18n.hooks-running;
+            font-size: 13px; color: parent.status-color; vertical-alignment: center; overflow: elide;
+        }
+    }
+    GitHubHookStopAction {
+        x: parent.width - 88px; y: root.action-padding;
+        visible: HookSettingsState.test-status == "running";
+        button-enabled: HookSettingsState.test-run != "";
+        accessible-label: I18n.hooks-stop; clicked => { HookSettingsState.stop(); }
+    }
+    GitHubHookViewRunAction {
+        x: parent.width - 48px; y: root.action-padding;
+        visible: HookSettingsState.test-run != "";
+        button-enabled: !HookSettingsState.busy;
+        accessible-label: I18n.hooks-view-run;
+        clicked => { HookSettingsState.open-run(HookSettingsState.test-run); }
+    }
+    error-measure := Text {
+        width: parent.width - 32px; text: HookSettingsState.result; font-size: 13px; wrap: word-wrap; visible: false;
+    }
+    GitHubScrollView {
+        x: root.action-padding;
+        y: root.action-padding + GitHubMetrics.control-medium-size + GitHubMetrics.stack-gap-condensed;
+        width: parent.width - root.action-padding * 2;
+        height: parent.height - root.action-row-height;
+        visible: HookSettingsState.result != "";
+        error-text := Text {
+            width: parent.visible-width; text: HookSettingsState.result; font-size: 13px; wrap: word-wrap;
+            color: HookSettingsState.result-error ? GitHubTheme.danger-fg : GitHubTheme.fg-muted;
+        }
+    }
+}
+
+export component GitHubHookSettingsSection inherits Rectangle {
+    in property <length> viewport-origin-x;
+    in property <length> viewport-origin-y;
+    height: column.preferred-height;
+    background: transparent;
+    column := VerticalLayout {
+        x: 0px; y: 0px; width: root.width;
+        spacing: 16px; alignment: start;
+        HorizontalLayout {
+            spacing: 16px;
+            Text { text: I18n.hooks-title; font-size: 20px; font-weight: 600; color: GitHubTheme.fg-default; horizontal-stretch: 1; }
+            GitHubToggle {
+                checked: HookSettingsState.enabled;
+                enabled: HookSettingsState.ready && !HookSettingsState.busy && !HookSettingsState.enable-busy;
+                loading: HookSettingsState.enable-busy;
+                toggled(value) => { HookSettingsState.enable(value); }
+            }
+        }
+        Rectangle { height: 1px; background: GitHubTheme.border-default; }
+        HorizontalLayout {
+            alignment: end;
+            GitHubButton {
+                text: I18n.hooks-new;
+                leading-icon: @image-url("../../assets/icons/octicon-plus-16.svg");
+                disabled: !HookSettingsState.ready || HookSettingsState.busy;
+                clicked => { HookSettingsState.create(); }
+            }
+        }
+        if HookSettingsState.summaries.length == 0: Text {
+            text: HookSettingsState.ready ? I18n.projects-no-hooks : I18n.projects-hooks-loading;
+            color: GitHubTheme.fg-muted; font-size: 14px;
+        }
+        if HookSettingsState.summaries.length > 0: Rectangle {
+            private property <length> category-spacing: GitHubMetrics.size-48;
+            height: HookSettingsState.summaries.length * 72px
+                + (HookSettingsState.summaries[HookSettingsState.summaries.length - 1].category-index + 1)
+                    * self.category-spacing + 2px;
+            background: transparent;
+            for hook[index] in HookSettingsState.summaries: Rectangle {
+                x: 0px;
+                y: index * 72px + (hook.category-index + 1) * parent.category-spacing;
+                width: parent.width;
+                height: 72px;
+                background: transparent;
+
+                if hook.category-start: GitHubSelectGroupHeading {
+                    x: 0px;
+                    y: -36px;
+                    width: parent.width;
+                    text: hook.category;
+                    auxiliary-text: "" + hook.category-size;
+                }
+                if hook.category-start: Rectangle {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: hook.category-size * 72px + 2px;
+                    border-width: 1px;
+                    border-radius: GitHubMetrics.radius-medium;
+                    border-color: GitHubTheme.border-default;
+                    background: GitHubTheme.canvas-default;
+                }
+                Text {
+                    x: 13px; y: 11px; width: parent.width - 162px; height: 24px;
+                    text: hook.name; font-size: 14px; font-weight: 600; color: GitHubTheme.fg-default;
+                    vertical-alignment: center; overflow: elide;
+                }
+                Text {
+                    x: 13px; y: 39px; width: parent.width - 162px; height: 20px;
+                    text: hook.description; font-size: 12px; color: GitHubTheme.fg-muted; overflow: elide;
+                }
+                row-toggle := GitHubToggle {
+                    x: parent.width - 137px; y: 25px;
+                    checked: HookSettingsState.enabled && hook.enabled;
+                    enabled: HookSettingsState.ready && HookSettingsState.enabled
+                        && !HookSettingsState.busy;
+                    interaction-enabled: self.enabled && HookSettingsState.row-enable-busy-id == "";
+                    loading: HookSettingsState.row-enable-busy-id == hook.id;
+                    accessible-label: I18n.hooks-enabled + ": " + hook.name;
+                    toggled(value) => { HookSettingsState.set-hook-enabled(hook.id, value); }
+                }
+                GitHubHookEditAction {
+                    x: parent.width - 77px; y: 21px;
+                    accessible-label: I18n.hooks-edit + ": " + hook.name;
+                    button-enabled: HookSettingsState.ready && !HookSettingsState.busy;
+                    clicked => { HookSettingsState.choose("hook", hook.id); }
+                }
+                GitHubHookDeleteAction {
+                    x: parent.width - 41px; y: 21px;
+                    accessible-label: I18n.common-delete + ": " + hook.name;
+                    button-enabled: HookSettingsState.ready && !HookSettingsState.busy;
+                    clicked => { HookSettingsState.request-delete(hook.id); }
+                }
+                Rectangle {
+                    x: 1px;
+                    y: parent.height;
+                    width: parent.width - 2px;
+                    height: 1px;
+                    background: GitHubTheme.border-default;
+                    visible: !hook.category-end;
+                }
+            }
+        }
+        if HookSettingsState.result != "" && HookSettingsState.dialog-mode == "": Text {
+            width: parent.width; text: HookSettingsState.result;
+            color: HookSettingsState.result-error ? GitHubTheme.danger-fg : GitHubTheme.fg-muted;
+            font-size: 14px; wrap: word-wrap;
+        }
+        Rectangle {
+            height: 40px;
+            history-picker := GitHubHookPicker {
+                x: 0px; y: 0px; width: parent.width - 44px;
+                text: I18n.hooks-history; kind: "history"; items: HookSettingsState.history;
+                clicked => { GitHubSelectState.toggle("hooks-history", "", 0, root.viewport-origin-x + parent.x + self.x, root.viewport-origin-y + parent.y + self.y, self.width, self.height); }
+            }
+            GitHubHookClearHistoryAction {
+                x: parent.width - 32px; y: 4px;
+                button-enabled: HookSettingsState.can-clear-history && !HookSettingsState.busy;
+                clicked => { HookSettingsState.request-clear-history(); }
+            }
+        }
+    }
+}
+
+export component GitHubHookDialog inherits Rectangle {
+    background: transparent;
+    private property <string> editor-mode: HookSettingsState.dialog-mode;
+    changed editor-mode => {
+        form.reset-code-viewport();
+        code-viewport-reset.restart();
+    }
+    code-viewport-reset := Timer {
+        // TextInput applies its external `text` binding and restores the
+        // cursor on the following event-loop turn.  Reset after that
+        // synchronization so reopening a long script cannot inherit the
+        // previous editor's cursor/viewport position.
+        interval: 60ms;
+        running: false;
+        triggered => {
+            form.finish-code-viewport-reset();
+        }
+    }
+    private property <bool> deleting: HookSettingsState.dialog-mode == "delete";
+    private property <bool> clearing: HookSettingsState.dialog-mode == "clear-history";
+    private property <bool> confirming: root.deleting || root.clearing;
+    frame := GitHubDialog {
+        dialog-visible: HookSettingsState.dialog-mode != "";
+        title: root.clearing ? I18n.hooks-clear-history : root.deleting ? I18n.hooks-delete-title
+            : HookSettingsState.dialog-mode == "add" ? I18n.hooks-new : I18n.hooks-edit;
+        dialog-width: root.confirming ? 480px : 680px;
+        dialog-height: root.confirming ? 280px : min(760px, root.height - 32px);
+        body-padding: 0px;
+        close-enabled: !HookSettingsState.busy;
+        primary-label: root.clearing ? I18n.hooks-clear-history : root.deleting ? I18n.common-delete : I18n.common-save;
+        primary-success: !root.confirming;
+        primary-danger: root.confirming;
+        submit-on-primary-enter: !root.confirming;
+        primary-enabled: HookSettingsState.ready && !HookSettingsState.busy;
+        primary-busy: HookSettingsState.busy && HookSettingsState.test-run == "";
+        close-requested => { HookSettingsState.cancel(); }
+        cancel-clicked => { HookSettingsState.cancel(); }
+        primary-clicked => { if root.clearing { HookSettingsState.clear-history(); } else if root.deleting { HookSettingsState.delete(); } else { HookSettingsState.save(); } }
+        Rectangle {
+            x: frame.content-x; y: frame.content-y;
+            width: frame.content-width; height: frame.content-height;
+            background: transparent;
+            clip: true;
+            if root.confirming: Text {
+                x: 16px; y: 16px; width: parent.width - 32px;
+                text: (root.clearing ? I18n.hooks-clear-history-confirmation : I18n.hooks-delete-confirmation + "\n" + HookSettingsState.draft-name) + "\n" + HookSettingsState.result;
+                font-size: 14px; color: GitHubTheme.fg-default; wrap: word-wrap;
+            }
+            Rectangle {
+                visible: !root.confirming;
+                x: 0px; y: 0px;
+                width: parent.width; height: root.confirming ? 0px : parent.height - feedback.height;
+                clip: true;
+                // Keep the dialog body as a single, bounded surface. The code
+                // editor owns the only vertical ScrollView in this form; an
+                // outer ScrollView here would create unsupported same-axis
+                // nesting and steal macOS trackpad gestures from the editor.
+                form := GitHubHookEditorForm {
+                    x: 16px; y: 16px; width: parent.width - 32px;
+                    // The feedback row supplies the lower 16px safe area, so
+                    // reserve body padding only above the form here.
+                    available-height: parent.height - GitHubMetrics.stack-padding-normal;
+                    viewport-origin-x: root.absolute-position.x + frame.content-x + 16px;
+                    viewport-origin-y: root.absolute-position.y + frame.content-y + 16px;
+                }
+            }
+            feedback := GitHubHookTestFeedback {
+                x: 0px; y: parent.height - self.height; width: parent.width;
+                visible: !root.confirming;
+            }
+        }
+    }
+}

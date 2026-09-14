@@ -17,12 +17,16 @@ Keep Usher a responsive desktop application with explicit module ownership, even
 3. Inspect `git status --short`; preserve unrelated user changes.
 4. Locate both Rust callback bindings and their Slint declaration before changing UI-facing behavior.
 5. For terminal work, read `docs/specs/terminal.md`; use the long iteration notes only as history.
+6. Before adding or changing any Tooltip, read [Tooltip implementation contract](docs/specs/tooltips.md). Follow its factory-isolation rules and acceptance matrix; a build-only check is insufficient.
+7. Before any UI change, read [Internationalization](docs/specs/i18n.md). Every new or changed user-facing string must use the shared semantic catalog, and dynamic Rust projections must refresh immediately when the runtime locale changes.
 
 1. 阅读对应语言的 README 和架构文档。
 2. 阅读 `docs/specs/README.md` 以及对应功能 spec。
 3. 先检查 `git status --short`，保留用户无关改动。
 4. 修改 UI 行为前，同时定位 Rust callback 绑定和 Slint 声明。
 5. Terminal 改动先读 `docs/specs/terminal.md`，长篇迭代记录只作为历史参考。
+6. **新增或修改任何 Tooltip 前，必须先阅读 [Tooltip 实现规范](docs/specs/tooltips.md)**，遵守组件工厂隔离规则并完成对应验收矩阵，不能仅凭编译通过交付。
+7. **任何 UI 改动前都必须阅读 [国际化规范](docs/specs/i18n.md)**。所有新增或修改的用户可见文案必须进入共享语义 catalog；Rust 动态投影必须在运行时切换语言后立即刷新。
 
 ## Canonical references / 主文档
 
@@ -101,12 +105,14 @@ Keep Usher a responsive desktop application with explicit module ownership, even
 - Mount full-window overlays at the root window layer.
 - Reuse existing FAB, card-action, modal, toast, notification, and terminal components before adding variants.
 - Any new root property/callback must have a consistent name in `ui/main.slint` and Rust.
+- Every UI change must preserve full multi-language behavior: no hard-coded user-facing prose, no persisted translated strings, and no stale Rust-projected copy after a locale switch. Validate at least the source locale and one packaged non-source locale.
 
 - Hover 命中节点应常驻，用 opacity/state 控制。
 - 滚动和 resize 期间不要重建大型 model。
 - 全窗口遮罩必须挂在根窗口层。
 - 新建变体前先复用现有 FAB、卡片操作、Modal、Toast、Notification、Terminal 组件。
 - 根 property/callback 在 `ui/main.slint` 和 Rust 中必须命名一致。
+- 每次 UI 改动都必须保持完整多语言行为：不得硬编码用户可见文案，不得持久化翻译后的字符串，运行时切换语言后 Rust 投影文案不得残留旧语言；至少验证源语言和一种内置非源语言。
 
 ### Vendored Material / 内置 Material
 
