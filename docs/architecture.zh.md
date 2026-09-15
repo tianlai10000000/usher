@@ -187,7 +187,7 @@ callback 耗时和夹具效果预算避免相对比较掩盖回归。显式 `--b
 | `ui/components/github_metadata_label.slint` | 共享的 Primer small Label：透明背景、包含边框的留白计算、内容居中与强类型 Default/Primary/Secondary 变体；Hook 状态元数据采用 Secondary。 |
 | `ui/components/github_link.slint` | 共用的 Primer 文本链接状态和键盘交互。 |
 | `ui/components/github_spinner.slint` | 控件和加载界面统一使用的应用自有 Primer 不定进度 Spinner。 |
-| `ui/components/github_progress_bar.slint` | 状态栏和更新界面共用的语义化确定/不确定进度条。 |
+| `ui/components/github_progress_bar.slint` | 状态栏和更新界面共用的语义化确定/不确定进度条；确定进度的填充条固定在左侧，宽度随进度向右增长。 |
 | `ui/components/github_scroll_view.slint` | 应用自有的常驻纵向视口和语义滚动条基础。 |
 | `ui/components/navigation/github_underline_nav.slint` | Workflow 及其功能子页签共用的、支持键盘的 Primer UnderlineNav/UnderlinePanels 容器与 Item；容器统一管理全宽底线、安全区内边距和页签间距。 |
 | `ui/components/github_segmented_control.slint` | 共用的紧凑 Primer SegmentedControl 外壳、Item、Divider 及焦点/禁用交互。 |

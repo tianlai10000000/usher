@@ -1,0 +1,28 @@
+import { GitHubDownloadProgressDialog } from "../../ui/components/update/update.slint";
+import { I18n } from "@i18n";
+
+// Development-only fixture: uses the production dialog without starting an update.
+export component UpdateProgressFixture inherits Window {
+    width: 800px;
+    height: 600px;
+    background: #ffffff;
+    in-out property <float> mock-progress: 0.19;
+    in property <bool> animate-progress: false;
+
+    Timer {
+        running: root.animate-progress;
+        interval: 1000ms;
+        triggered => {
+            root.mock-progress = root.mock-progress >= 1 ? 0 : min(1, root.mock-progress + 0.1);
+        }
+    }
+
+    GitHubDownloadProgressDialog {
+        width: parent.width;
+        height: parent.height;
+        show-modal: true;
+        progress: root.mock-progress;
+        version: "0.0.9-alpha.2";
+        status: root.mock-progress > 0 ? I18n.update-downloading : I18n.update-preparing-download;
+    }
+}

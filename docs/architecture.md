@@ -212,7 +212,7 @@ bounds or replace manual input/paint validation.
 | `ui/components/github_metadata_label.slint` | Shared small Primer Label: transparent background, border-inclusive padding, centered content and typed Default/Primary/Secondary variants; Hook status metadata uses Secondary. |
 | `ui/components/github_link.slint` | Shared Primer text-link states and keyboard interaction. |
 | `ui/components/github_spinner.slint` | Single application-owned Primer indeterminate spinner used by controls and loading surfaces. |
-| `ui/components/github_progress_bar.slint` | Shared semantic determinate/indeterminate progress track for status and update surfaces. |
+| `ui/components/github_progress_bar.slint` | Shared semantic determinate/indeterminate progress track for status and update surfaces; determinate fill is anchored to the left edge and grows in width with progress. |
 | `ui/components/github_scroll_view.slint` | Application-owned mounted vertical viewport and semantic scrollbar foundation. |
 | `ui/components/navigation/github_underline_nav.slint` | Shared keyboard-accessible Primer UnderlineNav/UnderlinePanels shell and item used by Workflow and nested feature tabs; the shell owns the full-width baseline, safe-area inset, and item spacing. |
 | `ui/components/github_segmented_control.slint` | Shared compact Primer SegmentedControl shell, items, dividers, and focus/disabled interaction. |
