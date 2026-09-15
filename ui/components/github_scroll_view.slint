@@ -276,7 +276,7 @@ export component GitHubScrollView inherits Rectangle {
             animate opacity { duration: 120ms; easing: ease-out; }
         }
 
-        Rectangle {
+        scrollbar-thumb := Rectangle {
             x: (parent.width - GitHubMetrics.size-4) / 2;
             y: root.displayed-thumb-y;
             width: GitHubMetrics.size-4;

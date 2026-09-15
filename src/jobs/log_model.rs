@@ -1,7 +1,7 @@
 //! Send-safe incremental parsing and bounded, lazy Slint line materialization.
 use crate::JobLogLineItem;
 use slint::{Model, ModelNotify, ModelTracker};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -44,6 +44,7 @@ impl LogSnapshot {
 }
 
 pub(super) struct LogModel {
+    pub(super) revision: Cell<i32>,
     snapshot: RefCell<LogSnapshot>,
     cache: RefCell<HashMap<usize, JobLogLineItem>>,
     notify: ModelNotify,
@@ -51,6 +52,7 @@ pub(super) struct LogModel {
 impl LogModel {
     pub(super) fn new(snapshot: LogSnapshot) -> Self {
         Self {
+            revision: Cell::new(0),
             snapshot: RefCell::new(snapshot),
             cache: RefCell::new(HashMap::new()),
             notify: ModelNotify::default(),
@@ -61,6 +63,7 @@ impl LogModel {
         if Arc::ptr_eq(&old.0, &next.0) {
             return;
         }
+        self.revision.set(self.revision.get().wrapping_add(1));
         let prefix = old
             .0
             .iter()
@@ -93,6 +96,16 @@ impl LogModel {
                 self.notify.row_added(prefix, added);
             }
         }
+    }
+    pub(super) fn measurement_lines(&self) -> Arc<Vec<ParsedText>> {
+        Arc::new(
+            self.snapshot
+                .borrow()
+                .0
+                .iter()
+                .map(|line| line.parsed.clone())
+                .collect(),
+        )
     }
 }
 impl Model for LogModel {

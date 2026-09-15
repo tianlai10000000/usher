@@ -6,6 +6,7 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 
 | Spec | Status | Code owners |
 | --- | --- | --- |
+| [Exact virtual scrolling](virtual-scrolling.md) | Shared contract for variable-height documents and stable thumb geometry / 可变行高文档与稳定滑块几何通用契约 | `crates/usher-virtual-list/`, `src/app_runtime/latest_compute.rs`, `ui/components/github_scroll_view.slint`, feature layout adapters |
 | [HTTP pipeline](http.md) | Current / 当前 | `src/http/mod.rs`, all HTTP callers |
 | [Cross-page state store](state-store.md) | Current: bounded latest snapshots and revision barriers / 当前：有界最新快照与版本屏障 | `crates/usher-state-store/`, all cross-page state owners and UI bridges |
 | [Shared search navigation](search.md) | Current / 当前 | `crates/usher-search/`, feature Find adapters, PR `find_bridge.rs`, `controller/diff_bindings.rs`, `PrDiffBridge` |
@@ -17,7 +18,7 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | [Artifact preview framework](artifact-preview.md) | Current: cancellable exact worker layout and virtual code lines / 当前：可取消的后台精确布局与代码行虚拟化 | `crates/usher-preview/`, `src/artifact_preview/`, `ui/components/artifact_preview/`, Settings and all preview callers |
 | [Project repository metadata](project-repository.md) | Current: explicit Hook opt-in with disabled-row restoration, bounded Logo retries and projection / 当前：Hook 显式选择与禁用行恢复、Logo 有界重试与投影 | `src/project/mod.rs`, `src/git/`, `src/codereview/api/` |
 | [Pull request workflow](pr-review.md) | Current / 当前 | `src/workflow/pr_list.rs`, `src/workflow/pr_review.rs`, `src/workflow/pr_review/`, `src/git/`, `ui/features/pr_review/`, `ui/views/workflow/`, `ui/components/workflow/` |
-| [Reusable job runs](jobs.md) | Current: typed lifecycle/durations, bounded output, virtualized logs with explicit wrapped-line pitch / 当前：类型化生命周期/耗时、有界输出与日志虚拟化、显式换行行高 | `src/jobs/`, `ui/views/job_run.slint`, `ui/components/jobs/`, feature controllers |
+| [Reusable job runs](jobs.md) | Current: typed lifecycle/durations, bounded output, virtualized logs, safe blank rows and fixed run pages with output-only scrolling / 当前：类型化生命周期/耗时、有界输出与日志虚拟化、空行安全处理及固定运行页/仅输出区滚动 | `src/jobs/`, `ui/views/job_run.slint`, `ui/components/jobs/`, feature controllers |
 | [Application Hooks](hooks.md) | Current: bounded syntax text and native cursor/selection; macOS cursor visual QA passed / 当前：有界语法文本与原生光标/选区，macOS 光标视觉验收通过 | `src/hooks/`, `src/project/`, Settings, PR/AI completion sources, notifications and shutdown drains |
 | [Tag workflow](tag.md) | Current / 当前 | `src/workflow/tag.rs`, `src/workflow/tag/`, `src/workflow/state.rs`, `ui/views/workflow/` |
 | [Terminal behavior](terminal.md) | Current / 当前 | `src/terminal/`, `ui/components/drawer/terminal_drawer.slint`, `ui/main.slint` |

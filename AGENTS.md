@@ -19,6 +19,7 @@ Keep Usher a responsive desktop application with explicit module ownership, even
 5. For terminal work, read `docs/specs/terminal.md`; use the long iteration notes only as history.
 6. Before adding or changing any Tooltip, read [Tooltip implementation contract](docs/specs/tooltips.md). Follow its factory-isolation rules and acceptance matrix; a build-only check is insufficient.
 7. Before any UI change, read [Internationalization](docs/specs/i18n.md). Every new or changed user-facing string must use the shared semantic catalog, and dynamic Rust projections must refresh immediately when the runtime locale changes.
+8. For variable-height lists or unstable scrollbars, read [Exact virtual scrolling](docs/specs/virtual-scrolling.md). Reuse exact extents, shared virtualization and the worker/layout acceptance matrix; do not patch estimated ranges by freezing the thumb.
 
 1. 阅读对应语言的 README 和架构文档。
 2. 阅读 `docs/specs/README.md` 以及对应功能 spec。
@@ -27,6 +28,7 @@ Keep Usher a responsive desktop application with explicit module ownership, even
 5. Terminal 改动先读 `docs/specs/terminal.md`，长篇迭代记录只作为历史参考。
 6. **新增或修改任何 Tooltip 前，必须先阅读 [Tooltip 实现规范](docs/specs/tooltips.md)**，遵守组件工厂隔离规则并完成对应验收矩阵，不能仅凭编译通过交付。
 7. **任何 UI 改动前都必须阅读 [国际化规范](docs/specs/i18n.md)**。所有新增或修改的用户可见文案必须进入共享语义 catalog；Rust 动态投影必须在运行时切换语言后立即刷新。
+8. 可变行高列表或滚动条不稳定问题先读 [精确虚拟滚动](docs/specs/virtual-scrolling.md)，复用精确 extent、共享虚拟化及 Worker/布局验收矩阵，禁止仅冻结滑块来掩盖估算范围问题。
 
 ## Canonical references / 主文档
 

@@ -1283,6 +1283,7 @@ export component MainWindow inherits Window {
                         visible: root.show-page-scroll-view
                             && root.current-route != Route.Settings
                             && root.current-route != Route.Messages
+                            && root.current-route != Route.JobRun
                             && !(root.shell-drawer-docked-route
                                 && root.shell-drawer-visible
                                 && root.shell-drawer-fullscreen);
@@ -1324,26 +1325,6 @@ export component MainWindow inherits Window {
                             viewport-height: page-scroll-view.visible-height - 2px;
                             navigate(route) => {
                                 root.navigate(route);
-                            }
-                        }
-                        if root.current-route == Route.JobRun: JobRunPage {
-                            viewport-height: page-scroll-view.visible-height
-                                - root.page-content-height-offset;
-                            run-title: root.job-run-title;
-                            workflow-name: root.job-run-workflow-name;
-                            context-name: root.job-run-context-name;
-                            job-name: root.job-run-job-name;
-                            trigger-detail: root.job-run-trigger-detail;
-                            summary: root.job-run-summary;
-                            execution-status: root.job-run-status;
-                            conclusion: root.job-run-conclusion;
-                            total-duration: root.job-run-total-duration;
-                            steps: root.job-run-steps;
-                            running: root.job-run-running;
-                            animations-enabled: root.job-run-animations-enabled;
-                            stop => { root.job-run-stop(); }
-                            load-step-log(index) => {
-                                root.job-run-load-step-log(index);
                             }
                         }
                         // The review workspace owns the whole window. Keep workflow
@@ -1520,6 +1501,28 @@ export component MainWindow inherits Window {
                             }
                         }
                     }
+                    }
+
+                    // Job output owns scrolling; no page Flickable ancestor.
+                    if root.current-route == Route.JobRun: JobRunPage {
+                        x: GitHubMetrics.size-4;
+                        y: root.page-content-top-padding;
+                        width: parent.width - GitHubMetrics.size-8;
+                        height: max(0px, parent.height - root.page-content-height-offset);
+                        run-title: root.job-run-title;
+                        workflow-name: root.job-run-workflow-name;
+                        context-name: root.job-run-context-name;
+                        job-name: root.job-run-job-name;
+                        trigger-detail: root.job-run-trigger-detail;
+                        summary: root.job-run-summary;
+                        execution-status: root.job-run-status;
+                        conclusion: root.job-run-conclusion;
+                        total-duration: root.job-run-total-duration;
+                        steps: root.job-run-steps;
+                        running: root.job-run-running;
+                        animations-enabled: root.job-run-animations-enabled;
+                        stop => { root.job-run-stop(); }
+                        load-step-log(index) => { root.job-run-load-step-log(index); }
                     }
 
                     // Lazily create one stable cross-crate factory shell. The

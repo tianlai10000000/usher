@@ -1,7 +1,10 @@
 mod log_layout;
 mod log_model;
+mod log_viewport;
 mod model;
 mod presenter;
+#[cfg(test)]
+mod scroll_tests;
 
 use crate::i18n::LocalizedText;
 use crate::{JobStepItem, MainWindow};
@@ -11,7 +14,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 pub(crate) use model::{
-    JobConclusion, JobSnapshot, JobStepData, JobStepDefinition, JobStepStatus, format_duration,
+    format_duration, JobConclusion, JobSnapshot, JobStepData, JobStepDefinition, JobStepStatus,
 };
 
 #[derive(Debug, Clone)]

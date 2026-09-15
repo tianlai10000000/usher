@@ -989,6 +989,11 @@ reads only generic Job Run properties; it never reads Workflow or Tag properties
 `jobs/log_layout.rs` shapes mounted log rows with Parley into visual lines;
 the UI paints them at a 20 px pitch with one number per source row. Source-row
 padding remains independent, and resizing does not rebuild the source log model.
+Empty source rows bypass shaping and retain one blank visual line, avoiding
+synthetic shaping ranges outside the original string.
+While a first load or width reflow is pending, the log viewport shows the shared
+centered Spinner/loading state and hides the previous row projection, so loading
+copy never overlaps a stale first line.
 `ui/components/jobs/job.slint` renders the selected Job snapshot, while
 `github_job_run.slint` provides the GitHub Actions-style header, Jobs region, and responsive log
 layout. Both own no I/O or timing. Git
@@ -999,9 +1004,22 @@ executing a Job; any future executable Branch plan must adopt the reusable Job b
 of copying the presenter or adding domain branches to it.
 `jobs/log_model.rs` incrementally prepares Send-safe semantic lines on log mutations,
 reusing unchanged lines. `jobs/presenter.rs` preserves Step and nested log model identities;
-the lazy UI cache retains at most 128 converted rows. Expanded logs use the existing public
-ListView with the GitHub scrollbar in a pane capped at 420 px; wrapped lines retain source
-numbers and scroll within the pane. Scrolling/resizing never reparses the complete log.
+the lazy UI cache retains at most 128 converted source rows. `jobs/log_viewport.rs`
+measures wrapped rows on the cancellable shared blocking pool, then installs exact
+extents in `usher-virtual-list`. A bounded source-numbered window is painted inside
+`GitHubScrollView`; document height and thumb range use the same exact extent, not
+ListView's visible-row estimate. Same-count edits advance the log revision.
+Scrolling never rewraps the document; only source/font/width changes request layout.
+The cross-feature integration and acceptance contract is
+[Exact virtual scrolling](specs/virtual-scrolling.md).
+JobRun is mounted outside the generic page Flickable in a fixed-height viewport.
+Its header and Jobs navigation stay fixed; log panes shrink to the remaining
+height and retain their virtual-list scrollbars. Single-step run logs fill that
+space even in tall windows instead of retaining the embedded Job's 420 px cap.
+If ordered steps overflow, a
+passive clipped output frame handles unconsumed wheel input and an output-only
+scrollbar, without a Flickable ancestor capturing log gestures. Other routes
+retain their normal page scrolling.
 The process driver reads 4 KiB blocks into a 16-block queue, preserves UTF-8/CRLF across
 blocks, and keeps a strict 32 KiB tail including the truncation marker. It drains while
 readers run, aborts/joins them on cancellation, and limits inherited-pipe drain after direct

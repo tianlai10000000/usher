@@ -216,6 +216,7 @@ export component GitHubSelectDemoOverlay inherits Rectangle {
             }
         }
     }
+
 }
 
 export component GitHubUiComponentsGallery inherits Rectangle {
@@ -395,6 +396,7 @@ export component GitHubUiComponentsGallery inherits Rectangle {
 
     height: gallery-content.preferred-height;
     background: transparent;
+    clip: false;
 
     gallery-content := VerticalLayout {
         width: parent.width;
@@ -900,10 +902,12 @@ export component GitHubUiComponentsGallery inherits Rectangle {
             }
         }
 
-        GitHubShowcaseSection {
+        action-menu-section := GitHubShowcaseSection {
             title: "ActionMenu - borderless ActionList";
             description: "Borderless action rows, AnchoredOverlay placement, alignment, side selection, Escape, and caller-owned outside-click dismiss.";
-            content-height: root.action-menu-open ? 204px : 48px;
+            // The overlay is anchored to this fixed trigger row and must not
+            // participate in the section's layout geometry.
+            content-height: 48px;
 
             HorizontalLayout {
                 x: 0px;
@@ -914,27 +918,61 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 spacing: GitHubMetrics.size-8;
                 alignment: start;
 
-                for menu-action in [
-                    { label: "Start / below", align: "start", side: "bottom", close: false },
-                    { label: "End / below", align: "end", side: "bottom", close: false },
-                    { label: "Start / above", align: "start", side: "top", close: false },
-                    { label: "Close", align: "start", side: "bottom", close: true }
-                ]: GitHubButton {
-                    text: menu-action.label;
-                    selected: !menu-action.close
-                        && root.action-menu-open
-                        && root.action-menu-align == menu-action.align
-                        && root.action-menu-side == menu-action.side;
-                    disabled: menu-action.close && !root.action-menu-open;
+                start-action-button := GitHubButton {
+                    text: "Start / below";
+                    selected: root.action-menu-open
+                        && root.action-menu-align == "start"
+                        && root.action-menu-side == "bottom";
                     clicked => {
-                        if menu-action.close {
+                        if root.action-menu-open
+                                && root.action-menu-align == "start"
+                                && root.action-menu-side == "bottom" {
                             root.action-menu-open = false;
                         } else {
-                            root.action-menu-align = menu-action.align;
-                            root.action-menu-side = menu-action.side;
+                            root.action-menu-align = "start";
+                            root.action-menu-side = "bottom";
                             root.action-menu-open = true;
                         }
                     }
+                }
+                end-action-button := GitHubButton {
+                    text: "End / below";
+                    selected: root.action-menu-open
+                        && root.action-menu-align == "end"
+                        && root.action-menu-side == "bottom";
+                    clicked => {
+                        if root.action-menu-open
+                                && root.action-menu-align == "end"
+                                && root.action-menu-side == "bottom" {
+                            root.action-menu-open = false;
+                        } else {
+                            root.action-menu-align = "end";
+                            root.action-menu-side = "bottom";
+                            root.action-menu-open = true;
+                        }
+                    }
+                }
+                above-action-button := GitHubButton {
+                    text: "Start / above";
+                    selected: root.action-menu-open
+                        && root.action-menu-align == "start"
+                        && root.action-menu-side == "top";
+                    clicked => {
+                        if root.action-menu-open
+                                && root.action-menu-align == "start"
+                                && root.action-menu-side == "top" {
+                            root.action-menu-open = false;
+                        } else {
+                            root.action-menu-align = "start";
+                            root.action-menu-side = "top";
+                            root.action-menu-open = true;
+                        }
+                    }
+                }
+                close-action-button := GitHubButton {
+                    text: "Close";
+                    disabled: !root.action-menu-open;
+                    clicked => { root.action-menu-open = false; }
                 }
             }
 
@@ -953,47 +991,6 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 }
             }
 
-            GitHubActionMenu {
-                z: 1;
-                open: root.action-menu-open;
-                viewport-x: 0px;
-                viewport-y: 0px;
-                viewport-width: parent.width;
-                viewport-height: parent.height;
-                anchor-x: root.action-menu-align == "end"
-                    ? min(420px, parent.width - 120px)
-                    : 0px;
-                anchor-y: root.action-menu-side == "top" ? 190px : 32px;
-                anchor-width: 120px;
-                anchor-height: 32px;
-                menu-width: 280px;
-                content-height: 128px;
-                align: root.action-menu-align;
-                side: root.action-menu-side;
-                dismiss-requested => { root.action-menu-open = false; }
-
-                VerticalLayout {
-                    x: GitHubMetrics.size-8;
-                    y: GitHubMetrics.size-8;
-                    width: parent.width - GitHubMetrics.size-16;
-                    spacing: 0px;
-                    alignment: start;
-
-                    for menu-item in [
-                        { label: "Selected option", description: "Current ActionList state", selected: true, enabled: true, danger: false, icon: @image-url("") },
-                        { label: "Disabled option", description: "", selected: false, enabled: false, danger: false, icon: @image-url("") },
-                        { label: "Danger option", description: "", selected: false, enabled: true, danger: true, icon: @image-url("../../assets/icons/octicon-trash-16.svg") }
-                    ]: GitHubActionListItem {
-                        text: menu-item.label;
-                        description: menu-item.description;
-                        selected: menu-item.selected;
-                        item-enabled: menu-item.enabled;
-                        danger: menu-item.danger;
-                        icon: menu-item.icon;
-                        activated => { root.action-menu-open = false; }
-                    }
-                }
-            }
         }
 
         GitHubShowcaseSection {
@@ -1706,6 +1703,68 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // Root-mounted portal: the menu paints above every showcase section while
+    // remaining outside the vertical layout geometry.
+    if root.action-menu-open: action-menu := GitHubActionMenu {
+        z: 10000;
+        open: true;
+        viewport-x: -GitHubMetrics.size-8;
+        viewport-y: 0px;
+        viewport-width: root.width + GitHubMetrics.size-16;
+        viewport-height: root.height;
+        // Keep the portal tied to the selected trigger's live geometry. These
+        // bindings are reevaluated when responsive layout changes on resize.
+        anchor-x: action-menu-section.x
+            + (root.action-menu-align == "end"
+                ? end-action-button.x
+                : root.action-menu-side == "top"
+                    ? above-action-button.x
+                    : start-action-button.x);
+        anchor-y: action-menu-section.y + 60px
+            + (root.action-menu-align == "end"
+                ? end-action-button.y
+                : root.action-menu-side == "top"
+                    ? above-action-button.y
+                    : start-action-button.y);
+        anchor-width: root.action-menu-align == "end"
+            ? end-action-button.width
+            : root.action-menu-side == "top"
+                ? above-action-button.width
+                : start-action-button.width;
+        anchor-height: root.action-menu-align == "end"
+            ? end-action-button.height
+            : root.action-menu-side == "top"
+                ? above-action-button.height
+                : start-action-button.height;
+        menu-width: 256px;
+        content-height: 128px;
+        align: root.action-menu-align;
+        side: root.action-menu-side;
+        dismiss-requested => { root.action-menu-open = false; }
+
+        VerticalLayout {
+            x: GitHubMetrics.size-8;
+            y: GitHubMetrics.size-8;
+            width: parent.width - GitHubMetrics.size-16;
+            spacing: 0px;
+            alignment: start;
+
+            for menu-item in [
+                { label: "Selected option", description: "Current ActionList state", selected: true, enabled: true, danger: false, icon: @image-url("") },
+                { label: "Disabled option", description: "", selected: false, enabled: false, danger: false, icon: @image-url("") },
+                { label: "Danger option", description: "", selected: false, enabled: true, danger: true, icon: @image-url("../../assets/icons/octicon-trash-16.svg") }
+            ]: GitHubActionListItem {
+                text: menu-item.label;
+                description: menu-item.description;
+                selected: menu-item.selected;
+                item-enabled: menu-item.enabled;
+                danger: menu-item.danger;
+                icon: menu-item.icon;
+                activated => { root.action-menu-open = false; }
             }
         }
     }

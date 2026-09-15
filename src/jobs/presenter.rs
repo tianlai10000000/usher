@@ -38,7 +38,8 @@ pub(super) fn apply(ui: &MainWindow, source: &str, snapshot: &JobSnapshot) {
             } else {
                 view.logs[index].update(parsed);
             }
-            let item = step.to_slint_with_lines(view.logs[index].clone().into());
+            let mut item = step.to_slint_with_lines(view.logs[index].clone().into());
+            item.log_revision = view.logs[index].revision.get();
             if index == view.rows.row_count() {
                 view.rows.push(item);
             } else if view.rows.row_data(index).as_ref() != Some(&item) {

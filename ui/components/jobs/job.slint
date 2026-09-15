@@ -1,19 +1,33 @@
-import { ListView } from "@material";
-import { GitHubVirtualListScrollbar } from "../github_scroll_view.slint";
+import { GitHubScrollView } from "../github_scroll_view.slint";
 import { AppState } from "../../state/app_state.slint";
-import { GitHubSpinner } from "../github_spinner.slint";
+import { GitHubCenteredLoadingState, GitHubSpinner } from "../github_spinner.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { I18n } from "@i18n";
-
-export global JobLogLayout {
-    pure callback wrap-lines(string, float) -> [string];
-}
 
 export struct JobLogLineItem {
     text: string,
     prefix: string,
     // GitHub workflow-command levels: plain, notice, warning, error, debug.
     kind: string,
+}
+
+export struct JobLogVirtualRow {
+    line: JobLogLineItem,
+    line-number: int,
+    visual-lines: [string],
+    offset: float,
+    extent: float,
+}
+
+export struct JobLogWindow {
+    rows: [JobLogVirtualRow],
+    content-height: float,
+    loading: bool,
+}
+
+export global JobLogLayout {
+    in-out property <int> epoch: 0;
+    callback layout-window([JobLogLineItem], int, float, float, float, float, int) -> JobLogWindow;
 }
 
 // Public Job input/snapshot item. Callers provide the immutable name/command
@@ -30,6 +44,7 @@ export struct JobStepItem {
     log-loaded: bool,
     // Lazy, virtualized source-line model; wrapped rows keep their source number.
     log-lines: [JobLogLineItem],
+    log-revision: int,
     duration: string,
     default-expanded: bool,
 }
@@ -46,8 +61,8 @@ component GitHubActionsLogLineRow inherits Rectangle {
     in property <int> line-number;
     in property <color> foreground;
     in property <color> muted-foreground;
-    private property <string> display-text: root.line.prefix + root.line.text;
-    private property <[string]> visual-lines: JobLogLayout.wrap-lines(root.display-text, root.text-width / 1px);
+    in property <[string]> wrapped-lines;
+    private property <[string]> visual-lines: root.wrapped-lines;
     private property <length> visual-line-pitch: 20px;
     private property <length> text-width: max(1px, root.width - 80px);
     private property <color> hover-background: GitHubTheme.control-muted-rest;
@@ -135,6 +150,8 @@ component GitHubActionsLogLineRow inherits Rectangle {
 // canvas tokens for the active application theme.
 component GitHubActionsJobStepRow inherits Rectangle {
     in property <JobStepItem> step;
+    in property <length> max-log-height: 420px;
+    in property <bool> fill-log-height: false;
     in property <bool> expanded: false;
     in property <bool> animations-enabled: true;
     private property <bool> expandable: !root.queued && (root.step.has-log || root.running);
@@ -344,51 +361,84 @@ component GitHubActionsJobStepRow inherits Rectangle {
 
         if root.expanded: Rectangle {
             width: parent.width;
-            // Use a bounded source-row budget; wrapped lines scroll within the pane.
-            height: min(420px, max(60px, root.step.log-lines.length * 36px + 24px));
+            // Run pages can fill the output frame; embedded multi-step jobs
+            // retain a bounded source-row budget. Wrapped lines scroll here.
+            height: root.fill-log-height ? root.max-log-height
+                : min(root.max-log-height, max(60px, root.step.log-lines.length * 36px + 24px));
             vertical-stretch: 0;
             background: root.log-canvas;
 
             // Each source line owns a variable-height row. Wrapped continuation
             // lines stay indented under the message and do not repeat the
             // source line number, matching GitHub Actions.
-            if !root.step.log-loaded: Text {
-                x: 64px;
-                y: 12px;
-                width: parent.width - 80px;
-                height: 28px;
-                text: I18n.jobs-loading-logs;
-                color: root.fg-muted;
+            if !root.step.log-loaded || log-window.loading: GitHubCenteredLoadingState {
+                width: parent.width;
+                height: parent.height;
+                label: I18n.jobs-loading-logs;
+                foreground: root.fg-muted;
+            }
+            log-measure := Text {
+                visible: false;
+                text: "Ag";
                 font-size: 12px;
                 font-family: "monospace";
             }
-            log-rows := ListView {
+            private property <JobLogWindow> log-window;
+            private property <bool> refreshing: false;
+            private property <length> observed-y: log-rows.viewport-y;
+            private property <length> observed-width: log-rows.width;
+            private property <length> observed-height: log-rows.height;
+            private property <length> observed-line-height: log-measure.preferred-height;
+            private property <int> observed-revision: root.step.log-revision;
+            private property <[JobLogLineItem]> observed-lines: root.step.log-lines;
+            private property <int> observed-epoch: JobLogLayout.epoch;
+            function refresh-window() {
+                if self.refreshing { return; }
+                self.refreshing = true;
+                let next = JobLogLayout.layout-window(root.step.log-lines, root.step.log-revision,
+                    max(1px, log-rows.width - 80px) / 1px,
+                    max(0px, -log-rows.viewport-y) / 1px,
+                    log-rows.height / 1px, log-measure.preferred-height / 1px, JobLogLayout.epoch);
+                self.log-window = next;
+                self.refreshing = false;
+            }
+            init => { self.refresh-window(); }
+            changed observed-y => { self.refresh-window(); }
+            changed observed-width => { self.refresh-window(); }
+            changed observed-height => { self.refresh-window(); }
+            changed observed-line-height => { self.refresh-window(); }
+            changed observed-revision => { self.refresh-window(); }
+            changed observed-lines => { self.refresh-window(); }
+            changed observed-epoch => { self.refresh-window(); }
+            log-rows := GitHubScrollView {
                 y: 12px;
                 width: parent.width;
                 height: parent.height - 24px;
-                horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
-                vertical-scrollbar-policy: ScrollBarPolicy.always-off;
-                for line[index] in root.step.log-lines: GitHubActionsLogLineRow {
-                    width: log-rows.visible-width;
-                    line: line;
-                    line-number: index + 1;
-                    foreground: root.fg-default;
-                    muted-foreground: root.fg-muted;
+                visible: root.step.log-loaded && !log-window.loading;
+                interactive: false;
+                Rectangle {
+                    width: log-rows.width;
+                    height: log-window.content-height * 1px;
+                    for row in log-window.rows: GitHubActionsLogLineRow {
+                        x: 0px;
+                        y: row.offset * 1px;
+                        width: parent.width;
+                        height: row.extent * 1px;
+                        line: row.line;
+                        line-number: row.line-number;
+                        wrapped-lines: row.visual-lines;
+                        foreground: root.fg-default;
+                        muted-foreground: root.fg-muted;
+                    }
                 }
-            }
-            GitHubVirtualListScrollbar {
-                x: parent.width - self.width;
-                y: 12px;
-                height: parent.height - 24px;
-                viewport-y <=> log-rows.viewport-y;
-                visible-height: log-rows.visible-height;
-                content-height: log-rows.viewport-height;
             }
         }
     }
 }
 
 export component GitHubActionsJob inherits Rectangle {
+    in property <length> max-log-height: 420px;
+    in property <bool> fill-log-height: false;
     in property <string> title: I18n.jobs-steps;
     in property <string> summary: "";
     in property <string> empty-text: I18n.jobs-empty-steps;
@@ -507,6 +557,8 @@ export component GitHubActionsJob inherits Rectangle {
         }
 
         for step[index] in root.steps: GitHubActionsJobStepRow {
+            max-log-height: root.max-log-height;
+            fill-log-height: root.fill-log-height;
             width: parent.width;
             vertical-stretch: 0;
             step: step;

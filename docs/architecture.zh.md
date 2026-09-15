@@ -775,11 +775,23 @@ Stage Snapshot 适配到共用 `GitHubActionsJob` 视觉展示；Branch 当前�
 `tag/command_output.rs` 负责流式进程执行与取消，controller 保留领域编排。
 `jobs/log_model.rs` 在日志变更时后台增量准备可跨线程的语义行，复用未变化行。
 `jobs/presenter.rs` 保留 Step 与嵌套日志 model 身份，UI 懒缓存最多 128 个转换行。
-`jobs/log_layout.rs` 使用 Parley 将已挂载日志行拆成视觉行，UI 以 20px 行高逐行绘制，
+`jobs/log_layout.rs` 使用 Parley 将日志行拆成视觉行，UI 以 20px 行高逐行绘制，
 每条源日志只显示一次行号；源日志间的留白独立保留，resize 不重建源日志 model。
-展开日志复用公开 ListView 与 GitHub 滚动条，视口最高 420px；换行保留源行号，
-在面板内滚动，滚动/resize 不重新解析全部日志。进程以 4 KiB 分块读取，队列最多
-16 块，跨块保留 UTF-8/CRLF；含截断标记的尾日志严格不超过 32 KiB。Reader 运行
+空源行跳过 shaping 并保留一个空视觉行，避免合成排版范围越过原始字符串。
+首次加载或宽度重排等待期间，日志视口显示共享的居中 Spinner/加载状态并隐藏旧的行投影，
+避免加载文案与旧首行重叠。
+`jobs/log_viewport.rs` 在共享可取消 blocking pool 排版，向 `usher-virtual-list`
+安装精确 extent，并在 `GitHubScrollView` 内绘制有界、保留源行号的窗口。文档高度
+与滑块范围使用同一精确 extent，不依赖 ListView 的可见行估算；同数量修改也递增
+日志 revision。普通滚动不重新换行，仅源内容/字体/宽度变化请求布局。
+跨 Feature 接入与验收遵循 [精确虚拟滚动](specs/virtual-scrolling.md)。
+JobRun 独立挂在通用页面 Flickable 之外，采用固定高度视口。页头和 Jobs 导航固定，
+日志面板按剩余高度收缩并保留虚拟列表滚动条。单步骤运行的日志填满剩余空间，大窗口
+不沿用内嵌 Job 的 420px 上限。多个有序步骤超出输出区时，由被动裁剪
+视口处理未被日志消费的滚轮事件及输出区专属滚动条，不再由祖先 Flickable 抢占日志
+手势。其他路由保持原有页面滚动。
+进程以 4 KiB 分块读取，队列最多 16 块，跨块保留 UTF-8/CRLF；含截断标记的尾日志
+严格不超过 32 KiB。Reader 运行
 期间持续排空，取消时 abort/join；直接子进程退出后，继承管道最多继续排空 2 秒，
 超时明确报告失败。
 Step 原始日志在 disclosure 第一次请求行 model 前始终保留在项目级 Rust 快照中，

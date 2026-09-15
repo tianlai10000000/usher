@@ -214,16 +214,36 @@ References:
 ## Output and viewport budgets / 输出与视口预算
 
 - Wrapped visual lines within one source row use a 20 px pitch at 12 px font
-  size. Parley shapes the mounted rows; Slint paints each visual line separately.
+  size. Parley shapes rows on the shared cancellable blocking pool; Slint paints
+  only the exact visible/overscan window, using the prewrapped visual lines.
   The source number appears once, with existing padding between source rows.
-- 同一源行内的换行文本采用 12px 字号、20px 视觉行高，由 Parley 对已挂载行排版，
-  Slint 分行绘制。源行号仅显示一次，不同行号之间保留既有留白。
+  Empty source rows return one blank visual line without shaping or slicing.
+  During initial measurement or reflow, the output viewport uses the shared
+  centered Spinner/loading state and does not render a stale row projection.
+  JobRun has no outer page scrolling or page scrollbar. Its header/navigation
+  remain fixed; log panes fit the remaining viewport height. A single-step run's
+  log viewport fills the output frame, including tall/maximized windows, rather
+  than stopping at the embedded Job's 420 px cap. Log wheel input and
+  scrollbar drags affect only output. Overflowing ordered steps remain reachable
+  through a passive clipped output viewport and its output-only scrollbar, with
+  no ancestor Flickable capturing nested log gestures.
+- 同一源行内的换行文本采用 12px 字号、20px 视觉行高，
+  共享可取消 blocking pool 使用 Parley 排版，Slint 仅在精确可见/overscan 窗口
+  绘制预换行文本。源行号仅显示一次，不同行号之间保留既有留白。
+  空源行不参与 shaping 或切片，直接返回一个空视觉行。
+  首次测量或重排期间，输出视口使用共享的居中 Spinner/加载状态，不渲染旧的行投影。
+  JobRun 不允许外层页面滚动或页面滚动条；页头/导航固定，日志面板适配剩余视口高度。
+  单步骤运行的日志视口填满输出框，包括高窗口/最大化窗口，不受内嵌 Job 的 420px
+  上限限制。日志滚轮和滑块拖动仅影响输出。超出输出区的有序步骤通过被动裁剪的输出视口及专属
+  滚动条保持可达，不再由祖先 Flickable 抢占嵌套日志手势。
 
 - Worker log mutations prepare semantic lines incrementally, reusing unchanged
   lines; the event loop only converts requested visible rows. Step/log model
   identities remain stable across progress, append and tail eviction.
-- Slint conversion cache: at most 128 rows. Expanded log panes: at most 420 px,
-  using public ListView and the existing GitHub scrollbar. Source numbers,
+- Slint conversion cache: at most 128 source rows. Embedded/multi-step log panes
+  are capped at 420 px; single-step JobRun fills the remaining output viewport,
+  using the shared exact `usher-virtual-list` facade and GitHub viewport/scrollbar.
+  Follow [Exact virtual scrolling](virtual-scrolling.md). Source numbers,
   wrapping and semantic colors remain; long wrapped rows scroll inside the pane.
 - Tag transport: two 4 KiB readers, a shared queue of 16 blocks, at most three
   UTF-8 carry bytes per stream, and a 32 KiB combined tail including truncation.
@@ -236,8 +256,10 @@ References:
 
 - Worker 日志变更增量准备语义行并复用未变化行；event loop 只转换请求的可见行。
   Progress、追加与尾部淘汰保持 Step/log model 身份。
-- Slint 转换缓存最多 128 行，展开面板最高 420px，复用公开 ListView 与现有
-  GitHub 滚动条。保留源行号、换行和语义色；较长的换行行在面板内滚动。
+- Slint 转换缓存最多 128 个源行；内嵌/多步骤面板最高 420px，单步骤 JobRun 填满
+  剩余输出视口，复用共享精确 `usher-virtual-list` 门面与应用自有视口/滚动条，不再使用
+  ListView 可见行估算。遵循 [精确虚拟滚动通用规范](virtual-scrolling.md)。
+  保留源行号、换行和语义色；较长的换行行在面板内滚动。
 - Tag 两个 Reader 每次读取 4 KiB，共用 16 块队列，每流 UTF-8 跨块残留最多 3 字节；
   合并尾日志连同截断标记最多 32 KiB。超限淘汰最旧展示字节，不扩大队列或整行缓冲。
 - 等待 Reader 时继续消费。取消必须 abort/join 两个 Reader；直接子进程退出后

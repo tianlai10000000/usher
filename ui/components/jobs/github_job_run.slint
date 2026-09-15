@@ -1,4 +1,5 @@
 import { GitHubActionsJob, JobStepItem } from "job.slint";
+import { GitHubVirtualListScrollbar } from "../github_scroll_view.slint";
 import { GitHubSpinner } from "../github_spinner.slint";
 import { GitHubButton } from "../settings/github_settings_controls.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
@@ -254,19 +255,42 @@ component GitHubJobRunJobFrame inherits Rectangle {
     in property <bool> animations-enabled: true;
     in-out property <int> expanded-step-overrides: 0;
     callback load-step-log(int);
+    private property <length> viewport-y: 0px;
+    private property <length> scroll-maximum: max(0px, run-job.height + 2px - root.height);
+    changed scroll-maximum => {
+        root.viewport-y = max(-root.scroll-maximum, min(0px, root.viewport-y));
+    }
 
     width: 100%;
-    height: run-job.height + GitHubMetrics.size-2;
     border-radius: GitHubMetrics.radius-medium;
     border-width: GitHubMetrics.border-thin;
     border-color: GitHubTheme.border-default;
     background: GitHubTheme.code-canvas;
     clip: true;
 
+    // A passive clipped viewport cannot capture phased wheel gestures or
+    // pointer drags from the virtual log lists. Unhandled wheel input scrolls
+    // the ordered steps, so later steps remain reachable in a fixed-height frame.
+    TouchArea {
+        width: parent.width;
+        height: parent.height;
+        scroll-event(event) => {
+            if root.scroll-maximum > 0px {
+                root.viewport-y = max(-root.scroll-maximum, min(0px, root.viewport-y + event.delta-y));
+                return accept;
+            }
+            return reject;
+        }
+    }
+
     run-job := GitHubActionsJob {
         x: GitHubMetrics.border-thin;
-        y: GitHubMetrics.border-thin;
-        width: parent.width - GitHubMetrics.size-2;
+        y: GitHubMetrics.border-thin + root.viewport-y;
+        width: parent.width - GitHubMetrics.size-2 - 12px;
+        max-log-height: root.steps.length == 1
+            ? max(60px, root.height - 123px)
+            : max(60px, min(420px, root.height - 123px));
+        fill-log-height: root.steps.length == 1;
         title: root.job-name;
         summary: root.summary;
         execution-status: root.execution-status;
@@ -278,6 +302,15 @@ component GitHubJobRunJobFrame inherits Rectangle {
         load-step-log(index) => {
             root.load-step-log(index);
         }
+    }
+
+    steps-scrollbar := GitHubVirtualListScrollbar {
+        x: parent.width - self.width;
+        y: 1px;
+        height: max(0px, parent.height - 2px);
+        viewport-y <=> root.viewport-y;
+        visible-height: parent.height - 2px;
+        content-height: run-job.height;
     }
 }
 
@@ -303,15 +336,16 @@ export component GitHubJobRunSurface {
         min(root.width, GitHubMetrics.page-wide-content-max-width);
 
     width: 100%;
-    height: run-layout.preferred-height;
 
-    run-layout := VerticalLayout {
+    run-layout := Rectangle {
         x: (parent.width - root.content-width) / 2;
         width: root.content-width;
-        spacing: GitHubMetrics.size-20;
-        alignment: start;
+        height: root.height;
+        background: transparent;
 
-        GitHubJobRunHeader {
+        run-header := GitHubJobRunHeader {
+            x: 0px;
+            y: 0px;
             run-title: root.run-title;
             workflow-name: root.workflow-name;
             context-name: root.context-name;
@@ -325,8 +359,9 @@ export component GitHubJobRunSurface {
         }
 
         if !root.compact: Rectangle {
+            y: run-header.height + GitHubMetrics.size-20;
             width: parent.width;
-            height: max(jobs-nav.height, job-frame.height);
+            height: max(0px, root.height - self.y);
             background: transparent;
 
             jobs-nav := GitHubJobRunJobsNav {
@@ -344,6 +379,7 @@ export component GitHubJobRunSurface {
                 x: jobs-nav.width + GitHubMetrics.size-24;
                 y: 0px;
                 width: parent.width - self.x;
+                height: parent.height;
                 job-name: root.job-name;
                 summary: root.summary;
                 execution-status: root.execution-status;
@@ -356,12 +392,15 @@ export component GitHubJobRunSurface {
             }
         }
 
-        if root.compact: VerticalLayout {
+        if root.compact: Rectangle {
+            y: run-header.height + GitHubMetrics.size-20;
             width: parent.width;
-            spacing: GitHubMetrics.size-16;
-            alignment: start;
+            height: max(0px, root.height - self.y);
+            background: transparent;
 
             GitHubJobRunJobsNav {
+                x: 0px;
+                y: 0px;
                 width: parent.width;
                 job-name: root.job-name;
                 execution-status: root.execution-status;
@@ -371,7 +410,9 @@ export component GitHubJobRunSurface {
             }
 
             GitHubJobRunJobFrame {
+                y: 76px + GitHubMetrics.size-16;
                 width: parent.width;
+                height: max(0px, parent.height - self.y);
                 job-name: root.job-name;
                 summary: root.summary;
                 execution-status: root.execution-status;

@@ -1,11 +1,10 @@
-import { GitHubPageView } from "../components/page/page_view.slint";
 import { GitHubJobRunSurface } from "../components/jobs/github_job_run.slint";
 import { JobStepItem } from "../components/jobs/job.slint";
 import { GitHubMetrics } from "../theme/github_theme.slint";
 import { I18n } from "@i18n";
 
 // Application-level run route. Any feature may provide the active source.
-export component GitHubJobRunPage inherits GitHubPageView {
+export component GitHubJobRunPage inherits Rectangle {
     in property <string> run-title: I18n.common-job-run;
     in property <string> workflow-name: "Workflow";
     in property <string> context-name: "Usher";
@@ -21,10 +20,15 @@ export component GitHubJobRunPage inherits GitHubPageView {
     callback stop();
     callback load-step-log(int);
     private property <length> available-width:
-        max(320px, root.width - GitHubMetrics.size-32);
+        max(0px, root.width - GitHubMetrics.size-32);
+    background: transparent;
+    clip: true;
 
     GitHubJobRunSurface {
+        x: GitHubMetrics.size-16;
+        y: GitHubMetrics.size-16;
         width: root.available-width;
+        height: max(0px, root.height - GitHubMetrics.size-32);
         run-title: root.run-title;
         workflow-name: root.workflow-name;
         context-name: root.context-name;
