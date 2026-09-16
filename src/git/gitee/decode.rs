@@ -1,4 +1,3 @@
-use base64::Engine as _;
 use serde_json::Value;
 
 use super::super::{
@@ -8,18 +7,7 @@ use super::super::{
 use super::{string_field, value_u32};
 
 pub(super) fn decode_base64_content(payload: &Value) -> Result<String, String> {
-    let content = payload
-        .get("content")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "Gitee repository file response has no content.".to_string())?
-        .chars()
-        .filter(|character| !character.is_whitespace())
-        .collect::<String>();
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(content.as_bytes())
-        .map_err(|error| format!("Gitee repository file base64 decode failed: {error}"))?;
-    String::from_utf8(bytes)
-        .map_err(|error| format!("Gitee repository file is not UTF-8 text: {error}"))
+    super::super::source::decode_base64_content(payload, "Gitee")
 }
 
 pub(super) fn decode_pull_request_diff(payload: &Value) -> Result<PullRequestDiffDetail, String> {

@@ -1378,6 +1378,16 @@ The persisted release channel defaults from the running build: stable builds use
 
 Every request supplies `RequestOptions`:
 
+- `response_byte_limit` is opt-in and counts actual chunks before they reach
+  buffering or consumers. An exceeded limit stays failed and emits feedback once.
+  `HttpResponse::response_byte_limit` can only tighten a limit after inspecting
+  headers. Remote Logos use 8 MiB; AI model-list JSON and buffered completions, including JSON fallback
+  from streaming requests, use 16 MiB. Repository raw source uses 8 MiB, Base64
+  JSON uses 12 MiB, and `src/git/source.rs` bounds decoded source to 8 MiB.
+  SSE and updater streams keep their own policies. These are payload limits,
+  not total RSS limits: transport chunks, JSON/text expansion and consumers add
+  allocations. Error excerpts collect at most an 8,000-byte prefix before truncation.
+
 - `operation` provides stable logs and user-facing context.
 - `reject_http_errors` defaults to true and converts non-2xx responses into `HttpError` with a bounded body excerpt.
 - `feedback` defaults to `Silent`; user actions may opt into toast, notification, or both.

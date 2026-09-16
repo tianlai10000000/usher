@@ -48,6 +48,25 @@ class TerminalBudgetTests(unittest.TestCase):
             row["cycles_ms"] = [500, 600, 700]
         self.assertFalse(BENCHMARK.summarize(rows)["passed"])
 
+    def test_stale_highlight_loading_is_a_candidate_failure(self):
+        rows = results()
+        rows["A"][0]["premature_loading_clears"] = 5
+        self.assertTrue(BENCHMARK.summarize(rows)["passed"])
+        rows["B"][0]["premature_loading_clears"] = 1
+        self.assertFalse(BENCHMARK.summarize(rows)["passed"])
+
+    def test_response_budget_requires_rejection_and_successful_followups(self):
+        rows = results()
+        for side in "AB":
+            for row in rows[side]:
+                row.update(batch=67, small_responses=6, oversized_rejections=3 if side == "B" else 0)
+        self.assertTrue(BENCHMARK.summarize(rows)["passed"])
+        rows["B"][0]["oversized_rejections"] = 2
+        self.assertFalse(BENCHMARK.summarize(rows)["passed"])
+        rows["B"][0]["oversized_rejections"] = 3
+        rows["B"][1]["small_responses"] = 5
+        self.assertFalse(BENCHMARK.summarize(rows)["passed"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -49,6 +49,7 @@ pub(crate) enum HttpErrorKind {
     Request,
     Status,
     Decode,
+    ResponseTooLarge,
     Interceptor,
 }
 
@@ -386,6 +387,7 @@ pub(crate) struct RequestOptions {
     pub timeout: Duration,
     pub read_idle_timeout: Duration,
     pub body_diagnostic_context: Option<String>,
+    response_byte_limit: Option<usize>,
     retry: Option<RetryPolicy>,
     retry_disabled: bool,
 }
@@ -399,6 +401,7 @@ impl RequestOptions {
             timeout: DEFAULT_TIMEOUT,
             read_idle_timeout: DEFAULT_READ_IDLE_TIMEOUT,
             body_diagnostic_context: None,
+            response_byte_limit: None,
             retry: None,
             retry_disabled: false,
         }
@@ -407,6 +410,12 @@ impl RequestOptions {
     #[allow(dead_code)]
     pub(crate) fn feedback(mut self, feedback: ErrorFeedback) -> Self {
         self.feedback = feedback;
+        self
+    }
+
+    /// Bound actual response bytes before buffering or delivering each chunk.
+    pub(crate) fn response_byte_limit(mut self, limit: usize) -> Self {
+        self.response_byte_limit = Some(limit);
         self
     }
 
@@ -745,6 +754,9 @@ pub(crate) struct HttpResponse {
     method: Method,
     url: Url,
     options: RequestOptions,
+    received_bytes: usize,
+    body_error: Option<HttpError>,
+    error_reported: bool,
 }
 
 impl HttpResponse {
@@ -760,10 +772,55 @@ impl HttpResponse {
         self.inner.content_length()
     }
 
+    /// Tighten the limit after inspecting headers (e.g. SSE versus buffered JSON).
+    pub(crate) fn response_byte_limit(mut self, limit: usize) -> Self {
+        self.options.response_byte_limit = Some(
+            self.options
+                .response_byte_limit
+                .map_or(limit, |old| old.min(limit)),
+        );
+        self
+    }
+
+    fn report_body_error(&mut self, error: HttpError) -> HttpError {
+        if self.error_reported {
+            return error;
+        }
+        self.error_reported = true;
+        handle_error(error, self.options.feedback)
+    }
+
+    fn budget_error(&self) -> HttpError {
+        HttpError {
+            kind: HttpErrorKind::ResponseTooLarge,
+            operation: self.options.operation.clone(),
+            method: Some(self.method.clone()),
+            url: Some(self.url.clone()),
+            status: None,
+            message: format!(
+                "response body exceeds {} byte limit",
+                self.options.response_byte_limit.unwrap_or(usize::MAX)
+            ),
+            response_body: None,
+        }
+    }
+
     async fn chunk_raw_with_timeout(
         &mut self,
         wait_timeout: Duration,
     ) -> HttpResult<Option<bytes::Bytes>> {
+        if let Some(error) = &self.body_error {
+            return Err(error.clone());
+        }
+        if self
+            .options
+            .response_byte_limit
+            .is_some_and(|limit| self.received_bytes > limit)
+        {
+            let error = self.budget_error();
+            self.body_error = Some(error.clone());
+            return Err(error);
+        }
         let read = await_with_read_idle_timeout(wait_timeout, self.inner.chunk())
             .await
             .map_err(|()| {
@@ -774,7 +831,22 @@ impl HttpResponse {
                     self.options.read_idle_timeout,
                 )
             })?;
-        read.map_err(|error| HttpError::decode(error, &self.options.operation))
+        let chunk = read.map_err(|error| HttpError::decode(error, &self.options.operation))?;
+        if let Some(chunk) = &chunk {
+            let total = self.received_bytes.checked_add(chunk.len());
+            if total.is_none()
+                || self
+                    .options
+                    .response_byte_limit
+                    .is_some_and(|limit| total.unwrap() > limit)
+            {
+                let error = self.budget_error();
+                self.body_error = Some(error.clone());
+                return Err(error);
+            }
+            self.received_bytes = total.unwrap();
+        }
+        Ok(chunk)
     }
 
     async fn chunk_raw(&mut self) -> HttpResult<Option<bytes::Bytes>> {
@@ -785,7 +857,7 @@ impl HttpResponse {
     pub(crate) async fn chunk(&mut self) -> HttpResult<Option<bytes::Bytes>> {
         self.chunk_raw()
             .await
-            .map_err(|error| handle_error(error, self.options.feedback))
+            .map_err(|error| self.report_body_error(error))
     }
 
     async fn for_each_chunk_raw(
@@ -910,15 +982,22 @@ impl HttpResponse {
         mut self,
         consume: impl FnMut(&[u8]) -> ChunkConsumerResult,
     ) -> HttpResult<()> {
-        let feedback = self.options.feedback;
         self.for_each_chunk_raw(consume)
             .await
-            .map_err(|error| handle_error(error, feedback))
+            .map_err(|error| self.report_body_error(error))
     }
 
-    async fn bytes_raw(mut self) -> HttpResult<Vec<u8>> {
+    async fn bytes_raw(&mut self) -> HttpResult<Vec<u8>> {
         let mut body = Vec::new();
+        let limit = self.options.response_byte_limit;
         self.for_each_chunk_raw(|chunk| {
+            if let Some(limit) = limit {
+                let needed = body.len() + chunk.len();
+                if needed > body.capacity() {
+                    let capacity = needed.max(body.capacity().saturating_mul(2)).min(limit);
+                    body.reserve_exact(capacity - body.len());
+                }
+            }
             body.extend_from_slice(chunk);
             Ok(())
         })
@@ -926,41 +1005,48 @@ impl HttpResponse {
         Ok(body)
     }
 
-    pub(crate) async fn bytes(self) -> HttpResult<Vec<u8>> {
-        let feedback = self.options.feedback;
+    pub(crate) async fn bytes(mut self) -> HttpResult<Vec<u8>> {
         self.bytes_raw()
             .await
-            .map_err(|error| handle_error(error, feedback))
+            .map_err(|error| self.report_body_error(error))
     }
 
-    async fn text_raw(self) -> HttpResult<String> {
+    async fn text_raw(&mut self) -> HttpResult<String> {
         self.bytes_raw()
             .await
             .map(|body| String::from_utf8_lossy(&body).into_owned())
     }
 
-    pub(crate) async fn text(self) -> HttpResult<String> {
-        let feedback = self.options.feedback;
+    pub(crate) async fn text(mut self) -> HttpResult<String> {
         self.text_raw()
             .await
-            .map_err(|error| handle_error(error, feedback))
+            .map_err(|error| self.report_body_error(error))
     }
 
-    pub(crate) async fn json<T: DeserializeOwned>(self) -> HttpResult<T> {
-        let feedback = self.options.feedback;
+    pub(crate) async fn json<T: DeserializeOwned>(mut self) -> HttpResult<T> {
         let operation = self.options.operation.clone();
         let method = self.method.clone();
         let url = self.url.clone();
         let body = self
             .bytes_raw()
             .await
-            .map_err(|error| handle_error(error, feedback))?;
+            .map_err(|error| self.report_body_error(error))?;
         serde_json::from_slice(&body).map_err(|error| {
-            handle_error(
-                HttpError::json_decode(error, &operation, method, url),
-                feedback,
-            )
+            self.report_body_error(HttpError::json_decode(error, &operation, method, url))
         })
+    }
+
+    async fn error_excerpt(&mut self) -> HttpResult<String> {
+        let mut body = Vec::new();
+        let byte_limit = MAX_ERROR_BODY_CHARS * 4;
+        while body.len() < byte_limit {
+            let Some(chunk) = self.chunk_raw().await? else {
+                break;
+            };
+            let take = chunk.len().min(byte_limit - body.len());
+            body.extend_from_slice(&chunk[..take]);
+        }
+        Ok(truncate_body(String::from_utf8_lossy(&body).into_owned()))
     }
 }
 
@@ -1048,6 +1134,9 @@ async fn send_attempt(
         method,
         url,
         options: options.clone(),
+        received_bytes: 0,
+        body_error: None,
+        error_reported: false,
     })
 }
 
@@ -1085,7 +1174,7 @@ pub(crate) async fn send(
             .flatten();
         *request.timeout_mut() = request_attempt_timeout(retry_request.is_some(), remaining);
         match send_attempt(request, &options).await {
-            Ok(response) => {
+            Ok(mut response) => {
                 let status = response.status();
                 let exhausted_primary_quota = status == StatusCode::FORBIDDEN
                     && rate_limit_remaining(response.headers()) == Some(0);
@@ -1142,7 +1231,7 @@ pub(crate) async fn send(
                     let method = response.method.clone();
                     let url = response.url.clone();
                     let body = response
-                        .text_raw()
+                        .error_excerpt()
                         .await
                         .map_err(|error| handle_error(error, options.feedback))?;
                     return Err(handle_error(
@@ -1250,6 +1339,9 @@ fn present_error(error: &HttpError, feedback: ErrorFeedback) {
         }
     });
 }
+
+#[cfg(test)]
+pub(crate) mod budget_tests;
 
 #[cfg(test)]
 mod tests {

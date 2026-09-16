@@ -275,7 +275,9 @@ pub(super) fn find_cached_remote_logo_path(url: &str) -> Option<PathBuf> {
 pub(super) async fn download_remote_logo_to_cache(url: &str) -> Option<PathBuf> {
     let response = http::send(
         http::get(url),
-        RequestOptions::new("Download project logo").no_retry(),
+        RequestOptions::new("Download project logo")
+            .no_retry()
+            .response_byte_limit(super::logo_prepare::MAX_SOURCE_BYTES as usize),
     )
     .await
     .ok()?;

@@ -60,6 +60,7 @@ mod actions;
 mod diff_bindings;
 use actions::{apply_action_state, readiness_label_key, reset_action_ui};
 mod diagnostics;
+mod highlight_benchmark;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ReviewRequest {
@@ -559,6 +560,7 @@ pub(crate) fn bind_pr_review(
         revert_controller.revert(&ui);
     });
 
+    highlight_benchmark::setup(ui, controller.clone());
     controller
 }
 

@@ -1665,7 +1665,9 @@ pub(super) async fn get_repository_file_text(
     }
     let response = http::send(
         request,
-        RequestOptions::new("Load GitLab repository file").retry_transient(3),
+        RequestOptions::new("Load GitLab repository file")
+            .retry_transient(3)
+            .response_byte_limit(super::source::MAX_SOURCE_BYTES),
     )
     .await
     .map_err(|error| error.to_string())?;

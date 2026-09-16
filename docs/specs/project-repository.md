@@ -42,6 +42,16 @@ This specification covers provider metadata resolved on the Project page and the
 
 ## Invariants / 不变量
 
+Remote Logo downloads use the same 8 MiB input budget as local preparation and
+reject before cache writes. Repository file reads use 8 MiB for GitLab raw bytes,
+12 MiB for GitHub/Gitee Base64 JSON envelopes, and at most 8 MiB decoded source
+through `src/git/source.rs`. Encoding/UTF-8 errors remain failures. These budgets
+do not bound all image-decoder or JSON allocations. See [HTTP pipeline](http.md).
+远程 Logo 下载与本地准备统一采用 8 MiB 输入预算，超限不会写入缓存。仓库文件读取：
+GitLab 原文字节 8 MiB，GitHub/Gitee Base64 JSON 包装 12 MiB，`src/git/source.rs`
+解码源码最多 8 MiB；编码/UTF-8 错误仍失败。这些预算不是图片/JSON 总分配上限。
+详见 [HTTP 管线](http.md)。
+
 1. `remote_repo` determines the provider. Supported values are `gitee`, `gitlab`, and `github`.
 2. A supported URL may use HTTPS or SSH Git syntax and must include an owner/group plus repository path.
 3. Configured Gitee-compatible enterprise project search uses the final `remote_repo` path segment before `.git` as `project_name`; it never uses the editable project name or alias.

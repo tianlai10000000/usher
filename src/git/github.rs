@@ -1,6 +1,5 @@
 //! GitHub repository operations.
 
-use base64::Engine as _;
 use futures_util::{StreamExt, stream};
 use reqwest::StatusCode;
 use reqwest::header::{ACCEPT, AUTHORIZATION, USER_AGENT};
@@ -429,7 +428,9 @@ pub(super) async fn get_repository_file_text(
         repository_endpoint(endpoints::REPOSITORY_CONTENT_URL, locator, None, Some(path));
     let payload: Value = http::send_json(
         authenticated_request(locator, endpoint).query(&[("ref", reference)]),
-        RequestOptions::new("Load GitHub repository file").retry_transient(3),
+        RequestOptions::new("Load GitHub repository file")
+            .retry_transient(3)
+            .response_byte_limit(super::source::MAX_SOURCE_JSON_BYTES),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -1337,18 +1338,7 @@ fn repository_endpoint(
 }
 
 fn decode_base64_content(payload: &Value, provider: &str) -> Result<String, String> {
-    let content = payload
-        .get("content")
-        .and_then(Value::as_str)
-        .ok_or_else(|| format!("{provider} repository file response has no content."))?
-        .chars()
-        .filter(|character| !character.is_whitespace())
-        .collect::<String>();
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(content.as_bytes())
-        .map_err(|error| format!("{provider} repository file base64 decode failed: {error}"))?;
-    String::from_utf8(bytes)
-        .map_err(|error| format!("{provider} repository file is not UTF-8 text: {error}"))
+    super::source::decode_base64_content(payload, provider)
 }
 
 fn api_base_url(locator: &RepoLocator) -> String {

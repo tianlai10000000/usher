@@ -11,6 +11,7 @@ mod model;
 mod overview;
 mod prefix_cache;
 mod provider;
+mod source;
 
 use diff::{parse_unified_diff, unavailable_diff_file};
 pub(crate) use error::{GitError, GitResult};

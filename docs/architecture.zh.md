@@ -1094,6 +1094,14 @@ Toast、Dialog demo 路由已删除。关闭 feature 时，两个侧边栏都不
 
 每个请求都提供 `RequestOptions`：
 
+- `response_byte_limit` 按调用方显式开启，在缓冲或投递前累计实际 chunk 字节。
+  超限后保持失败且仅反馈一次；读取 header 后的 `HttpResponse::response_byte_limit`
+  只能收紧限制。远程 Logo 为 8 MiB，AI 模型列表与缓冲 completion（含流式请求回退 JSON）
+  为 16 MiB。仓库原始源码为 8 MiB，Base64 JSON 为 12 MiB，`src/git/source.rs`
+  将解码源码限制为 8 MiB。SSE/更新下载保留自身策略。这是 payload 预算，不是
+  总 RSS 上限；传输 chunk、JSON/文本转换及消费者仍有分配。错误摘要最多收集
+  8,000 字节前缀再截断，不再读取完整错误正文。
+
 - `operation` 用于稳定日志和用户提示上下文。
 - `reject_http_errors` 默认开启，把非 2xx 响应转换为 `HttpError`，并保留受长度限制的响应正文摘要。
 - `feedback` 默认 `Silent`；用户操作可以选择 Toast、Notification 或两者。

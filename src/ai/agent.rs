@@ -9,6 +9,8 @@ use crate::settings::AiAgentSettings;
 use reqwest::{Method, Url};
 use serde::{Deserialize, Serialize};
 
+const MAX_BUFFERED_AGENT_JSON_BYTES: usize = 16 * 1024 * 1024;
+
 #[cfg(feature = "ai-code-review")]
 const REVIEW_READ_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 #[cfg(feature = "ai-code-review")]
@@ -280,7 +282,8 @@ pub(crate) async fn test_connection(
     let response = http::send_json::<ModelsResponse>(
         http::get(url).bearer_auth(settings.api_key.trim()),
         // The Settings action owns one bottom Toast for every terminal result.
-        RequestOptions::new("Test AI Agent connection"),
+        RequestOptions::new("Test AI Agent connection")
+            .response_byte_limit(MAX_BUFFERED_AGENT_JSON_BYTES),
     )
     .await?;
     Ok(ConnectionTestResult {
@@ -421,7 +424,10 @@ async fn complete_with_options(
             });
         }
     }
-    let response = response.json::<CompletionResponse>().await?;
+    let response = response
+        .response_byte_limit(MAX_BUFFERED_AGENT_JSON_BYTES)
+        .json::<CompletionResponse>()
+        .await?;
     response
         .choices
         .into_iter()
@@ -441,6 +447,108 @@ async fn complete_with_options(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn connection_test_budget_bounds_models_json() {
+        let mut settings = AiAgentSettings {
+            base_url: crate::http::budget_tests::fixture(
+                "200 OK",
+                vec![br#"{"data":[{"id":"fixture"}]}"#.to_vec()],
+                "application/json",
+            )
+            .await,
+            api_key: "fixture".into(),
+            model: "fixture".into(),
+            ..Default::default()
+        };
+        assert!(test_connection(&settings).await.unwrap().model_listed);
+        settings.base_url = crate::http::budget_tests::fixture(
+            "200 OK",
+            vec![vec![b' '; 1024 * 1024]; 17],
+            "application/json",
+        )
+        .await;
+        assert_eq!(
+            test_connection(&settings).await.unwrap_err().kind,
+            HttpErrorKind::ResponseTooLarge
+        );
+    }
+
+    #[tokio::test]
+    async fn buffered_completion_budget_covers_json_and_stream_fallback() {
+        for stream in [false, true] {
+            let url = crate::http::budget_tests::fixture(
+                "200 OK",
+                vec![br#"{"choices":[{"message":{"content":"ok"}}]}"#.to_vec()],
+                "application/json",
+            )
+            .await;
+            let mut settings = AiAgentSettings {
+                base_url: url,
+                api_key: "fixture".into(),
+                model: "fixture".into(),
+                ..Default::default()
+            };
+            let messages = [CompletionMessage::user("fixture")];
+            assert_eq!(
+                complete_with_options(
+                    &settings,
+                    &messages,
+                    RequestOptions::new("AI budget fixture"),
+                    stream
+                )
+                .await
+                .unwrap(),
+                "ok"
+            );
+            settings.base_url = crate::http::budget_tests::fixture(
+                "200 OK",
+                vec![vec![b' '; 1024 * 1024]; 17],
+                "application/json",
+            )
+            .await;
+            let error = complete_with_options(
+                &settings,
+                &messages,
+                RequestOptions::new("AI budget fixture"),
+                stream,
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.kind, HttpErrorKind::ResponseTooLarge);
+        }
+    }
+
+    #[cfg(feature = "ai-code-review")]
+    #[tokio::test]
+    async fn streamed_completion_budget_retains_sse_transport() {
+        let base_url = crate::http::budget_tests::fixture(
+            "200 OK",
+            vec![
+                b"data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"
+                    .to_vec(),
+            ],
+            "text/event-stream",
+        )
+        .await;
+        let settings = AiAgentSettings {
+            base_url,
+            api_key: "fixture".into(),
+            model: "fixture".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            complete_with_options(
+                &settings,
+                &[CompletionMessage::user("fixture")],
+                RequestOptions::new("SSE budget fixture"),
+                true
+            )
+            .await
+            .unwrap(),
+            "ok"
+        );
+    }
 
     #[test]
     fn normalizes_provider_base_urls() {

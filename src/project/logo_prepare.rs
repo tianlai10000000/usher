@@ -9,7 +9,7 @@ use std::io::Cursor;
 use std::path::Path;
 use std::sync::Arc;
 
-const MAX_SOURCE_BYTES: u64 = 8 * 1024 * 1024;
+pub(super) const MAX_SOURCE_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_DECODED_BYTES: u64 = 64 * 1024 * 1024;
 const SIDE: u32 = 128;
 

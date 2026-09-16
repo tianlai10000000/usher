@@ -336,6 +336,7 @@ pub fn setup_project(ui: &MainWindow) -> ProjectController {
     });
 
     super::benchmark::setup(ui, &state);
+    super::http_benchmark::setup(ui);
     ProjectController {
         state,
         logo_loader,

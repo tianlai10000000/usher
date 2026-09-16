@@ -8,6 +8,14 @@ This spec covers the Settings-page connection to an OpenAI-compatible AI Agent p
 
 ## Configuration / 配置项
 
+Model-list JSON and buffered completions, including JSON returned for a streaming request, enforce a
+16 MiB response-body budget through the shared HTTP pipeline before JSON parsing.
+Actual SSE keeps its existing parser and completion limits. Oversized JSON fails
+with the typed, non-transient HTTP budget error and the existing failure UI.
+模型列表 JSON 与缓冲 completion（包括流式请求收到 JSON 的回退）在解析前通过共享 HTTP 管线执行
+16 MiB 正文预算；真实 SSE 保留原 parser 与完成限制。JSON 超限返回强类型、非瞬态
+HTTP 预算错误，沿用既有失败展示。
+
 The minimum usable connection configuration has three values:
 
 1. **OpenAI Base URL** — provider origin, with or without `/v1`.

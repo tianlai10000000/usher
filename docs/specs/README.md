@@ -7,7 +7,7 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | Spec | Status | Code owners |
 | --- | --- | --- |
 | [Exact virtual scrolling](virtual-scrolling.md) | Shared contract for variable-height documents and stable thumb geometry / 可变行高文档与稳定滑块几何通用契约 | `crates/usher-virtual-list/`, `src/app_runtime/latest_compute.rs`, `ui/components/github_scroll_view.slint`, feature layout adapters |
-| [HTTP pipeline](http.md) | Current / 当前 | `src/http/mod.rs`, all HTTP callers |
+| [HTTP pipeline](http.md) | Explicit response budgets and bounded error reads / 显式响应预算与有界错误读取 | `src/http/mod.rs`, all HTTP callers |
 | [Cross-page state store](state-store.md) | Current: bounded latest snapshots and revision barriers / 当前：有界最新快照与版本屏障 | `crates/usher-state-store/`, all cross-page state owners and UI bridges |
 | [Shared search navigation](search.md) | Current / 当前 | `crates/usher-search/`, feature Find adapters, PR `find_bridge.rs`, `controller/diff_bindings.rs`, `PrDiffBridge` |
 | [Internationalization](i18n.md) | Implementation current; full-route visual QA pending / 实现当前，全路由视觉验收待完成 | `i18n/`, `crates/usher-i18n/`, `src/i18n.rs`, all user-facing copy |

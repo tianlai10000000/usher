@@ -12,6 +12,51 @@ This spec covers application-owned HTTP requests. It does not replace reqwest an
 - Initialization: `setup_http` in `src/lib.rs`, after Toast and Notification setup.
 - Async execution: shared Tokio runtime from `src/app_runtime.rs`.
 
+## Response budgets / 响应预算
+
+`RequestOptions::response_byte_limit` defaults to no total byte cap. Opted-in
+requests count actual chunks before returning them or extending any body buffer;
+Content-Length is not trusted as the enforcement boundary. Zero permits only an
+empty body. Exceeding the limit returns non-transient `ResponseTooLarge`, never a
+partial successful body; repeated reads retain the error and report it once.
+After header inspection, `HttpResponse::response_byte_limit` may only tighten the
+limit and still counts bytes read earlier. Idle/total deadlines and silent feedback
+remain independent. Body failures do not restart a successful-header request.
+
+`RequestOptions::response_byte_limit` 默认不设总字节限制；显式开启时，在返回 chunk
+或扩展正文缓冲前累计真实字节，不依赖 Content-Length 执行限制。零只允许空正文。
+超限返回非瞬态 `ResponseTooLarge`，不能返回成功的部分正文；继续读取仍失败，
+且只反馈一次。header 后设置的 `HttpResponse::response_byte_limit` 只能收紧，
+此前读过的字节仍计入。空闲/总截止时间与静默反馈策略独立；成功 header 后的
+正文失败不会重新发起请求。
+
+| Caller / 调用方 | Payload limit / 正文限制 |
+| --- | --- |
+| Remote Logo / 远程 Logo | 8 MiB, shared with local source input / 与本地源输入相同 |
+| AI model list and buffered completion, including stream-to-JSON fallback / AI 模型列表、缓冲完成及 JSON 回退 | 16 MiB |
+| GitLab raw repository source / 原始源码 | 8 MiB |
+| GitHub/Gitee source JSON / 源码 JSON | 12 MiB envelope; decoded bytes <=8 MiB / 包装 12 MiB，解码 <=8 MiB |
+
+SSE and update downloads retain their streaming policies. These limits do not cap
+transport-internal buffers, JSON objects, lossy UTF-8 expansion or process RSS.
+Non-2xx excerpts collect at most 8,000 bytes before the existing 2,000-character
+truncation; the final received transport chunk may be larger than that prefix.
+No response content is included in budget errors. Existing semantic error copy is
+reused; background feedback remains silent.
+
+SSE 与更新包沿用流式策略；这些限制不涵盖传输内部缓冲、JSON 对象、UTF-8 有损
+转换膨胀或进程 RSS。非 2xx 摘要最多收集 8,000 字节，再沿用 2,000 字符截断；
+最后收到的传输 chunk 可以大于前缀。预算错误不携带正文，复用既有语义错误文案，
+后台仍静默。
+
+Regression: exact/zero limits, missing length and split chunks, all body readers,
+sticky single-report failure, header-based tightening, idle timeout, JSON fallback,
+SSE success, bounded error excerpts, Base64 padding/UTF-8, and successful small
+downloads after a rejected oversized response.
+回归：精确/零边界、缺少长度与分块、全部读取接口、连续失败只反馈一次、header 后
+收紧、idle 超时、JSON 回退、SSE 成功、错误摘要、Base64 padding/UTF-8，以及超限后
+的小文件成功请求。
+
 ## Invariants / 不变量
 
 1. Application code must not construct a reusable reqwest client outside `src/http/mod.rs`.

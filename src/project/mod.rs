@@ -3,6 +3,7 @@
 mod benchmark;
 mod controller;
 mod hook_selection;
+mod http_benchmark;
 mod logo;
 mod logo_loader;
 mod logo_prepare;

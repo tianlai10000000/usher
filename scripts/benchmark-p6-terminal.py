@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Controlled macOS Release A/B through the offline production Terminal fixture."""
+"""Controlled macOS Release A/B through opt-in offline production fixtures."""
 import argparse
 import hashlib
 import json
@@ -17,18 +17,18 @@ def percentile(values, fraction):
     return sorted(values)[int((len(values) - 1) * fraction)] if values else None
 
 
-def run(binary, directory, seconds):
+def run(binary, directory, seconds, batch=65):
     state = directory / "state/default/run-0"
     state.mkdir(parents=True)
     (state / "settings.toml").write_text(
         'theme_mode = 0\nlanguage = "en"\n[diagnostics]\nterminal_verbose_logging = false\n'
     )
     env = os.environ.copy()
-    env.update(USHER_BENCHMARK_OFFLINE="1", USHER_P6_BENCHMARK="65",
+    env.update(USHER_BENCHMARK_OFFLINE="1", USHER_P6_BENCHMARK=str(batch),
                USHER_BENCHMARK_STATE_ROOT=str(directory / "state"),
                USHER_AI_REVIEW_RESPONSE_VARIANT="default", USHER_MEMORY_BENCHMARK_RUN="0",
                USHER_MEMORY_DIAGNOSTICS="1", USHER_MEMORY_BUILD_PROFILE="release",
-               USHER_MEMORY_SCENARIO="p6-terminal", USHER_TOKIO_WORKER_THREADS="2",
+               USHER_MEMORY_SCENARIO=f"p6-{batch}", USHER_TOKIO_WORKER_THREADS="2",
                SLINT_BACKEND="winit-femtovg", SHELL="/bin/sh", ENV="/dev/null")
     samples = []
     start = time.monotonic()
@@ -56,12 +56,13 @@ def run(binary, directory, seconds):
     log = log_path.read_text(errors="replace")
     first = [s["rss_mib"] for s in samples if seconds * .25 <= s["seconds"] < seconds * .5]
     last = [s["rss_mib"] for s in samples if s["seconds"] >= seconds * .75]
-    heartbeats = [int(v) / 1000 for v in re.findall(r"\[P6\]\[65\] heartbeat_us=(\d+)", log)]
-    cycles = [int(v) for v in re.findall(r"\[P6\]\[65\] cycle=\d+ completed_ms=(\d+)", log)]
+    marker = re.escape(f"[P6][{batch}]")
+    heartbeats = [int(v) / 1000 for v in re.findall(marker + r" heartbeat_us=(\d+)", log)]
+    cycles = [int(v) for v in re.findall(marker + r" cycle=\d+ completed_ms=(\d+)", log)]
     footprints = [float(v) for v in re.findall(r" phys_footprint_mib=([\d.]+)", log)]
     lifetime_peaks = [float(v) for v in re.findall(r" rss_lifetime_peak_mib=([\d.]+)", log)]
-    complete = "[P6][65] complete" in log and len(cycles) == 3
-    result = dict(complete=complete, clean_exit=process.returncode == 0,
+    complete = f"[P6][{batch}] complete" in log and len(cycles) == 3
+    result = dict(batch=batch, complete=complete, clean_exit=process.returncode == 0,
                   peak_mib=max(s["rss_mib"] for s in samples) if samples else None,
                   lifetime_peak_mib=max(lifetime_peaks) if lifetime_peaks else None,
                   settled_mib=statistics.median(last) if last else None,
@@ -71,7 +72,10 @@ def run(binary, directory, seconds):
                   ui_p95_ms=percentile(heartbeats, .95), ui_max_ms=max(heartbeats) if heartbeats else None,
                   cycles_ms=cycles, shutdown_ms=shutdown_ms,
                   cpu_p95=percentile([s["cpu_percent"] for s in samples], .95),
-                  framebuffer_errors=log.count("Invalid framebuffer"))
+                  framebuffer_errors=log.count("Invalid framebuffer"),
+                  premature_loading_clears=log.count(f"[P6][{batch}] premature_loading_clear"),
+                  oversized_rejections=log.count(f"[P6][{batch}] response large=true rejected"),
+                  small_responses=len(re.findall(marker + r" response large=false accepted_bytes=\d+", log)))
     (directory / "result.json").write_text(json.dumps(result, indent=2))
     return result
 
@@ -99,8 +103,13 @@ def summarize(results):
                                "footprint_peak_mib", "footprint_final_mib"])
         passed &= b["growth_mib"] <= 8 and b["growth_mib"] - a["growth_mib"] <= 8
         passed &= b["ui_p95_ms"] - a["ui_p95_ms"] <= max(8, a["ui_p95_ms"] * .1)
-        # The fixture observes completion at 100 ms intervals.
+        # Polling fixtures observe completion at 50-100 ms intervals.
         passed &= b["cycle_ms"] - a["cycle_ms"] <= max(100, a["cycle_ms"] * .2)
+        passed &= all(row.get("premature_loading_clears", 0) == 0 for row in results["B"])
+        passed &= all(row.get("oversized_rejections") == 3 and row.get("small_responses") == 6
+                      for row in results["B"] if row.get("batch") == 67)
+        passed &= all(row.get("small_responses") == 6
+                      for row in results["A"] if row.get("batch") == 67)
     return dict(valid=valid, medians=medians, passed=passed)
 
 
@@ -110,13 +119,14 @@ def main():
     parser.add_argument("--b", type=Path, required=True)
     parser.add_argument("--seconds", type=float, default=30)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--batch", type=int, choices=[65, 66, 67], default=65)
     args = parser.parse_args()
     if args.seconds < 30:
         parser.error("At least 30 seconds per fresh process is required")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     binaries = {side: getattr(args, side.lower()).resolve() for side in "AB"}
-    metadata = dict(task=65, seconds=args.seconds, pairs=3, order="AB/BA/AB",
+    metadata = dict(task=args.batch, seconds=args.seconds, pairs=3, order="AB/BA/AB",
                     platform=platform.platform(), machine=platform.machine(),
                     profile="release", renderer="winit-femtovg", window="1100x700 logical",
                     memory_budget="peak/stable <= A + max(8 MiB, 5% A); B growth and growth delta <= 8 MiB",
@@ -130,7 +140,7 @@ def main():
         for side in ("AB" if index % 2 == 0 else "BA"):
             directory = output / f"{side}-{index + 1}"
             directory.mkdir()
-            result = run(binaries[side], directory, args.seconds)
+            result = run(binaries[side], directory, args.seconds, args.batch)
             results[side].append(result)
             print(side, index + 1, json.dumps(result), flush=True)
     summary = summarize(results)
