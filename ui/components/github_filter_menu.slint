@@ -6,6 +6,7 @@ import { I18n } from "@i18n";
 // Generic ActionMenu trigger for compact filter and sort choices.
 export component GitHubFilterMenuButton inherits FocusScope {
     in property <string> label;
+    in property <length> maximum-label-width: 10000px;
     in property <bool> selected: false;
     // When wired to the open menu identity, trigger clicks reconcile with
     // same-event chrome dismiss instead of dismiss→toggle-reopen.
@@ -13,7 +14,7 @@ export component GitHubFilterMenuButton inherits FocusScope {
     callback clicked();
 
     private property <bool> keyboard-focus-visible: false;
-    private property <length> label-width: label-measure.preferred-width;
+    private property <length> label-width: min(label-measure.preferred-width, root.maximum-label-width);
 
     width: root.label-width + GitHubMetrics.size-28;
     height: GitHubMetrics.control-medium-size;
@@ -68,6 +69,7 @@ export component GitHubFilterMenuButton inherits FocusScope {
             font-weight: 500;
             color: GitHubTheme.fg-muted;
             vertical-alignment: center;
+            overflow: elide;
         }
 
         Image {

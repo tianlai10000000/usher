@@ -1,9 +1,9 @@
 import { GitHubUiComponentsPage } from "../views/ui_components.slint";
-import { GitHubSelectDemoOverlay } from "../components/showcase/github_ui_components_gallery.slint";
+import { GitHubUiComponentsOverlay } from "../components/showcase/github_ui_components_gallery.slint";
 
 export global UiComponentsFeature {
     out property <bool> enabled: true;
 }
 
 export component UiComponentsPage inherits GitHubUiComponentsPage {}
-export component UiComponentsOverlay inherits GitHubSelectDemoOverlay {}
+export component UiComponentsOverlay inherits GitHubUiComponentsOverlay {}

@@ -1266,6 +1266,18 @@ msgctxt "pr_list.sort_by"
 msgid "Sort by"
 msgstr "排序方式"
 
+msgctxt "pr_list.created_on"
+msgid "Created on"
+msgstr "创建时间"
+
+msgctxt "pr_list.last_updated"
+msgid "Last updated"
+msgstr "最后更新"
+
+msgctxt "pr_list.order"
+msgid "Order"
+msgstr "排序方向"
+
 msgctxt "pr_list.retry_request"
 msgid "Retry request"
 msgstr "重试请求"
@@ -4101,3 +4113,1075 @@ msgstr "正在加载默认项目的最新本地 Tag。"
 msgctxt "tag.loading_remove_default"
 msgid "Loading the latest remote Tag for the default project."
 msgstr "正在加载默认项目的最新远程 Tag。"
+
+msgctxt "ui_components.foundations"
+msgid "Foundations"
+msgstr "基础"
+
+msgctxt "ui_components.actions"
+msgid "Actions"
+msgstr "操作"
+
+msgctxt "ui_components.containment"
+msgid "Containment"
+msgstr "容器"
+
+msgctxt "ui_components.communication"
+msgid "Communication"
+msgstr "反馈"
+
+msgctxt "ui_components.navigation"
+msgid "Navigation"
+msgstr "导航"
+
+msgctxt "ui_components.selection"
+msgid "Selection"
+msgstr "选择"
+
+msgctxt "ui_components.text_input"
+msgid "Text input"
+msgstr "文本输入"
+
+msgctxt "ui_components.scenarios"
+msgid "Scenarios"
+msgstr "场景"
+
+msgctxt "ui_components.demo.code_review"
+msgid "Code review"
+msgstr "代码 Review"
+
+msgctxt "ui_components.demo.pull_request_review_submitted"
+msgid "Pull request review submitted"
+msgstr "已提交 Pull Request Review"
+
+msgctxt "ui_components.demo.ai_review_completed"
+msgid "AI review completed"
+msgstr "AI Review 已完成"
+
+msgctxt "ui_components.demo.delivery"
+msgid "Delivery"
+msgstr "交付"
+
+msgctxt "ui_components.demo.tag_created"
+msgid "Tag created"
+msgstr "Tag 已创建"
+
+msgctxt "ui_components.demo.deployment_completed"
+msgid "Deployment completed"
+msgstr "部署已完成"
+
+msgctxt "ui_components.demo.informational_toast"
+msgid "Informational Toast"
+msgstr "提示消息"
+
+msgctxt "ui_components.demo.operation_completed"
+msgid "Operation completed"
+msgstr "操作已完成"
+
+msgctxt "ui_components.demo.operation_failed"
+msgid "Operation failed"
+msgstr "操作失败"
+
+msgctxt "ui_components.demo.loading_with_overlay"
+msgid "Loading with overlay"
+msgstr "正在加载（带遮罩）"
+
+msgctxt "ui_components.demo.top_position"
+msgid "Top position"
+msgstr "顶部位置"
+
+msgctxt "ui_components.demo.middle_position"
+msgid "Middle position"
+msgstr "中部位置"
+
+msgctxt "ui_components.demo.bottom_position"
+msgid "Bottom position"
+msgstr "底部位置"
+
+msgctxt "ui_components.demo.closes_after_five_seconds"
+msgid "Closes after five seconds"
+msgstr "五秒后关闭"
+
+msgctxt "ui_components.demo.click_the_overlay_to_dismiss"
+msgid "Click the overlay to dismiss"
+msgstr "点击遮罩关闭"
+
+msgctxt "ui_components.demo.information"
+msgid "Information"
+msgstr "提示"
+
+msgctxt "ui_components.demo.review_the_current_settings"
+msgid "Review the current settings."
+msgstr "请检查当前设置。"
+
+msgctxt "ui_components.demo.saved"
+msgid "Saved"
+msgstr "已保存"
+
+msgctxt "ui_components.demo.configuration_was_saved"
+msgid "Configuration was saved."
+msgstr "配置已保存。"
+
+msgctxt "ui_components.demo.attention"
+msgid "Attention"
+msgstr "注意"
+
+msgctxt "ui_components.demo.a_follow_up_action_is_required"
+msgid "A follow-up action is required."
+msgstr "需要进一步操作。"
+
+msgctxt "ui_components.demo.failed"
+msgid "Failed"
+msgstr "失败"
+
+msgctxt "ui_components.demo.the_request_could_not_be_completed"
+msgid "The request could not be completed."
+msgstr "无法完成请求。"
+
+msgctxt "ui_components.demo.update_available"
+msgid "Update available"
+msgstr "有可用更新"
+
+msgctxt "ui_components.demo.choose_an_action_to_exercise_banner_callbacks"
+msgid "Choose an action to exercise Banner callbacks."
+msgstr "请选择一项通知操作。"
+
+msgctxt "ui_components.demo.later"
+msgid "Later"
+msgstr "稍后"
+
+msgctxt "ui_components.demo.install"
+msgid "Install"
+msgstr "安装"
+
+msgctxt "ui_components.demo.webhook_received"
+msgid "Webhook received"
+msgstr "已收到 Webhook"
+
+msgctxt "ui_components.demo.a_webhook_event_is_ready_for_review"
+msgid "A webhook event is ready for review."
+msgstr "有一条 Webhook 事件待查看。"
+
+msgctxt "ui_components.demo.general_message"
+msgid "General message"
+msgstr "普通消息"
+
+msgctxt "ui_components.demo.a_general_application_message_was_received"
+msgid "A general application message was received."
+msgstr "收到一条应用消息。"
+
+msgctxt "ui_components.demo.usher_1_0_0_is_ready_to_install"
+msgid "Usher 1.0.0 is ready to install."
+msgstr "Usher 1.0.0 已可安装。"
+
+msgctxt "ui_components.demo.updater"
+msgid "Updater"
+msgstr "更新程序"
+
+msgctxt "ui_components.demo.cd_workflow_completed"
+msgid "CD workflow completed"
+msgstr "CD Workflow 已完成"
+
+msgctxt "ui_components.demo.the_release_passed_verification_and_is_live"
+msgid "The release passed verification and is live."
+msgstr "发布已通过验证并上线。"
+
+msgctxt "ui_components.demo.action_recommended"
+msgid "Action recommended"
+msgstr "建议操作"
+
+msgctxt "ui_components.demo.review_the_deployment_configuration_before_continuing"
+msgid "Review the deployment configuration before continuing."
+msgstr "请先检查部署配置。"
+
+msgctxt "ui_components.demo.critical_failure"
+msgid "Critical failure"
+msgstr "严重错误"
+
+msgctxt "ui_components.demo.this_test_always_requests_a_native_system_notification"
+msgid "This test always requests a native system notification."
+msgstr "此示例始终发送系统通知。"
+
+msgctxt "ui_components.demo.in_app_only"
+msgid "In-app only"
+msgstr "仅应用内"
+
+msgctxt "ui_components.demo.this_message_is_stored_in_inbox_without_a"
+msgid "This message is stored in Inbox without a system notification."
+msgstr "消息仅存入收件箱，不发送系统通知。"
+
+msgctxt "ui_components.demo.confirm_change"
+msgid "Confirm change"
+msgstr "确认更改"
+
+msgctxt "ui_components.demo.this_modal_dialog_uses_fixed_dimensions_a_backdrop"
+msgid "This modal dialog uses fixed dimensions, a backdrop, one secondary action, and one primary action."
+msgstr "此对话框包含遮罩、次要操作与主要操作。"
+
+msgctxt "ui_components.demo.confirm"
+msgid "Confirm"
+msgstr "确认"
+
+msgctxt "ui_components.demo.non_modal_example"
+msgid "Non-modal example"
+msgstr "非模态示例"
+
+msgctxt "ui_components.demo.press_escape_use_the_close_button_or_click"
+msgid "Press Escape, use the close button, or click the backdrop to dismiss this percentage-sized dialog."
+msgstr "按 Escape、点击关闭按钮或遮罩可关闭此对话框。"
+
+msgctxt "ui_components.demo.done"
+msgid "Done"
+msgstr "完成"
+
+msgctxt "ui_components.demo.dialog_without_backdrop"
+msgid "Dialog without backdrop"
+msgstr "无遮罩对话框"
+
+msgctxt "ui_components.demo.this_variant_keeps_the_underlying_page_visible_and"
+msgid "This variant keeps the underlying page visible and exercises the overlay property."
+msgstr "此示例保持底层页面可见。"
+
+msgctxt "ui_components.demo.semantic_tokens_and_status"
+msgid "Semantic tokens and status"
+msgstr "语义颜色与状态"
+
+msgctxt "ui_components.demo.foreground_canvas_border_success_attention_danger_and_status"
+msgid "Foreground, canvas, border, success, attention, danger, and status-badge comparisons."
+msgstr "前景、背景、边框及成功、注意、危险状态。"
+
+msgctxt "ui_components.demo.canvas"
+msgid "Canvas"
+msgstr "背景"
+
+msgctxt "ui_components.demo.subtle"
+msgid "Subtle"
+msgstr "弱化背景"
+
+msgctxt "ui_components.demo.accent"
+msgid "Accent"
+msgstr "强调"
+
+msgctxt "ui_components.demo.success"
+msgid "Success"
+msgstr "成功"
+
+msgctxt "ui_components.demo.danger"
+msgid "Danger"
+msgstr "危险"
+
+msgctxt "ui_components.demo.neutral"
+msgid "Neutral"
+msgstr "中性"
+
+msgctxt "ui_components.demo.buttons"
+msgid "Buttons"
+msgstr "按钮"
+
+msgctxt "ui_components.demo.githubbutton_properties_default_primary_danger_selected_disabled_and"
+msgid "GitHubButton properties: default, primary, danger, selected, disabled, and busy."
+msgstr "默认、主要、危险、选中、禁用与加载状态。"
+
+msgctxt "ui_components.demo.intent"
+msgid "Intent"
+msgstr "用途"
+
+msgctxt "ui_components.demo.primary"
+msgid "Primary"
+msgstr "主要"
+
+msgctxt "ui_components.demo.selected"
+msgid "Selected"
+msgstr "已选中"
+
+msgctxt "ui_components.demo.availability"
+msgid "Availability"
+msgstr "可用状态"
+
+msgctxt "ui_components.demo.disabled"
+msgid "Disabled"
+msgstr "已禁用"
+
+msgctxt "ui_components.demo.try_action"
+msgid "Try action"
+msgstr "执行操作"
+
+msgctxt "ui_components.demo.button_activation_received"
+msgid "Button activation received."
+msgstr "按钮操作已触发。"
+
+msgctxt "ui_components.demo.load_more"
+msgid "Load more"
+msgstr "加载更多"
+
+msgctxt "ui_components.demo.iconbutton_and_copybutton"
+msgid "IconButton and CopyButton"
+msgstr "图标与复制按钮"
+
+msgctxt "ui_components.demo.invisible_icon_button"
+msgid "Invisible icon button"
+msgstr "无边框图标按钮"
+
+msgctxt "ui_components.demo.bordered_icon_button"
+msgid "Bordered icon button"
+msgstr "带边框图标按钮"
+
+msgctxt "ui_components.demo.danger_icon_button"
+msgid "Danger icon button"
+msgstr "危险操作按钮"
+
+msgctxt "ui_components.demo.review_this_pull_request_with_ai"
+msgid "Review this pull request with AI"
+msgstr "使用 AI Review 此 Pull Request"
+
+msgctxt "ui_components.demo.close_ai_code_review"
+msgid "Close AI code review"
+msgstr "关闭 AI Review"
+
+msgctxt "ui_components.demo.ai_code_review_is_running"
+msgid "AI code review is running"
+msgstr "AI Review 正在运行"
+
+msgctxt "ui_components.demo.action_list_item"
+msgid "Action list item"
+msgstr "操作项"
+
+msgctxt "ui_components.demo.with_supporting_text"
+msgid "With supporting text"
+msgstr "含辅助说明"
+
+msgctxt "ui_components.demo.delete_item"
+msgid "Delete item"
+msgstr "删除项目"
+
+msgctxt "ui_components.demo.actionmenu_borderless_actionlist"
+msgid "ActionMenu - borderless ActionList"
+msgstr "ActionMenu · 无边框操作列表"
+
+msgctxt "ui_components.demo.borderless_action_rows_anchoredoverlay_placement_alignment_side_selection"
+msgid "Borderless action rows, AnchoredOverlay placement, alignment, side selection, Escape, and caller-owned outside-click dismiss."
+msgstr "无边框操作项、锚点定位、对齐与关闭行为。"
+
+msgctxt "ui_components.demo.start_below"
+msgid "Start / below"
+msgstr "起点对齐 / 下方"
+
+msgctxt "ui_components.demo.end_below"
+msgid "End / below"
+msgstr "终点对齐 / 下方"
+
+msgctxt "ui_components.demo.start_above"
+msgid "Start / above"
+msgstr "起点对齐 / 上方"
+
+msgctxt "ui_components.demo.fixed_percentage_sizing_modal_non_modal_behavior_backdrop"
+msgid "Fixed/percentage sizing, modal/non-modal behavior, backdrop, and action combinations."
+msgstr "固定或比例尺寸、模态状态、遮罩与操作组合。"
+
+msgctxt "ui_components.demo.confirmation"
+msgid "Confirmation"
+msgstr "确认对话框"
+
+msgctxt "ui_components.demo.non_modal"
+msgid "Non-modal"
+msgstr "非模态"
+
+msgctxt "ui_components.demo.no_backdrop"
+msgid "No backdrop"
+msgstr "无遮罩"
+
+msgctxt "ui_components.demo.labels_and_counters"
+msgid "Labels and counters"
+msgstr "标签与计数"
+
+msgctxt "ui_components.demo.metadata_labels_and_primer_counterlabel_schemes_limits_and"
+msgid "Metadata labels and Primer CounterLabel schemes, limits, and zero-count behavior."
+msgstr "元数据标签、计数样式、上限与零值状态。"
+
+msgctxt "ui_components.demo.neutral_metadata"
+msgid "Neutral metadata"
+msgstr "中性元数据"
+
+msgctxt "ui_components.demo.secondary"
+msgid "Secondary"
+msgstr "次要"
+
+msgctxt "ui_components.demo.bounded_metadata"
+msgid "Bounded metadata"
+msgstr "受限宽度"
+
+msgctxt "ui_components.demo.repository_identifier_1130209340"
+msgid "Repository identifier 1130209340"
+msgstr "仓库标识 1130209340"
+
+msgctxt "ui_components.demo.counter_schemes"
+msgid "Counter schemes"
+msgstr "计数样式"
+
+msgctxt "ui_components.demo.issues"
+msgid "Issues"
+msgstr "议题"
+
+msgctxt "ui_components.demo.pull_requests"
+msgid "Pull requests"
+msgstr "Pull Request"
+
+msgctxt "ui_components.demo.checks"
+msgid "Checks"
+msgstr "检查"
+
+msgctxt "ui_components.demo.limit_and_zero"
+msgid "Limit and zero"
+msgstr "上限与零值"
+
+msgctxt "ui_components.demo.notifications"
+msgid "Notifications"
+msgstr "通知"
+
+msgctxt "ui_components.demo.zero_hidden"
+msgid "Zero hidden"
+msgstr "隐藏零值"
+
+msgctxt "ui_components.demo.loading_and_empty_states"
+msgid "Loading and empty states"
+msgstr "加载与空状态"
+
+msgctxt "ui_components.demo.spinner_sizes_determinate_indeterminate_progress_and_bordered_loading"
+msgid "Spinner sizes, determinate/indeterminate progress, and bordered/loading/error Blankslate variants."
+msgstr "加载图标、确定或不确定进度，以及空白、加载、错误状态。"
+
+msgctxt "ui_components.demo.show_error_state"
+msgid "Show error state"
+msgstr "显示错误状态"
+
+msgctxt "ui_components.demo.show_loading_state"
+msgid "Show loading state"
+msgstr "显示加载状态"
+
+msgctxt "ui_components.demo.progress"
+msgid "Progress"
+msgstr "进度"
+
+msgctxt "ui_components.demo.62_percent_complete"
+msgid "62 percent complete"
+msgstr "已完成 62%"
+
+msgctxt "ui_components.demo.loading_progress"
+msgid "Loading progress"
+msgstr "加载进度"
+
+msgctxt "ui_components.demo.no_results"
+msgid "No results"
+msgstr "没有结果"
+
+msgctxt "ui_components.demo.default_bordered_empty_state_with_primary_and_secondary"
+msgid "Default bordered empty state with primary and secondary actions."
+msgstr "带有主要与次要操作的空状态。"
+
+msgctxt "ui_components.demo.create_item"
+msgid "Create item"
+msgstr "创建项目"
+
+msgctxt "ui_components.demo.reset_filters"
+msgid "Reset filters"
+msgstr "重置筛选"
+
+msgctxt "ui_components.demo.unable_to_load"
+msgid "Unable to load"
+msgstr "无法加载"
+
+msgctxt "ui_components.demo.loading_preserves_the_empty_state_geometry"
+msgid "Loading preserves the empty-state geometry."
+msgstr "加载时保持布局稳定。"
+
+msgctxt "ui_components.demo.error_and_loading_properties_share_the_same_stable"
+msgid "Error and loading properties share the same stable layout."
+msgstr "错误与加载状态共用布局。"
+
+msgctxt "ui_components.demo.retry"
+msgid "Retry"
+msgstr "重试"
+
+msgctxt "ui_components.demo.type_position_duration_overlay_close_on_click_and"
+msgid "Type, position, duration, overlay, close-on-click, and explicit show() variants."
+msgstr "类型、位置、持续时间、遮罩与关闭方式。"
+
+msgctxt "ui_components.demo.info"
+msgid "Info"
+msgstr "提示"
+
+msgctxt "ui_components.demo.error"
+msgid "Error"
+msgstr "错误"
+
+msgctxt "ui_components.demo.position"
+msgid "Position"
+msgstr "位置"
+
+msgctxt "ui_components.demo.top"
+msgid "Top"
+msgstr "顶部"
+
+msgctxt "ui_components.demo.middle"
+msgid "Middle"
+msgstr "中部"
+
+msgctxt "ui_components.demo.bottom"
+msgid "Bottom"
+msgstr "底部"
+
+msgctxt "ui_components.demo.behavior"
+msgid "Behavior"
+msgstr "行为"
+
+msgctxt "ui_components.demo.5_seconds"
+msgid "5 seconds"
+msgstr "5 秒"
+
+msgctxt "ui_components.demo.overlay_dismiss"
+msgid "Overlay + dismiss"
+msgstr "遮罩与关闭"
+
+msgctxt "ui_components.demo.action_banner_plus_an_honest_capped_queue_footer"
+msgid "Action Banner plus an honest capped-queue footer whose batch actions stay in an overflow menu."
+msgstr "带操作的通知与消息队列；批量操作收纳在更多菜单中。"
+
+msgctxt "ui_components.demo.warning"
+msgid "Warning"
+msgstr "警告"
+
+msgctxt "ui_components.demo.action_banner"
+msgid "Action Banner"
+msgstr "操作通知"
+
+msgctxt "ui_components.demo.queue_stack_footer"
+msgid "Queue stack + footer"
+msgstr "通知队列与页脚"
+
+msgctxt "ui_components.demo.remove_all"
+msgid "Remove all"
+msgstr "全部移除"
+
+msgctxt "ui_components.demo.clear_queue"
+msgid "Clear queue"
+msgstr "清空队列"
+
+msgctxt "ui_components.demo.action_banner_overflow_footer_3_shown_9_more"
+msgid "Action Banner + overflow footer (3 shown · 9 more)"
+msgstr "操作通知与队列页脚（显示 3 条 · 另有 9 条）"
+
+msgctxt "ui_components.demo.standalone_link"
+msgid "Standalone link"
+msgstr "独立链接"
+
+msgctxt "ui_components.demo.inline_link"
+msgid "Inline link"
+msgstr "行内链接"
+
+msgctxt "ui_components.demo.muted_link"
+msgid "Muted link"
+msgstr "弱化链接"
+
+msgctxt "ui_components.demo.disabled_link"
+msgid "Disabled link"
+msgstr "禁用链接"
+
+msgctxt "ui_components.demo.underline_navigation_examples"
+msgid "Underline navigation examples"
+msgstr "下划线导航示例"
+
+msgctxt "ui_components.demo.overview"
+msgid "Overview"
+msgstr "概览"
+
+msgctxt "ui_components.demo.activity"
+msgid "Activity"
+msgstr "动态"
+
+msgctxt "ui_components.demo.selected_navigation"
+msgid "Selected navigation"
+msgstr "已选导航"
+
+msgctxt "ui_components.demo.select_all"
+msgid "Select all"
+msgstr "全选"
+
+msgctxt "ui_components.demo.pull_request_review"
+msgid "Pull request review"
+msgstr "Pull Request Review"
+
+msgctxt "ui_components.demo.ai_review"
+msgid "AI review"
+msgstr "AI Review"
+
+msgctxt "ui_components.demo.partially_selected"
+msgid "Partially selected"
+msgstr "部分选中"
+
+msgctxt "ui_components.demo.disabled_selected"
+msgid "Disabled selected"
+msgstr "禁用且选中"
+
+msgctxt "ui_components.demo.disabled_mixed"
+msgid "Disabled mixed"
+msgstr "禁用且部分选中"
+
+msgctxt "ui_components.demo.segmentedcontrol_clone_method"
+msgid "SegmentedControl - clone method"
+msgstr "SegmentedControl · 克隆方式"
+
+msgctxt "ui_components.demo.clone_method"
+msgid "Clone method"
+msgstr "克隆方式"
+
+msgctxt "ui_components.demo.disabled_state"
+msgid "Disabled state"
+msgstr "禁用状态"
+
+msgctxt "ui_components.demo.disabled_segmented_control_state"
+msgid "Disabled segmented control state"
+msgstr "分段控件禁用状态"
+
+msgctxt "ui_components.demo.available"
+msgid "Available"
+msgstr "可用"
+
+msgctxt "ui_components.demo.icon_only_with_motion"
+msgid "Icon-only with motion"
+msgstr "动态图标分段控件"
+
+msgctxt "ui_components.demo.list_view"
+msgid "List view"
+msgstr "列表视图"
+
+msgctxt "ui_components.demo.grid_view"
+msgid "Grid view"
+msgstr "网格视图"
+
+msgctxt "ui_components.demo.project_view"
+msgid "Project view"
+msgstr "项目视图"
+
+msgctxt "ui_components.demo.name"
+msgid "Name"
+msgstr "名称"
+
+msgctxt "ui_components.demo.project_name"
+msgid "Project name"
+msgstr "项目名称"
+
+msgctxt "ui_components.demo.selectmenu_bordered_single_select"
+msgid "Bordered"
+msgstr "带边框"
+
+msgctxt "ui_components.demo.github_filter_rows_with_dividers_a_default_foreground"
+msgid "GitHub filter rows with dividers, a default-foreground Check, semibold selection, title, close control, and dismissal behavior."
+msgstr "筛选选项、分隔线、选中标记、标题与关闭操作。"
+
+msgctxt "ui_components.demo.status"
+msgid "Status"
+msgstr "状态"
+
+msgctxt "ui_components.demo.owner"
+msgid "Owner"
+msgstr "负责人"
+
+msgctxt "ui_components.demo.sort"
+msgid "Sort"
+msgstr "排序"
+
+msgctxt "ui_components.demo.filter_by_status"
+msgid "Filter by status"
+msgstr "按状态筛选"
+
+msgctxt "ui_components.demo.filter_by_owner"
+msgid "Filter by owner"
+msgstr "按负责人筛选"
+
+msgctxt "ui_components.demo.sort_by"
+msgid "Sort by"
+msgstr "排序方式"
+
+msgctxt "ui_components.demo.all_statuses"
+msgid "All statuses"
+msgstr "全部状态"
+
+msgctxt "ui_components.demo.active"
+msgid "Active"
+msgstr "活跃"
+
+msgctxt "ui_components.demo.paused"
+msgid "Paused"
+msgstr "已暂停"
+
+msgctxt "ui_components.demo.archived"
+msgid "Archived"
+msgstr "已归档"
+
+msgctxt "ui_components.demo.anyone"
+msgid "Anyone"
+msgstr "所有人"
+
+msgctxt "ui_components.demo.owned_by_me"
+msgid "Owned by me"
+msgstr "由我负责"
+
+msgctxt "ui_components.demo.unassigned"
+msgid "Unassigned"
+msgstr "未分配"
+
+msgctxt "ui_components.demo.newest"
+msgid "Newest"
+msgstr "最新"
+
+msgctxt "ui_components.demo.oldest"
+msgid "Oldest"
+msgstr "最早"
+
+msgctxt "ui_components.demo.recently_updated"
+msgid "Recently updated"
+msgstr "最近更新"
+
+msgctxt "ui_components.demo.least_recently_updated"
+msgid "Least recently updated"
+msgstr "最久未更新"
+
+msgctxt "ui_components.demo.repository"
+msgid "Repository"
+msgstr "仓库"
+
+msgctxt "ui_components.demo.editable_default_state"
+msgid "Editable default state"
+msgstr "可编辑状态"
+
+msgctxt "ui_components.demo.required_value"
+msgid "Required value"
+msgstr "必填"
+
+msgctxt "ui_components.demo.a_token_is_required"
+msgid "A token is required."
+msgstr "请填写 Token。"
+
+msgctxt "ui_components.demo.loading_field"
+msgid "Loading field"
+msgstr "加载中输入框"
+
+msgctxt "ui_components.demo.checking_repository"
+msgid "Checking repository"
+msgstr "正在检查仓库"
+
+msgctxt "ui_components.demo.compact_field"
+msgid "Compact field"
+msgstr "紧凑输入框"
+
+msgctxt "ui_components.demo.pull_request_menus"
+msgid "Borderless - Pull Request"
+msgstr "无边框 · Pull Request"
+
+msgctxt "ui_components.demo.message_center"
+msgid "Message center"
+msgstr "消息中心"
+
+msgctxt "ui_components.demo.exercise_the_real_banner_durable_inbox_unread_count"
+msgid "Exercise the real Banner, durable Inbox, unread count, category, and native-delivery pipeline."
+msgstr "通知、收件箱、未读计数、分类与系统通知。"
+
+msgctxt "ui_components.demo.general"
+msgid "General"
+msgstr "普通消息"
+
+msgctxt "ui_components.demo.software_update"
+msgid "Software update"
+msgstr "软件更新"
+
+msgctxt "ui_components.demo.cd_success"
+msgid "CD success"
+msgstr "CD 成功"
+
+msgctxt "ui_components.demo.critical_os"
+msgid "Critical + OS"
+msgstr "严重错误与系统通知"
+
+msgctxt "ui_components.demo.notification_inbox_rows"
+msgid "Notification inbox rows"
+msgstr "收件箱消息行"
+
+msgctxt "ui_components.demo.github_inbox_unread_hierarchy_canvas_subtle_fill_accent"
+msgid "GitHub Inbox unread hierarchy: canvas-subtle fill, accent unread disc, bold vs muted title."
+msgstr "未读背景、标记与标题层级。"
+
+msgctxt "ui_components.demo.pull_request_checks_completed"
+msgid "Pull request checks completed"
+msgstr "Pull Request 检查已完成"
+
+msgctxt "ui_components.demo.all_required_checks_passed_for_the_release_branch"
+msgid "All required checks passed for the release branch."
+msgstr "发布 Branch 的所有必要检查均已通过。"
+
+msgctxt "ui_components.demo.cd_workflow"
+msgid "CD workflow"
+msgstr "CD Workflow"
+
+msgctxt "ui_components.demo.just_now"
+msgid "Just now"
+msgstr "刚刚"
+
+msgctxt "ui_components.demo.network_connection_restored"
+msgid "Network connection restored"
+msgstr "网络连接已恢复"
+
+msgctxt "ui_components.demo.remote_repository_operations_are_available_again"
+msgid "Remote repository operations are available again."
+msgstr "已可继续访问远程仓库。"
+
+msgctxt "ui_components.demo.network"
+msgid "Network"
+msgstr "网络"
+
+msgctxt "ui_components.demo.10_minutes_ago"
+msgid "10 minutes ago"
+msgstr "10 分钟前"
+
+msgctxt "ui_components.demo.ai_review_findings"
+msgid "AI review findings"
+msgstr "AI Review 发现"
+
+msgctxt "ui_components.demo.copilot_style_severity_labels_and_flat_actionable_rows"
+msgid "Copilot-style severity labels and flat actionable rows that navigate to a changed line."
+msgstr "严重程度标签与跳转到变更行的 Review 条目。"
+
+msgctxt "ui_components.demo.authorization_failure_is_ignored"
+msgid "Authorization failure is ignored"
+msgstr "忽略了授权失败"
+
+msgctxt "ui_components.demo.the_new_branch_continues_after_a_denied_authorization"
+msgid "The new branch continues after a denied authorization response."
+msgstr "新分支在授权被拒绝后仍继续执行。"
+
+msgctxt "ui_components.demo.return_the_provider_error_before_persisting_the_transaction"
+msgid "Return the provider error before persisting the transaction."
+msgstr "在保存事务前返回 Provider 错误。"
+
+msgctxt "ui_components.demo.cache_key_is_not_project_scoped"
+msgid "Cache key is not project-scoped"
+msgstr "缓存键未隔离项目"
+
+msgctxt "ui_components.demo.two_open_projects_can_overwrite_the_same_review"
+msgid "Two open projects can overwrite the same review entry."
+msgstr "两个打开的项目可能覆盖同一条 Review 记录。"
+
+msgctxt "ui_components.demo.agent_response"
+msgid "Agent response"
+msgstr "AI Agent 回复"
+
+msgctxt "ui_components.demo.native_compact_markdown_blocks_with_in_place_preview"
+msgid "Native compact Markdown blocks with in-place Preview and opaque link callback feedback."
+msgstr "Markdown 内容、预览入口与链接操作反馈。"
+
+msgctxt "ui_components.demo.artifact_preview_fixtures"
+msgid "Artifact preview fixtures"
+msgstr "内容预览样例"
+
+msgctxt "ui_components.demo.open_real_preview_providers_and_failure_handling_through"
+msgid "Open real Preview providers and failure handling through the application-level host."
+msgstr "Markdown、图片、文本及失败状态。"
+
+msgctxt "ui_components.demo.headings_inline_styles_links_lists_quotes_tables_and"
+msgid "Headings, inline styles, links, lists, quotes, tables, and code"
+msgstr "标题、行内样式、链接、列表、引用、表格与代码"
+
+msgctxt "ui_components.demo.png_image"
+msgid "PNG image"
+msgstr "PNG 图片"
+
+msgctxt "ui_components.demo.decoded_rgba_image_with_contain_sizing"
+msgid "Decoded RGBA image with contain sizing"
+msgstr "完整显示解码后的 RGBA 图片"
+
+msgctxt "ui_components.demo.plain_text"
+msgid "Plain text"
+msgstr "纯文本"
+
+msgctxt "ui_components.demo.scrollable_monospaced_log_with_copy_support"
+msgid "Scrollable monospaced log with copy support"
+msgstr "支持滚动与复制的等宽日志"
+
+msgctxt "ui_components.demo.json_text"
+msgid "JSON text"
+msgstr "JSON 文本"
+
+msgctxt "ui_components.demo.utf_8_application_json_through_the_plain_text"
+msgid "UTF-8 application/json through the plain-text provider"
+msgstr "以纯文本预览 UTF-8 JSON"
+
+msgctxt "ui_components.demo.unsupported_binary"
+msgid "Unsupported binary"
+msgstr "不支持的二进制文件"
+
+msgctxt "ui_components.demo.safe_unsupported_provider_error_state"
+msgid "Safe unsupported-provider error state"
+msgstr "不支持此文件类型的提示"
+
+msgctxt "ui_components.demo.open"
+msgid "Open"
+msgstr "打开"
+
+msgctxt "ui_components.demo.feature_component_registry"
+msgid "Feature component registry"
+msgstr "业务组件索引"
+
+msgctxt "ui_components.demo.complex_components_use_real_project_state_on_their"
+msgid "Complex components use real project state on their owning routes; use these links to exercise them without duplicating business logic."
+msgstr "前往对应页面查看使用真实项目状态的业务组件。"
+
+msgctxt "ui_components.demo.project_components"
+msgid "Project components"
+msgstr "项目组件"
+
+msgctxt "ui_components.demo.grid_list_cards_search_view_switcher_card_actions"
+msgid "Grid/List cards, search, view switcher, card actions, and project dialog variants"
+msgstr "网格与列表、搜索、视图切换及项目对话框"
+
+msgctxt "ui_components.demo.workflow_components"
+msgid "Workflow components"
+msgstr "Workflow 组件"
+
+msgctxt "ui_components.demo.branch_tag_pull_request_deployment_filters_and_pagination"
+msgid "Branch, tag, pull request, deployment, filters, and pagination states"
+msgstr "Branch、Tag、Pull Request、部署、筛选与分页"
+
+msgctxt "ui_components.demo.pull_request_filter_menu"
+msgid "Pull request filter menu"
+msgstr "Pull Request 筛选菜单"
+
+msgctxt "ui_components.demo.reviews_assignee_and_sort_popovers_with_selected_options"
+msgid "Reviews, Assignee, and Sort popovers with selected options and dismissal"
+msgstr "Review、负责人和排序菜单的选中与关闭状态"
+
+msgctxt "ui_components.demo.job_run_components"
+msgid "Job Run components"
+msgstr "Job Run 组件"
+
+msgctxt "ui_components.demo.application_level_run_header_jobs_navigation_status_steps"
+msgid "Application-level run header, Jobs navigation, status, steps, logs, and Stop action"
+msgstr "运行标题、Job 导航、状态、步骤、日志与停止操作"
+
+msgctxt "ui_components.demo.chat_components"
+msgid "Chat components"
+msgstr "Chat 组件"
+
+msgctxt "ui_components.demo.welcome_suggestions_message_roles_status_artifact_title_actions"
+msgid "Welcome suggestions, message roles/status, artifact title actions, composer, and history loading"
+msgstr "欢迎建议、消息角色与状态、内容操作、输入框与历史加载"
+
+msgctxt "ui_components.demo.artifact_preview"
+msgid "Artifact preview"
+msgstr "内容预览"
+
+msgctxt "ui_components.demo.shared_markdown_image_and_plain_text_surface_with"
+msgid "Shared Markdown, image, and plain-text surface with docked or detached hosts"
+msgstr "Markdown、图片和纯文本的停靠或独立预览"
+
+msgctxt "ui_components.demo.shared"
+msgid "Shared"
+msgstr "共用"
+
+msgctxt "ui_components.demo.settings_components"
+msgid "Settings components"
+msgstr "设置组件"
+
+msgctxt "ui_components.demo.responsive_section_navigation_provider_navigation_fields_toggles_panes"
+msgid "Responsive section navigation, provider navigation, fields, toggles, panes, and update actions"
+msgstr "响应式分组导航、Provider 导航、输入框、开关与更新操作"
+
+msgctxt "ui_components.demo.shell_and_review_components"
+msgid "Shell and review components"
+msgstr "应用框架与 Review 组件"
+
+msgctxt "ui_components.demo.navigation_rail_breadcrumb_status_bar_terminal_drawer_pull"
+msgid "Navigation rail, breadcrumb, status bar, terminal drawer, pull-request review and diff controls"
+msgstr "导航栏、面包屑、状态栏、Terminal 抽屉及 Review 和 Diff 控件"
+
+msgctxt "ui_components.demo.live"
+msgid "Live"
+msgstr "当前页面"
+
+msgctxt "ui_components.demo.selected_option"
+msgid "Selected option"
+msgstr "选中选项"
+
+msgctxt "ui_components.demo.current_actionlist_state"
+msgid "Current ActionList state"
+msgstr "当前操作列表状态"
+
+msgctxt "ui_components.demo.disabled_option"
+msgid "Disabled option"
+msgstr "禁用选项"
+
+msgctxt "ui_components.demo.danger_option"
+msgid "Danger option"
+msgstr "危险选项"
+
+msgctxt "ui_components.agent_response_heading"
+msgid "Review response"
+msgstr "Review 回复"
+
+msgctxt "ui_components.agent_response_context"
+msgid "Structured context"
+msgstr "结构化上下文"
+
+msgctxt "ui_components.agent_response_emphasis"
+msgid "Clear emphasis"
+msgstr "清晰的重点"
+
+msgctxt "ui_components.agent_response_guidance"
+msgid "Repository guidance"
+msgstr "仓库指南"
+
+msgctxt "ui_components.agent_response_worker"
+msgid "Bound compact projection work on the worker."
+msgstr "在 Worker 上限制内容投影规模。"
+
+msgctxt "ui_components.agent_response_preview"
+msgid "Full Markdown remains available through Preview."
+msgstr "可在预览中查看完整 Markdown。"
+
+msgctxt "ui_components.agent_response_table"
+msgid "Projection | Bounded    Preview | Complete"
+msgstr "内容投影 | 有限    预览 | 完整"
+
+msgctxt "ui_components.agent_response_idle"
+msgid "No response action activated yet."
+msgstr "尚未触发回复操作。"
+
+msgctxt "ui_components.agent_response_preview_feedback"
+msgid "Preview action: Review response"
+msgstr "预览操作：Review 回复"
+
+msgctxt "ui_components.agent_response_link_feedback"
+msgid "Link callback: "
+msgstr "链接操作："
+
+msgctxt "ui_components.short_rules"
+msgid "2 rules"
+msgstr "2 条规则"
+
+msgctxt "ui_components.long_rules"
+msgid "14 rules"
+msgstr "14 条规则"
+
+msgctxt "ui_components.two_hours_ago"
+msgid "2 hours ago"
+msgstr "2 小时前"
+
+msgctxt "ui_components.five_hours_ago"
+msgid "5 hours ago"
+msgstr "5 小时前"
+
+msgctxt "ui_components.one_day_ago"
+msgid "1 day ago"
+msgstr "1 天前"
+
+msgctxt "ui_components.two_days_ago"
+msgid "2 days ago"
+msgstr "2 天前"

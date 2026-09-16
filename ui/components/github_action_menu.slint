@@ -1,5 +1,6 @@
 import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
 import { TransientOverlayState } from "../state/transient_overlay_state.slint";
+import { FloatingOverlayBridge, FloatingOverlayRect } from "../state/floating_overlay_bridge.slint";
 
 // Primer ActionMenu is an ActionList inside AnchoredOverlay. This shell owns
 // the shared Overlay surface and collision-aware placement. Coordinates are in
@@ -14,6 +15,16 @@ import { TransientOverlayState } from "../state/transient_overlay_state.slint";
 //    hit target inside this z:10000 surface would swallow those triggers.
 export component GitHubActionMenu inherits FocusScope {
     in property <bool> open: false;
+    // Opt-in Primer placement uses the requested side/alignment with collision fallback.
+    in property <bool> adaptive-placement: false;
+    private property <bool> use-adaptive-placement: root.adaptive-placement && FloatingOverlayBridge.ready;
+    private property <FloatingOverlayRect> adaptive-bounds: root.open && root.use-adaptive-placement
+        ? FloatingOverlayBridge.position(
+            { x: root.anchor-x, y: root.anchor-y, width: root.anchor-width, height: root.anchor-height },
+            { x: root.viewport-x, y: root.viewport-y, width: root.viewport-width, height: root.viewport-height },
+            { x: 0px, y: 0px, width: root.menu-width, height: root.desired-height },
+            root.anchor-gap, root.viewport-margin, root.side, root.align)
+        : { x: 0px, y: 0px, width: 0px, height: 0px };
     in property <length> viewport-x: 0px;
     in property <length> viewport-y: 0px;
     in property <length> viewport-width: 0px;
@@ -35,7 +46,9 @@ export component GitHubActionMenu inherits FocusScope {
     in property <length> reveal-height: 0px;
     callback dismiss-requested();
     out property <bool> opens-above:
-        root.side == "top"
+        root.use-adaptive-placement
+        ? root.adaptive-bounds.y + root.adaptive-bounds.height <= root.anchor-y - root.anchor-gap
+        : root.side == "top"
         || (root.side == "auto"
             && root.space-below < root.desired-height
             && root.space-above > root.space-below);
@@ -116,15 +129,16 @@ export component GitHubActionMenu inherits FocusScope {
     }
 
     visible: root.open && root.width > 0px && root.height > 0px;
-    x: max(
+    x: root.use-adaptive-placement ? root.adaptive-bounds.x : max(
         root.viewport-x + root.viewport-margin,
         min(root.viewport-right - root.viewport-margin - root.desired-width, root.aligned-x)
     );
-    y: root.opens-above
+    y: root.use-adaptive-placement ? root.adaptive-bounds.y : root.opens-above
         ? root.anchor-y - root.anchor-gap - root.height
         : root.anchor-y + root.anchor-height + root.anchor-gap;
-    width: root.desired-width;
-    height: min(root.desired-height, root.opens-above ? root.space-above : root.space-below);
+    width: root.use-adaptive-placement ? root.adaptive-bounds.width : root.desired-width;
+    height: root.use-adaptive-placement ? root.adaptive-bounds.height
+        : min(root.desired-height, root.opens-above ? root.space-above : root.space-below);
     z: 10000;
 
     menu-surface := Rectangle {
@@ -132,10 +146,10 @@ export component GitHubActionMenu inherits FocusScope {
         height: parent.height;
         border-radius: 12px;
         border-width: 1px;
-        border-color: GitHubTheme.border-default;
+        border-color: GitHubTheme.border-muted;
         background: GitHubTheme.canvas-overlay;
         drop-shadow-blur: 18px;
-        drop-shadow-color: GitHubTheme.shadow-floating-medium;
+        drop-shadow-color: GitHubTheme.shadow-floating-small;
         drop-shadow-offset-y: 6px;
         clip: true;
 
@@ -221,8 +235,8 @@ export component GitHubActionListItem inherits FocusScope {
     in property <string> description: "";
     in property <string> trailing-text: "";
     in property <length> label-font-size: GitHubMetrics.text-medium;
-    in property <int> label-font-weight: 400;
-    in property <color> selected-visual-color: GitHubTheme.accent-fg;
+    in property <int> label-font-weight: root.description == "" ? 400 : 600;
+    in property <color> selected-visual-color: GitHubTheme.fg-default;
     in property <bool> show-bottom-divider: false;
     in property <image> icon;
     in property <bool> selected: false;
@@ -333,6 +347,7 @@ export component GitHubActionListItem inherits FocusScope {
         height: GitHubMetrics.size-16;
         text: root.description;
         font-size: GitHubMetrics.text-small;
+        font-weight: 400;
         color: root.item-enabled
             ? GitHubTheme.fg-muted
             : GitHubTheme.control-disabled-fg;
@@ -346,6 +361,7 @@ export component GitHubActionListItem inherits FocusScope {
         height: parent.height;
         text: root.trailing-text;
         font-size: GitHubMetrics.text-small;
+        font-weight: 400;
         color: root.item-enabled
             ? GitHubTheme.fg-muted
             : GitHubTheme.control-disabled-fg;

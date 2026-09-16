@@ -181,7 +181,7 @@ callback 耗时和夹具效果预算避免相对比较掩盖回归。显式 `--b
 | `ui/components/artifact_preview/` | 应用级通用预览外壳、基于 Primer token 的原生 Markdown/文本/图片 Surface、右侧固定面板与独立原生窗口；不承担解析或 I/O，也不引入 WebView。 |
 | `ui/components/agent_response/` | Agent 回复的紧凑原生 block renderer；只消费准备好的结构并上报 link/action callback，不承担 Markdown 解析、仓库路径解析或文件 I/O。 |
 | `ui/components/about/`、`ai_review/`、`chat/`、`project/`、`workflow/` | 从路由页面抽出的功能级 GitHub/Primer 视觉积木，不负责 I/O 或路由跳转。 |
-| `ui/components/showcase/` | GitHub/Primer 属性对比矩阵，以及把依赖业务 model 的组合组件链接到真实路由的登记表；Select 示例共用受约束的列宽，在共享 small 断点以下单列排列，分区高度从控件几何计算；可选 Preview 样例只发出 fixture id，不得绕过 Provider 或 Host；新增或实质变更的视觉组件必须同步登记。 |
+| `ui/components/showcase/` | GitHub/Primer 属性对比矩阵按基础、操作、容器、反馈、导航、选择、文本输入、场景排序；本地化目录与返回入口复用页面滚动宿主；浅色 Primer Box-header 通栏明确章节边界，示例文案绑定共享 catalog，AI Agent 回复反馈保存操作标识并随语言即时刷新；登记表把依赖业务 model 的组合组件链接到真实路由；带边框与无边框 PR 菜单相邻放在“选择”的 Select Menu 分区；带边框菜单通过实时窗口锚点与共享 Floating UI adapter 挂到根浮层，分区高度保持固定；Select 示例共用受约束的列宽，在共享 small 断点以下单列排列，分区高度从控件几何计算；PR 菜单直接复用生产工具栏和 `GitHubPullRequestRuleMenu`，使用本地 2/14 条规则 model 和可见视口边界，不持久化选择；可选 Preview 样例只发出 fixture id，不得绕过 Provider 或 Host；新增或实质变更的视觉组件必须同步登记。 |
 | `ui/components/button/github_icon_button.slint` | 图标按钮、浮动按钮、Terminal、项目卡片和复制操作共用的 `GitHubIconButton` 基础，统一键盘焦点、Tooltip、加载态和语义变体。 |
 | `ui/components/label/github_counter_label.slint` | 共用的强类型 Primer CounterLabel，提供 Default/Primary/Secondary Scheme、可选上限、紧凑叠加几何与零值隐藏；状态栏通知徽标及后续导航/操作计数统一复用。 |
 | `ui/components/github_metadata_label.slint` | 共享的 Primer small Label：透明背景、包含边框的留白计算、内容居中与强类型 Default/Primary/Secondary 变体；Hook 状态元数据采用 Secondary。 |
@@ -198,7 +198,7 @@ callback 耗时和夹具效果预算避免相对比较掩盖回归。显式 `--b
 | `ui/components/button/github_copy_button.slint` | 所有图标复制操作共用的 GitHub CopyToClipboardButton 交互；组件负责短时 Copy→Check 状态和 `Copied!` Tooltip，feature callback 返回剪贴板写入是否成功。 |
 | `ui/components/jobs/` | 可复用的 GitHub Actions 风格 Run/Job/Step/日志展示；只接收归一化快照，不执行流程命令。 |
 | `ui/components/dialog/github_dialog.slint` | 全局、项目、PR Review 和更新弹窗共用的响应式 Primer Dialog 外壳，统一遮罩输入归属、初始关闭按钮焦点、Header/Body/Footer 安全边距、Esc 关闭（`modal` 时禁用）、窄屏全窗口布局、关闭行为与操作状态；可选的外部视口使路由内弹窗始终按完整应用窗口居中，并跨固定 Shell Chrome 绘制连续遮罩；根状态继续把遮罩延伸到 macOS 标题栏 inset，`src/platform/macos.rs` 在保留 AppKit 交通灯可用的同时屏蔽应用自有标题栏附件；原生标题栏点击复用普通遮罩关闭语义，不会削弱不可关闭 Dialog；功能正文以 `@children` 嵌套。 |
-| `ui/components/toast/`、`ui/components/notify/` | 共用的紧凑 Primer Banner 风格瞬时/排队反馈；根层同一时刻只渲染最新的一条排队通知（最新在前、最多 3 条），用持久未读总数明示队列上限之外的通知，并把批量操作收入紧凑 ActionMenu。 |
+| `ui/components/toast/`、`ui/components/notify/` | 共用的紧凑 Primer Banner 风格瞬时/排队反馈；根层同一时刻只渲染最新的一条排队通知（最新在前、最多 3 条），用持久未读总数明示队列上限之外的通知，并把批量操作收入紧凑 ActionMenu。`GitHubNotificationQueueMenu` 在根层通知与演练场根浮层间共享操作项；行内 Banner 发布实时窗口锚点，不在页面章节内绘制菜单。两类宿主均以底栏按钮为共享 Floating UI 的锚点，上下展开均留出 6px。 |
 | `ui/components/messages/` | 可复用 GitHub Inbox 消息行，统一已读/未读、语义级别、元数据和常驻行操作，并登记到 UI Components。 |
 | `ui/components/pr_review/` | PR Review 的公开 UI struct、可复用外壳/文件树/Diff 控件；跨区域状态仍留在完整页面实现。 |
 | `ui/theme/github_theme.slint` | 应用自有的 `GitHubTheme` 语义色，以及 `GitHubMetrics` Primer 几何、控件、字体、浮层与断点令牌；功能性 UI 原始颜色统一在此管理。 |
@@ -700,6 +700,20 @@ Project Store 持有 `logo_requests.rs` 调度策略：最多 4 个活跃请求�
 `GitHubPageHeader` 与 `GitHubBlankslate`，不再维护页面局部占位模式。
 
 ### Workflow
+
+`crates/usher-ui/src/floating_overlay.rs` 将原生矩形适配到固定版本的
+`floating-ui-core`。纯 `FloatingOverlayBridge` callback 将其接入共享 ActionMenu
+的可选自适应定位，PR 列表与演练场菜单启用此能力。callback 保留调用方方向/对齐，
+通过库的两次 Flip 配置 Primer 先方向后对齐的回退顺序；Select Menu 默认下方、
+start 对齐、4px 间距，PR 筛选显式使用 end 对齐。偏移、方向与对齐翻转、平移和可用尺寸
+由库计算，Slint 负责绘制、滚动、焦点及关闭。
+PR 列表菜单由当前筛选按钮持续提供窗口坐标系内的完整边界；
+`GitHubPullRequestFlow` 将带实例 owner token 的临时菜单投影发布到
+`GitHubPrMenuState`，由 `GitHubPullRequestMenuOverlay` 在窗口根层绘制，
+避开页面滚动裁剪和章节层叠。选择事件通过限定 owner 的 action revision 返回既有
+Flow callback；该投影不持久化，也不拥有 Workflow 业务状态。MainWindow 提供实际
+可见页面视口。缩放、滚动和语言切换更新菜单锚点；按钮完全离屏、Flow 隐藏、路由
+切换或紧凑工具栏替换时关闭菜单，滚回不自动重开。
 
 Workflow 在所有支持的宽度下统一使用 GitHub 仓库页的 UnderlineNav 交互；低于 720px 时，仓库路径与操作从身份页头移入尾部 kebab 浮层。PR 列表严格复刻 GitHub 查询与响应式筛选交互：卡片上方放置 Search 风格查询框，Open/Closed 与筛选保持在卡片页头同一行；低于 620px 时直接保留 Assignee，把 Reviews 与 Sort 合并进一个分组 kebab ActionMenu。所有菜单互斥，第一次点击即可切换。Closed 使用 GitHub 语义，包含 merged 与关闭未合并。`is:merged` 和 `is:closed is:unmerged` 分别筛选两个精确子集；与 GitHub 一致，任何非标准查询都会把 Open/Closed 替换为“清除查询”入口与 Total 汇总。PR 行在 Slint 中测量标题换行后的实际高度，由纵向布局累加每行自然高度；Workflow Shell 直接消费组件最终高度，不再自行预测固定行高。Controller 解析可移植的状态/Review/Assignee qualifier，使查询框与工具栏切换保持同步，并在查询变化后重置分页。Provider adapter 负责翻译归一化查询：GitHub 使用原生 Search qualifier，Gitee 企业版使用文档规定的状态/search 参数，GitLab 为 Closed 合并按 Provider 顺序排列的 closed/merged 前缀，Gitee 公有 v5 无法精确服务端筛选时执行有界客户端扫描。项目或筛选条件变化时独立获取 Open 与 Closed 总数，页头不再复用当前选中分页的临时数量。总数仍在加载或计数请求失败时，页头按 Primer 降级体验隐藏数字并保留当前汇总标签，而不是长期停留在加载占位。列表时间使用相对时间，并提供东八区绝对时间 Tooltip。
 

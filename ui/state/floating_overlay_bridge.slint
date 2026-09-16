@@ -1,0 +1,9 @@
+export struct FloatingOverlayRect {
+    x: length, y: length, width: length, height: length,
+}
+
+// Pure geometry only. The Rust adapter uses Floating UI's native core.
+export global FloatingOverlayBridge {
+    in property <bool> ready: false;
+    pure callback position(FloatingOverlayRect, FloatingOverlayRect, FloatingOverlayRect, length, length, string, string) -> FloatingOverlayRect;
+}

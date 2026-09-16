@@ -1,3 +1,4 @@
+import { I18n } from "@i18n";
 import { Route } from "../../route/routeMap.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { GitHubPageHeader } from "../page/github_page_header.slint";
@@ -21,12 +22,50 @@ import { GitHubFilterMenuButton, GitHubFilterMenuFrame, GitHubFilterMenuItem } f
 import { ToastManager, ToastType } from "../toast/toast_manager.slint";
 import { NotificationManager, NotificationType, NotificationDelivery, CustomComponentType } from "../notify/notification.slint";
 import { NotificationIcons } from "../notify/icons.slint";
-import { GitHubNotificationBanner } from "../notify/actions_notify.slint";
+import { GitHubNotificationBanner, GitHubNotificationQueueMenu } from "../notify/actions_notify.slint";
 import { DialogManager } from "../dialog/dialog_manager.slint";
 import { GitHubMessageListItem, MessageLevel } from "../messages/github_message_components.slint";
 import { GitHubPagination } from "../navigation/github_pagination.slint";
 import { GitHubAiReviewFindingRow, GitHubAiReviewSeverityLabel } from "../ai_review/github_ai_review_components.slint";
 import { GitHubAgentResponseShowcase } from "github_agent_response_showcase.slint";
+import { GitHubPrMenuShowcase } from "github_pr_menu_showcase.slint";
+
+component GitHubShowcaseGroup inherits Rectangle {
+    in property <string> title;
+    callback back-to-top();
+    // Primer Box-header treatment, applied as an unframed section band.
+    // https://primer.style/view-components/lookbook/inspect/primer/beta/border_box/header_with_title/
+    height: 80px;
+    background: transparent;
+    header-band := Rectangle {
+        x: 0px;
+        y: 16px;
+        width: parent.width;
+        height: 56px;
+        background: GitHubTheme.canvas-subtle;
+        Rectangle { y: 0px; width: parent.width; height: 1px; background: GitHubTheme.border-default; }
+        Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: GitHubTheme.border-default; }
+        heading := Text {
+            x: GitHubMetrics.size-16;
+            y: GitHubMetrics.size-16;
+            width: parent.width - back-link.width - GitHubMetrics.size-48;
+            height: 24px;
+            text: root.title;
+            accessible-label: root.title;
+            font-size: GitHubMetrics.text-medium;
+            font-weight: 600;
+            color: GitHubTheme.fg-default;
+            vertical-alignment: center;
+        }
+        back-link := GitHubLink {
+            x: parent.width - self.width - GitHubMetrics.size-16;
+            y: 18px;
+            text: I18n.tooltip-back-to-top;
+            muted: true;
+            clicked => { root.back-to-top(); }
+        }
+    }
+}
 
 component GitHubShowcaseSection inherits Rectangle {
     in property <string> title;
@@ -48,7 +87,7 @@ component GitHubShowcaseSection inherits Rectangle {
         width: parent.width;
         height: GitHubMetrics.size-24;
         text: root.title;
-        font-size: GitHubMetrics.heading-small;
+        font-size: GitHubMetrics.text-large;
         font-weight: 600;
         color: GitHubTheme.fg-default;
         vertical-alignment: center;
@@ -142,6 +181,52 @@ global GitHubSelectDemoState {
     in-out property <int> grouped-value: 0;
 }
 
+
+global GitHubFilterDemoState {
+    in-out property <string> menu: "";
+    in-out property <string> status: "all";
+    in-out property <string> owner: "any";
+    in-out property <string> sort: "newest";
+    in-out property <length> anchor-x;
+    in-out property <length> anchor-y;
+    in-out property <length> anchor-width;
+    in-out property <length> anchor-height;
+}
+
+component GitHubFilterDemoButton inherits GitHubFilterMenuButton {
+    in property <string> identity;
+    menu-open: GitHubFilterDemoState.menu == root.identity;
+    private property <length> global-x: anchor-marker.absolute-position.x;
+    private property <length> global-y: anchor-marker.absolute-position.y;
+    anchor-marker := Rectangle { x: 0px; y: 0px; width: 0px; height: 0px; }
+    function publish-anchor() {
+        if root.menu-open {
+            GitHubFilterDemoState.anchor-x = root.global-x;
+            GitHubFilterDemoState.anchor-y = root.global-y;
+            GitHubFilterDemoState.anchor-width = root.width;
+            GitHubFilterDemoState.anchor-height = root.height;
+        }
+    }
+    changed global-x => { root.publish-anchor(); }
+    changed global-y => { root.publish-anchor(); }
+    changed width => { root.publish-anchor(); }
+    clicked => {
+        if root.menu-open {
+            GitHubFilterDemoState.menu = "";
+        } else {
+            GitHubFilterDemoState.menu = root.identity;
+            root.publish-anchor();
+        }
+    }
+}
+
+global GitHubNotificationDemoState {
+    in-out property <bool> open: false;
+    in-out property <length> anchor-x;
+    in-out property <length> anchor-y;
+    in-out property <length> anchor-height;
+}
+
 export component GitHubSelectDemoOverlay inherits Rectangle {
     background: transparent;
 
@@ -152,7 +237,7 @@ export component GitHubSelectDemoOverlay inherits Rectangle {
             GitHubSelectDemoState.value = index;
             GitHubSelectState.close(true);
         }
-        for label[index] in ["System default", "English", "Chinese (Simplified)"]: GitHubSelectOption {
+        for label[index] in [I18n.language-system-default, "English", "简体中文"]: GitHubSelectOption {
             x: 0px;
             y: index * GitHubMetrics.size-32;
             width: plain-popup.option-width;
@@ -180,13 +265,13 @@ export component GitHubSelectDemoOverlay inherits Rectangle {
         }
         GitHubSelectGroupHeading {
             x: 0px; y: 0px; width: grouped-popup.option-width;
-            text: "Code review";
+            text: I18n.ui-components-demo-code-review;
         }
-        for label[index] in ["Pull request review submitted", "AI review completed"]: GitHubSelectOption {
+        for label[index] in [I18n.ui-components-demo-pull-request-review-submitted, I18n.ui-components-demo-ai-review-completed]: GitHubSelectOption {
             x: 0px; y: GitHubMetrics.size-28 + index * GitHubMetrics.size-32;
             width: grouped-popup.option-width;
             text: label;
-            group-label: index == 0 ? "Code review" : "";
+            group-label: index == 0 ? I18n.ui-components-demo-code-review : "";
             selected: GitHubSelectDemoState.grouped-value == index;
             active: GitHubSelectState.open && GitHubSelectState.owner == "showcase-grouped"
                 && GitHubSelectState.active-index == index;
@@ -199,14 +284,14 @@ export component GitHubSelectDemoOverlay inherits Rectangle {
             x: 0px;
             y: GitHubMetrics.size-28 + 2 * GitHubMetrics.size-32;
             width: grouped-popup.option-width;
-            text: "Delivery";
+            text: I18n.ui-components-demo-delivery;
         }
-        for label[index] in ["Tag created", "Deployment completed"]: GitHubSelectOption {
+        for label[index] in [I18n.ui-components-demo-tag-created, I18n.ui-components-demo-deployment-completed]: GitHubSelectOption {
             x: 0px;
             y: 2 * GitHubMetrics.size-28 + (index + 2) * GitHubMetrics.size-32;
             width: grouped-popup.option-width;
             text: label;
-            group-label: index == 0 ? "Delivery" : "";
+            group-label: index == 0 ? I18n.ui-components-demo-delivery : "";
             selected: GitHubSelectDemoState.grouped-value == index + 2;
             active: GitHubSelectState.open && GitHubSelectState.owner == "showcase-grouped"
                 && GitHubSelectState.active-index == index + 2;
@@ -219,9 +304,134 @@ export component GitHubSelectDemoOverlay inherits Rectangle {
 
 }
 
+export component GitHubUiComponentsOverlay inherits GitHubSelectDemoOverlay {
+    in property <length> viewport-x;
+    in property <length> viewport-y;
+    in property <length> viewport-width;
+    in property <length> viewport-height;
+    private property <bool> anchor-visible:
+        GitHubNotificationDemoState.anchor-y + GitHubNotificationDemoState.anchor-height > root.viewport-y
+        && GitHubNotificationDemoState.anchor-y < root.viewport-y + root.viewport-height;
+    changed anchor-visible => {
+        if !root.anchor-visible { GitHubNotificationDemoState.open = false; }
+    }
+
+
+    private property <bool> filter-anchor-visible:
+        GitHubFilterDemoState.anchor-x + GitHubFilterDemoState.anchor-width > root.viewport-x
+        && GitHubFilterDemoState.anchor-x < root.viewport-x + root.viewport-width
+        && GitHubFilterDemoState.anchor-y + GitHubFilterDemoState.anchor-height > root.viewport-y
+        && GitHubFilterDemoState.anchor-y < root.viewport-y + root.viewport-height;
+    changed filter-anchor-visible => {
+        if !root.filter-anchor-visible { GitHubFilterDemoState.menu = ""; }
+    }
+    private property <string> filter-identity: GitHubFilterDemoState.menu;
+    changed filter-identity => {
+        // Switching triggers keeps this surface open, so re-home keyboard focus.
+        if root.filter-identity != "" { filter-menu.focus(); }
+    }
+
+    filter-menu := GitHubActionMenu {
+        open: GitHubFilterDemoState.menu != "";
+        adaptive-placement: true;
+        viewport-x: root.viewport-x;
+        viewport-y: root.viewport-y;
+        viewport-width: root.viewport-width;
+        viewport-height: root.viewport-height;
+        anchor-x: GitHubFilterDemoState.anchor-x;
+        anchor-y: GitHubFilterDemoState.anchor-y;
+        anchor-width: GitHubFilterDemoState.anchor-width;
+        anchor-height: GitHubFilterDemoState.anchor-height;
+        menu-width: 200px;
+        content-height: GitHubFilterDemoState.menu == "owner" ? 128px : 160px;
+        dismiss-requested => { GitHubFilterDemoState.menu = ""; }
+
+        GitHubFilterMenuFrame {
+            width: parent.width;
+            title: GitHubFilterDemoState.menu == "status"
+                ? I18n.ui-components-demo-filter-by-status
+                : (GitHubFilterDemoState.menu == "owner" ? I18n.ui-components-demo-filter-by-owner : I18n.ui-components-demo-sort-by);
+            content-height: GitHubFilterDemoState.menu == "owner" ? 96px : 128px;
+            close => { GitHubFilterDemoState.menu = ""; }
+
+            if GitHubFilterDemoState.menu == "status": VerticalLayout {
+                for option in [
+                    { label: I18n.ui-components-demo-all-statuses, value: "all" },
+                    { label: I18n.ui-components-demo-active, value: "active" },
+                    { label: I18n.ui-components-demo-paused, value: "paused" },
+                    { label: I18n.ui-components-demo-archived, value: "archived" }
+                ]: GitHubFilterMenuItem {
+                    text: option.label;
+                    value: option.value;
+                    selected-value: GitHubFilterDemoState.status;
+                    chosen(value) => { GitHubFilterDemoState.status = value; GitHubFilterDemoState.menu = ""; }
+                }
+            }
+            if GitHubFilterDemoState.menu == "owner": VerticalLayout {
+                for option in [
+                    { label: I18n.ui-components-demo-anyone, value: "any" },
+                    { label: I18n.ui-components-demo-owned-by-me, value: "me" },
+                    { label: I18n.ui-components-demo-unassigned, value: "none" }
+                ]: GitHubFilterMenuItem {
+                    text: option.label;
+                    value: option.value;
+                    selected-value: GitHubFilterDemoState.owner;
+                    chosen(value) => { GitHubFilterDemoState.owner = value; GitHubFilterDemoState.menu = ""; }
+                }
+            }
+            if GitHubFilterDemoState.menu == "sort": VerticalLayout {
+                for option in [
+                    { label: I18n.ui-components-demo-newest, value: "newest" },
+                    { label: I18n.ui-components-demo-oldest, value: "oldest" },
+                    { label: I18n.ui-components-demo-recently-updated, value: "updated-desc" },
+                    { label: I18n.ui-components-demo-least-recently-updated, value: "updated-asc" }
+                ]: GitHubFilterMenuItem {
+                    text: option.label;
+                    value: option.value;
+                    selected-value: GitHubFilterDemoState.sort;
+                    chosen(value) => { GitHubFilterDemoState.sort = value; GitHubFilterDemoState.menu = ""; }
+                }
+            }
+        }
+    }
+
+    notification-menu := GitHubNotificationQueueMenu {
+        open: GitHubNotificationDemoState.open;
+        adaptive-placement: true;
+        viewport-x: root.viewport-x;
+        viewport-y: root.viewport-y;
+        viewport-width: root.viewport-width;
+        viewport-height: root.viewport-height;
+        anchor-x: GitHubNotificationDemoState.anchor-x;
+        anchor-y: GitHubNotificationDemoState.anchor-y;
+        anchor-width: 24px;
+        anchor-height: GitHubNotificationDemoState.anchor-height;
+        dismiss-requested => { GitHubNotificationDemoState.open = false; }
+        view-all-clicked => { GitHubNotificationDemoState.open = false; }
+        dismiss-all-clicked => { GitHubNotificationDemoState.open = false; }
+    }
+}
+
 export component GitHubUiComponentsGallery inherits Rectangle {
+    in property <length> viewport-global-x;
+    in property <length> viewport-global-y;
+    in property <length> viewport-width;
+    in property <length> viewport-height;
     callback navigate(Route);
     callback open-artifact-preview-fixture(string);
+    callback scroll-to-section(length);
+
+    init => { GitHubNotificationDemoState.open = false; GitHubFilterDemoState.menu = ""; }
+
+    function jump-to(offset: length) {
+        GitHubNotificationDemoState.open = false;
+        GitHubFilterDemoState.menu = "";
+        root.action-menu-open = false;
+        // A return link lives far down the document. Release its focus before
+        // returning, otherwise resize scrolls it back into view automatically.
+        if offset == 0px { directory.focus(); }
+        root.scroll-to-section(root.absolute-position.y + offset);
+    }
 
     private property <bool> toggle-checked: true;
     private property <bool> checkbox-first: false;
@@ -238,33 +448,29 @@ export component GitHubUiComponentsGallery inherits Rectangle {
     private property <bool> action-menu-open: false;
     private property <string> action-menu-align: "start";
     private property <string> action-menu-side: "bottom";
-    private property <string> filter-menu: "";
-    private property <string> filter-status: "all";
-    private property <string> filter-owner: "any";
-    private property <string> filter-sort: "newest";
     private property <int> select-value: GitHubSelectDemoState.value;
     private property <int> grouped-select-value: GitHubSelectDemoState.grouped-value;
 
     function show-toast-example(action: int) {
         if action == 0 {
-            ToastManager.info({ message: "Informational Toast", position: "bottom" });
+            ToastManager.info({ message: I18n.ui-components-demo-informational-toast, position: "bottom" });
         } else if action == 1 {
-            ToastManager.success({ message: "Operation completed", position: "bottom" });
+            ToastManager.success({ message: I18n.ui-components-demo-operation-completed, position: "bottom" });
         } else if action == 2 {
-            ToastManager.error({ message: "Operation failed", position: "bottom" });
+            ToastManager.error({ message: I18n.ui-components-demo-operation-failed, position: "bottom" });
         } else if action == 3 {
-            ToastManager.loading({ message: "Loading with overlay", overlay: true, close-on-click: true });
+            ToastManager.loading({ message: I18n.ui-components-demo-loading-with-overlay, overlay: true, close-on-click: true });
         } else if action == 4 {
-            ToastManager.success({ message: "Top position", position: "top" });
+            ToastManager.success({ message: I18n.ui-components-demo-top-position, position: "top" });
         } else if action == 5 {
-            ToastManager.info({ message: "Middle position", position: "middle" });
+            ToastManager.info({ message: I18n.ui-components-demo-middle-position, position: "middle" });
         } else if action == 6 {
-            ToastManager.error({ message: "Bottom position", position: "bottom" });
+            ToastManager.error({ message: I18n.ui-components-demo-bottom-position, position: "bottom" });
         } else if action == 7 {
-            ToastManager.success({ message: "Closes after five seconds", duration: 5000 });
+            ToastManager.success({ message: I18n.ui-components-demo-closes-after-five-seconds, duration: 5000 });
         } else {
             ToastManager.show(ToastType.Success, {
-                message: "Click the overlay to dismiss",
+                message: I18n.ui-components-demo-click-the-overlay-to-dismiss,
                 overlay: true,
                 close-on-click: true,
                 width: "360px"
@@ -274,19 +480,19 @@ export component GitHubUiComponentsGallery inherits Rectangle {
 
     function show-notification-example(action: int) {
         if action == 0 {
-            NotificationManager.info({ title: "Information", message: "Review the current settings." });
+            NotificationManager.info({ title: I18n.ui-components-demo-information, message: I18n.ui-components-demo-review-the-current-settings });
         } else if action == 1 {
-            NotificationManager.success({ title: "Saved", message: "Configuration was saved." });
+            NotificationManager.success({ title: I18n.ui-components-demo-saved, message: I18n.ui-components-demo-configuration-was-saved });
         } else if action == 2 {
-            NotificationManager.warn({ title: "Attention", message: "A follow-up action is required." });
+            NotificationManager.warn({ title: I18n.ui-components-demo-attention, message: I18n.ui-components-demo-a-follow-up-action-is-required });
         } else if action == 3 {
-            NotificationManager.error({ title: "Failed", message: "The request could not be completed." });
+            NotificationManager.error({ title: I18n.ui-components-demo-failed, message: I18n.ui-components-demo-the-request-could-not-be-completed });
         } else if action == 4 {
             NotificationManager.show(NotificationType.Info, {
-                title: "Update available",
-                message: "Choose an action to exercise Banner callbacks.",
+                title: I18n.ui-components-demo-update-available,
+                message: I18n.ui-components-demo-choose-an-action-to-exercise-banner-callbacks,
                 component: CustomComponentType.ActionsNotify,
-                actions: ["Later", "Install"],
+                actions: [I18n.ui-components-demo-later, I18n.ui-components-demo-install],
                 tag: "ui-components"
             });
         } else if action == 5 {
@@ -296,18 +502,18 @@ export component GitHubUiComponentsGallery inherits Rectangle {
         } else {
             // Permanent stack exercises the in-card Dismiss all footer (queue >= 2).
             NotificationManager.info({
-                title: "Webhook received",
-                message: "A webhook event is ready for review.",
+                title: I18n.ui-components-demo-webhook-received,
+                message: I18n.ui-components-demo-a-webhook-event-is-ready-for-review,
                 duration: 0
             });
             NotificationManager.success({
-                title: "Saved",
-                message: "Configuration was saved.",
+                title: I18n.ui-components-demo-saved,
+                message: I18n.ui-components-demo-configuration-was-saved,
                 duration: 0
             });
             NotificationManager.warn({
-                title: "Attention",
-                message: "A follow-up action is required.",
+                title: I18n.ui-components-demo-attention,
+                message: I18n.ui-components-demo-a-follow-up-action-is-required,
                 duration: 0
             });
         }
@@ -316,38 +522,38 @@ export component GitHubUiComponentsGallery inherits Rectangle {
     function send-message-example(action: int) {
         if action == 0 {
             NotificationManager.info({
-                title: "General message", message: "A general application message was received.",
+                title: I18n.ui-components-demo-general-message, message: I18n.ui-components-demo-a-general-application-message-was-received,
                 source: "Usher", category: "general"
             });
         } else if action == 1 {
             NotificationManager.info({
-                title: "Webhook received", message: "A webhook event is ready for review.",
+                title: I18n.ui-components-demo-webhook-received, message: I18n.ui-components-demo-a-webhook-event-is-ready-for-review,
                 source: "Webhook", category: "webhook"
             });
         } else if action == 2 {
             NotificationManager.info({
-                title: "Update available", message: "Usher 1.0.0 is ready to install.",
-                source: "Updater", category: "software_update"
+                title: I18n.ui-components-demo-update-available, message: I18n.ui-components-demo-usher-1-0-0-is-ready-to-install,
+                source: I18n.ui-components-demo-updater, category: "software_update"
             });
         } else if action == 3 {
             NotificationManager.success({
-                title: "CD workflow completed", message: "The release passed verification and is live.",
+                title: I18n.ui-components-demo-cd-workflow-completed, message: I18n.ui-components-demo-the-release-passed-verification-and-is-live,
                 source: "CD", category: "cd_workflow"
             });
         } else if action == 4 {
             NotificationManager.warn({
-                title: "Action recommended", message: "Review the deployment configuration before continuing.",
+                title: I18n.ui-components-demo-action-recommended, message: I18n.ui-components-demo-review-the-deployment-configuration-before-continuing,
                 source: "Usher", category: "general"
             });
         } else if action == 5 {
             NotificationManager.error({
-                title: "Critical failure", message: "This test always requests a native system notification.",
+                title: I18n.ui-components-demo-critical-failure, message: I18n.ui-components-demo-this-test-always-requests-a-native-system-notification,
                 source: "Usher", category: "general",
                 native-delivery: NotificationDelivery.Always
             });
         } else {
             NotificationManager.info({
-                title: "In-app only", message: "This message is stored in Inbox without a system notification.",
+                title: I18n.ui-components-demo-in-app-only, message: I18n.ui-components-demo-this-message-is-stored-in-inbox-without-a,
                 source: "Usher", category: "general",
                 native-delivery: NotificationDelivery.Never
             });
@@ -358,10 +564,10 @@ export component GitHubUiComponentsGallery inherits Rectangle {
         if action == 0 {
             DialogManager.show({
                 id: "gallery-confirm",
-                title: "Confirm change",
-                content: "This modal dialog uses fixed dimensions, a backdrop, one secondary action, and one primary action.",
-                actions: ["Cancel"],
-                default-action: "Confirm",
+                title: I18n.ui-components-demo-confirm-change,
+                content: I18n.ui-components-demo-this-modal-dialog-uses-fixed-dimensions-a-backdrop,
+                actions: [I18n.common-cancel],
+                default-action: I18n.ui-components-demo-confirm,
                 overlay: true,
                 modal: true,
                 width: "440px",
@@ -370,10 +576,10 @@ export component GitHubUiComponentsGallery inherits Rectangle {
         } else if action == 1 {
             DialogManager.show({
                 id: "gallery-non-modal",
-                title: "Non-modal example",
-                content: "Press Escape, use the close button, or click the backdrop to dismiss this percentage-sized dialog.",
+                title: I18n.ui-components-demo-non-modal-example,
+                content: I18n.ui-components-demo-press-escape-use-the-close-button-or-click,
                 actions: [],
-                default-action: "Done",
+                default-action: I18n.ui-components-demo-done,
                 overlay: true,
                 modal: false,
                 width: "52%",
@@ -382,9 +588,9 @@ export component GitHubUiComponentsGallery inherits Rectangle {
         } else {
             DialogManager.show({
                 id: "gallery-no-backdrop",
-                title: "Dialog without backdrop",
-                content: "This variant keeps the underlying page visible and exercises the overlay property.",
-                actions: ["Close"],
+                title: I18n.ui-components-demo-dialog-without-backdrop,
+                content: I18n.ui-components-demo-this-variant-keeps-the-underlying-page-visible-and,
+                actions: [I18n.common-close],
                 default-action: "",
                 overlay: false,
                 modal: false,
@@ -404,1160 +610,42 @@ export component GitHubUiComponentsGallery inherits Rectangle {
         alignment: start;
 
         GitHubPageHeader {
-            title: "UI Components";
-            description: "Interactive playground and visual contract for application-owned GitHub UI components.";
+            title: I18n.navigation-ui-components;
+            description: "";
             leading-icon: @image-url("../../assets/icons/octicon-stack-16.svg");
-            large-title: true;
+            large-title: false;
         }
 
-        GitHubShowcaseSection {
-            title: "Buttons";
-            description: "GitHubButton properties: default, primary, danger, selected, disabled, and busy.";
-            content-height: 144px;
-
-            GitHubShowcaseLabel { x: 0px; y: 0px; width: 120px; height: 20px; label: "Intent"; }
-            HorizontalLayout {
-                x: 0px;
-                y: 28px;
-                width: parent.width;
-                height: 32px;
-                spacing: GitHubMetrics.size-8;
-                alignment: start;
-
-                for button-state in [
-                    { label: "Default", primary: false, danger: false, selected: false },
-                    { label: "Primary", primary: true, danger: false, selected: false },
-                    { label: "Danger", primary: false, danger: true, selected: false },
-                    { label: "Selected", primary: false, danger: false, selected: true }
-                ]: GitHubButton {
-                    text: button-state.label;
-                    primary: button-state.primary;
-                    danger: button-state.danger;
-                    selected: button-state.selected;
-                }
-            }
-
-            GitHubShowcaseLabel { x: 0px; y: 76px; width: 120px; height: 20px; label: "Availability"; }
-            HorizontalLayout {
-                x: 0px;
-                y: 104px;
-                width: parent.width;
-                height: 32px;
-                spacing: GitHubMetrics.size-8;
-                alignment: start;
-
-                for button-state in [
-                    { label: "Disabled", disabled: true, busy: false, primary: false },
-                    { label: "Loading", disabled: false, busy: true, primary: true }
-                ]: GitHubButton {
-                    text: button-state.label;
-                    disabled: button-state.disabled;
-                    busy: button-state.busy;
-                    primary: button-state.primary;
-                }
-                GitHubButton {
-                    text: "Try action";
-                    clicked => {
-                        ToastManager.success({
-                            message: "Button activation received.",
-                            position: "bottom"
-                        });
-                    }
-                }
-                GitHubButton {
-                    text: "Load more";
-                    leading-icon: @image-url("../../assets/icons/octicon-arrow-up-16.svg");
-                    label-font-size: GitHubMetrics.text-small;
-                    height: GitHubMetrics.control-small-size;
-                }
-            }
-        }
-
-        GitHubShowcaseSection {
-            title: "Icon buttons, links, and copy";
-            description: "Visible/invisible icon surfaces, Copilot review states, semantic danger, disabled state, links, and copy confirmation.";
-            content-height: 142px;
-
-            GitHubShowcaseLabel { x: 0px; y: 0px; width: 150px; height: 20px; label: "IconButton"; }
-            HorizontalLayout {
-                x: 0px;
-                y: 28px;
-                width: parent.width;
-                height: 36px;
-                spacing: GitHubMetrics.size-12;
-                alignment: start;
-
-                for button-state in [
-                    { icon: @image-url("../../assets/icons/octicon-plus-16.svg"), label: "Invisible icon button", invisible: true, danger: false, loading: false, enabled: true, selected: false },
-                    { icon: @image-url("../../assets/icons/octicon-sync-16.svg"), label: "Bordered icon button", invisible: false, danger: false, loading: false, enabled: true, selected: false },
-                    { icon: @image-url("../../assets/icons/octicon-trash-16.svg"), label: "Danger icon button", invisible: false, danger: true, loading: false, enabled: true, selected: false },
-                    { icon: @image-url("../../assets/icons/octicon-sync-16.svg"), label: "Loading", invisible: false, danger: false, loading: true, enabled: true, selected: false },
-                    { icon: @image-url("../../assets/icons/octicon-plus-16.svg"), label: "Disabled", invisible: false, danger: false, loading: false, enabled: false, selected: false },
-                    { icon: @image-url("../../assets/icons/octicon-copilot-16.svg"), label: "Review this pull request with AI", invisible: true, danger: false, loading: false, enabled: true, selected: false },
-                    { icon: @image-url("../../assets/icons/octicon-copilot-16.svg"), label: "Close AI code review", invisible: true, danger: false, loading: false, enabled: true, selected: true },
-                    { icon: @image-url("../../assets/icons/octicon-copilot-16.svg"), label: "AI code review is running", invisible: true, danger: false, loading: true, enabled: true, selected: false }
-                ]: GitHubIconButton {
-                    icon: button-state.icon;
-                    tooltip-text: button-state.label;
-                    invisible: button-state.invisible;
-                    danger: button-state.danger;
-                    loading: button-state.loading;
-                    button-enabled: button-state.enabled;
-                    selected: button-state.selected;
-                }
-                GitHubCopyButton {
-                    tooltip-above: false;
-                    copy-requested => { true }
-                }
-            }
-
-            GitHubShowcaseLabel { x: 0px; y: 82px; width: 150px; height: 20px; label: "Link"; }
-            HorizontalLayout {
-                x: 0px;
-                y: 110px;
-                width: parent.width;
-                height: 24px;
-                spacing: GitHubMetrics.size-20;
-                alignment: start;
-
-                for link-state in [
-                    { label: "Standalone link", inline: false, muted: false, enabled: true },
-                    { label: "Inline link", inline: true, muted: false, enabled: true },
-                    { label: "Muted link", inline: false, muted: true, enabled: true },
-                    { label: "Disabled link", inline: false, muted: false, enabled: false }
-                ]: GitHubLink {
-                    text: link-state.label;
-                    inline: link-state.inline;
-                    muted: link-state.muted;
-                    link-enabled: link-state.enabled;
-                }
-            }
-        }
-
-        GitHubShowcaseSection {
-            title: "Labels and counters";
-            description: "Metadata labels and Primer CounterLabel schemes, limits, and zero-count behavior.";
-            content-height: 252px;
-
-            GitHubShowcaseLabel { x: 0px; y: 0px; width: 180px; height: 20px; label: "Neutral metadata"; }
-            HorizontalLayout {
-                x: 0px;
-                y: 28px;
-                width: parent.width;
-                height: 24px;
-                spacing: GitHubMetrics.size-8;
-                alignment: start;
-
-                GitHubMetadataLabel { text: "Default"; }
-                GitHubMetadataLabel { text: "Primary"; variant: GitHubMetadataLabelVariant.Primary; }
-                GitHubMetadataLabel { text: "Secondary"; variant: GitHubMetadataLabelVariant.Secondary; }
-            }
-
-            GitHubShowcaseLabel { x: 0px; y: 68px; width: 180px; height: 20px; label: "Bounded metadata"; }
-            GitHubMetadataLabel {
-                x: 0px;
-                y: 96px;
-                max-label-width: 168px;
-                text: "Repository identifier 1130209340";
-            }
-
-            GitHubShowcaseLabel { x: 0px; y: 132px; width: 180px; height: 20px; label: "Counter schemes"; }
-            HorizontalLayout {
-                x: 0px;
-                y: 160px;
-                width: parent.width;
-                height: 20px;
-                spacing: GitHubMetrics.size-20;
-                alignment: start;
-
-                HorizontalLayout {
-                    spacing: GitHubMetrics.size-6;
-                    Text { text: "Issues"; color: GitHubTheme.fg-default; vertical-alignment: center; }
-                    GitHubCounterLabel { count: 12; }
-                }
-                HorizontalLayout {
-                    spacing: GitHubMetrics.size-6;
-                    Text { text: "Pull requests"; color: GitHubTheme.fg-default; vertical-alignment: center; }
-                    GitHubCounterLabel { count: 7; scheme: GitHubCounterScheme.Primary; }
-                }
-                HorizontalLayout {
-                    spacing: GitHubMetrics.size-6;
-                    Text { text: "Checks"; color: GitHubTheme.fg-default; vertical-alignment: center; }
-                    GitHubCounterLabel { count: 3; scheme: GitHubCounterScheme.Secondary; }
-                }
-            }
-
-            GitHubShowcaseLabel { x: 0px; y: 196px; width: 180px; height: 20px; label: "Limit and zero"; }
-            HorizontalLayout {
-                x: 0px;
-                y: 224px;
-                width: parent.width;
-                height: 20px;
-                spacing: GitHubMetrics.size-20;
-                alignment: start;
-
-                HorizontalLayout {
-                    spacing: GitHubMetrics.size-6;
-                    Text { text: "Notifications"; color: GitHubTheme.fg-default; vertical-alignment: center; }
-                    GitHubCounterLabel { count: 128; limit: 99; scheme: GitHubCounterScheme.Primary; }
-                }
-                HorizontalLayout {
-                    spacing: GitHubMetrics.size-6;
-                    Text { text: "Zero hidden"; color: GitHubTheme.fg-muted; vertical-alignment: center; }
-                    GitHubCounterLabel { count: 0; hide-if-zero: true; }
-                }
-            }
-        }
-
-        GitHubShowcaseSection {
-            title: "Form controls";
-            description: "Text input, compact input, secret/loading/error states, and Toggle interaction.";
-            content-height: 268px;
-
-            GitHubShowcaseSampleSurface {
-                x: 0px;
-                y: 0px;
-                width: parent.width;
-                height: 260px;
-
-                GitHubTextField {
-                    x: GitHubMetrics.size-16;
-                    y: GitHubMetrics.size-16;
-                    width: max(180px, (parent.width - GitHubMetrics.size-48) / 2);
-                    label: "Repository";
-                    placeholder: "owner/repository";
-                    caption: "Editable default state";
-                    text <=> root.field-text;
-                }
-
-                GitHubTextField {
-                    x: parent.width / 2 + GitHubMetrics.size-8;
-                    y: GitHubMetrics.size-16;
-                    width: max(180px, parent.width - self.x - GitHubMetrics.size-16);
-                    label: "Token";
-                    placeholder: "Required value";
-                    secret: true;
-                    required: true;
-                    validation-error: true;
-                    validation-message: "A token is required.";
-                }
-
-                GitHubTextField {
-                    x: GitHubMetrics.size-16;
-                    y: 112px;
-                    width: max(180px, (parent.width - GitHubMetrics.size-48) / 2);
-                    label: "Loading field";
-                    text: "Checking repository";
-                    loading: true;
-                }
-
-                GitHubCompactTextField {
-                    x: parent.width / 2 + GitHubMetrics.size-8;
-                    y: 138px;
-                    width: max(120px, parent.width - self.x - GitHubMetrics.size-80);
-                    placeholder: "Compact field";
-                    text <=> root.compact-field-text;
-                }
-
-                GitHubToggle {
-                    x: parent.width - GitHubMetrics.size-64;
-                    y: 142px;
-                    checked: root.toggle-checked;
-                    toggled(value) => { root.toggle-checked = value; }
-                }
-            }
-        }
-
-        GitHubShowcaseSection {
-            title: "Checkbox";
-            description: "";
-            content-height: 224px;
-            VerticalLayout {
-                width: parent.width;
-                spacing: 0px;
-                GitHubCheckbox {
-                    text: "Select all";
-                    checked: root.checkbox-first && root.checkbox-second;
-                    indeterminate: root.checkbox-first != root.checkbox-second;
-                    toggled(value) => { root.checkbox-first = value; root.checkbox-second = value; }
-                }
-                GitHubCheckbox { text: "Pull request review"; checked: root.checkbox-first; toggled(value) => { root.checkbox-first = value; } }
-                GitHubCheckbox { text: "AI review"; checked: root.checkbox-second; toggled(value) => { root.checkbox-second = value; } }
-                GitHubCheckbox { text: "Partially selected"; indeterminate: true; }
-                GitHubCheckbox { text: "Disabled"; control-enabled: false; }
-                GitHubCheckbox { text: "Disabled selected"; checked: true; control-enabled: false; }
-                GitHubCheckbox { text: "Disabled mixed"; indeterminate: true; control-enabled: false; }
-            }
-        }
-
-        GitHubShowcaseSection {
-            title: "Radio";
-            description: "";
-            content-height: 128px;
-            VerticalLayout {
-                width: parent.width; spacing: 0px;
-                GitHubRadio { text: "Shell"; checked: root.radio-choice == 0; chosen => { root.radio-choice = 0; } stepped(delta) => { root.radio-choice = mod(root.radio-choice + delta + 3, 3); } }
-                GitHubRadio { text: "JavaScript"; checked: root.radio-choice == 1; chosen => { root.radio-choice = 1; } stepped(delta) => { root.radio-choice = mod(root.radio-choice + delta + 3, 3); } }
-                GitHubRadio { text: "TypeScript"; checked: root.radio-choice == 2; chosen => { root.radio-choice = 2; } stepped(delta) => { root.radio-choice = mod(root.radio-choice + delta + 3, 3); } }
-                GitHubRadio { text: "Disabled"; checked: true; control-enabled: false; }
-            }
-        }
-
-        select-section := GitHubShowcaseSection {
-            title: "Select";
-            description: "";
-            private property <bool> compact: self.width < GitHubMetrics.breakpoint-small;
-            private property <length> column-width: min(320px,
-                self.compact ? self.width : (self.width - GitHubMetrics.stack-gap-normal) / 2);
-            private property <length> second-column-x:
-                self.compact ? 0px : self.width / 2 + GitHubMetrics.size-8;
-            content-height: max(select-name.y + select-name.height,
-                select-disabled.y + select-disabled.height);
-
-            select-trigger := GitHubSettingsSectionMenuButton {
-                x: 0px;
-                y: 0px;
-                width: select-section.column-width;
-                text: root.select-value == 0 ? "System default"
-                    : (root.select-value == 1 ? "English" : "Chinese (Simplified)");
-                open: GitHubSelectState.open && GitHubSelectState.owner == "showcase";
-                restore-focus-on-close: GitHubSelectState.restore-focus;
-                changed absolute-position => {
-                    if self.open { GitHubSelectState.close(false); }
-                }
-                changed width => {
-                    if self.open { GitHubSelectState.close(false); }
-                }
+        directory := FocusScope {
+            width: parent.width;
+            private property <int> columns: self.width < 640px ? 2 : 4;
+            height: self.columns == 2 ? 120px : 64px;
+            // Keep the eight links mounted across locale and layout changes.
+            for index in 8: GitHubLink {
+                x: mod(index, directory.columns) * directory.width / directory.columns;
+                y: 4px + floor(index / directory.columns) * 28px;
+                height: 28px;
+                text: [I18n.ui-components-foundations, I18n.ui-components-actions,
+                    I18n.ui-components-containment, I18n.ui-components-communication,
+                    I18n.ui-components-navigation, I18n.ui-components-selection,
+                    I18n.ui-components-text-input, I18n.ui-components-scenarios][index];
+                text-max-width: directory.width / directory.columns - 16px;
                 clicked => {
-                  if self.open { GitHubSelectState.close(true); } else {
-                    GitHubSelectState.show("showcase", "" + root.select-value, root.select-value,
-                        select-trigger.absolute-position.x, select-trigger.absolute-position.y,
-                        select-trigger.width, select-trigger.height);
-                  }
+                    root.jump-to([foundations-group.y, actions-group.y,
+                        containment-group.y, communication-group.y, navigation-group.y,
+                        selection-group.y, text-input-group.y, scenarios-group.y][index]);
                 }
             }
-            select-disabled := GitHubSettingsSectionMenuButton {
-                x: select-section.second-column-x;
-                y: select-section.compact
-                    ? select-name.y + select-name.height + GitHubMetrics.stack-gap-normal
-                    : select-name.y + select-name.height - GitHubMetrics.control-medium-size;
-                width: select-section.column-width;
-                text: "Disabled";
-                enabled: false;
-            }
-            grouped-select-trigger := GitHubSettingsSectionMenuButton {
-                // The inherited absolute-position duplicates nonzero component
-                // offsets; use the zero-offset peer's origin for both axes.
-                private property <length> viewport-anchor-x:
-                    select-trigger.absolute-position.x + self.x - select-trigger.x;
-                private property <length> viewport-anchor-y:
-                    select-trigger.absolute-position.y + self.y - select-trigger.y;
-                x: select-section.second-column-x;
-                y: select-section.compact
-                    ? select-trigger.height + GitHubMetrics.stack-gap-normal : 0px;
-                width: select-section.column-width;
-                text: root.grouped-select-value == 0 ? "Pull request review submitted"
-                    : root.grouped-select-value == 1 ? "AI review completed"
-                    : root.grouped-select-value == 2 ? "Tag created" : "Deployment completed";
-                open: GitHubSelectState.open && GitHubSelectState.owner == "showcase-grouped";
-                restore-focus-on-close: GitHubSelectState.restore-focus;
-                changed viewport-anchor-x => {
-                    if self.open && self.viewport-anchor-x != GitHubSelectState.anchor-x {
-                        GitHubSelectState.close(false);
-                    }
-                }
-                changed viewport-anchor-y => {
-                    if self.open && self.viewport-anchor-y != GitHubSelectState.anchor-y {
-                        GitHubSelectState.close(false);
-                    }
-                }
-                changed width => {
-                    if self.open { GitHubSelectState.close(false); }
-                }
-                clicked => {
-                    if self.open { GitHubSelectState.close(true); } else {
-                        GitHubSelectState.show("showcase-grouped", "" + root.grouped-select-value,
-                            root.grouped-select-value,
-                            grouped-select-trigger.viewport-anchor-x,
-                            grouped-select-trigger.viewport-anchor-y,
-                            grouped-select-trigger.width, grouped-select-trigger.height);
-                    }
-                }
-            }
-            select-name := GitHubTextField {
-                x: 0px;
-                y: select-section.compact
-                    ? grouped-select-trigger.y + grouped-select-trigger.height + GitHubMetrics.stack-gap-normal
-                    : select-trigger.height + GitHubMetrics.stack-gap-normal;
-                width: select-section.column-width;
-                label: "Name";
-                placeholder: "Project name";
-            }
+        }
+
+        foundations-group := GitHubShowcaseGroup {
+            title: I18n.ui-components-foundations;
+            back-to-top => { root.jump-to(0px); }
         }
 
         GitHubShowcaseSection {
-            title: "Selection and navigation";
-            description: "SegmentedControl, UnderlineNav, SettingsNavItem, and ActionList selected/disabled/danger states.";
-            content-height: 384px;
-
-            GitHubShowcaseLabel { x: 0px; y: 0px; width: 200px; height: 20px; label: "SegmentedControl - clone method"; }
-            GitHubSegmentedControl {
-                x: 0px;
-                y: 28px;
-                group-label: "Clone method";
-                items: [
-                    { label: "HTTPS", count: -1, count-suffix-offset: 0, enabled: true },
-                    { label: "SSH", count: -1, count-suffix-offset: 0, enabled: true },
-                    { label: "GitHub CLI", count: -1, count-suffix-offset: 0, enabled: true },
-                ];
-                selected-index: root.selected-segment;
-                selection-changed(index) => { root.selected-segment = index; }
-            }
-
-            GitHubShowcaseLabel { x: 0px; y: 76px; width: 160px; height: 20px; label: "Disabled state"; }
-            GitHubSegmentedControl {
-                x: 0px;
-                y: 100px;
-                group-label: "Disabled segmented control state";
-                items: [
-                    { label: "Available", count: -1, count-suffix-offset: 0, enabled: true },
-                    { label: "Disabled", count: -1, count-suffix-offset: 0, enabled: false },
-                ];
-                selected-index: 0;
-            }
-
-            GitHubShowcaseLabel { x: 0px; y: 144px; width: 200px; height: 20px; label: "Icon-only with motion"; }
-            GitHubSegmentedControlIconOnly {
-                x: 0px;
-                y: 168px;
-                items: [
-                    {
-                        icon: @image-url("../../assets/icons/octicon-list-unordered-16.svg"),
-                        label: "List view",
-                        enabled: true,
-                    },
-                    {
-                        icon: @image-url("../../assets/icons/octicon-table-16.svg"),
-                        label: "Grid view",
-                        enabled: true,
-                    },
-                ];
-                selected-index: root.selected-icon-segment;
-                group-label: "Project view";
-                selection-changed(index) => { root.selected-icon-segment = index; }
-            }
-
-            GitHubShowcaseLabel { x: 0px; y: 212px; width: 160px; height: 20px; label: "UnderlineNav"; }
-            GitHubUnderlineNav {
-                x: 0px;
-                y: 240px;
-                width: parent.width;
-                height: 48px;
-                group-label: "Underline navigation examples";
-
-                GitHubUnderlineNavItem {
-                    label: "Overview";
-                    selected: root.selected-tab == 0;
-                    clicked => { root.selected-tab = 0; }
-                }
-                GitHubUnderlineNavItem {
-                    label: "Activity";
-                    icon: @image-url("../../assets/icons/octicon-comment-discussion-16.svg");
-                    selected: root.selected-tab == 1;
-                    clicked => { root.selected-tab = 1; }
-                }
-                GitHubUnderlineNavItem { label: "Disabled"; item-enabled: false; }
-            }
-
-            GitHubShowcaseSampleSurface {
-                x: 0px;
-                y: 304px;
-                width: parent.width;
-                height: 72px;
-
-                GitHubSettingsNavItem {
-                    x: GitHubMetrics.size-8;
-                    y: GitHubMetrics.size-8;
-                    width: parent.width / 3 - GitHubMetrics.size-12;
-                    text: "Selected navigation";
-                    selected: true;
-                }
-                GitHubActionListItem {
-                    x: parent.width / 3 + GitHubMetrics.size-4;
-                    y: GitHubMetrics.size-8;
-                    width: parent.width / 3 - GitHubMetrics.size-8;
-                    text: "Action list item";
-                    description: "With supporting text";
-                    selected: root.selected-action == 0;
-                    activated => { root.selected-action = 0; }
-                }
-                GitHubActionListItem {
-                    x: parent.width * 2 / 3;
-                    y: GitHubMetrics.size-8;
-                    width: parent.width / 3 - GitHubMetrics.size-8;
-                    text: "Delete item";
-                    icon: @image-url("../../assets/icons/octicon-trash-16.svg");
-                    danger: true;
-                }
-            }
-        }
-
-        action-menu-section := GitHubShowcaseSection {
-            title: "ActionMenu - borderless ActionList";
-            description: "Borderless action rows, AnchoredOverlay placement, alignment, side selection, Escape, and caller-owned outside-click dismiss.";
-            // The overlay is anchored to this fixed trigger row and must not
-            // participate in the section's layout geometry.
-            content-height: 48px;
-
-            HorizontalLayout {
-                x: 0px;
-                y: 0px;
-                width: parent.width;
-                height: 32px;
-                z: 2;
-                spacing: GitHubMetrics.size-8;
-                alignment: start;
-
-                start-action-button := GitHubButton {
-                    text: "Start / below";
-                    selected: root.action-menu-open
-                        && root.action-menu-align == "start"
-                        && root.action-menu-side == "bottom";
-                    clicked => {
-                        if root.action-menu-open
-                                && root.action-menu-align == "start"
-                                && root.action-menu-side == "bottom" {
-                            root.action-menu-open = false;
-                        } else {
-                            root.action-menu-align = "start";
-                            root.action-menu-side = "bottom";
-                            root.action-menu-open = true;
-                        }
-                    }
-                }
-                end-action-button := GitHubButton {
-                    text: "End / below";
-                    selected: root.action-menu-open
-                        && root.action-menu-align == "end"
-                        && root.action-menu-side == "bottom";
-                    clicked => {
-                        if root.action-menu-open
-                                && root.action-menu-align == "end"
-                                && root.action-menu-side == "bottom" {
-                            root.action-menu-open = false;
-                        } else {
-                            root.action-menu-align = "end";
-                            root.action-menu-side = "bottom";
-                            root.action-menu-open = true;
-                        }
-                    }
-                }
-                above-action-button := GitHubButton {
-                    text: "Start / above";
-                    selected: root.action-menu-open
-                        && root.action-menu-align == "start"
-                        && root.action-menu-side == "top";
-                    clicked => {
-                        if root.action-menu-open
-                                && root.action-menu-align == "start"
-                                && root.action-menu-side == "top" {
-                            root.action-menu-open = false;
-                        } else {
-                            root.action-menu-align = "start";
-                            root.action-menu-side = "top";
-                            root.action-menu-open = true;
-                        }
-                    }
-                }
-                close-action-button := GitHubButton {
-                    text: "Close";
-                    disabled: !root.action-menu-open;
-                    clicked => { root.action-menu-open = false; }
-                }
-            }
-
-            // Demonstrate the caller-owned outside-click layer ActionMenu
-            // expects under the menu surface.
-            if root.action-menu-open: Rectangle {
-                x: 0px;
-                y: 0px;
-                width: parent.width;
-                height: parent.height;
-                z: 0;
-                background: transparent;
-                TouchArea {
-                    mouse-cursor: default;
-                    clicked => { root.action-menu-open = false; }
-                }
-            }
-
-        }
-
-        GitHubShowcaseSection {
-            title: "SelectMenu - bordered single select";
-            description: "GitHub filter rows with dividers, a default-foreground Check, semibold selection, title, close control, and dismissal behavior.";
-            content-height: root.filter-menu == "" ? 48px : 216px;
-
-            status-filter-button := GitHubFilterMenuButton {
-                x: 0px;
-                y: 0px;
-                z: 2;
-                label: "Status";
-                menu-open: root.filter-menu == "status";
-                selected: root.filter-menu == "status"
-                    || root.filter-status != "all";
-                clicked => {
-                    root.filter-menu = root.filter-menu == "status"
-                        ? ""
-                        : "status";
-                }
-            }
-            owner-filter-button := GitHubFilterMenuButton {
-                x: status-filter-button.width;
-                y: 0px;
-                z: 2;
-                label: "Owner";
-                menu-open: root.filter-menu == "owner";
-                selected: root.filter-menu == "owner"
-                    || root.filter-owner != "any";
-                clicked => {
-                    root.filter-menu = root.filter-menu == "owner"
-                        ? ""
-                        : "owner";
-                }
-            }
-            sort-filter-button := GitHubFilterMenuButton {
-                x: owner-filter-button.x + owner-filter-button.width;
-                y: 0px;
-                z: 2;
-                label: "Sort";
-                menu-open: root.filter-menu == "sort";
-                selected: root.filter-menu == "sort"
-                    || root.filter-sort != "newest";
-                clicked => {
-                    root.filter-menu = root.filter-menu == "sort"
-                        ? ""
-                        : "sort";
-                }
-            }
-
-            // Under-chrome dismiss so the first click on another filter switches
-            // menus instead of only closing (same stacking as Workflow PR list).
-            if root.filter-menu != "": Rectangle {
-                x: 0px;
-                y: 0px;
-                width: parent.width;
-                height: parent.height;
-                z: 0;
-                background: transparent;
-                TouchArea {
-                    mouse-cursor: default;
-                    clicked => { root.filter-menu = ""; }
-                }
-            }
-
-            if root.filter-menu != "": GitHubActionMenu {
-                z: 1;
-                open: true;
-                viewport-x: 0px;
-                viewport-y: 0px;
-                viewport-width: parent.width;
-                viewport-height: parent.height;
-                anchor-x: root.filter-menu == "status"
-                    ? status-filter-button.x
-                    : (root.filter-menu == "owner"
-                        ? owner-filter-button.x
-                        : sort-filter-button.x);
-                anchor-y: 0px;
-                anchor-width: root.filter-menu == "status"
-                    ? status-filter-button.width
-                    : (root.filter-menu == "owner"
-                        ? owner-filter-button.width
-                        : sort-filter-button.width);
-                anchor-height: GitHubMetrics.size-32;
-                menu-width: 200px;
-                content-height: root.filter-menu == "owner" ? 128px : 160px;
-                align: "start";
-                dismiss-requested => { root.filter-menu = ""; }
-
-                GitHubFilterMenuFrame {
-                    width: parent.width;
-                    title: root.filter-menu == "status"
-                        ? "Filter by status"
-                        : (root.filter-menu == "owner" ? "Filter by owner" : "Sort by");
-                    content-height: root.filter-menu == "owner" ? 96px : 128px;
-                    close => { root.filter-menu = ""; }
-
-                    if root.filter-menu == "status": VerticalLayout {
-                        for option in [
-                            { label: "All statuses", value: "all" },
-                            { label: "Active", value: "active" },
-                            { label: "Paused", value: "paused" },
-                            { label: "Archived", value: "archived" }
-                        ]: GitHubFilterMenuItem {
-                            text: option.label;
-                            value: option.value;
-                            selected-value: root.filter-status;
-                            chosen(value) => { root.filter-status = value; root.filter-menu = ""; }
-                        }
-                    }
-                    if root.filter-menu == "owner": VerticalLayout {
-                        for option in [
-                            { label: "Anyone", value: "any" },
-                            { label: "Owned by me", value: "me" },
-                            { label: "Unassigned", value: "none" }
-                        ]: GitHubFilterMenuItem {
-                            text: option.label;
-                            value: option.value;
-                            selected-value: root.filter-owner;
-                            chosen(value) => { root.filter-owner = value; root.filter-menu = ""; }
-                        }
-                    }
-                    if root.filter-menu == "sort": VerticalLayout {
-                        for option in [
-                            { label: "Newest", value: "newest" },
-                            { label: "Oldest", value: "oldest" },
-                            { label: "Recently updated", value: "updated-desc" },
-                            { label: "Least recently updated", value: "updated-asc" }
-                        ]: GitHubFilterMenuItem {
-                            text: option.label;
-                            value: option.value;
-                            selected-value: root.filter-sort;
-                            chosen(value) => { root.filter-sort = value; root.filter-menu = ""; }
-                        }
-                    }
-                }
-            }
-        }
-
-        GitHubShowcaseSection {
-            title: "Toast";
-            description: "Type, position, duration, overlay, close-on-click, and explicit show() variants.";
-            content-height: 196px;
-
-            HorizontalLayout {
-                x: 0px;
-                y: 0px;
-                width: parent.width;
-                height: 32px;
-                spacing: GitHubMetrics.size-8;
-                alignment: start;
-
-                for action in [
-                    { label: "Info", id: 0, primary: false, danger: false },
-                    { label: "Success", id: 1, primary: true, danger: false },
-                    { label: "Error", id: 2, primary: false, danger: true },
-                    { label: "Loading", id: 3, primary: false, danger: false }
-                ]: GitHubButton {
-                    text: action.label;
-                    primary: action.primary;
-                    danger: action.danger;
-                    clicked => { root.show-toast-example(action.id); }
-                }
-            }
-
-            GitHubShowcaseLabel { x: 0px; y: 56px; width: 160px; height: 20px; label: "Position"; }
-            HorizontalLayout {
-                x: 0px;
-                y: 84px;
-                width: parent.width;
-                height: 32px;
-                spacing: GitHubMetrics.size-8;
-                alignment: start;
-
-                for action in [
-                    { label: "Top", id: 4 },
-                    { label: "Middle", id: 5 },
-                    { label: "Bottom", id: 6 }
-                ]: GitHubButton {
-                    text: action.label;
-                    clicked => { root.show-toast-example(action.id); }
-                }
-            }
-
-            GitHubShowcaseLabel { x: 0px; y: 140px; width: 160px; height: 20px; label: "Behavior"; }
-            HorizontalLayout {
-                x: 0px;
-                y: 164px;
-                width: parent.width;
-                height: 32px;
-                spacing: GitHubMetrics.size-8;
-                alignment: start;
-
-                for action in [
-                    { label: "5 seconds", id: 7 },
-                    { label: "Overlay + dismiss", id: 8 }
-                ]: GitHubButton {
-                    text: action.label;
-                    clicked => { root.show-toast-example(action.id); }
-                }
-            }
-        }
-
-        GitHubShowcaseSection {
-            title: "Notification";
-            description: "Action Banner plus an honest capped-queue footer whose batch actions stay in an overflow menu.";
-            content-height: 320px;
-
-            HorizontalLayout {
-                x: 0px;
-                y: 0px;
-                width: parent.width;
-                height: 32px;
-                spacing: GitHubMetrics.size-8;
-                alignment: start;
-
-                for action in [
-                    { label: "Info", id: 0, primary: false, danger: false },
-                    { label: "Success", id: 1, primary: true, danger: false },
-                    { label: "Warning", id: 2, primary: false, danger: false },
-                    { label: "Error", id: 3, primary: false, danger: true }
-                ]: GitHubButton {
-                    text: action.label;
-                    primary: action.primary;
-                    danger: action.danger;
-                    clicked => { root.show-notification-example(action.id); }
-                }
-            }
-
-            HorizontalLayout {
-                x: 0px;
-                y: 48px;
-                width: parent.width;
-                height: 32px;
-                spacing: GitHubMetrics.size-8;
-                alignment: start;
-
-                for action in [
-                    { label: "Action Banner", id: 4, danger: false },
-                    { label: "Queue stack + footer", id: 7, danger: false },
-                    { label: "Remove all", id: 5, danger: false },
-                    { label: "Clear queue", id: 6, danger: true }
-                ]: GitHubButton {
-                    text: action.label;
-                    danger: action.danger;
-                    clicked => { root.show-notification-example(action.id); }
-                }
-            }
-
-            GitHubShowcaseLabel {
-                x: 0px;
-                y: 96px;
-                width: parent.width;
-                height: 20px;
-                label: "Action Banner + overflow footer (3 shown · 9 more)";
-            }
-
-            GitHubShowcaseSampleSurface {
-                x: 0px;
-                y: 124px;
-                width: min(400px, parent.width);
-                height: 196px;
-
-                GitHubNotificationBanner {
-                    x: GitHubMetrics.size-12;
-                    y: GitHubMetrics.size-12;
-                    width: parent.width - GitHubMetrics.size-24;
-                    title: "Attention";
-                    message: "A follow-up action is required.";
-                    icon: NotificationIcons.warning;
-                    notification-type: NotificationType.Warning;
-                    actions: ["Later", "Install"];
-                    queue-count: 3;
-                    total-count: 12;
-                    // Sample surface is not the window; leave overlay viewport at
-                    // the Banner default so the overflow menu clamps locally.
-                    view-all-clicked => { }
-                    dismiss-all-clicked => { }
-                    close-clicked => { }
-                }
-            }
-        }
-
-        GitHubShowcaseSection {
-            title: "Message center";
-            description: "Exercise the real Banner, durable Inbox, unread count, category, and native-delivery pipeline.";
-            content-height: 96px;
-
-            HorizontalLayout {
-                x: 0px;
-                y: 0px;
-                width: parent.width;
-                height: 32px;
-                spacing: GitHubMetrics.size-8;
-                alignment: start;
-
-                for action in [
-                    { label: "General", id: 0, primary: false },
-                    { label: "Webhook", id: 1, primary: false },
-                    { label: "Software update", id: 2, primary: false },
-                    { label: "CD success", id: 3, primary: true }
-                ]: GitHubButton {
-                    text: action.label;
-                    primary: action.primary;
-                    clicked => { root.send-message-example(action.id); }
-                }
-            }
-
-            HorizontalLayout {
-                x: 0px;
-                y: 56px;
-                width: parent.width;
-                height: 32px;
-                spacing: GitHubMetrics.size-8;
-                alignment: start;
-
-                for action in [
-                    { label: "Warning", id: 4, danger: false },
-                    { label: "Critical + OS", id: 5, danger: true },
-                    { label: "In-app only", id: 6, danger: false }
-                ]: GitHubButton {
-                    text: action.label;
-                    danger: action.danger;
-                    clicked => { root.send-message-example(action.id); }
-                }
-            }
-        }
-
-        GitHubShowcaseSection {
-            title: "Dialog";
-            description: "Fixed/percentage sizing, modal/non-modal behavior, backdrop, and action combinations.";
-            content-height: 40px;
-
-            HorizontalLayout {
-                x: 0px;
-                y: 0px;
-                width: parent.width;
-                height: 32px;
-                spacing: GitHubMetrics.size-8;
-                alignment: start;
-
-                for action in [
-                    { label: "Confirmation", id: 0, primary: true },
-                    { label: "Non-modal", id: 1, primary: false },
-                    { label: "No backdrop", id: 2, primary: false }
-                ]: GitHubButton {
-                    text: action.label;
-                    primary: action.primary;
-                    clicked => { root.show-dialog-example(action.id); }
-                }
-            }
-        }
-
-        GitHubShowcaseSection {
-            title: "Loading and empty states";
-            description: "Spinner sizes, determinate/indeterminate progress, and bordered/loading/error Blankslate variants.";
-            content-height: loading-empty-sample.y + loading-empty-sample.height + GitHubMetrics.size-16;
-
-            GitHubShowcaseLabel { x: 0px; y: 0px; width: 160px; height: 20px; label: "Spinner"; }
-            HorizontalLayout {
-                x: 0px;
-                y: 28px;
-                width: 180px;
-                height: 32px;
-                spacing: GitHubMetrics.size-16;
-                alignment: start;
-                for spinner-state in [
-                    { size: 16px, foreground: GitHubTheme.fg-muted, spinning: true },
-                    { size: 24px, foreground: GitHubTheme.fg-muted, spinning: true },
-                    { size: 32px, foreground: GitHubTheme.accent-fg, spinning: true },
-                    { size: 24px, foreground: GitHubTheme.fg-muted, spinning: false }
-                ]: GitHubSpinner {
-                    spinner-size: spinner-state.size;
-                    foreground: spinner-state.foreground;
-                    spinning: spinner-state.spinning;
-                }
-            }
-
-            GitHubButton {
-                x: min(224px, parent.width - self.width);
-                y: 28px;
-                text: root.blankslate-loading ? "Show error state" : "Show loading state";
-                clicked => { root.blankslate-loading = !root.blankslate-loading; }
-            }
-
-            GitHubShowcaseLabel { x: 0px; y: 76px; width: 160px; height: 20px; label: "Progress"; }
-            GitHubProgressBar {
-                x: 0px;
-                y: 104px;
-                width: min(360px, parent.width / 2 - GitHubMetrics.size-8);
-                progress: root.progress-value;
-                status-label: "62 percent complete";
-            }
-            GitHubProgressBar {
-                x: min(384px, parent.width / 2 + GitHubMetrics.size-8);
-                y: 104px;
-                width: max(160px, parent.width - self.x);
-                indeterminate: true;
-                status-label: "Loading progress";
-            }
-
-            loading-empty-sample := GitHubShowcaseSampleSurface {
-                x: 0px;
-                y: 144px;
-                width: parent.width;
-                height: max(
-                    228px,
-                    max(no-results-blankslate.preferred-height, load-error-blankslate.preferred-height)
-                        + GitHubMetrics.size-16
-                );
-
-                no-results-blankslate := GitHubBlankslate {
-                    x: GitHubMetrics.size-8;
-                    y: GitHubMetrics.size-8;
-                    width: max(240px, parent.width / 2 - GitHubMetrics.size-12);
-                    heading: "No results";
-                    description: "Default bordered empty state with primary and secondary actions.";
-                    icon: @image-url("../../assets/icons/octicon-search-16.svg");
-                    primary-label: "Create item";
-                    secondary-label: "Reset filters";
-                    bordered: true;
-                    narrow: true;
-                }
-
-                load-error-blankslate := GitHubBlankslate {
-                    x: parent.width / 2 + GitHubMetrics.size-4;
-                    y: GitHubMetrics.size-8;
-                    width: max(240px, parent.width / 2 - GitHubMetrics.size-12);
-                    heading: "Unable to load";
-                    description: root.blankslate-loading
-                        ? "Loading preserves the empty-state geometry."
-                        : "Error and loading properties share the same stable layout.";
-                    icon: @image-url("../../assets/icons/octicon-alert-16.svg");
-                    primary-label: root.blankslate-loading ? "" : "Retry";
-                    bordered: true;
-                    narrow: true;
-                    loading: root.blankslate-loading;
-                    error: !root.blankslate-loading;
-                }
-            }
-        }
-
-        GitHubShowcaseSection {
-            title: "Notification inbox rows";
-            description: "GitHub Inbox unread hierarchy: canvas-subtle fill, accent unread disc, bold vs muted title.";
-            content-height: 224px;
-
-            GitHubShowcaseSampleSurface {
-                x: 0px;
-                y: 0px;
-                width: parent.width;
-                height: 168px;
-                clip: true;
-
-                VerticalLayout {
-                    width: parent.width;
-                    spacing: 0px;
-
-                    GitHubMessageListItem {
-                        framed: true;
-                        first-row: true;
-                        item: {
-                            id: "gallery-unread",
-                            title: "Pull request checks completed",
-                            body: "All required checks passed for the release branch.",
-                            source: "Pull requests",
-                            category: "cd_workflow",
-                            category-label: "CD workflow",
-                            created-at: "Just now",
-                            level: MessageLevel.Success,
-                            read: false,
-                            target: ""
-                        };
-                    }
-                    GitHubMessageListItem {
-                        framed: true;
-                        last-row: true;
-                        item: {
-                            id: "gallery-read",
-                            title: "Network connection restored",
-                            body: "Remote repository operations are available again.",
-                            source: "Network",
-                            category: "general",
-                            category-label: "General",
-                            created-at: "10 minutes ago",
-                            level: MessageLevel.Info,
-                            read: true,
-                            target: ""
-                        };
-                    }
-                }
-            }
-
-            GitHubPagination {
-                y: 184px;
-                width: parent.width;
-                current-page: 1;
-                page-count: 4;
-                pages: [1, 2, 3, 4];
-                page-selected(number) => { self.current-page = number; }
-            }
-        }
-
-        GitHubShowcaseSection {
-            title: "AI review findings";
-            description: "Copilot-style severity labels and flat actionable rows that navigate to a changed line.";
-            content-height: 328px;
-
-            GitHubShowcaseSampleSurface {
-                x: 0px;
-                y: 0px;
-                width: parent.width;
-                height: 320px;
-                clip: true;
-
-                VerticalLayout {
-                    width: parent.width;
-                    spacing: 0px;
-
-                    GitHubAiReviewFindingRow {
-                        width: parent.width;
-                        severity: "high";
-                        file: "src/payment/authorize.rs";
-                        line: 84;
-                        title: "Authorization failure is ignored";
-                        explanation: "The new branch continues after a denied authorization response.";
-                        suggestion: "Return the provider error before persisting the transaction.";
-                    }
-                    GitHubAiReviewFindingRow {
-                        width: parent.width;
-                        severity: "medium";
-                        file: "src/cache.rs";
-                        line: 37;
-                        title: "Cache key is not project-scoped";
-                        explanation: "Two open projects can overwrite the same review entry.";
-                        selected: true;
-                    }
-                    HorizontalLayout {
-                        width: parent.width;
-                        height: GitHubMetrics.size-40;
-                        padding-left: GitHubMetrics.size-16;
-                        spacing: GitHubMetrics.size-8;
-                        alignment: start;
-                        GitHubAiReviewSeverityLabel { severity: "high"; }
-                        GitHubAiReviewSeverityLabel { severity: "medium"; }
-                        GitHubAiReviewSeverityLabel { severity: "low"; }
-                    }
-                }
-            }
-        }
-
-        GitHubShowcaseSection {
-            title: "Agent response";
-            description: "Native compact Markdown blocks with in-place Preview and opaque link callback feedback.";
-            content-height: agent-response-showcase.height + GitHubMetrics.size-8;
-
-            agent-response-showcase := GitHubAgentResponseShowcase {
-                x: 0px;
-                y: 0px;
-                width: parent.width;
-                open-preview => { root.open-artifact-preview-fixture("markdown"); }
-            }
-        }
-
-        GitHubShowcaseSection {
-            title: "Semantic tokens and status";
-            description: "Foreground, canvas, border, success, attention, danger, and status-badge comparisons.";
+            title: I18n.ui-components-demo-semantic-tokens-and-status;
+            description: I18n.ui-components-demo-foreground-canvas-border-success-attention-danger-and-status;
             content-height: 132px;
 
             HorizontalLayout {
@@ -1569,12 +657,12 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 alignment: start;
 
                 for color-data in [
-                    { name: "Canvas", value: GitHubTheme.canvas-default },
-                    { name: "Subtle", value: GitHubTheme.canvas-subtle },
-                    { name: "Accent", value: GitHubTheme.accent-emphasis },
-                    { name: "Success", value: GitHubTheme.success-emphasis },
-                    { name: "Attention", value: GitHubTheme.attention-emphasis },
-                    { name: "Danger", value: GitHubTheme.danger-emphasis }
+                    { name: I18n.ui-components-demo-canvas, value: GitHubTheme.canvas-default },
+                    { name: I18n.ui-components-demo-subtle, value: GitHubTheme.canvas-subtle },
+                    { name: I18n.ui-components-demo-accent, value: GitHubTheme.accent-emphasis },
+                    { name: I18n.ui-components-demo-success, value: GitHubTheme.success-emphasis },
+                    { name: I18n.ui-components-demo-attention, value: GitHubTheme.attention-emphasis },
+                    { name: I18n.ui-components-demo-danger, value: GitHubTheme.danger-emphasis }
                 ]: Rectangle {
                     width: max(72px, (parent.width - GitHubMetrics.size-40) / 6);
                     height: 72px;
@@ -1614,9 +702,9 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 spacing: GitHubMetrics.size-8;
                 alignment: start;
                 for badge-state in [
-                    { label: "Neutral", kind: "neutral" },
-                    { label: "Success", kind: "success" },
-                    { label: "Danger", kind: "danger" }
+                    { label: I18n.ui-components-demo-neutral, kind: "neutral" },
+                    { label: I18n.ui-components-demo-success, kind: "success" },
+                    { label: I18n.ui-components-demo-danger, kind: "danger" }
                 ]: GitHubShowcaseStateBadge {
                     text: badge-state.label;
                     kind: badge-state.kind;
@@ -1624,9 +712,1120 @@ export component GitHubUiComponentsGallery inherits Rectangle {
             }
         }
 
+        actions-group := GitHubShowcaseGroup {
+            title: I18n.ui-components-actions;
+            back-to-top => { root.jump-to(0px); }
+        }
+
         GitHubShowcaseSection {
-            title: "Artifact preview fixtures";
-            description: "Open real Preview providers and failure handling through the application-level host.";
+            title: I18n.ui-components-demo-buttons;
+            description: I18n.ui-components-demo-githubbutton-properties-default-primary-danger-selected-disabled-and;
+            content-height: 144px;
+
+            GitHubShowcaseLabel { x: 0px; y: 0px; width: 120px; height: 20px; label: I18n.ui-components-demo-intent; }
+            HorizontalLayout {
+                x: 0px;
+                y: 28px;
+                width: parent.width;
+                height: 32px;
+                spacing: GitHubMetrics.size-8;
+                alignment: start;
+
+                for button-state in [
+                    { label: I18n.common-default, primary: false, danger: false, selected: false },
+                    { label: I18n.ui-components-demo-primary, primary: true, danger: false, selected: false },
+                    { label: I18n.ui-components-demo-danger, primary: false, danger: true, selected: false },
+                    { label: I18n.ui-components-demo-selected, primary: false, danger: false, selected: true }
+                ]: GitHubButton {
+                    text: button-state.label;
+                    primary: button-state.primary;
+                    danger: button-state.danger;
+                    selected: button-state.selected;
+                }
+            }
+
+            GitHubShowcaseLabel { x: 0px; y: 76px; width: 120px; height: 20px; label: I18n.ui-components-demo-availability; }
+            HorizontalLayout {
+                x: 0px;
+                y: 104px;
+                width: parent.width;
+                height: 32px;
+                spacing: GitHubMetrics.size-8;
+                alignment: start;
+
+                for button-state in [
+                    { label: I18n.ui-components-demo-disabled, disabled: true, busy: false, primary: false },
+                    { label: I18n.common-loading, disabled: false, busy: true, primary: true }
+                ]: GitHubButton {
+                    text: button-state.label;
+                    disabled: button-state.disabled;
+                    busy: button-state.busy;
+                    primary: button-state.primary;
+                }
+                GitHubButton {
+                    text: I18n.ui-components-demo-try-action;
+                    clicked => {
+                        ToastManager.success({
+                            message: I18n.ui-components-demo-button-activation-received,
+                            position: "bottom"
+                        });
+                    }
+                }
+                GitHubButton {
+                    text: I18n.ui-components-demo-load-more;
+                    leading-icon: @image-url("../../assets/icons/octicon-arrow-up-16.svg");
+                    label-font-size: GitHubMetrics.text-small;
+                    height: GitHubMetrics.control-small-size;
+                }
+            }
+        }
+
+        GitHubShowcaseSection {
+            title: I18n.ui-components-demo-iconbutton-and-copybutton;
+            description: "";
+            content-height: 72px;
+
+            GitHubShowcaseLabel { x: 0px; y: 0px; width: 150px; height: 20px; label: "IconButton"; }
+            HorizontalLayout {
+                x: 0px;
+                y: 28px;
+                width: parent.width;
+                height: 36px;
+                spacing: GitHubMetrics.size-12;
+                alignment: start;
+
+                for button-state in [
+                    { icon: @image-url("../../assets/icons/octicon-plus-16.svg"), label: I18n.ui-components-demo-invisible-icon-button, invisible: true, danger: false, loading: false, enabled: true, selected: false },
+                    { icon: @image-url("../../assets/icons/octicon-sync-16.svg"), label: I18n.ui-components-demo-bordered-icon-button, invisible: false, danger: false, loading: false, enabled: true, selected: false },
+                    { icon: @image-url("../../assets/icons/octicon-trash-16.svg"), label: I18n.ui-components-demo-danger-icon-button, invisible: false, danger: true, loading: false, enabled: true, selected: false },
+                    { icon: @image-url("../../assets/icons/octicon-sync-16.svg"), label: I18n.common-loading, invisible: false, danger: false, loading: true, enabled: true, selected: false },
+                    { icon: @image-url("../../assets/icons/octicon-plus-16.svg"), label: I18n.ui-components-demo-disabled, invisible: false, danger: false, loading: false, enabled: false, selected: false },
+                    { icon: @image-url("../../assets/icons/octicon-copilot-16.svg"), label: I18n.ui-components-demo-review-this-pull-request-with-ai, invisible: true, danger: false, loading: false, enabled: true, selected: false },
+                    { icon: @image-url("../../assets/icons/octicon-copilot-16.svg"), label: I18n.ui-components-demo-close-ai-code-review, invisible: true, danger: false, loading: false, enabled: true, selected: true },
+                    { icon: @image-url("../../assets/icons/octicon-copilot-16.svg"), label: I18n.ui-components-demo-ai-code-review-is-running, invisible: true, danger: false, loading: true, enabled: true, selected: false }
+                ]: GitHubIconButton {
+                    icon: button-state.icon;
+                    tooltip-text: button-state.label;
+                    invisible: button-state.invisible;
+                    danger: button-state.danger;
+                    loading: button-state.loading;
+                    button-enabled: button-state.enabled;
+                    selected: button-state.selected;
+                }
+                GitHubCopyButton {
+                    tooltip-above: false;
+                    copy-requested => { true }
+                }
+            }
+
+        }
+
+        GitHubShowcaseSection {
+            title: "ActionList";
+            description: "";
+            content-height: 72px;
+            GitHubShowcaseSampleSurface {
+                width: parent.width;
+                height: 72px;
+                GitHubActionListItem {
+                    x: 8px;
+                    y: GitHubMetrics.size-8;
+                    width: parent.width / 2 - 12px;
+                    text: I18n.ui-components-demo-action-list-item;
+                    description: I18n.ui-components-demo-with-supporting-text;
+                    selected: root.selected-action == 0;
+                    activated => { root.selected-action = 0; }
+                }
+                GitHubActionListItem {
+                    x: parent.width / 2 + 4px;
+                    y: GitHubMetrics.size-8;
+                    width: parent.width / 2 - 12px;
+                    text: I18n.ui-components-demo-delete-item;
+                    icon: @image-url("../../assets/icons/octicon-trash-16.svg");
+                    danger: true;
+                }
+            }
+        }
+
+        action-menu-section := GitHubShowcaseSection {
+            title: I18n.ui-components-demo-actionmenu-borderless-actionlist;
+            description: I18n.ui-components-demo-borderless-action-rows-anchoredoverlay-placement-alignment-side-selection;
+            // The overlay is anchored to this fixed trigger row and must not
+            // participate in the section's layout geometry.
+            content-height: 48px;
+
+            HorizontalLayout {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: 32px;
+                z: 2;
+                spacing: GitHubMetrics.size-8;
+                alignment: start;
+
+                start-action-button := GitHubButton {
+                    text: I18n.ui-components-demo-start-below;
+                    selected: root.action-menu-open
+                        && root.action-menu-align == "start"
+                        && root.action-menu-side == "bottom";
+                    clicked => {
+                        if root.action-menu-open
+                                && root.action-menu-align == "start"
+                                && root.action-menu-side == "bottom" {
+                            root.action-menu-open = false;
+                        } else {
+                            root.action-menu-align = "start";
+                            root.action-menu-side = "bottom";
+                            root.action-menu-open = true;
+                        }
+                    }
+                }
+                end-action-button := GitHubButton {
+                    text: I18n.ui-components-demo-end-below;
+                    selected: root.action-menu-open
+                        && root.action-menu-align == "end"
+                        && root.action-menu-side == "bottom";
+                    clicked => {
+                        if root.action-menu-open
+                                && root.action-menu-align == "end"
+                                && root.action-menu-side == "bottom" {
+                            root.action-menu-open = false;
+                        } else {
+                            root.action-menu-align = "end";
+                            root.action-menu-side = "bottom";
+                            root.action-menu-open = true;
+                        }
+                    }
+                }
+                above-action-button := GitHubButton {
+                    text: I18n.ui-components-demo-start-above;
+                    selected: root.action-menu-open
+                        && root.action-menu-align == "start"
+                        && root.action-menu-side == "top";
+                    clicked => {
+                        if root.action-menu-open
+                                && root.action-menu-align == "start"
+                                && root.action-menu-side == "top" {
+                            root.action-menu-open = false;
+                        } else {
+                            root.action-menu-align = "start";
+                            root.action-menu-side = "top";
+                            root.action-menu-open = true;
+                        }
+                    }
+                }
+                close-action-button := GitHubButton {
+                    text: I18n.common-close;
+                    disabled: !root.action-menu-open;
+                    clicked => { root.action-menu-open = false; }
+                }
+            }
+
+            // Demonstrate the caller-owned outside-click layer ActionMenu
+            // expects under the menu surface.
+            if root.action-menu-open: Rectangle {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                z: 0;
+                background: transparent;
+                TouchArea {
+                    mouse-cursor: default;
+                    clicked => { root.action-menu-open = false; }
+                }
+            }
+
+        }
+
+        containment-group := GitHubShowcaseGroup {
+            title: I18n.ui-components-containment;
+            back-to-top => { root.jump-to(0px); }
+        }
+
+        GitHubShowcaseSection {
+            title: "Dialog";
+            description: I18n.ui-components-demo-fixed-percentage-sizing-modal-non-modal-behavior-backdrop;
+            content-height: 40px;
+
+            HorizontalLayout {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: 32px;
+                spacing: GitHubMetrics.size-8;
+                alignment: start;
+
+                for action in [
+                    { label: I18n.ui-components-demo-confirmation, id: 0, primary: true },
+                    { label: I18n.ui-components-demo-non-modal, id: 1, primary: false },
+                    { label: I18n.ui-components-demo-no-backdrop, id: 2, primary: false }
+                ]: GitHubButton {
+                    text: action.label;
+                    primary: action.primary;
+                    clicked => { root.show-dialog-example(action.id); }
+                }
+            }
+        }
+
+        communication-group := GitHubShowcaseGroup {
+            title: I18n.ui-components-communication;
+            back-to-top => { root.jump-to(0px); }
+        }
+
+        GitHubShowcaseSection {
+            title: I18n.ui-components-demo-labels-and-counters;
+            description: I18n.ui-components-demo-metadata-labels-and-primer-counterlabel-schemes-limits-and;
+            content-height: 252px;
+
+            GitHubShowcaseLabel { x: 0px; y: 0px; width: 180px; height: 20px; label: I18n.ui-components-demo-neutral-metadata; }
+            HorizontalLayout {
+                x: 0px;
+                y: 28px;
+                width: parent.width;
+                height: 24px;
+                spacing: GitHubMetrics.size-8;
+                alignment: start;
+
+                GitHubMetadataLabel { text: I18n.common-default; }
+                GitHubMetadataLabel { text: I18n.ui-components-demo-primary; variant: GitHubMetadataLabelVariant.Primary; }
+                GitHubMetadataLabel { text: I18n.ui-components-demo-secondary; variant: GitHubMetadataLabelVariant.Secondary; }
+            }
+
+            GitHubShowcaseLabel { x: 0px; y: 68px; width: 180px; height: 20px; label: I18n.ui-components-demo-bounded-metadata; }
+            GitHubMetadataLabel {
+                x: 0px;
+                y: 96px;
+                max-label-width: 168px;
+                text: I18n.ui-components-demo-repository-identifier-1130209340;
+            }
+
+            GitHubShowcaseLabel { x: 0px; y: 132px; width: 180px; height: 20px; label: I18n.ui-components-demo-counter-schemes; }
+            HorizontalLayout {
+                x: 0px;
+                y: 160px;
+                width: parent.width;
+                height: 20px;
+                spacing: GitHubMetrics.size-20;
+                alignment: start;
+
+                HorizontalLayout {
+                    spacing: GitHubMetrics.size-6;
+                    Text { text: I18n.ui-components-demo-issues; color: GitHubTheme.fg-default; vertical-alignment: center; }
+                    GitHubCounterLabel { count: 12; }
+                }
+                HorizontalLayout {
+                    spacing: GitHubMetrics.size-6;
+                    Text { text: I18n.ui-components-demo-pull-requests; color: GitHubTheme.fg-default; vertical-alignment: center; }
+                    GitHubCounterLabel { count: 7; scheme: GitHubCounterScheme.Primary; }
+                }
+                HorizontalLayout {
+                    spacing: GitHubMetrics.size-6;
+                    Text { text: I18n.ui-components-demo-checks; color: GitHubTheme.fg-default; vertical-alignment: center; }
+                    GitHubCounterLabel { count: 3; scheme: GitHubCounterScheme.Secondary; }
+                }
+            }
+
+            GitHubShowcaseLabel { x: 0px; y: 196px; width: 180px; height: 20px; label: I18n.ui-components-demo-limit-and-zero; }
+            HorizontalLayout {
+                x: 0px;
+                y: 224px;
+                width: parent.width;
+                height: 20px;
+                spacing: GitHubMetrics.size-20;
+                alignment: start;
+
+                HorizontalLayout {
+                    spacing: GitHubMetrics.size-6;
+                    Text { text: I18n.ui-components-demo-notifications; color: GitHubTheme.fg-default; vertical-alignment: center; }
+                    GitHubCounterLabel { count: 128; limit: 99; scheme: GitHubCounterScheme.Primary; }
+                }
+                HorizontalLayout {
+                    spacing: GitHubMetrics.size-6;
+                    Text { text: I18n.ui-components-demo-zero-hidden; color: GitHubTheme.fg-muted; vertical-alignment: center; }
+                    GitHubCounterLabel { count: 0; hide-if-zero: true; }
+                }
+            }
+        }
+
+        GitHubShowcaseSection {
+            title: I18n.ui-components-demo-loading-and-empty-states;
+            description: I18n.ui-components-demo-spinner-sizes-determinate-indeterminate-progress-and-bordered-loading;
+            content-height: loading-empty-sample.y + loading-empty-sample.height + GitHubMetrics.size-16;
+
+            GitHubShowcaseLabel { x: 0px; y: 0px; width: 160px; height: 20px; label: "Spinner"; }
+            HorizontalLayout {
+                x: 0px;
+                y: 28px;
+                width: 180px;
+                height: 32px;
+                spacing: GitHubMetrics.size-16;
+                alignment: start;
+                for spinner-state in [
+                    { size: 16px, foreground: GitHubTheme.fg-muted, spinning: true },
+                    { size: 24px, foreground: GitHubTheme.fg-muted, spinning: true },
+                    { size: 32px, foreground: GitHubTheme.accent-fg, spinning: true },
+                    { size: 24px, foreground: GitHubTheme.fg-muted, spinning: false }
+                ]: GitHubSpinner {
+                    spinner-size: spinner-state.size;
+                    foreground: spinner-state.foreground;
+                    spinning: spinner-state.spinning;
+                }
+            }
+
+            GitHubButton {
+                x: min(224px, parent.width - self.width);
+                y: 28px;
+                text: root.blankslate-loading ? I18n.ui-components-demo-show-error-state : I18n.ui-components-demo-show-loading-state;
+                clicked => { root.blankslate-loading = !root.blankslate-loading; }
+            }
+
+            GitHubShowcaseLabel { x: 0px; y: 76px; width: 160px; height: 20px; label: I18n.ui-components-demo-progress; }
+            GitHubProgressBar {
+                x: 0px;
+                y: 104px;
+                width: min(360px, parent.width / 2 - GitHubMetrics.size-8);
+                progress: root.progress-value;
+                status-label: I18n.ui-components-demo-62-percent-complete;
+            }
+            GitHubProgressBar {
+                x: min(384px, parent.width / 2 + GitHubMetrics.size-8);
+                y: 104px;
+                width: max(160px, parent.width - self.x);
+                indeterminate: true;
+                status-label: I18n.ui-components-demo-loading-progress;
+            }
+
+            loading-empty-sample := GitHubShowcaseSampleSurface {
+                x: 0px;
+                y: 144px;
+                width: parent.width;
+                height: max(
+                    228px,
+                    max(no-results-blankslate.preferred-height, load-error-blankslate.preferred-height)
+                        + GitHubMetrics.size-16
+                );
+
+                no-results-blankslate := GitHubBlankslate {
+                    x: GitHubMetrics.size-8;
+                    y: GitHubMetrics.size-8;
+                    width: max(240px, parent.width / 2 - GitHubMetrics.size-12);
+                    heading: I18n.ui-components-demo-no-results;
+                    description: I18n.ui-components-demo-default-bordered-empty-state-with-primary-and-secondary;
+                    icon: @image-url("../../assets/icons/octicon-search-16.svg");
+                    primary-label: I18n.ui-components-demo-create-item;
+                    secondary-label: I18n.ui-components-demo-reset-filters;
+                    bordered: true;
+                    narrow: true;
+                }
+
+                load-error-blankslate := GitHubBlankslate {
+                    x: parent.width / 2 + GitHubMetrics.size-4;
+                    y: GitHubMetrics.size-8;
+                    width: max(240px, parent.width / 2 - GitHubMetrics.size-12);
+                    heading: I18n.ui-components-demo-unable-to-load;
+                    description: root.blankslate-loading
+                        ? I18n.ui-components-demo-loading-preserves-the-empty-state-geometry
+                        : I18n.ui-components-demo-error-and-loading-properties-share-the-same-stable;
+                    icon: @image-url("../../assets/icons/octicon-alert-16.svg");
+                    primary-label: root.blankslate-loading ? "" : I18n.ui-components-demo-retry;
+                    bordered: true;
+                    narrow: true;
+                    loading: root.blankslate-loading;
+                    error: !root.blankslate-loading;
+                }
+            }
+        }
+
+        GitHubShowcaseSection {
+            title: "Toast";
+            description: I18n.ui-components-demo-type-position-duration-overlay-close-on-click-and;
+            content-height: 196px;
+
+            HorizontalLayout {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: 32px;
+                spacing: GitHubMetrics.size-8;
+                alignment: start;
+
+                for action in [
+                    { label: I18n.ui-components-demo-info, id: 0, primary: false, danger: false },
+                    { label: I18n.ui-components-demo-success, id: 1, primary: true, danger: false },
+                    { label: I18n.ui-components-demo-error, id: 2, primary: false, danger: true },
+                    { label: I18n.common-loading, id: 3, primary: false, danger: false }
+                ]: GitHubButton {
+                    text: action.label;
+                    primary: action.primary;
+                    danger: action.danger;
+                    clicked => { root.show-toast-example(action.id); }
+                }
+            }
+
+            GitHubShowcaseLabel { x: 0px; y: 56px; width: 160px; height: 20px; label: I18n.ui-components-demo-position; }
+            HorizontalLayout {
+                x: 0px;
+                y: 84px;
+                width: parent.width;
+                height: 32px;
+                spacing: GitHubMetrics.size-8;
+                alignment: start;
+
+                for action in [
+                    { label: I18n.ui-components-demo-top, id: 4 },
+                    { label: I18n.ui-components-demo-middle, id: 5 },
+                    { label: I18n.ui-components-demo-bottom, id: 6 }
+                ]: GitHubButton {
+                    text: action.label;
+                    clicked => { root.show-toast-example(action.id); }
+                }
+            }
+
+            GitHubShowcaseLabel { x: 0px; y: 140px; width: 160px; height: 20px; label: I18n.ui-components-demo-behavior; }
+            HorizontalLayout {
+                x: 0px;
+                y: 164px;
+                width: parent.width;
+                height: 32px;
+                spacing: GitHubMetrics.size-8;
+                alignment: start;
+
+                for action in [
+                    { label: I18n.ui-components-demo-5-seconds, id: 7 },
+                    { label: I18n.ui-components-demo-overlay-dismiss, id: 8 }
+                ]: GitHubButton {
+                    text: action.label;
+                    clicked => { root.show-toast-example(action.id); }
+                }
+            }
+        }
+
+        GitHubShowcaseSection {
+            title: "Notification";
+            description: I18n.ui-components-demo-action-banner-plus-an-honest-capped-queue-footer;
+            content-height: 320px;
+
+            HorizontalLayout {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: 32px;
+                spacing: GitHubMetrics.size-8;
+                alignment: start;
+
+                for action in [
+                    { label: I18n.ui-components-demo-info, id: 0, primary: false, danger: false },
+                    { label: I18n.ui-components-demo-success, id: 1, primary: true, danger: false },
+                    { label: I18n.ui-components-demo-warning, id: 2, primary: false, danger: false },
+                    { label: I18n.ui-components-demo-error, id: 3, primary: false, danger: true }
+                ]: GitHubButton {
+                    text: action.label;
+                    primary: action.primary;
+                    danger: action.danger;
+                    clicked => { root.show-notification-example(action.id); }
+                }
+            }
+
+            HorizontalLayout {
+                x: 0px;
+                y: 48px;
+                width: parent.width;
+                height: 32px;
+                spacing: GitHubMetrics.size-8;
+                alignment: start;
+
+                for action in [
+                    { label: I18n.ui-components-demo-action-banner, id: 4, danger: false },
+                    { label: I18n.ui-components-demo-queue-stack-footer, id: 7, danger: false },
+                    { label: I18n.ui-components-demo-remove-all, id: 5, danger: false },
+                    { label: I18n.ui-components-demo-clear-queue, id: 6, danger: true }
+                ]: GitHubButton {
+                    text: action.label;
+                    danger: action.danger;
+                    clicked => { root.show-notification-example(action.id); }
+                }
+            }
+
+            GitHubShowcaseLabel {
+                x: 0px;
+                y: 96px;
+                width: parent.width;
+                height: 20px;
+                label: I18n.ui-components-demo-action-banner-overflow-footer-3-shown-9-more;
+            }
+
+            GitHubShowcaseSampleSurface {
+                x: 0px;
+                y: 124px;
+                width: min(400px, parent.width);
+                height: 196px;
+
+                notification-demo := GitHubNotificationBanner {
+                    x: GitHubMetrics.size-12;
+                    y: GitHubMetrics.size-12;
+                    width: parent.width - GitHubMetrics.size-24;
+                    title: I18n.ui-components-demo-attention;
+                    message: I18n.ui-components-demo-a-follow-up-action-is-required;
+                    icon: NotificationIcons.warning;
+                    notification-type: NotificationType.Warning;
+                    actions: [I18n.ui-components-demo-later, I18n.ui-components-demo-install];
+                    queue-count: 3;
+                    total-count: 12;
+                    external-queue-menu: true;
+                    queue-menu-open <=> GitHubNotificationDemoState.open;
+                    queue-menu-anchor-changed(x, y, height) => {
+                        GitHubNotificationDemoState.anchor-x = x;
+                        GitHubNotificationDemoState.anchor-y = y;
+                        GitHubNotificationDemoState.anchor-height = height;
+                    }
+                    view-all-clicked => { }
+                    dismiss-all-clicked => { }
+                    close-clicked => { }
+                }
+            }
+        }
+
+        navigation-group := GitHubShowcaseGroup {
+            title: I18n.ui-components-navigation;
+            back-to-top => { root.jump-to(0px); }
+        }
+
+        GitHubShowcaseSection {
+            title: "Link";
+            description: "";
+            content-height: 56px;
+            GitHubShowcaseLabel { x: 0px; y: 0px; width: 150px; height: 20px; label: "Link"; }
+            HorizontalLayout {
+                x: 0px;
+                y: 28px;
+                width: parent.width;
+                height: 24px;
+                spacing: GitHubMetrics.size-20;
+                alignment: start;
+
+                for link-state in [
+                    { label: I18n.ui-components-demo-standalone-link, inline: false, muted: false, enabled: true },
+                    { label: I18n.ui-components-demo-inline-link, inline: true, muted: false, enabled: true },
+                    { label: I18n.ui-components-demo-muted-link, inline: false, muted: true, enabled: true },
+                    { label: I18n.ui-components-demo-disabled-link, inline: false, muted: false, enabled: false }
+                ]: GitHubLink {
+                    text: link-state.label;
+                    inline: link-state.inline;
+                    muted: link-state.muted;
+                    link-enabled: link-state.enabled;
+                }
+            }
+        }
+
+        GitHubShowcaseSection {
+            title: I18n.ui-components-navigation;
+            description: "";
+            content-height: 132px;
+
+            GitHubShowcaseLabel { x: 0px; y: 0px; width: 160px; height: 20px; label: "UnderlineNav"; }
+            GitHubUnderlineNav {
+                x: 0px;
+                y: 28px;
+                width: parent.width;
+                height: 48px;
+                group-label: I18n.ui-components-demo-underline-navigation-examples;
+
+                GitHubUnderlineNavItem {
+                    label: I18n.ui-components-demo-overview;
+                    selected: root.selected-tab == 0;
+                    clicked => { root.selected-tab = 0; }
+                }
+                GitHubUnderlineNavItem {
+                    label: I18n.ui-components-demo-activity;
+                    icon: @image-url("../../assets/icons/octicon-comment-discussion-16.svg");
+                    selected: root.selected-tab == 1;
+                    clicked => { root.selected-tab = 1; }
+                }
+                GitHubUnderlineNavItem { label: I18n.ui-components-demo-disabled; item-enabled: false; }
+            }
+
+            GitHubSettingsNavItem {
+                x: 0px;
+                y: 88px;
+                width: min(256px, parent.width);
+                text: I18n.ui-components-demo-selected-navigation;
+                selected: true;
+            }
+        }
+
+        selection-group := GitHubShowcaseGroup {
+            title: I18n.ui-components-selection;
+            back-to-top => { root.jump-to(0px); }
+        }
+
+        GitHubShowcaseSection {
+            title: "Checkbox";
+            description: "";
+            content-height: 224px;
+            VerticalLayout {
+                width: parent.width;
+                spacing: 0px;
+                GitHubCheckbox {
+                    text: I18n.ui-components-demo-select-all;
+                    checked: root.checkbox-first && root.checkbox-second;
+                    indeterminate: root.checkbox-first != root.checkbox-second;
+                    toggled(value) => { root.checkbox-first = value; root.checkbox-second = value; }
+                }
+                GitHubCheckbox { text: I18n.ui-components-demo-pull-request-review; checked: root.checkbox-first; toggled(value) => { root.checkbox-first = value; } }
+                GitHubCheckbox { text: I18n.ui-components-demo-ai-review; checked: root.checkbox-second; toggled(value) => { root.checkbox-second = value; } }
+                GitHubCheckbox { text: I18n.ui-components-demo-partially-selected; indeterminate: true; }
+                GitHubCheckbox { text: I18n.ui-components-demo-disabled; control-enabled: false; }
+                GitHubCheckbox { text: I18n.ui-components-demo-disabled-selected; checked: true; control-enabled: false; }
+                GitHubCheckbox { text: I18n.ui-components-demo-disabled-mixed; indeterminate: true; control-enabled: false; }
+            }
+        }
+
+        GitHubShowcaseSection {
+            title: "Radio";
+            description: "";
+            content-height: 128px;
+            VerticalLayout {
+                width: parent.width; spacing: 0px;
+                GitHubRadio { text: "Shell"; checked: root.radio-choice == 0; chosen => { root.radio-choice = 0; } stepped(delta) => { root.radio-choice = mod(root.radio-choice + delta + 3, 3); } }
+                GitHubRadio { text: "JavaScript"; checked: root.radio-choice == 1; chosen => { root.radio-choice = 1; } stepped(delta) => { root.radio-choice = mod(root.radio-choice + delta + 3, 3); } }
+                GitHubRadio { text: "TypeScript"; checked: root.radio-choice == 2; chosen => { root.radio-choice = 2; } stepped(delta) => { root.radio-choice = mod(root.radio-choice + delta + 3, 3); } }
+                GitHubRadio { text: I18n.ui-components-demo-disabled; checked: true; control-enabled: false; }
+            }
+        }
+
+        GitHubShowcaseSection {
+            title: "SegmentedControl";
+            description: "";
+            content-height: 208px;
+
+            GitHubShowcaseLabel { x: 0px; y: 0px; width: 200px; height: 20px; label: I18n.ui-components-demo-segmentedcontrol-clone-method; }
+            GitHubSegmentedControl {
+                x: 0px;
+                y: 28px;
+                group-label: I18n.ui-components-demo-clone-method;
+                items: [
+                    { label: "HTTPS", count: -1, count-suffix-offset: 0, enabled: true },
+                    { label: "SSH", count: -1, count-suffix-offset: 0, enabled: true },
+                    { label: "GitHub CLI", count: -1, count-suffix-offset: 0, enabled: true },
+                ];
+                selected-index: root.selected-segment;
+                selection-changed(index) => { root.selected-segment = index; }
+            }
+
+            GitHubShowcaseLabel { x: 0px; y: 76px; width: 160px; height: 20px; label: I18n.ui-components-demo-disabled-state; }
+            GitHubSegmentedControl {
+                x: 0px;
+                y: 100px;
+                group-label: I18n.ui-components-demo-disabled-segmented-control-state;
+                items: [
+                    { label: I18n.ui-components-demo-available, count: -1, count-suffix-offset: 0, enabled: true },
+                    { label: I18n.ui-components-demo-disabled, count: -1, count-suffix-offset: 0, enabled: false },
+                ];
+                selected-index: 0;
+            }
+
+            GitHubShowcaseLabel { x: 0px; y: 144px; width: 200px; height: 20px; label: I18n.ui-components-demo-icon-only-with-motion; }
+            GitHubSegmentedControlIconOnly {
+                x: 0px;
+                y: 168px;
+                items: [
+                    {
+                        icon: @image-url("../../assets/icons/octicon-list-unordered-16.svg"),
+                        label: I18n.ui-components-demo-list-view,
+                        enabled: true,
+                    },
+                    {
+                        icon: @image-url("../../assets/icons/octicon-table-16.svg"),
+                        label: I18n.ui-components-demo-grid-view,
+                        enabled: true,
+                    },
+                ];
+                selected-index: root.selected-icon-segment;
+                group-label: I18n.ui-components-demo-project-view;
+                selection-changed(index) => { root.selected-icon-segment = index; }
+            }
+
+        }
+
+        select-section := GitHubShowcaseSection {
+            title: "Select";
+            description: "";
+            private property <bool> compact: self.width < GitHubMetrics.breakpoint-small;
+            private property <length> column-width: min(320px,
+                self.compact ? self.width : (self.width - GitHubMetrics.stack-gap-normal) / 2);
+            private property <length> second-column-x:
+                self.compact ? 0px : self.width / 2 + GitHubMetrics.size-8;
+            content-height: max(select-name.y + select-name.height,
+                select-disabled.y + select-disabled.height);
+
+            select-trigger := GitHubSettingsSectionMenuButton {
+                x: 0px;
+                y: 0px;
+                width: select-section.column-width;
+                text: root.select-value == 0 ? I18n.language-system-default
+                    : (root.select-value == 1 ? "English" : "简体中文");
+                open: GitHubSelectState.open && GitHubSelectState.owner == "showcase";
+                restore-focus-on-close: GitHubSelectState.restore-focus;
+                changed absolute-position => {
+                    if self.open { GitHubSelectState.close(false); }
+                }
+                changed width => {
+                    if self.open { GitHubSelectState.close(false); }
+                }
+                clicked => {
+                  if self.open { GitHubSelectState.close(true); } else {
+                    GitHubSelectState.show("showcase", "" + root.select-value, root.select-value,
+                        select-trigger.absolute-position.x, select-trigger.absolute-position.y,
+                        select-trigger.width, select-trigger.height);
+                  }
+                }
+            }
+            select-disabled := GitHubSettingsSectionMenuButton {
+                x: select-section.second-column-x;
+                y: select-section.compact
+                    ? select-name.y + select-name.height + GitHubMetrics.stack-gap-normal
+                    : select-name.y + select-name.height - GitHubMetrics.control-medium-size;
+                width: select-section.column-width;
+                text: I18n.ui-components-demo-disabled;
+                enabled: false;
+            }
+            grouped-select-trigger := GitHubSettingsSectionMenuButton {
+                // The inherited absolute-position duplicates nonzero component
+                // offsets; use the zero-offset peer's origin for both axes.
+                private property <length> viewport-anchor-x:
+                    select-trigger.absolute-position.x + self.x - select-trigger.x;
+                private property <length> viewport-anchor-y:
+                    select-trigger.absolute-position.y + self.y - select-trigger.y;
+                x: select-section.second-column-x;
+                y: select-section.compact
+                    ? select-trigger.height + GitHubMetrics.stack-gap-normal : 0px;
+                width: select-section.column-width;
+                text: root.grouped-select-value == 0 ? I18n.ui-components-demo-pull-request-review-submitted
+                    : root.grouped-select-value == 1 ? I18n.ui-components-demo-ai-review-completed
+                    : root.grouped-select-value == 2 ? I18n.ui-components-demo-tag-created : I18n.ui-components-demo-deployment-completed;
+                open: GitHubSelectState.open && GitHubSelectState.owner == "showcase-grouped";
+                restore-focus-on-close: GitHubSelectState.restore-focus;
+                changed viewport-anchor-x => {
+                    if self.open && self.viewport-anchor-x != GitHubSelectState.anchor-x {
+                        GitHubSelectState.close(false);
+                    }
+                }
+                changed viewport-anchor-y => {
+                    if self.open && self.viewport-anchor-y != GitHubSelectState.anchor-y {
+                        GitHubSelectState.close(false);
+                    }
+                }
+                changed width => {
+                    if self.open { GitHubSelectState.close(false); }
+                }
+                clicked => {
+                    if self.open { GitHubSelectState.close(true); } else {
+                        GitHubSelectState.show("showcase-grouped", "" + root.grouped-select-value,
+                            root.grouped-select-value,
+                            grouped-select-trigger.viewport-anchor-x,
+                            grouped-select-trigger.viewport-anchor-y,
+                            grouped-select-trigger.width, grouped-select-trigger.height);
+                    }
+                }
+            }
+            select-name := GitHubTextField {
+                x: 0px;
+                y: select-section.compact
+                    ? grouped-select-trigger.y + grouped-select-trigger.height + GitHubMetrics.stack-gap-normal
+                    : select-trigger.height + GitHubMetrics.stack-gap-normal;
+                width: select-section.column-width;
+                label: I18n.ui-components-demo-name;
+                placeholder: I18n.ui-components-demo-project-name;
+            }
+        }
+
+        filter-menu-section := GitHubShowcaseSection {
+            title: "Select Menu";
+            description: "";
+            content-height: 108px + pr-menu-showcase.height;
+
+            GitHubShowcaseLabel {
+                x: 0px; y: 0px; width: parent.width; height: 20px;
+                label: I18n.ui-components-demo-selectmenu-bordered-single-select;
+            }
+            status-filter-button := GitHubFilterDemoButton {
+                x: 0px; y: 28px;
+                identity: "status";
+                label: I18n.ui-components-demo-status;
+                selected: self.menu-open || GitHubFilterDemoState.status != "all";
+            }
+            owner-filter-button := GitHubFilterDemoButton {
+                x: status-filter-button.width; y: 28px;
+                identity: "owner";
+                label: I18n.ui-components-demo-owner;
+                selected: self.menu-open || GitHubFilterDemoState.owner != "any";
+            }
+            sort-filter-button := GitHubFilterDemoButton {
+                x: owner-filter-button.x + owner-filter-button.width; y: 28px;
+                identity: "sort";
+                label: I18n.ui-components-demo-sort;
+                selected: self.menu-open || GitHubFilterDemoState.sort != "newest";
+            }
+            GitHubShowcaseLabel {
+                x: 0px; y: 80px; width: parent.width; height: 20px;
+                label: I18n.ui-components-demo-pull-request-menus;
+            }
+            pr-menu-showcase := GitHubPrMenuShowcase {
+                y: 108px;
+                width: parent.width;
+                viewport-global-x: root.viewport-global-x;
+                viewport-global-y: root.viewport-global-y;
+                viewport-width: root.viewport-width;
+                viewport-height: root.viewport-height;
+            }
+        }
+
+        GitHubShowcaseSection {
+            title: "ToggleSwitch";
+            description: "";
+            content-height: 40px;
+            GitHubToggle {
+                y: 4px;
+                checked: root.toggle-checked;
+                toggled(value) => { root.toggle-checked = value; }
+            }
+        }
+
+        text-input-group := GitHubShowcaseGroup {
+            title: I18n.ui-components-text-input;
+            back-to-top => { root.jump-to(0px); }
+        }
+
+        GitHubShowcaseSection {
+            title: "TextInput";
+            description: "";
+            content-height: 268px;
+
+            GitHubShowcaseSampleSurface {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: 260px;
+
+                GitHubTextField {
+                    x: GitHubMetrics.size-16;
+                    y: GitHubMetrics.size-16;
+                    width: max(180px, (parent.width - GitHubMetrics.size-48) / 2);
+                    label: I18n.ui-components-demo-repository;
+                    placeholder: "owner/repository";
+                    caption: I18n.ui-components-demo-editable-default-state;
+                    text <=> root.field-text;
+                }
+
+                GitHubTextField {
+                    x: parent.width / 2 + GitHubMetrics.size-8;
+                    y: GitHubMetrics.size-16;
+                    width: max(180px, parent.width - self.x - GitHubMetrics.size-16);
+                    label: "Token";
+                    placeholder: I18n.ui-components-demo-required-value;
+                    secret: true;
+                    required: true;
+                    validation-error: true;
+                    validation-message: I18n.ui-components-demo-a-token-is-required;
+                }
+
+                GitHubTextField {
+                    x: GitHubMetrics.size-16;
+                    y: 112px;
+                    width: max(180px, (parent.width - GitHubMetrics.size-48) / 2);
+                    label: I18n.ui-components-demo-loading-field;
+                    text: I18n.ui-components-demo-checking-repository;
+                    loading: true;
+                }
+
+                GitHubCompactTextField {
+                    x: parent.width / 2 + GitHubMetrics.size-8;
+                    y: 138px;
+                    width: max(120px, parent.width - self.x - GitHubMetrics.size-16);
+                    placeholder: I18n.ui-components-demo-compact-field;
+                    text <=> root.compact-field-text;
+                }
+
+            }
+        }
+
+        scenarios-group := GitHubShowcaseGroup {
+            title: I18n.ui-components-scenarios;
+            back-to-top => { root.jump-to(0px); }
+        }
+
+
+        GitHubShowcaseSection {
+            title: I18n.ui-components-demo-message-center;
+            description: I18n.ui-components-demo-exercise-the-real-banner-durable-inbox-unread-count;
+            content-height: 96px;
+
+            HorizontalLayout {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: 32px;
+                spacing: GitHubMetrics.size-8;
+                alignment: start;
+
+                for action in [
+                    { label: I18n.ui-components-demo-general, id: 0, primary: false },
+                    { label: "Webhook", id: 1, primary: false },
+                    { label: I18n.ui-components-demo-software-update, id: 2, primary: false },
+                    { label: I18n.ui-components-demo-cd-success, id: 3, primary: true }
+                ]: GitHubButton {
+                    text: action.label;
+                    primary: action.primary;
+                    clicked => { root.send-message-example(action.id); }
+                }
+            }
+
+            HorizontalLayout {
+                x: 0px;
+                y: 56px;
+                width: parent.width;
+                height: 32px;
+                spacing: GitHubMetrics.size-8;
+                alignment: start;
+
+                for action in [
+                    { label: I18n.ui-components-demo-warning, id: 4, danger: false },
+                    { label: I18n.ui-components-demo-critical-os, id: 5, danger: true },
+                    { label: I18n.ui-components-demo-in-app-only, id: 6, danger: false }
+                ]: GitHubButton {
+                    text: action.label;
+                    danger: action.danger;
+                    clicked => { root.send-message-example(action.id); }
+                }
+            }
+        }
+
+        GitHubShowcaseSection {
+            title: I18n.ui-components-demo-notification-inbox-rows;
+            description: I18n.ui-components-demo-github-inbox-unread-hierarchy-canvas-subtle-fill-accent;
+            content-height: 224px;
+
+            GitHubShowcaseSampleSurface {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: 168px;
+                clip: true;
+
+                VerticalLayout {
+                    width: parent.width;
+                    spacing: 0px;
+
+                    GitHubMessageListItem {
+                        framed: true;
+                        first-row: true;
+                        item: {
+                            id: "gallery-unread",
+                            title: I18n.ui-components-demo-pull-request-checks-completed,
+                            body: I18n.ui-components-demo-all-required-checks-passed-for-the-release-branch,
+                            source: I18n.ui-components-demo-pull-requests,
+                            category: "cd_workflow",
+                            category-label: I18n.ui-components-demo-cd-workflow,
+                            created-at: I18n.ui-components-demo-just-now,
+                            level: MessageLevel.Success,
+                            read: false,
+                            target: ""
+                        };
+                    }
+                    GitHubMessageListItem {
+                        framed: true;
+                        last-row: true;
+                        item: {
+                            id: "gallery-read",
+                            title: I18n.ui-components-demo-network-connection-restored,
+                            body: I18n.ui-components-demo-remote-repository-operations-are-available-again,
+                            source: I18n.ui-components-demo-network,
+                            category: "general",
+                            category-label: I18n.ui-components-demo-general,
+                            created-at: I18n.ui-components-demo-10-minutes-ago,
+                            level: MessageLevel.Info,
+                            read: true,
+                            target: ""
+                        };
+                    }
+                }
+            }
+
+            GitHubPagination {
+                y: 184px;
+                width: parent.width;
+                current-page: 1;
+                page-count: 4;
+                pages: [1, 2, 3, 4];
+                page-selected(number) => { self.current-page = number; }
+            }
+        }
+
+        GitHubShowcaseSection {
+            title: I18n.ui-components-demo-ai-review-findings;
+            description: I18n.ui-components-demo-copilot-style-severity-labels-and-flat-actionable-rows;
+            content-height: 328px;
+
+            GitHubShowcaseSampleSurface {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: 320px;
+                clip: true;
+
+                VerticalLayout {
+                    width: parent.width;
+                    spacing: 0px;
+
+                    GitHubAiReviewFindingRow {
+                        width: parent.width;
+                        severity: "high";
+                        file: "src/payment/authorize.rs";
+                        line: 84;
+                        title: I18n.ui-components-demo-authorization-failure-is-ignored;
+                        explanation: I18n.ui-components-demo-the-new-branch-continues-after-a-denied-authorization;
+                        suggestion: I18n.ui-components-demo-return-the-provider-error-before-persisting-the-transaction;
+                    }
+                    GitHubAiReviewFindingRow {
+                        width: parent.width;
+                        severity: "medium";
+                        file: "src/cache.rs";
+                        line: 37;
+                        title: I18n.ui-components-demo-cache-key-is-not-project-scoped;
+                        explanation: I18n.ui-components-demo-two-open-projects-can-overwrite-the-same-review;
+                        selected: true;
+                    }
+                    HorizontalLayout {
+                        width: parent.width;
+                        height: GitHubMetrics.size-40;
+                        padding-left: GitHubMetrics.size-16;
+                        spacing: GitHubMetrics.size-8;
+                        alignment: start;
+                        GitHubAiReviewSeverityLabel { severity: "high"; }
+                        GitHubAiReviewSeverityLabel { severity: "medium"; }
+                        GitHubAiReviewSeverityLabel { severity: "low"; }
+                    }
+                }
+            }
+        }
+
+        GitHubShowcaseSection {
+            title: I18n.ui-components-demo-agent-response;
+            description: I18n.ui-components-demo-native-compact-markdown-blocks-with-in-place-preview;
+            content-height: agent-response-showcase.height + GitHubMetrics.size-8;
+
+            agent-response-showcase := GitHubAgentResponseShowcase {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                open-preview => { root.open-artifact-preview-fixture("markdown"); }
+            }
+        }
+
+        GitHubShowcaseSection {
+            title: I18n.ui-components-demo-artifact-preview-fixtures;
+            description: I18n.ui-components-demo-open-real-preview-providers-and-failure-handling-through;
             content-height: 268px;
 
             GitHubShowcaseSampleSurface {
@@ -1641,15 +1840,15 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                     spacing: 0px;
 
                     for fixture in [
-                        { id: "markdown", label: "Markdown", description: "Headings, inline styles, links, lists, quotes, tables, and code", icon: @image-url("../../assets/icons/octicon-read-16.svg") },
-                        { id: "image-png", label: "PNG image", description: "Decoded RGBA image with contain sizing", icon: @image-url("../../assets/icons/octicon-file-added-16.svg") },
-                        { id: "plain-text", label: "Plain text", description: "Scrollable monospaced log with copy support", icon: @image-url("../../assets/icons/octicon-file-diff-16.svg") },
-                        { id: "json-text", label: "JSON text", description: "UTF-8 application/json through the plain-text provider", icon: @image-url("../../assets/icons/octicon-table-16.svg") },
-                        { id: "unsupported-binary", label: "Unsupported binary", description: "Safe unsupported-provider error state", icon: @image-url("../../assets/icons/octicon-alert-16.svg") }
+                        { id: "markdown", label: "Markdown", description: I18n.ui-components-demo-headings-inline-styles-links-lists-quotes-tables-and, icon: @image-url("../../assets/icons/octicon-read-16.svg") },
+                        { id: "image-png", label: I18n.ui-components-demo-png-image, description: I18n.ui-components-demo-decoded-rgba-image-with-contain-sizing, icon: @image-url("../../assets/icons/octicon-file-added-16.svg") },
+                        { id: "plain-text", label: I18n.ui-components-demo-plain-text, description: I18n.ui-components-demo-scrollable-monospaced-log-with-copy-support, icon: @image-url("../../assets/icons/octicon-file-diff-16.svg") },
+                        { id: "json-text", label: I18n.ui-components-demo-json-text, description: I18n.ui-components-demo-utf-8-application-json-through-the-plain-text, icon: @image-url("../../assets/icons/octicon-table-16.svg") },
+                        { id: "unsupported-binary", label: I18n.ui-components-demo-unsupported-binary, description: I18n.ui-components-demo-safe-unsupported-provider-error-state, icon: @image-url("../../assets/icons/octicon-alert-16.svg") }
                     ]: GitHubActionListItem {
                         text: fixture.label;
                         description: fixture.description;
-                        trailing-text: "Open";
+                        trailing-text: I18n.ui-components-demo-open;
                         icon: fixture.icon;
                         activated => { root.open-artifact-preview-fixture(fixture.id); }
                     }
@@ -1658,8 +1857,8 @@ export component GitHubUiComponentsGallery inherits Rectangle {
         }
 
         registry-section := GitHubShowcaseSection {
-            title: "Feature component registry";
-            description: "Complex components use real project state on their owning routes; use these links to exercise them without duplicating business logic.";
+            title: I18n.ui-components-demo-feature-component-registry;
+            description: I18n.ui-components-demo-complex-components-use-real-project-state-on-their;
             // Seven row gaps separate the eight descriptive ActionList rows;
             // the final row ends before the surface's bottom inset.
             content-height: 7 * (GitHubMetrics.size-48 + GitHubMetrics.size-8)
@@ -1681,14 +1880,14 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                     alignment: start;
 
                     for feature[index] in [
-                        { label: "Project components", description: "Grid/List cards, search, view switcher, card actions, and project dialog variants", trailing: "Open", icon: @image-url("../../assets/icons/octicon-repo-16.svg"), route: Route.Project, selected: false },
-                        { label: "Workflow components", description: "Branch, tag, pull request, deployment, filters, and pagination states", trailing: "Open", icon: @image-url("../../assets/icons/octicon-git-pull-request-16.svg"), route: Route.Workflow, selected: false },
-                        { label: "Pull request filter menu", description: "Reviews, Assignee, and Sort popovers with selected options and dismissal", trailing: "Open", icon: @image-url("../../assets/icons/octicon-filter-16.svg"), route: Route.Workflow, selected: false },
-                        { label: "Job Run components", description: "Application-level run header, Jobs navigation, status, steps, logs, and Stop action", trailing: "Open", icon: @image-url("../../assets/icons/octicon-terminal-16.svg"), route: Route.JobRun, selected: false },
-                        { label: "Chat components", description: "Welcome suggestions, message roles/status, artifact title actions, composer, and history loading", trailing: "Open", icon: @image-url("../../assets/icons/octicon-comment-discussion-16.svg"), route: Route.Chat, selected: false },
-                        { label: "Artifact preview", description: "Shared Markdown, image, and plain-text surface with docked or detached hosts", trailing: "Shared", icon: @image-url("../../assets/icons/octicon-file-diff-16.svg"), route: Route.UiComponents, selected: false },
-                        { label: "Settings components", description: "Responsive section navigation, provider navigation, fields, toggles, panes, and update actions", trailing: "Open", icon: @image-url("../../assets/icons/octicon-gear-16.svg"), route: Route.Settings, selected: false },
-                        { label: "Shell and review components", description: "Navigation rail, breadcrumb, status bar, terminal drawer, pull-request review and diff controls", trailing: "Live", icon: @image-url("../../assets/icons/octicon-stack-16.svg"), route: Route.UiComponents, selected: true }
+                        { label: I18n.ui-components-demo-project-components, description: I18n.ui-components-demo-grid-list-cards-search-view-switcher-card-actions, trailing: I18n.ui-components-demo-open, icon: @image-url("../../assets/icons/octicon-repo-16.svg"), route: Route.Project, selected: false },
+                        { label: I18n.ui-components-demo-workflow-components, description: I18n.ui-components-demo-branch-tag-pull-request-deployment-filters-and-pagination, trailing: I18n.ui-components-demo-open, icon: @image-url("../../assets/icons/octicon-git-pull-request-16.svg"), route: Route.Workflow, selected: false },
+                        { label: I18n.ui-components-demo-pull-request-filter-menu, description: I18n.ui-components-demo-reviews-assignee-and-sort-popovers-with-selected-options, trailing: I18n.ui-components-demo-open, icon: @image-url("../../assets/icons/octicon-filter-16.svg"), route: Route.Workflow, selected: false },
+                        { label: I18n.ui-components-demo-job-run-components, description: I18n.ui-components-demo-application-level-run-header-jobs-navigation-status-steps, trailing: I18n.ui-components-demo-open, icon: @image-url("../../assets/icons/octicon-terminal-16.svg"), route: Route.JobRun, selected: false },
+                        { label: I18n.ui-components-demo-chat-components, description: I18n.ui-components-demo-welcome-suggestions-message-roles-status-artifact-title-actions, trailing: I18n.ui-components-demo-open, icon: @image-url("../../assets/icons/octicon-comment-discussion-16.svg"), route: Route.Chat, selected: false },
+                        { label: I18n.ui-components-demo-artifact-preview, description: I18n.ui-components-demo-shared-markdown-image-and-plain-text-surface-with, trailing: I18n.ui-components-demo-shared, icon: @image-url("../../assets/icons/octicon-file-diff-16.svg"), route: Route.UiComponents, selected: false },
+                        { label: I18n.ui-components-demo-settings-components, description: I18n.ui-components-demo-responsive-section-navigation-provider-navigation-fields-toggles-panes, trailing: I18n.ui-components-demo-open, icon: @image-url("../../assets/icons/octicon-gear-16.svg"), route: Route.Settings, selected: false },
+                        { label: I18n.ui-components-demo-shell-and-review-components, description: I18n.ui-components-demo-navigation-rail-breadcrumb-status-bar-terminal-drawer-pull, trailing: I18n.ui-components-demo-live, icon: @image-url("../../assets/icons/octicon-stack-16.svg"), route: Route.UiComponents, selected: true }
                     ]: GitHubActionListItem {
                         bottom-padding: index < 7 ? GitHubMetrics.size-8 : 0px;
                         text: feature.label;
@@ -1754,9 +1953,9 @@ export component GitHubUiComponentsGallery inherits Rectangle {
             alignment: start;
 
             for menu-item in [
-                { label: "Selected option", description: "Current ActionList state", selected: true, enabled: true, danger: false, icon: @image-url("") },
-                { label: "Disabled option", description: "", selected: false, enabled: false, danger: false, icon: @image-url("") },
-                { label: "Danger option", description: "", selected: false, enabled: true, danger: true, icon: @image-url("../../assets/icons/octicon-trash-16.svg") }
+                { label: I18n.ui-components-demo-selected-option, description: I18n.ui-components-demo-current-actionlist-state, selected: true, enabled: true, danger: false, icon: @image-url("") },
+                { label: I18n.ui-components-demo-disabled-option, description: "", selected: false, enabled: false, danger: false, icon: @image-url("") },
+                { label: I18n.ui-components-demo-danger-option, description: "", selected: false, enabled: true, danger: true, icon: @image-url("../../assets/icons/octicon-trash-16.svg") }
             ]: GitHubActionListItem {
                 text: menu-item.label;
                 description: menu-item.description;

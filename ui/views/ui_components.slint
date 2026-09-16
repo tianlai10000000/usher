@@ -3,14 +3,23 @@ import { GitHubUiComponentsGallery } from "../components/showcase/github_ui_comp
 import { GitHubMetrics } from "../theme/github_theme.slint";
 
 export component GitHubUiComponentsPage inherits GitHubPageView {
+    in property <length> viewport-global-x;
+    in property <length> viewport-global-y;
+    in property <length> viewport-width;
     callback open-artifact-preview-fixture(string);
+    callback scroll-to-section(length);
 
     private property <length> available-width:
         max(0px, root.width - GitHubMetrics.size-32);
 
     GitHubUiComponentsGallery {
         width: root.available-width;
+        viewport-global-x: root.viewport-global-x;
+        viewport-global-y: root.viewport-global-y;
+        viewport-width: root.viewport-width;
+        viewport-height: root.viewport-height;
         navigate(route) => { root.navigate(route); }
+        scroll-to-section(position) => { root.scroll-to-section(position); }
         open-artifact-preview-fixture(id) => { root.open-artifact-preview-fixture(id); }
     }
 }

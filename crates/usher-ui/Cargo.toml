@@ -19,6 +19,8 @@ dev-shell = []
 ai-code-review = []
 
 [dependencies]
+floating-ui-core = "=0.6.0"
+floating-ui-utils = "=0.6.0"
 slint = { version = "1.17.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "raw-window-handle-06", "unstable-fontique-010"] }
 
 [build-dependencies]

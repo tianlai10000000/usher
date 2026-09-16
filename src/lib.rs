@@ -131,6 +131,7 @@ fn ui(
     // Now create the MainWindow (will inherit app appearance)
     // Using native macOS title bar
     let app = MainWindow::new().context("Failed to create MainWindow")?;
+    install_floating_overlay_positioning(&app);
     startup_timeline.checkpoint("main_window_created");
     i18n::initialize(&app, &loaded_settings.language)?;
     startup_timeline.checkpoint("language_initialized");

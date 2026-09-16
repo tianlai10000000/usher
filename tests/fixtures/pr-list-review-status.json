@@ -197,6 +197,204 @@
       "review_status": "none",
       "conversation_count": 1,
       "updated_hours_ago": 192
+    },
+    {
+      "number": "99019",
+      "title": "Support keyboard selection in repository filters",
+      "state": "open",
+      "author": "octocat",
+      "source_branch": "fix/support-keyboard-selection-in-repository-filters",
+      "target_branch": "develop",
+      "review_status": "review_required",
+      "conversation_count": 0,
+      "updated_hours_ago": 200
+    },
+    {
+      "number": "99020",
+      "title": "Keep review menu aligned after changing the window size",
+      "state": "open",
+      "author": "mona",
+      "source_branch": "feature/keep-review-menu-aligned-after-changing-the",
+      "target_branch": "main",
+      "review_status": "approved",
+      "conversation_count": 1,
+      "updated_hours_ago": 207
+    },
+    {
+      "number": "99021",
+      "title": "Refresh translated labels while a menu remains open",
+      "state": "open",
+      "author": "hubot",
+      "source_branch": "chore/refresh-translated-labels-while-a-menu-remains",
+      "target_branch": "main",
+      "review_status": "changes_requested",
+      "conversation_count": 8,
+      "updated_hours_ago": 214
+    },
+    {
+      "number": "99022",
+      "title": "Avoid clipping the last rule in a long selection list",
+      "state": "open",
+      "author": "release-bot",
+      "source_branch": "fix/avoid-clipping-the-last-rule-in-a",
+      "target_branch": "main",
+      "review_status": "none",
+      "conversation_count": 24,
+      "updated_hours_ago": 221
+    },
+    {
+      "number": "99023",
+      "title": "Preserve focus after dismissing the sort menu",
+      "state": "open",
+      "author": "octocat",
+      "source_branch": "feature/preserve-focus-after-dismissing-the-sort-menu",
+      "target_branch": "develop",
+      "review_status": "review_required",
+      "conversation_count": 99,
+      "updated_hours_ago": 228
+    },
+    {
+      "number": "99024",
+      "title": "Apply neutral selection indicators to single-choice menus",
+      "state": "open",
+      "author": "mona",
+      "source_branch": "chore/apply-neutral-selection-indicators-to-single-choice-menus",
+      "target_branch": "main",
+      "review_status": "approved",
+      "conversation_count": 128,
+      "updated_hours_ago": 235
+    },
+    {
+      "number": "99025",
+      "title": "Reposition overlays near the lower right window corner",
+      "state": "open",
+      "author": "hubot",
+      "source_branch": "fix/reposition-overlays-near-the-lower-right-window",
+      "target_branch": "main",
+      "review_status": "changes_requested",
+      "conversation_count": 0,
+      "updated_hours_ago": 242
+    },
+    {
+      "number": "99026",
+      "title": "Handle a long feature branch name in the pull request list",
+      "state": "open",
+      "author": "release-bot",
+      "source_branch": "feature/handle-a-long-feature-branch-name-in",
+      "target_branch": "main",
+      "review_status": "none",
+      "conversation_count": 1,
+      "updated_hours_ago": 249
+    },
+    {
+      "number": "99027",
+      "title": "Fix stale review state when switching between projects",
+      "state": "open",
+      "author": "octocat",
+      "source_branch": "chore/fix-stale-review-state-when-switching-between",
+      "target_branch": "develop",
+      "review_status": "review_required",
+      "conversation_count": 8,
+      "updated_hours_ago": 256
+    },
+    {
+      "number": "99028",
+      "title": "Group compact toolbar actions with a single separator",
+      "state": "open",
+      "author": "mona",
+      "source_branch": "fix/group-compact-toolbar-actions-with-a-single",
+      "target_branch": "main",
+      "review_status": "approved",
+      "conversation_count": 24,
+      "updated_hours_ago": 263
+    },
+    {
+      "number": "99029",
+      "title": "Improve contrast for secondary menu descriptions",
+      "state": "open",
+      "author": "hubot",
+      "source_branch": "feature/improve-contrast-for-secondary-menu-descriptions",
+      "target_branch": "main",
+      "review_status": "changes_requested",
+      "conversation_count": 99,
+      "updated_hours_ago": 270
+    },
+    {
+      "number": "99030",
+      "title": "Respect overlay padding in compact windows",
+      "state": "open",
+      "author": "release-bot",
+      "source_branch": "chore/respect-overlay-padding-in-compact-windows",
+      "target_branch": "main",
+      "review_status": "none",
+      "conversation_count": 128,
+      "updated_hours_ago": 277
+    },
+    {
+      "number": "99031",
+      "title": "Align assignee options with review filter options",
+      "state": "merged",
+      "author": "octocat",
+      "source_branch": "fix/align-assignee-options-with-review-filter-options",
+      "target_branch": "develop",
+      "review_status": "review_required",
+      "conversation_count": 0,
+      "updated_hours_ago": 284
+    },
+    {
+      "number": "99032",
+      "title": "Restore the selected rule after opening the menu again",
+      "state": "merged",
+      "author": "mona",
+      "source_branch": "feature/restore-the-selected-rule-after-opening-the",
+      "target_branch": "main",
+      "review_status": "approved",
+      "conversation_count": 1,
+      "updated_hours_ago": 291
+    },
+    {
+      "number": "99033",
+      "title": "Check event-loop updates during asynchronous list refresh",
+      "state": "merged",
+      "author": "hubot",
+      "source_branch": "chore/check-event-loop-updates-during-asynchronous-list-refresh",
+      "target_branch": "main",
+      "review_status": "changes_requested",
+      "conversation_count": 8,
+      "updated_hours_ago": 298
+    },
+    {
+      "number": "99034",
+      "title": "Keep merged pull requests in the closed results",
+      "state": "closed",
+      "author": "release-bot",
+      "source_branch": "fix/keep-merged-pull-requests-in-the-closed",
+      "target_branch": "main",
+      "review_status": "none",
+      "conversation_count": 24,
+      "updated_hours_ago": 305
+    },
+    {
+      "number": "99035",
+      "title": "Close menus when the responsive toolbar changes",
+      "state": "closed",
+      "author": "octocat",
+      "source_branch": "feature/close-menus-when-the-responsive-toolbar-changes",
+      "target_branch": "develop",
+      "review_status": "review_required",
+      "conversation_count": 99,
+      "updated_hours_ago": 312
+    },
+    {
+      "number": "99036",
+      "title": "Validate search and sort with multiple pages of results",
+      "state": "closed",
+      "author": "mona",
+      "source_branch": "chore/validate-search-and-sort-with-multiple-pages",
+      "target_branch": "main",
+      "review_status": "approved",
+      "conversation_count": 128,
+      "updated_hours_ago": 319
     }
   ]
 }

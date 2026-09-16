@@ -269,10 +269,14 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
   newer row; Inbox reconciliation copies only the at-most-three mounted message
   IDs rather than the complete durable history.
   Window hosts must pass the real window size as `overlay-viewport-*` so collision clamping uses
-  window-mapped coordinates; demo hosts that omit those inputs keep Banner-local
-  clamping. The menu is end-aligned with the overflow trigger horizontally and
-  anchored 6 px below the complete Banner card rather than overlapping its
-  footer. This
+  window-mapped coordinates. Inline showcase Banners opt into the external
+  shared queue menu at the window root, publish live window anchors, and use
+  Floating UI against the visible page viewport. Section backgrounds and scroll
+  clips must never cover this menu; scrolling/resizing updates its placement,
+  and moving its trigger out of view closes it. The menu is end-aligned with the overflow trigger horizontally and
+  anchored to the actual 24 px footer button with a 6 px gap in either direction.
+  Both hosts use shared Floating UI placement: prefer below, flip above the
+  button when space is insufficient, and never use the full card as the anchor. This
   prevents a Banner's own action buttons from competing with a second
   text-button toolbar. The semantic rail spans the card's complete left edge
   and is clipped by its outer radius. The footer is shown for a multi-item
@@ -312,9 +316,12 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
   旧 timer 不得关闭新行。Inbox 对账只复制最多三条已挂载消息 ID，不复制完整持久历史。
   点击 Banner 的非交互表面也必须关闭菜单；操作按钮、关闭按钮与三点入口保持各自行为。
   窗口宿主必须把真实窗口尺寸传入 `overlay-viewport-*`，
-  碰撞夹紧才使用窗口坐标；演练场等未传入的宿主则回退到 Banner 本地夹紧，保证
-  菜单横向与三点按钮尾对齐，纵向从完整 Banner 卡片底边向下留出 6px，不得覆盖
-  底栏。这样 Notify 自身已有操作按钮时，不会再叠加
+  碰撞夹紧才使用窗口坐标。演练场行内 Banner 选择外部共享队列菜单，将其挂到窗口
+  根层并发布实时窗口锚点，使用 Floating UI 按可见页面视口避让。章节背景与滚动
+  裁剪不得遮挡菜单；滚动/缩放更新定位，触发器离开视口时关闭。保证
+  菜单横向与三点按钮尾对齐，纵向以实际 24px 底栏按钮为锚点，上下均留出 6px。
+  两类宿主共用 Floating UI：优先向下，空间不足时翻转到按钮上方，禁止把整张卡片
+  当成锚点。这样 Notify 自身已有操作按钮时，不会再叠加
   第二条文字按钮工具栏。左侧语义色条贯穿卡片全高，并由外层圆角裁剪。多条 Banner
   排队或存在额外未读消息时显示该底部行。
 - 行遵循 github.com/notifications 的未读层级：未读行静止态使用 `canvas-subtle`、
@@ -323,6 +330,12 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
   语义色。改变已读状态不得重排最新优先序列。
 
 ## Regression checklist / 回归清单
+
+- In English and Chinese, open the inline showcase queue menu and click its
+  overlay actions. Assert a 6 px button gap both below and above; verify scrolling, bottom-edge avoidance,
+  resizing, Escape, offscreen dismissal, and the production notification menu.
+- 中英文下打开行内通知菜单，验证浮层操作可点击；验证上下展开均与按钮相距 6px、
+  滚动跟随、底部避让、缩放、Escape、锚点离屏关闭，以及生产通知菜单。
 
 - Check 0/1/20/21/78/1,000 records: each projected page has at most 20 rows,
   all pages cover the filtered history once, and badges retain global counts.

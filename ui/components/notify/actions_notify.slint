@@ -5,6 +5,42 @@ import { GitHubActionListItem, GitHubActionMenu, GitHubActionMenuTriggerArea } f
 import { NotificationType } from "notification.slint";
 import { I18n } from "@i18n";
 
+// Shared queue actions; clipped page hosts mount this at their root overlay layer.
+export component GitHubNotificationQueueMenu inherits GitHubActionMenu {
+    callback view-all-clicked();
+    callback dismiss-all-clicked();
+    menu-width: 224px;
+    content-height: 80px;
+    align: "end";
+    side: "bottom";
+    anchor-gap: 6px;
+
+    VerticalLayout {
+        x: 8px;
+        y: 8px;
+        width: parent.width - 16px;
+        spacing: 0px;
+        alignment: start;
+
+        GitHubActionListItem {
+            text: I18n.messages-view-all;
+            icon: @image-url("../../assets/icons/octicon-link-external-16.svg");
+            activated => {
+                root.view-all-clicked();
+            }
+        }
+
+        GitHubActionListItem {
+            text: I18n.messages-dismiss-all;
+            icon: @image-url("../../assets/icons/octicon-trash-16.svg");
+            activated => {
+                root.dismiss-all-clicked();
+            }
+        }
+    }
+
+}
+
 // A floating application notification is an overlay surface, not an inline
 // Primer Banner. Keep its canvas and border neutral so it cannot merge with
 // page content; convey severity with the leading visual and a narrow accent.
@@ -32,7 +68,24 @@ export component GitHubNotificationBanner inherits Rectangle {
 
     private property <int> hidden-count: max(0, root.total-count - root.queue-count);
     private property <bool> show-queue-footer: root.queue-count >= 2 || root.hidden-count > 0;
-    private property <bool> queue-menu-open: false;
+    in-out property <bool> queue-menu-open: false;
+    in property <bool> external-queue-menu: false;
+    callback queue-menu-anchor-changed(length, length, length);
+    private property <length> queue-button-x: root.width - 30px;
+    private property <length> queue-button-y: root.height - root.footer-height + 1px
+        + (root.footer-height - 1px - 24px) / 2;
+    private property <length> queue-anchor-x: card-surface.absolute-position.x + root.queue-button-x;
+    private property <length> queue-anchor-y: card-surface.absolute-position.y + root.queue-button-y;
+
+    function publish-queue-anchor() {
+        if root.external-queue-menu && root.queue-menu-open {
+            root.queue-menu-anchor-changed(root.queue-anchor-x, root.queue-anchor-y, 24px);
+        }
+    }
+    changed queue-menu-open => { root.publish-queue-anchor(); }
+    changed queue-anchor-x => { root.publish-queue-anchor(); }
+    changed queue-anchor-y => { root.publish-queue-anchor(); }
+    changed height => { root.publish-queue-anchor(); }
     // Window hosts pass a viewport wider than this Banner (see main.slint).
     // Demo hosts leave the default (Banner width); mixing that with a
     // window-origin viewport-x clamps the menu to the far left of the window.
@@ -244,8 +297,8 @@ export component GitHubNotificationBanner inherits Rectangle {
         }
 
         queue-menu-button := Rectangle {
-            x: parent.width - 30px;
-            y: (parent.height - self.height) / 2;
+            x: root.queue-button-x;
+            y: root.queue-button-y - parent.y;
             width: 24px;
             height: 24px;
             border-radius: GitHubMetrics.radius-medium;
@@ -273,19 +326,18 @@ export component GitHubNotificationBanner inherits Rectangle {
         }
     }
 
-    queue-actions-menu := GitHubActionMenu {
+    if !root.external-queue-menu: queue-actions-menu := GitHubNotificationQueueMenu {
         open: root.queue-menu-open;
+        adaptive-placement: true;
         viewport-x: root.menu-viewport-x;
         viewport-y: root.menu-viewport-y;
         viewport-width: root.menu-viewport-width;
         viewport-height: root.menu-viewport-height;
-        // Match the footer kebab horizontally, but anchor vertically to the
-        // complete card edge. Anchoring to the inset 24px trigger made the
-        // menu overlap the footer instead of sitting cleanly below the Banner.
-        anchor-x: root.width - 30px;
-        anchor-y: root.height;
+        // Both placement directions use the same footer button rectangle.
+        anchor-x: root.queue-button-x;
+        anchor-y: root.queue-button-y;
         anchor-width: 24px;
-        anchor-height: 0px;
+        anchor-height: 24px;
         anchor-gap: 6px;
         menu-width: 224px;
         content-height: 80px;
@@ -293,31 +345,8 @@ export component GitHubNotificationBanner inherits Rectangle {
         side: "bottom";
         dismiss-requested => { root.queue-menu-open = false; }
 
-        VerticalLayout {
-            x: 8px;
-            y: 8px;
-            width: parent.width - 16px;
-            spacing: 0px;
-            alignment: start;
-
-            GitHubActionListItem {
-                text: I18n.messages-view-all;
-                icon: @image-url("../../assets/icons/octicon-link-external-16.svg");
-                activated => {
-                    root.queue-menu-open = false;
-                    root.view-all-clicked();
-                }
-            }
-
-            GitHubActionListItem {
-                text: I18n.messages-dismiss-all;
-                icon: @image-url("../../assets/icons/octicon-trash-16.svg");
-                activated => {
-                    root.queue-menu-open = false;
-                    root.dismiss-all-clicked();
-                }
-            }
-        }
+        view-all-clicked => { root.queue-menu-open = false; root.view-all-clicked(); }
+        dismiss-all-clicked => { root.queue-menu-open = false; root.dismiss-all-clicked(); }
     }
 
     close-button := GitHubIconButton {

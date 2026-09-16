@@ -11,6 +11,7 @@ use usher_lib::{MainWindow, Route};
 fn showcase_select_layout_and_popup_stay_inside_their_surfaces() {
     i_slint_backend_testing::init_no_event_loop();
     let window = MainWindow::new().unwrap();
+    slint::select_bundled_translation("en").unwrap();
     window.set_show_navigation_drawer(false);
     window.set_platform_is_macos(false);
     window.set_current_route(Route::UiComponents);
@@ -207,7 +208,7 @@ fn showcase_select_layout_and_popup_stay_inside_their_surfaces() {
             position.y + size.height <= trigger.absolute_position().y - 3.5,
             "menu near the bottom must flip above its trigger"
         );
-        for label in ["System default", "English", "Chinese (Simplified)"] {
+        for label in ["System default", "English", "简体中文"] {
             let row = ElementHandle::find_by_accessible_label(&window, label)
                 .find(|row| row.accessible_checked().is_some())
                 .unwrap();

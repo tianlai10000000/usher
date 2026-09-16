@@ -1,0 +1,24 @@
+import { GitHubActionListItem } from "../github_action_menu.slint";
+import { AiReviewRuleChoice } from "@ai-review";
+import { I18n } from "@i18n";
+
+// Shared by the PR toolbar and the isolated component playground.
+export component GitHubPullRequestRuleMenu inherits Rectangle {
+    in property <[AiReviewRuleChoice]> options;
+    callback selected(string);
+
+    width: 320px;
+    height: 16px + root.options.length * 48px;
+    background: transparent;
+
+    for rule[index] in root.options: rule-item := GitHubActionListItem {
+        x: 8px;
+        y: 8px + index * 48px;
+        width: parent.width - 16px;
+        text: rule.name;
+        description: rule.inherited ? I18n.pr-list-follows-settings-default : I18n.pr-list-project-override;
+        selectable: true;
+        selected: rule.selected;
+        activated => { root.selected(rule.id); }
+    }
+}

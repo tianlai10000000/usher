@@ -11,6 +11,7 @@ use usher_lib::{MainWindow, Route};
 fn showcase_action_menu_anchors_floats_and_toggles() {
     i_slint_backend_testing::init_no_event_loop();
     let window = MainWindow::new().unwrap();
+    usher_lib::install_floating_overlay_positioning(&window);
     window.set_show_navigation_drawer(false);
     window.set_platform_is_macos(false);
     window.set_current_route(Route::UiComponents);
@@ -24,6 +25,144 @@ fn showcase_action_menu_anchors_floats_and_toggles() {
             .next()
             .unwrap_or_else(|| panic!("missing UI element {id}"))
     };
+    for (locale, width, labels, back) in [
+        (
+            "en",
+            1000.0,
+            [
+                "Foundations",
+                "Actions",
+                "Containment",
+                "Communication",
+                "Navigation",
+                "Selection",
+                "Text input",
+                "Scenarios",
+            ],
+            "Back to top",
+        ),
+        (
+            "zh-CN",
+            600.0,
+            [
+                "基础",
+                "操作",
+                "容器",
+                "反馈",
+                "导航",
+                "选择",
+                "文本输入",
+                "场景",
+            ],
+            "返回顶部",
+        ),
+    ] {
+        window.window().dispatch_event(WindowEvent::Resized {
+            size: LogicalSize::new(width, 800.0),
+        });
+        slint::select_bundled_translation(locale).unwrap();
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        let directory = ElementHandle::find_by_element_type_name(&window, "GitHubLink")
+            .find(|element| element.accessible_label().as_deref() == Some(labels[0]))
+            .unwrap();
+        let directory_position = directory.absolute_position();
+        for label in labels {
+            let link = ElementHandle::find_by_element_type_name(&window, "GitHubLink")
+                .find(|element| element.accessible_label().as_deref() == Some(label))
+                .unwrap();
+            assert!(link.absolute_position().x + link.size().width <= width);
+            link.mock_single_click(PointerEventButton::Left);
+            i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
+            let group = find("GitHubShowcaseGroup::heading");
+            assert_eq!(group.accessible_label().as_deref(), Some(label));
+            assert!(
+                group.absolute_position().y >= 0.0 && group.absolute_position().y < 150.0,
+                "{label}"
+            );
+            let sample = match label {
+                "Actions" => Some("Try action"),
+                "操作" => Some("执行操作"),
+                "Navigation" => Some("Standalone link"),
+                "导航" => Some("独立链接"),
+                "Selection" => Some("Select all"),
+                "选择" => Some("全选"),
+                "Scenarios" => Some("General"),
+                "场景" => Some("普通消息"),
+                _ => None,
+            };
+            if let Some(sample) = sample {
+                assert!(
+                    ElementHandle::find_by_accessible_label(&window, sample)
+                        .next()
+                        .is_some(),
+                    "{locale}: {sample}"
+                );
+            }
+            ElementHandle::find_by_accessible_label(&window, back)
+                .next()
+                .unwrap()
+                .mock_single_click(PointerEventButton::Left);
+            i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
+            assert_eq!(directory.absolute_position(), directory_position);
+        }
+    }
+    window.window().dispatch_event(WindowEvent::Resized {
+        size: LogicalSize::new(1000.0, 800.0),
+    });
+    slint::select_bundled_translation("en").unwrap();
+    ElementHandle::find_by_element_type_name(&window, "GitHubLink")
+        .find(|element| element.accessible_label().as_deref() == Some("Selection"))
+        .unwrap()
+        .mock_single_click(PointerEventButton::Left);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
+    let page_scroll = find("MainWindow::page-scroll-view");
+    for _ in 0..20 {
+        if ElementHandle::find_by_element_id(&window, "GitHubPrMenuShowcase::short-rules-button")
+            .next()
+            .is_some()
+        {
+            break;
+        }
+        page_scroll.scroll(0.0, -200.0);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
+    }
+    let short = find("GitHubPrMenuShowcase::short-rules-button");
+    page_scroll.scroll(0.0, 220.0 - short.absolute_position().y);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
+    let flow = find("GitHubPrMenuShowcase::flow");
+    assert!(short.absolute_position().y + short.size().height <= flow.absolute_position().y);
+    short.mock_single_click(PointerEventButton::Left);
+    find("GitHubPullRequestFlow::rule-btn").mock_single_click(PointerEventButton::Left);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
+    assert_eq!(
+        find("GitHubPullRequestMenuOverlay::filter-menu")
+            .size()
+            .height,
+        112.0
+    );
+    find("GitHubPullRequestFlow::rule-btn").mock_single_click(PointerEventButton::Left);
+    find("GitHubPrMenuShowcase::long-rules-button").mock_single_click(PointerEventButton::Left);
+    let sort = find("GitHubPullRequestFlow::sort-btn");
+    sort.mock_single_click(PointerEventButton::Left);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
+    let popup = find("GitHubPullRequestMenuOverlay::filter-menu");
+    assert!(
+        (popup.absolute_position().y - sort.absolute_position().y - sort.size().height - 4.0).abs()
+            < 0.5
+    );
+    sort.mock_single_click(PointerEventButton::Left);
+    page_scroll.scroll(0.0, 100000.0);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
+    ElementHandle::find_by_accessible_label(&window, "Back to top")
+        .next()
+        .unwrap()
+        .mock_single_click(PointerEventButton::Left);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
+    ElementHandle::find_by_element_type_name(&window, "GitHubLink")
+        .find(|element| element.accessible_label().as_deref() == Some("Actions"))
+        .unwrap()
+        .mock_single_click(PointerEventButton::Left);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
     let scroll = find("MainWindow::page-scroll-view");
     for _ in 0..20 {
         if ElementHandle::find_by_element_id(

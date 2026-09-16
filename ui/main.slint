@@ -2,6 +2,7 @@ import { GitHubNavigationSidebar, GitHubSidebarRightEdge, NavItem } from "./comp
 import { I18n } from "@i18n";
 import { PrDiffBridge } from "./features/pr_review/diff_bridge.slint";
 export { PrDiffBridge } from "./features/pr_review/diff_bridge.slint";
+export { FloatingOverlayBridge, FloatingOverlayRect } from "./state/floating_overlay_bridge.slint";
 import { GitHubHomePage as HomePage } from "./views/home.slint";
 import { GitHubSearchPage as SearchPage } from "./views/search.slint";
 import { GitHubAboutPage as AboutPage } from "./views/about.slint";
@@ -9,6 +10,7 @@ import { UiComponentsFeature, UiComponentsPage, UiComponentsOverlay } from "@ui-
 import { GitHubWorkflowPage as WorkflowPage } from "./views/workflow/workflow.slint";
 import { GitHubJobRunPage as JobRunPage } from "./views/job_run.slint";
 import { WorkflowPullRequestItem } from "./components/workflow/github_pr_flow.slint";
+import { GitHubPullRequestMenuOverlay, GitHubPrMenuState } from "./components/workflow/github_pr_menu_overlay.slint";
 import { GitHubPullRequestReviewPage } from "@pr-review";
 import { GitHubAiReviewPanel, AiReviewTaskItem, AiReviewRuleChoice, AiReviewFindingItem, AiReviewConversationItem, AiReviewResponseVisualRow, AgentResponseBlockKind, AgentResponseBlock } from "@ai-review";
 import { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffRowMetric, WorkflowPrDiffVirtualWindow, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffGlyphRange, WorkflowPrDiffGlyphRect, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit, GitHubHeaderActionStrip } from "./components/pr_review/shell.slint";
@@ -1018,6 +1020,7 @@ export component MainWindow inherits Window {
     }
 
     changed current-route => {
+        GitHubPrMenuState.close();
         GitHubSelectState.open = false;
         root.settings-select-dismiss();
         root.ai-review-route-visible-changed(
@@ -1314,11 +1317,22 @@ export component MainWindow inherits Window {
                             navigate(route) => { root.navigate(route); }
                         }
                         if root.current-route == Route.UiComponents: UiComponentsPage {
+                            viewport-global-x: page-scroll-view.absolute-position.x;
+                            viewport-global-y: page-scroll-view.absolute-position.y;
+                            viewport-width: page-scroll-view.visible-width;
                             viewport-height: page-scroll-view.visible-height
                                 - root.page-content-height-offset;
                             navigate(route) => { root.navigate(route); }
                             open-artifact-preview-fixture(id) => {
                                 root.open-artifact-preview-fixture(id);
+                            }
+                            scroll-to-section(position) => {
+                                page-scroll-view.viewport-y = -max(0px, min(
+                                    -page-scroll-view.viewport-y + position
+                                        - page-scroll-view.absolute-position.y
+                                        - root.page-content-top-padding - GitHubMetrics.size-16,
+                                    page-scroll-view.content-height - page-scroll-view.visible-height
+                                ));
                             }
                         }
                         if root.current-route == Route.About: AboutPage {
@@ -1332,6 +1346,9 @@ export component MainWindow inherits Window {
                         // the opaque review surface is mounted so hidden delegates do
                         // not participate in live-resize layout and rendering.
                         if root.current-route == Route.Workflow && !root.workflow-pr-review-visible: WorkflowPage {
+                            overlay-viewport-x: page-scroll-view.absolute-position.x;
+                            overlay-viewport-y: page-scroll-view.absolute-position.y;
+                            overlay-viewport-width: page-scroll-view.visible-width;
                             code-font-family: root.workflow-pr-review-code-font-family;
                             viewport-height: page-scroll-view.visible-height - 2px;
                             selected-flow <=> root.workflow-selected-flow;
@@ -3000,7 +3017,21 @@ export component MainWindow inherits Window {
     // Shared tooltip portal: locators inside clipped page/scroll hosts publish
     // here so tips are never truncated by ancestor clip (z alone cannot escape).
     // The full-window host has no input handler; only its clamped tip child paints.
-    if root.current-route == Route.UiComponents: UiComponentsOverlay { z: 9000; }
+    GitHubPullRequestMenuOverlay {
+        z: 9000;
+        viewport-x: page-scroll-view.absolute-position.x;
+        viewport-y: page-scroll-view.absolute-position.y + root.page-content-top-padding;
+        viewport-width: page-scroll-view.visible-width;
+        viewport-height: page-scroll-view.visible-height - root.page-content-height-offset;
+    }
+
+    if root.current-route == Route.UiComponents: UiComponentsOverlay {
+        z: 9000;
+        viewport-x: page-scroll-view.absolute-position.x;
+        viewport-y: page-scroll-view.absolute-position.y + root.page-content-top-padding;
+        viewport-width: page-scroll-view.visible-width;
+        viewport-height: page-scroll-view.visible-height - root.page-content-height-offset;
+    }
 
     GitHubTooltipOverlayHost {
         x: 0px;

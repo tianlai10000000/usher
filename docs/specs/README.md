@@ -43,6 +43,7 @@ unchanged compact in-flow navigation. / UI 设计规范统一定义宽屏双栏�
 切换分组时内容顶部对齐吸顶留白（含短内容）；设置页遵循该规则，窄屏保持原有滚动行为。
 
 The UI design specification defines `GitHub*` component naming,
+the localized playground category directory and reusable-component-before-scenario order / 本地化演练场目录及基础组件先于场景的排序，
 content-sized Select menus with upward placement at bottom edges, isolated
 selector models, owner-scoped option focus, verified grouped-trigger anchors,
 and repeat-trigger dismissal / 按内容定高、底部向上展开、选项焦点按归属隔离、
@@ -71,6 +72,28 @@ Material 依赖边界、仓库级组件目录
 验收门禁；实施顺序和当前状态见
 [`docs/ui-github-migration-plan.md`](../ui-github-migration-plan.md)，缺陷记录见
 [`bug-history.md`](../../bug-history.md)。
+
+The PR workflow spec includes live filter-trigger anchoring and collision
+handling against the visible scroll viewport. / PR 工作流规格包含筛选按钮实时
+锚点与可见滚动视口边界避让。
+PR menus use inset ActionList rows and complete scroll extents; UI Components
+reuses the production toolbar with isolated short/long rule fixtures. / PR 菜单
+使用内缩 ActionList 和完整滚动高度，UI Components 以隔离的短/长规则样例复用生产工具栏。
+Bordered and borderless Select Menu demos are adjacent in Selection; bordered
+menus use the window root and shared adaptive placement without growing layout.
+/ 带边框与无边框 Select Menu 示例在“选择”中相邻展示；带边框菜单使用窗口根浮层
+与共享自适应定位，展开不增高布局。
+PR menus also use a window-root portal in Workflow and the showcase; visible
+anchors track scrolling, offscreen anchors dismiss, and internal menu scrolling
+stays open. / Workflow 与演练场的 PR 菜单也使用窗口根浮层；按钮可见时跟随滚动，
+离屏时关闭，菜单内部滚动保持展开。
+
+The message spec also requires inline notification demos to mount their shared
+queue menu at the window root, above section backgrounds and outside scroll clips.
+/ 消息规格也要求行内通知示例把共享队列菜单挂到窗口根层，避开章节背景遮挡与滚动裁剪。
+Notification queue menus anchor both downward and upward placement to the footer
+button, with a 6 px gap, using the shared Floating UI adapter. / 通知队列菜单上下
+展开均以底栏按钮为锚点、间隔 6px，复用共享 Floating UI 适配器。
 
 Documents that are not specs:
 

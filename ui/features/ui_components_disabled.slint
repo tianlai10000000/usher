@@ -8,7 +8,16 @@ export global UiComponentsFeature {
 // graph. Rust also normalizes direct attempts to enter this unavailable route.
 export component UiComponentsPage inherits Rectangle {
     in property <length> viewport-height;
+    in property <length> viewport-global-x;
+    in property <length> viewport-global-y;
+    in property <length> viewport-width;
     callback navigate(Route);
     callback open-artifact-preview-fixture(string);
+    callback scroll-to-section(length);
 }
-export component UiComponentsOverlay inherits Rectangle {}
+export component UiComponentsOverlay inherits Rectangle {
+    in property <length> viewport-x;
+    in property <length> viewport-y;
+    in property <length> viewport-width;
+    in property <length> viewport-height;
+}

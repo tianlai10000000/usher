@@ -849,6 +849,1078 @@ key = "navigation.ui_components"
 text = "UI Components"
 
 [[messages]]
+key = "ui_components.foundations"
+text = "Foundations"
+
+[[messages]]
+key = "ui_components.actions"
+text = "Actions"
+
+[[messages]]
+key = "ui_components.containment"
+text = "Containment"
+
+[[messages]]
+key = "ui_components.communication"
+text = "Communication"
+
+[[messages]]
+key = "ui_components.navigation"
+text = "Navigation"
+
+[[messages]]
+key = "ui_components.selection"
+text = "Selection"
+
+[[messages]]
+key = "ui_components.text_input"
+text = "Text input"
+
+[[messages]]
+key = "ui_components.scenarios"
+text = "Scenarios"
+
+[[messages]]
+key = "ui_components.demo.code_review"
+text = "Code review"
+
+[[messages]]
+key = "ui_components.demo.pull_request_review_submitted"
+text = "Pull request review submitted"
+
+[[messages]]
+key = "ui_components.demo.ai_review_completed"
+text = "AI review completed"
+
+[[messages]]
+key = "ui_components.demo.delivery"
+text = "Delivery"
+
+[[messages]]
+key = "ui_components.demo.tag_created"
+text = "Tag created"
+
+[[messages]]
+key = "ui_components.demo.deployment_completed"
+text = "Deployment completed"
+
+[[messages]]
+key = "ui_components.demo.informational_toast"
+text = "Informational Toast"
+
+[[messages]]
+key = "ui_components.demo.operation_completed"
+text = "Operation completed"
+
+[[messages]]
+key = "ui_components.demo.operation_failed"
+text = "Operation failed"
+
+[[messages]]
+key = "ui_components.demo.loading_with_overlay"
+text = "Loading with overlay"
+
+[[messages]]
+key = "ui_components.demo.top_position"
+text = "Top position"
+
+[[messages]]
+key = "ui_components.demo.middle_position"
+text = "Middle position"
+
+[[messages]]
+key = "ui_components.demo.bottom_position"
+text = "Bottom position"
+
+[[messages]]
+key = "ui_components.demo.closes_after_five_seconds"
+text = "Closes after five seconds"
+
+[[messages]]
+key = "ui_components.demo.click_the_overlay_to_dismiss"
+text = "Click the overlay to dismiss"
+
+[[messages]]
+key = "ui_components.demo.information"
+text = "Information"
+
+[[messages]]
+key = "ui_components.demo.review_the_current_settings"
+text = "Review the current settings."
+
+[[messages]]
+key = "ui_components.demo.saved"
+text = "Saved"
+
+[[messages]]
+key = "ui_components.demo.configuration_was_saved"
+text = "Configuration was saved."
+
+[[messages]]
+key = "ui_components.demo.attention"
+text = "Attention"
+
+[[messages]]
+key = "ui_components.demo.a_follow_up_action_is_required"
+text = "A follow-up action is required."
+
+[[messages]]
+key = "ui_components.demo.failed"
+text = "Failed"
+
+[[messages]]
+key = "ui_components.demo.the_request_could_not_be_completed"
+text = "The request could not be completed."
+
+[[messages]]
+key = "ui_components.demo.update_available"
+text = "Update available"
+
+[[messages]]
+key = "ui_components.demo.choose_an_action_to_exercise_banner_callbacks"
+text = "Choose an action to exercise Banner callbacks."
+
+[[messages]]
+key = "ui_components.demo.later"
+text = "Later"
+
+[[messages]]
+key = "ui_components.demo.install"
+text = "Install"
+
+[[messages]]
+key = "ui_components.demo.webhook_received"
+text = "Webhook received"
+
+[[messages]]
+key = "ui_components.demo.a_webhook_event_is_ready_for_review"
+text = "A webhook event is ready for review."
+
+[[messages]]
+key = "ui_components.demo.general_message"
+text = "General message"
+
+[[messages]]
+key = "ui_components.demo.a_general_application_message_was_received"
+text = "A general application message was received."
+
+[[messages]]
+key = "ui_components.demo.usher_1_0_0_is_ready_to_install"
+text = "Usher 1.0.0 is ready to install."
+
+[[messages]]
+key = "ui_components.demo.updater"
+text = "Updater"
+
+[[messages]]
+key = "ui_components.demo.cd_workflow_completed"
+text = "CD workflow completed"
+
+[[messages]]
+key = "ui_components.demo.the_release_passed_verification_and_is_live"
+text = "The release passed verification and is live."
+
+[[messages]]
+key = "ui_components.demo.action_recommended"
+text = "Action recommended"
+
+[[messages]]
+key = "ui_components.demo.review_the_deployment_configuration_before_continuing"
+text = "Review the deployment configuration before continuing."
+
+[[messages]]
+key = "ui_components.demo.critical_failure"
+text = "Critical failure"
+
+[[messages]]
+key = "ui_components.demo.this_test_always_requests_a_native_system_notification"
+text = "This test always requests a native system notification."
+
+[[messages]]
+key = "ui_components.demo.in_app_only"
+text = "In-app only"
+
+[[messages]]
+key = "ui_components.demo.this_message_is_stored_in_inbox_without_a"
+text = "This message is stored in Inbox without a system notification."
+
+[[messages]]
+key = "ui_components.demo.confirm_change"
+text = "Confirm change"
+
+[[messages]]
+key = "ui_components.demo.this_modal_dialog_uses_fixed_dimensions_a_backdrop"
+text = "This modal dialog uses fixed dimensions, a backdrop, one secondary action, and one primary action."
+
+[[messages]]
+key = "ui_components.demo.confirm"
+text = "Confirm"
+
+[[messages]]
+key = "ui_components.demo.non_modal_example"
+text = "Non-modal example"
+
+[[messages]]
+key = "ui_components.demo.press_escape_use_the_close_button_or_click"
+text = "Press Escape, use the close button, or click the backdrop to dismiss this percentage-sized dialog."
+
+[[messages]]
+key = "ui_components.demo.done"
+text = "Done"
+
+[[messages]]
+key = "ui_components.demo.dialog_without_backdrop"
+text = "Dialog without backdrop"
+
+[[messages]]
+key = "ui_components.demo.this_variant_keeps_the_underlying_page_visible_and"
+text = "This variant keeps the underlying page visible and exercises the overlay property."
+
+[[messages]]
+key = "ui_components.demo.semantic_tokens_and_status"
+text = "Semantic tokens and status"
+
+[[messages]]
+key = "ui_components.demo.foreground_canvas_border_success_attention_danger_and_status"
+text = "Foreground, canvas, border, success, attention, danger, and status-badge comparisons."
+
+[[messages]]
+key = "ui_components.demo.canvas"
+text = "Canvas"
+
+[[messages]]
+key = "ui_components.demo.subtle"
+text = "Subtle"
+
+[[messages]]
+key = "ui_components.demo.accent"
+text = "Accent"
+
+[[messages]]
+key = "ui_components.demo.success"
+text = "Success"
+
+[[messages]]
+key = "ui_components.demo.danger"
+text = "Danger"
+
+[[messages]]
+key = "ui_components.demo.neutral"
+text = "Neutral"
+
+[[messages]]
+key = "ui_components.demo.buttons"
+text = "Buttons"
+
+[[messages]]
+key = "ui_components.demo.githubbutton_properties_default_primary_danger_selected_disabled_and"
+text = "GitHubButton properties: default, primary, danger, selected, disabled, and busy."
+
+[[messages]]
+key = "ui_components.demo.intent"
+text = "Intent"
+
+[[messages]]
+key = "ui_components.demo.primary"
+text = "Primary"
+
+[[messages]]
+key = "ui_components.demo.selected"
+text = "Selected"
+
+[[messages]]
+key = "ui_components.demo.availability"
+text = "Availability"
+
+[[messages]]
+key = "ui_components.demo.disabled"
+text = "Disabled"
+
+[[messages]]
+key = "ui_components.demo.try_action"
+text = "Try action"
+
+[[messages]]
+key = "ui_components.demo.button_activation_received"
+text = "Button activation received."
+
+[[messages]]
+key = "ui_components.demo.load_more"
+text = "Load more"
+
+[[messages]]
+key = "ui_components.demo.iconbutton_and_copybutton"
+text = "IconButton and CopyButton"
+
+[[messages]]
+key = "ui_components.demo.invisible_icon_button"
+text = "Invisible icon button"
+
+[[messages]]
+key = "ui_components.demo.bordered_icon_button"
+text = "Bordered icon button"
+
+[[messages]]
+key = "ui_components.demo.danger_icon_button"
+text = "Danger icon button"
+
+[[messages]]
+key = "ui_components.demo.review_this_pull_request_with_ai"
+text = "Review this pull request with AI"
+
+[[messages]]
+key = "ui_components.demo.close_ai_code_review"
+text = "Close AI code review"
+
+[[messages]]
+key = "ui_components.demo.ai_code_review_is_running"
+text = "AI code review is running"
+
+[[messages]]
+key = "ui_components.demo.action_list_item"
+text = "Action list item"
+
+[[messages]]
+key = "ui_components.demo.with_supporting_text"
+text = "With supporting text"
+
+[[messages]]
+key = "ui_components.demo.delete_item"
+text = "Delete item"
+
+[[messages]]
+key = "ui_components.demo.actionmenu_borderless_actionlist"
+text = "ActionMenu - borderless ActionList"
+
+[[messages]]
+key = "ui_components.demo.borderless_action_rows_anchoredoverlay_placement_alignment_side_selection"
+text = "Borderless action rows, AnchoredOverlay placement, alignment, side selection, Escape, and caller-owned outside-click dismiss."
+
+[[messages]]
+key = "ui_components.demo.start_below"
+text = "Start / below"
+
+[[messages]]
+key = "ui_components.demo.end_below"
+text = "End / below"
+
+[[messages]]
+key = "ui_components.demo.start_above"
+text = "Start / above"
+
+[[messages]]
+key = "ui_components.demo.fixed_percentage_sizing_modal_non_modal_behavior_backdrop"
+text = "Fixed/percentage sizing, modal/non-modal behavior, backdrop, and action combinations."
+
+[[messages]]
+key = "ui_components.demo.confirmation"
+text = "Confirmation"
+
+[[messages]]
+key = "ui_components.demo.non_modal"
+text = "Non-modal"
+
+[[messages]]
+key = "ui_components.demo.no_backdrop"
+text = "No backdrop"
+
+[[messages]]
+key = "ui_components.demo.labels_and_counters"
+text = "Labels and counters"
+
+[[messages]]
+key = "ui_components.demo.metadata_labels_and_primer_counterlabel_schemes_limits_and"
+text = "Metadata labels and Primer CounterLabel schemes, limits, and zero-count behavior."
+
+[[messages]]
+key = "ui_components.demo.neutral_metadata"
+text = "Neutral metadata"
+
+[[messages]]
+key = "ui_components.demo.secondary"
+text = "Secondary"
+
+[[messages]]
+key = "ui_components.demo.bounded_metadata"
+text = "Bounded metadata"
+
+[[messages]]
+key = "ui_components.demo.repository_identifier_1130209340"
+text = "Repository identifier 1130209340"
+
+[[messages]]
+key = "ui_components.demo.counter_schemes"
+text = "Counter schemes"
+
+[[messages]]
+key = "ui_components.demo.issues"
+text = "Issues"
+
+[[messages]]
+key = "ui_components.demo.pull_requests"
+text = "Pull requests"
+
+[[messages]]
+key = "ui_components.demo.checks"
+text = "Checks"
+
+[[messages]]
+key = "ui_components.demo.limit_and_zero"
+text = "Limit and zero"
+
+[[messages]]
+key = "ui_components.demo.notifications"
+text = "Notifications"
+
+[[messages]]
+key = "ui_components.demo.zero_hidden"
+text = "Zero hidden"
+
+[[messages]]
+key = "ui_components.demo.loading_and_empty_states"
+text = "Loading and empty states"
+
+[[messages]]
+key = "ui_components.demo.spinner_sizes_determinate_indeterminate_progress_and_bordered_loading"
+text = "Spinner sizes, determinate/indeterminate progress, and bordered/loading/error Blankslate variants."
+
+[[messages]]
+key = "ui_components.demo.show_error_state"
+text = "Show error state"
+
+[[messages]]
+key = "ui_components.demo.show_loading_state"
+text = "Show loading state"
+
+[[messages]]
+key = "ui_components.demo.progress"
+text = "Progress"
+
+[[messages]]
+key = "ui_components.demo.62_percent_complete"
+text = "62 percent complete"
+
+[[messages]]
+key = "ui_components.demo.loading_progress"
+text = "Loading progress"
+
+[[messages]]
+key = "ui_components.demo.no_results"
+text = "No results"
+
+[[messages]]
+key = "ui_components.demo.default_bordered_empty_state_with_primary_and_secondary"
+text = "Default bordered empty state with primary and secondary actions."
+
+[[messages]]
+key = "ui_components.demo.create_item"
+text = "Create item"
+
+[[messages]]
+key = "ui_components.demo.reset_filters"
+text = "Reset filters"
+
+[[messages]]
+key = "ui_components.demo.unable_to_load"
+text = "Unable to load"
+
+[[messages]]
+key = "ui_components.demo.loading_preserves_the_empty_state_geometry"
+text = "Loading preserves the empty-state geometry."
+
+[[messages]]
+key = "ui_components.demo.error_and_loading_properties_share_the_same_stable"
+text = "Error and loading properties share the same stable layout."
+
+[[messages]]
+key = "ui_components.demo.retry"
+text = "Retry"
+
+[[messages]]
+key = "ui_components.demo.type_position_duration_overlay_close_on_click_and"
+text = "Type, position, duration, overlay, close-on-click, and explicit show() variants."
+
+[[messages]]
+key = "ui_components.demo.info"
+text = "Info"
+
+[[messages]]
+key = "ui_components.demo.error"
+text = "Error"
+
+[[messages]]
+key = "ui_components.demo.position"
+text = "Position"
+
+[[messages]]
+key = "ui_components.demo.top"
+text = "Top"
+
+[[messages]]
+key = "ui_components.demo.middle"
+text = "Middle"
+
+[[messages]]
+key = "ui_components.demo.bottom"
+text = "Bottom"
+
+[[messages]]
+key = "ui_components.demo.behavior"
+text = "Behavior"
+
+[[messages]]
+key = "ui_components.demo.5_seconds"
+text = "5 seconds"
+
+[[messages]]
+key = "ui_components.demo.overlay_dismiss"
+text = "Overlay + dismiss"
+
+[[messages]]
+key = "ui_components.demo.action_banner_plus_an_honest_capped_queue_footer"
+text = "Action Banner plus an honest capped-queue footer whose batch actions stay in an overflow menu."
+
+[[messages]]
+key = "ui_components.demo.warning"
+text = "Warning"
+
+[[messages]]
+key = "ui_components.demo.action_banner"
+text = "Action Banner"
+
+[[messages]]
+key = "ui_components.demo.queue_stack_footer"
+text = "Queue stack + footer"
+
+[[messages]]
+key = "ui_components.demo.remove_all"
+text = "Remove all"
+
+[[messages]]
+key = "ui_components.demo.clear_queue"
+text = "Clear queue"
+
+[[messages]]
+key = "ui_components.demo.action_banner_overflow_footer_3_shown_9_more"
+text = "Action Banner + overflow footer (3 shown · 9 more)"
+
+[[messages]]
+key = "ui_components.demo.standalone_link"
+text = "Standalone link"
+
+[[messages]]
+key = "ui_components.demo.inline_link"
+text = "Inline link"
+
+[[messages]]
+key = "ui_components.demo.muted_link"
+text = "Muted link"
+
+[[messages]]
+key = "ui_components.demo.disabled_link"
+text = "Disabled link"
+
+[[messages]]
+key = "ui_components.demo.underline_navigation_examples"
+text = "Underline navigation examples"
+
+[[messages]]
+key = "ui_components.demo.overview"
+text = "Overview"
+
+[[messages]]
+key = "ui_components.demo.activity"
+text = "Activity"
+
+[[messages]]
+key = "ui_components.demo.selected_navigation"
+text = "Selected navigation"
+
+[[messages]]
+key = "ui_components.demo.select_all"
+text = "Select all"
+
+[[messages]]
+key = "ui_components.demo.pull_request_review"
+text = "Pull request review"
+
+[[messages]]
+key = "ui_components.demo.ai_review"
+text = "AI review"
+
+[[messages]]
+key = "ui_components.demo.partially_selected"
+text = "Partially selected"
+
+[[messages]]
+key = "ui_components.demo.disabled_selected"
+text = "Disabled selected"
+
+[[messages]]
+key = "ui_components.demo.disabled_mixed"
+text = "Disabled mixed"
+
+[[messages]]
+key = "ui_components.demo.segmentedcontrol_clone_method"
+text = "SegmentedControl - clone method"
+
+[[messages]]
+key = "ui_components.demo.clone_method"
+text = "Clone method"
+
+[[messages]]
+key = "ui_components.demo.disabled_state"
+text = "Disabled state"
+
+[[messages]]
+key = "ui_components.demo.disabled_segmented_control_state"
+text = "Disabled segmented control state"
+
+[[messages]]
+key = "ui_components.demo.available"
+text = "Available"
+
+[[messages]]
+key = "ui_components.demo.icon_only_with_motion"
+text = "Icon-only with motion"
+
+[[messages]]
+key = "ui_components.demo.list_view"
+text = "List view"
+
+[[messages]]
+key = "ui_components.demo.grid_view"
+text = "Grid view"
+
+[[messages]]
+key = "ui_components.demo.project_view"
+text = "Project view"
+
+[[messages]]
+key = "ui_components.demo.name"
+text = "Name"
+
+[[messages]]
+key = "ui_components.demo.project_name"
+text = "Project name"
+
+[[messages]]
+key = "ui_components.demo.selectmenu_bordered_single_select"
+text = "Bordered"
+
+[[messages]]
+key = "ui_components.demo.github_filter_rows_with_dividers_a_default_foreground"
+text = "GitHub filter rows with dividers, a default-foreground Check, semibold selection, title, close control, and dismissal behavior."
+
+[[messages]]
+key = "ui_components.demo.status"
+text = "Status"
+
+[[messages]]
+key = "ui_components.demo.owner"
+text = "Owner"
+
+[[messages]]
+key = "ui_components.demo.sort"
+text = "Sort"
+
+[[messages]]
+key = "ui_components.demo.filter_by_status"
+text = "Filter by status"
+
+[[messages]]
+key = "ui_components.demo.filter_by_owner"
+text = "Filter by owner"
+
+[[messages]]
+key = "ui_components.demo.sort_by"
+text = "Sort by"
+
+[[messages]]
+key = "ui_components.demo.all_statuses"
+text = "All statuses"
+
+[[messages]]
+key = "ui_components.demo.active"
+text = "Active"
+
+[[messages]]
+key = "ui_components.demo.paused"
+text = "Paused"
+
+[[messages]]
+key = "ui_components.demo.archived"
+text = "Archived"
+
+[[messages]]
+key = "ui_components.demo.anyone"
+text = "Anyone"
+
+[[messages]]
+key = "ui_components.demo.owned_by_me"
+text = "Owned by me"
+
+[[messages]]
+key = "ui_components.demo.unassigned"
+text = "Unassigned"
+
+[[messages]]
+key = "ui_components.demo.newest"
+text = "Newest"
+
+[[messages]]
+key = "ui_components.demo.oldest"
+text = "Oldest"
+
+[[messages]]
+key = "ui_components.demo.recently_updated"
+text = "Recently updated"
+
+[[messages]]
+key = "ui_components.demo.least_recently_updated"
+text = "Least recently updated"
+
+[[messages]]
+key = "ui_components.demo.repository"
+text = "Repository"
+
+[[messages]]
+key = "ui_components.demo.editable_default_state"
+text = "Editable default state"
+
+[[messages]]
+key = "ui_components.demo.required_value"
+text = "Required value"
+
+[[messages]]
+key = "ui_components.demo.a_token_is_required"
+text = "A token is required."
+
+[[messages]]
+key = "ui_components.demo.loading_field"
+text = "Loading field"
+
+[[messages]]
+key = "ui_components.demo.checking_repository"
+text = "Checking repository"
+
+[[messages]]
+key = "ui_components.demo.compact_field"
+text = "Compact field"
+
+[[messages]]
+key = "ui_components.demo.pull_request_menus"
+text = "Borderless - Pull Request"
+
+[[messages]]
+key = "ui_components.demo.message_center"
+text = "Message center"
+
+[[messages]]
+key = "ui_components.demo.exercise_the_real_banner_durable_inbox_unread_count"
+text = "Exercise the real Banner, durable Inbox, unread count, category, and native-delivery pipeline."
+
+[[messages]]
+key = "ui_components.demo.general"
+text = "General"
+
+[[messages]]
+key = "ui_components.demo.software_update"
+text = "Software update"
+
+[[messages]]
+key = "ui_components.demo.cd_success"
+text = "CD success"
+
+[[messages]]
+key = "ui_components.demo.critical_os"
+text = "Critical + OS"
+
+[[messages]]
+key = "ui_components.demo.notification_inbox_rows"
+text = "Notification inbox rows"
+
+[[messages]]
+key = "ui_components.demo.github_inbox_unread_hierarchy_canvas_subtle_fill_accent"
+text = "GitHub Inbox unread hierarchy: canvas-subtle fill, accent unread disc, bold vs muted title."
+
+[[messages]]
+key = "ui_components.demo.pull_request_checks_completed"
+text = "Pull request checks completed"
+
+[[messages]]
+key = "ui_components.demo.all_required_checks_passed_for_the_release_branch"
+text = "All required checks passed for the release branch."
+
+[[messages]]
+key = "ui_components.demo.cd_workflow"
+text = "CD workflow"
+
+[[messages]]
+key = "ui_components.demo.just_now"
+text = "Just now"
+
+[[messages]]
+key = "ui_components.demo.network_connection_restored"
+text = "Network connection restored"
+
+[[messages]]
+key = "ui_components.demo.remote_repository_operations_are_available_again"
+text = "Remote repository operations are available again."
+
+[[messages]]
+key = "ui_components.demo.network"
+text = "Network"
+
+[[messages]]
+key = "ui_components.demo.10_minutes_ago"
+text = "10 minutes ago"
+
+[[messages]]
+key = "ui_components.demo.ai_review_findings"
+text = "AI review findings"
+
+[[messages]]
+key = "ui_components.demo.copilot_style_severity_labels_and_flat_actionable_rows"
+text = "Copilot-style severity labels and flat actionable rows that navigate to a changed line."
+
+[[messages]]
+key = "ui_components.demo.authorization_failure_is_ignored"
+text = "Authorization failure is ignored"
+
+[[messages]]
+key = "ui_components.demo.the_new_branch_continues_after_a_denied_authorization"
+text = "The new branch continues after a denied authorization response."
+
+[[messages]]
+key = "ui_components.demo.return_the_provider_error_before_persisting_the_transaction"
+text = "Return the provider error before persisting the transaction."
+
+[[messages]]
+key = "ui_components.demo.cache_key_is_not_project_scoped"
+text = "Cache key is not project-scoped"
+
+[[messages]]
+key = "ui_components.demo.two_open_projects_can_overwrite_the_same_review"
+text = "Two open projects can overwrite the same review entry."
+
+[[messages]]
+key = "ui_components.demo.agent_response"
+text = "Agent response"
+
+[[messages]]
+key = "ui_components.demo.native_compact_markdown_blocks_with_in_place_preview"
+text = "Native compact Markdown blocks with in-place Preview and opaque link callback feedback."
+
+[[messages]]
+key = "ui_components.demo.artifact_preview_fixtures"
+text = "Artifact preview fixtures"
+
+[[messages]]
+key = "ui_components.demo.open_real_preview_providers_and_failure_handling_through"
+text = "Open real Preview providers and failure handling through the application-level host."
+
+[[messages]]
+key = "ui_components.demo.headings_inline_styles_links_lists_quotes_tables_and"
+text = "Headings, inline styles, links, lists, quotes, tables, and code"
+
+[[messages]]
+key = "ui_components.demo.png_image"
+text = "PNG image"
+
+[[messages]]
+key = "ui_components.demo.decoded_rgba_image_with_contain_sizing"
+text = "Decoded RGBA image with contain sizing"
+
+[[messages]]
+key = "ui_components.demo.plain_text"
+text = "Plain text"
+
+[[messages]]
+key = "ui_components.demo.scrollable_monospaced_log_with_copy_support"
+text = "Scrollable monospaced log with copy support"
+
+[[messages]]
+key = "ui_components.demo.json_text"
+text = "JSON text"
+
+[[messages]]
+key = "ui_components.demo.utf_8_application_json_through_the_plain_text"
+text = "UTF-8 application/json through the plain-text provider"
+
+[[messages]]
+key = "ui_components.demo.unsupported_binary"
+text = "Unsupported binary"
+
+[[messages]]
+key = "ui_components.demo.safe_unsupported_provider_error_state"
+text = "Safe unsupported-provider error state"
+
+[[messages]]
+key = "ui_components.demo.open"
+text = "Open"
+
+[[messages]]
+key = "ui_components.demo.feature_component_registry"
+text = "Feature component registry"
+
+[[messages]]
+key = "ui_components.demo.complex_components_use_real_project_state_on_their"
+text = "Complex components use real project state on their owning routes; use these links to exercise them without duplicating business logic."
+
+[[messages]]
+key = "ui_components.demo.project_components"
+text = "Project components"
+
+[[messages]]
+key = "ui_components.demo.grid_list_cards_search_view_switcher_card_actions"
+text = "Grid/List cards, search, view switcher, card actions, and project dialog variants"
+
+[[messages]]
+key = "ui_components.demo.workflow_components"
+text = "Workflow components"
+
+[[messages]]
+key = "ui_components.demo.branch_tag_pull_request_deployment_filters_and_pagination"
+text = "Branch, tag, pull request, deployment, filters, and pagination states"
+
+[[messages]]
+key = "ui_components.demo.pull_request_filter_menu"
+text = "Pull request filter menu"
+
+[[messages]]
+key = "ui_components.demo.reviews_assignee_and_sort_popovers_with_selected_options"
+text = "Reviews, Assignee, and Sort popovers with selected options and dismissal"
+
+[[messages]]
+key = "ui_components.demo.job_run_components"
+text = "Job Run components"
+
+[[messages]]
+key = "ui_components.demo.application_level_run_header_jobs_navigation_status_steps"
+text = "Application-level run header, Jobs navigation, status, steps, logs, and Stop action"
+
+[[messages]]
+key = "ui_components.demo.chat_components"
+text = "Chat components"
+
+[[messages]]
+key = "ui_components.demo.welcome_suggestions_message_roles_status_artifact_title_actions"
+text = "Welcome suggestions, message roles/status, artifact title actions, composer, and history loading"
+
+[[messages]]
+key = "ui_components.demo.artifact_preview"
+text = "Artifact preview"
+
+[[messages]]
+key = "ui_components.demo.shared_markdown_image_and_plain_text_surface_with"
+text = "Shared Markdown, image, and plain-text surface with docked or detached hosts"
+
+[[messages]]
+key = "ui_components.demo.shared"
+text = "Shared"
+
+[[messages]]
+key = "ui_components.demo.settings_components"
+text = "Settings components"
+
+[[messages]]
+key = "ui_components.demo.responsive_section_navigation_provider_navigation_fields_toggles_panes"
+text = "Responsive section navigation, provider navigation, fields, toggles, panes, and update actions"
+
+[[messages]]
+key = "ui_components.demo.shell_and_review_components"
+text = "Shell and review components"
+
+[[messages]]
+key = "ui_components.demo.navigation_rail_breadcrumb_status_bar_terminal_drawer_pull"
+text = "Navigation rail, breadcrumb, status bar, terminal drawer, pull-request review and diff controls"
+
+[[messages]]
+key = "ui_components.demo.live"
+text = "Live"
+
+[[messages]]
+key = "ui_components.demo.selected_option"
+text = "Selected option"
+
+[[messages]]
+key = "ui_components.demo.current_actionlist_state"
+text = "Current ActionList state"
+
+[[messages]]
+key = "ui_components.demo.disabled_option"
+text = "Disabled option"
+
+[[messages]]
+key = "ui_components.demo.danger_option"
+text = "Danger option"
+
+[[messages]]
+key = "ui_components.agent_response_heading"
+text = "Review response"
+
+[[messages]]
+key = "ui_components.agent_response_context"
+text = "Structured context"
+
+[[messages]]
+key = "ui_components.agent_response_emphasis"
+text = "Clear emphasis"
+
+[[messages]]
+key = "ui_components.agent_response_guidance"
+text = "Repository guidance"
+
+[[messages]]
+key = "ui_components.agent_response_worker"
+text = "Bound compact projection work on the worker."
+
+[[messages]]
+key = "ui_components.agent_response_preview"
+text = "Full Markdown remains available through Preview."
+
+[[messages]]
+key = "ui_components.agent_response_table"
+text = "Projection | Bounded    Preview | Complete"
+
+[[messages]]
+key = "ui_components.agent_response_idle"
+text = "No response action activated yet."
+
+[[messages]]
+key = "ui_components.agent_response_preview_feedback"
+text = "Preview action: Review response"
+
+[[messages]]
+key = "ui_components.agent_response_link_feedback"
+text = "Link callback: "
+
+[[messages]]
+key = "ui_components.short_rules"
+text = "2 rules"
+
+[[messages]]
+key = "ui_components.long_rules"
+text = "14 rules"
+
+[[messages]]
+key = "ui_components.two_hours_ago"
+text = "2 hours ago"
+
+[[messages]]
+key = "ui_components.five_hours_ago"
+text = "5 hours ago"
+
+[[messages]]
+key = "ui_components.one_day_ago"
+text = "1 day ago"
+
+[[messages]]
+key = "ui_components.two_days_ago"
+text = "2 days ago"
+
+[[messages]]
 key = "tooltip.back_to_top"
 text = "Back to top"
 
@@ -1267,6 +2339,18 @@ text = "Filter by reviews"
 [[messages]]
 key = "pr_list.sort_by"
 text = "Sort by"
+
+[[messages]]
+key = "pr_list.created_on"
+text = "Created on"
+
+[[messages]]
+key = "pr_list.last_updated"
+text = "Last updated"
+
+[[messages]]
+key = "pr_list.order"
+text = "Order"
 
 [[messages]]
 key = "pr_list.retry_request"

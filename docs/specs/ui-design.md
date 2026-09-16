@@ -618,11 +618,25 @@ expanded/collapsed, and success confirmation.
   factory；全窗口键盘作用域关闭鼠标自动获取焦点，
   不得拦截首次点击或抢走目标焦点。
 - `GitHubActionMenu`: ActionList inside an AnchoredOverlay; 12 px overlay
-  radius, semantic border/shadow, 4 px anchor gap, viewport collision handling,
+  radius. PR-list menus opt into `adaptive-placement`, backed by the pinned
+  Rust `floating-ui-core` adapter in `crates/usher-ui/src/floating_overlay.rs`:
+  hosts pass their preferred side/alignment instead of forcing bottom/end.
+  Select Menu follows Primer AnchoredOverlay defaults: outside-bottom, start
+  alignment and a 4 px gap; PR filters explicitly prefer end alignment.
+  Two library Flip passes follow Primer's side-before-alignment fallback:
+  opposite side, right, left, then opposite alignment and center. Shift and Size
+  constrain the result to the desktop's visible page viewport.
+  References: [AnchoredOverlay props](https://primer.style/product/components/anchored-overlay/)
+  and [Primer positioning source](https://github.com/primer/behaviors/blob/main/src/anchored-position.ts).
+  The host supplies live complete trigger bounds and the visible clipping
+  viewport. Other menu hosts retain their explicit side/alignment contract.
+  The shared surface retains semantic
+  border/shadow, 4 px anchor gap, viewport collision handling,
   bounded height, internal scrolling, focus ownership, Escape dismissal, and
   reusable `GitHubActionListItem` rows. Medium rows follow Primer's 32 px
   geometry (6 px block padding around a 20 px label); block descriptions use
-  48 px rows with a 16 px secondary line. Single selections use a leading
+  48 px rows with a semibold label and a normal-weight 16 px secondary line.
+  Single selections use a default-foreground leading
   Check Octicon; selected state must not be represented by persistent hover
   fill or heavier label weight. Row dividers are opt-in and remain disabled for
   the borderless ActionMenu/ActionList variant. Outside dismissal is split on purpose: the menu owns Escape and chrome
@@ -653,14 +667,26 @@ expanded/collapsed, and success confirmation.
   composition. They own trigger, header/close, checked-row, keyboard, and
   accessibility behavior. Toolbar triggers use the 14 px body-text token;
   compact option labels use the 12 px small-text token while retaining the
-  shared 32 px ActionList row geometry. The GitHub PR filter variant matches
-  `.SelectMenu-item`: each row has a muted 1 px bottom divider; the selected
-  label uses weight 500 and the Check plus label use the default foreground,
-  with no persistent selected fill. Feature menus provide only labels, values,
+  shared 32 px ActionList row geometry. These bordered legacy SelectMenu rows
+  remain available for existing callers. PR filters instead use the current
+  inset ActionList variant: 8 px outer padding, 14 px regular labels, neutral
+  Check, no row dividers, and separators only between groups. AI rule rows
+  share `GitHubPullRequestRuleMenu` with the playground; their complete content
+  extent is independent of the overlay height cap. Feature menus provide labels, values,
   grouping, and anchored state; overlays anchor to the measured trigger edge
   rather than typography-specific offsets. UI Components demonstrates both the
-  bordered SelectMenu and borderless ActionMenu variants with provider-neutral
-  examples.
+  bordered SelectMenu and borderless PR variants together in Selection's
+  Select Menu section. The bordered demo has fixed trigger geometry and mounts
+  its menu at the window root; opening must neither grow its section nor move
+  later content. Its live window anchor uses the shared Floating UI adapter
+  against the visible page viewport, including scroll/resize updates and
+  dismissal when the trigger leaves view. The playground reuses the production
+  PR toolbar with local 2/14-rule fixtures and sample PR rows; no demo selection
+  is persisted. It uses
+  the same window-root PR menu portal as Workflow; it follows visible anchors on
+  scroll and closes when the trigger leaves the viewport instead of remaining
+  clamped over later sections. Scrolling the menu's own options does not close it.
+  Reference: [Primer ActionList source](https://github.com/primer/react/blob/main/packages/react/src/ActionList/ActionList.module.css).
 - `GitHubPageHeader`: the shared Primer PageHeader foundation for page title,
   description, leading visual, optional divider, and trailing actions.
 - `GitHubRadio`: controlled single-choice input with radio accessibility,
@@ -891,6 +917,18 @@ expanded/collapsed, and success confirmation.
   their owning live route and enumerate the states tested there; the playground
   must not create a second business-state implementation.
 - The playground uses the real shared components and root-layer managers.
+  Its directory and section headings group examples as Foundations, Actions,
+  Containment, Communication, Navigation, Selection, Text input, and Scenarios.
+  These are application ordering choices based on [Primer's component categories](https://primer.style/product/components/),
+  not a prescribed Primer display order. Composite PR menu fixtures belong in
+  Scenarios after the reusable components. Directory links and return links
+  scroll the existing page viewport, with localized category names.
+  Section bands adapt the official [Primer Box header](https://primer.style/view-components/lookbook/inspect/primer/beta/border_box/header_with_title/):
+  muted background, thin default-color separators, 16 px content insets and a
+  compact semibold title. They remain full-width bands, without enclosing each
+  section in a card. The directory, example descriptions, controls and action
+  feedback use the semantic i18n catalog; component API names, native language
+  names, code and mock repository/rule payloads retain their original identities.
   Static lookalikes, screenshots, or gallery-only variants do not satisfy
   component validation. Notification, Toast, and Dialog behavior is exercised
   from this route; they do not own standalone demo routes.
@@ -907,6 +945,13 @@ expanded/collapsed, and success confirmation.
 - 演练场必须使用真实共享组件和根层 Manager。静态仿制、截图或只在 Gallery 中
   存在的变体不能视为组件验证。Notification、Toast、Dialog 统一在此路由演练，
   不再拥有独立 demo 路由。
+- 目录与分组依次为基础、操作、容器、反馈、导航、选择、文本输入、场景。这是
+  应用依据 Primer 组件分类制定的展示顺序，不是 Primer 强制规定的顺序。PR 菜单
+  综合样例放在基础组件之后的场景组；目录跳转和返回入口复用页面滚动视口，
+  分类名称随语言切换即时更新。
+- 章节头部采用 Primer Box header 的浅色背景、细分隔线、16px 内边距与紧凑半粗
+  标题，保持通栏分组，不将整段内容包成卡片。目录、示例说明、控件文案和操作反馈
+  使用共享 i18n catalog；组件 API 名称、语言自称、代码、模拟仓库与规则数据保留原始标识。
 
 All GitHub/Primer visual component symbols across `ui/` use the `GitHub`
 prefix. `MainWindow`, non-visual structs, enums, globals, routes, and callbacks
@@ -927,12 +972,21 @@ prefix until their implementation satisfies this specification.
 `GitHubFilterMenuItem` 负责触发器、标题/关闭、选中标记、键盘及无障碍行为；
 工具栏触发器统一使用 14px body-text 令牌；紧凑选项标签统一使用 12px small-text
 令牌，同时保持共享 ActionList 的 32px 行高；弹层按触发器实际边界定位，不得依赖
-特定字号下的固定偏移；PR 筛选变体匹配 GitHub `.SelectMenu-item`：每行底部绘制
-1px muted 分隔线，选中标签使用 500 字重，Check 与标签使用默认前景色且不绘制持续
-选中背景。无逐行边框的 ActionMenu/ActionList 是独立变体，UI Components 必须以
-中性示例同时演示这两种菜单，禁止混用；
-业务层只提供中性的 label、value、分组与锚点状态，UI Components 页面必须在
-ActionMenu 区域使用无 Provider/Workflow/PR 字样的通用数据演示。Project 网格
+特定字号下的固定偏移；旧 SelectMenu 的逐行边框变体保留供既有调用方使用。
+PR 筛选使用 inset ActionList：8px 外围留白、14px 常规字重标签、默认前景色 Check，
+仅分组间分隔，无持续选中背景。AI 规则的主标签半粗体、12px 说明常规字重，
+完整内容高度与浮层限高分开计算。UI Components 在“选择”的同一个 Select Menu
+分区相邻展示带边框与无边框 PR 版本。带边框示例保持固定触发器区域，菜单挂到窗口
+根层，展开不得增高分区或挤压后续内容。实时窗口锚点通过共享 Floating UI adapter
+在可见页面视口内避让，随滚动/缩放更新，触发器离屏关闭。无边框示例直接复用
+生产 PR 工具栏与规则菜单，以隔离的 2/14 条规则和 PR 样例验证，不持久化演示选择。
+PR 示例与 Workflow 共用窗口根层菜单 portal；滚动时跟随可见按钮，按钮离屏时关闭，
+不得继续夹在视口边缘遮盖后续章节。菜单内部选项滚动不关闭菜单。
+Select Menu 默认遵循 Primer AnchoredOverlay 的 outside-bottom、start 对齐和 4px
+间距；PR 筛选显式使用 end 对齐。适配器接受调用方方向和对齐，以库的两次 Flip
+先尝试反向、右侧、左侧，再尝试反向对齐与居中；最后通过 Shift/Size 约束到桌面
+实际可见页面视口。
+Project 网格
 必须按受约束内容区计算列数，新增一列前保证每张卡片至少 280px 可读宽度。Chat
 历史分页入口必须位于 virtual top spacer 之前的真正历史顶部并占据真实高度，禁止覆盖
 消息或跟随虚拟窗口出现在会话中间；用户可见错误统一使用应用语言，HTTP 技术详情仅写有界日志。

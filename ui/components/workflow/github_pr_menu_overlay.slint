@@ -1,0 +1,91 @@
+import { GitHubActionMenu } from "../github_action_menu.slint";
+import { GitHubPullRequestRuleMenu } from "github_pr_rule_menu.slint";
+import { GitHubPullRequestFilterMenu } from "github_pr_list_components.slint";
+import { AiReviewRuleChoice } from "@ai-review";
+
+export struct GitHubPrMenuAnchor { x: length, y: length, width: length, height: length }
+export struct GitHubPrMenuProjection {
+    owner: int,
+    menu: string,
+    anchor: GitHubPrMenuAnchor,
+    rules: [AiReviewRuleChoice],
+    review: string,
+    assignee: string,
+    sort: string,
+}
+
+// Ephemeral presentation only. The owning flow still dispatches every action.
+export global GitHubPrMenuState {
+    in-out property <int> next-owner: 0;
+    in-out property <GitHubPrMenuProjection> current;
+    in-out property <int> action-owner: 0;
+    in-out property <string> action-kind;
+    in-out property <string> action-value;
+    in-out property <int> action-revision: 0;
+
+    public function close() { self.current.menu = ""; }
+    public function choose(kind: string, value: string) {
+        self.action-owner = self.current.owner;
+        self.action-kind = kind;
+        self.action-value = value;
+        self.action-revision += 1;
+        self.close();
+    }
+}
+
+export component GitHubPullRequestMenuOverlay inherits Rectangle {
+    in property <length> viewport-x;
+    in property <length> viewport-y;
+    in property <length> viewport-width;
+    in property <length> viewport-height;
+    background: transparent;
+    private property <GitHubPrMenuProjection> menu: GitHubPrMenuState.current;
+    private property <bool> anchor-visible:
+        root.menu.anchor.x + root.menu.anchor.width > root.viewport-x
+        && root.menu.anchor.x < root.viewport-x + root.viewport-width
+        && root.menu.anchor.y + root.menu.anchor.height > root.viewport-y
+        && root.menu.anchor.y < root.viewport-y + root.viewport-height;
+    changed anchor-visible => {
+        if !root.anchor-visible { GitHubPrMenuState.close(); }
+    }
+    private property <string> identity: root.menu.menu;
+    changed identity => {
+        if root.identity != "" { filter-menu.focus(); }
+    }
+
+    filter-menu := GitHubActionMenu {
+        open: root.menu.menu != "" && root.anchor-visible;
+        adaptive-placement: true;
+        viewport-x: root.viewport-x;
+        viewport-y: root.viewport-y;
+        viewport-width: root.viewport-width;
+        viewport-height: root.viewport-height;
+        anchor-x: root.menu.anchor.x;
+        anchor-y: root.menu.anchor.y;
+        anchor-width: root.menu.anchor.width;
+        anchor-height: root.menu.anchor.height;
+        menu-width: root.menu.menu == "ai-rule" ? 320px : 256px;
+        content-height: root.menu.menu == "ai-rule"
+            ? 16px + root.menu.rules.length * 48px
+            : (root.menu.menu == "assignee" ? 112px
+                : (root.menu.menu == "more" ? 390px : (root.menu.menu == "sort" ? 217px : 144px)));
+        menu-max-height: 432px;
+        align: "end";
+        dismiss-requested => { GitHubPrMenuState.close(); }
+
+        if root.menu.menu == "ai-rule": GitHubPullRequestRuleMenu {
+            width: parent.width;
+            options: root.menu.rules;
+            selected(id) => { GitHubPrMenuState.choose("ai-rule", id); }
+        }
+        if root.menu.menu != "ai-rule": GitHubPullRequestFilterMenu {
+            width: parent.width;
+            menu-type: root.menu.menu;
+            review-selected-value: root.menu.review;
+            assignee-selected-value: root.menu.assignee;
+            sort-selected-value: root.menu.sort;
+            selected(kind, value) => { GitHubPrMenuState.choose(kind, value); }
+            close => { GitHubPrMenuState.close(); }
+        }
+    }
+}

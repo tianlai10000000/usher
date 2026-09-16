@@ -1,10 +1,16 @@
+import { I18n } from "@i18n";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { AgentResponseBlockKind, GitHubAgentResponse } from "../agent_response/github_agent_response.slint";
 
 export component GitHubAgentResponseShowcase inherits Rectangle {
     callback open-preview();
 
-    private property <string> action-feedback: "No response action activated yet.";
+    private property <int> action-kind: 0;
+    private property <string> action-url;
+    private property <string> action-feedback: root.action-kind == 0
+        ? I18n.ui-components-agent-response-idle
+        : root.action-kind == 1 ? I18n.ui-components-agent-response-preview-feedback
+        : I18n.ui-components-agent-response-link-feedback + root.action-url;
     private property <length> content-inset: GitHubMetrics.size-16;
 
     height: response.y + response.height + feedback-row.height + GitHubMetrics.size-12;
@@ -20,8 +26,8 @@ export component GitHubAgentResponseShowcase inherits Rectangle {
         blocks: [
             {
                 kind: AgentResponseBlockKind.Heading2,
-                styled: @markdown("Review response"),
-                plain-text: "Review response",
+                styled: @markdown("\{I18n.ui-components-agent-response-heading}"),
+                plain-text: I18n.ui-components-agent-response-heading,
                 list-marker: "",
                 list-depth: 0,
                 code-language: "",
@@ -30,8 +36,10 @@ export component GitHubAgentResponseShowcase inherits Rectangle {
             },
             {
                 kind: AgentResponseBlockKind.Paragraph,
-                styled: @markdown("Keep **structured context**, *clear emphasis*, and [repository guidance](usher-repo-file:showcase-agent-response) in one readable paragraph."),
-                plain-text: "Keep structured context, clear emphasis, and repository guidance in one readable paragraph.",
+                styled: @markdown("**\{I18n.ui-components-agent-response-context}**, *\{I18n.ui-components-agent-response-emphasis}*, [\{I18n.ui-components-agent-response-guidance}](usher-repo-file:showcase-agent-response)"),
+                plain-text: I18n.ui-components-agent-response-context + ", "
+                    + I18n.ui-components-agent-response-emphasis + ", "
+                    + I18n.ui-components-agent-response-guidance,
                 list-marker: "",
                 list-depth: 0,
                 code-language: "",
@@ -40,8 +48,8 @@ export component GitHubAgentResponseShowcase inherits Rectangle {
             },
             {
                 kind: AgentResponseBlockKind.ListItem,
-                styled: @markdown("Bound compact projection work on the worker."),
-                plain-text: "Bound compact projection work on the worker.",
+                styled: @markdown("\{I18n.ui-components-agent-response-worker}"),
+                plain-text: I18n.ui-components-agent-response-worker,
                 list-marker: "1.",
                 list-depth: 0,
                 code-language: "",
@@ -50,8 +58,8 @@ export component GitHubAgentResponseShowcase inherits Rectangle {
             },
             {
                 kind: AgentResponseBlockKind.Quote,
-                styled: @markdown("Full Markdown remains available through Preview."),
-                plain-text: "Full Markdown remains available through Preview.",
+                styled: @markdown("\{I18n.ui-components-agent-response-preview}"),
+                plain-text: I18n.ui-components-agent-response-preview,
                 list-marker: "",
                 list-depth: 0,
                 code-language: "",
@@ -70,8 +78,8 @@ export component GitHubAgentResponseShowcase inherits Rectangle {
             },
             {
                 kind: AgentResponseBlockKind.TableRow,
-                styled: @markdown("Projection | Bounded    Preview | Complete"),
-                plain-text: "Projection | Bounded    Preview | Complete",
+                styled: @markdown("\{I18n.ui-components-agent-response-table}"),
+                plain-text: I18n.ui-components-agent-response-table,
                 list-marker: "",
                 list-depth: 0,
                 code-language: "",
@@ -89,14 +97,15 @@ export component GitHubAgentResponseShowcase inherits Rectangle {
                 line-count: 1
             }
         ];
-        preview-title: "Review response";
+        preview-title: I18n.ui-components-agent-response-heading;
         preview-available: true;
         open-full-response => {
-            root.action-feedback = "Preview action: Review response";
+            root.action-kind = 1;
             root.open-preview();
         }
         open-link(url) => {
-            root.action-feedback = "Link callback: " + url;
+            root.action-url = url;
+            root.action-kind = 2;
         }
     }
 
@@ -116,7 +125,7 @@ export component GitHubAgentResponseShowcase inherits Rectangle {
             height: parent.height;
             text: root.action-feedback;
             font-size: GitHubMetrics.text-small;
-            color: root.action-feedback == "No response action activated yet."
+            color: root.action-kind == 0
                 ? GitHubTheme.fg-muted
                 : GitHubTheme.success-fg;
             vertical-alignment: center;

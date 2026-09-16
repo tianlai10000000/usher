@@ -14,6 +14,13 @@ fn review_status_fixture_covers_status_and_responsive_cases() {
         .filter_map(|item| item["review_status"].as_str())
         .collect::<BTreeSet<_>>();
 
+    assert_eq!(items.len(), 36);
+    let numbers = items
+        .iter()
+        .map(|item| item["number"].as_str().unwrap())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(numbers.len(), items.len());
+
     assert_eq!(
         statuses,
         BTreeSet::from(["approved", "changes_requested", "none", "review_required",])

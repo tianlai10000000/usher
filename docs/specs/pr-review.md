@@ -44,6 +44,43 @@ weak window 回写和项目隔离语义不变。
 
 ## Product boundary / 产品边界
 
+PR-list filter menus follow [Primer AnchoredOverlay](https://primer.style/product/components/anchored-overlay/):
+prefer `outside-bottom`, use `end` alignment as in GitHub's PR toolbar, and leave
+a 4 px gap from the trigger. The complete measured trigger rectangle stays live
+across resize, scroll and locale changes. Collision handling uses the visible
+scroll viewport, never the full page content height; insufficient space below
+may flip the menu above or to either side, change end/start alignment, then shift
+and size it to fit with internal scrolling. Geometry uses the pinned Rust port
+of [Floating UI](https://floating-ui.rustforweb.org/platform.html), with
+`offset`, `flip`, `shift`, and `size` middleware; do not add feature-local
+collision algorithms. Replacing triggers at the compact breakpoint closes
+the menu. PR menus mount through `GitHubPullRequestMenuOverlay` at the window
+root, including the UI Components fixture, so later section backgrounds and
+scroll clips cannot cover them. Scrolling while the trigger is visible updates
+placement, following [Primer's scroll listener](https://github.com/primer/react/blob/main/packages/react/src/hooks/useAnchoredPosition.ts).
+Usher additionally closes a menu when its trigger no longer intersects the
+visible page viewport; scrolling back does not reopen it. This is an application
+lifecycle policy, not a claim that Primer mandates dismissal on every scroll.
+Scrolling inside a long menu keeps it open. Route changes and hidden PR tabs
+close the portal. Menu actions return only to the instance that opened it;
+showcase selections never reach Workflow callbacks.
+Verify Reviews, Assignee, Sort, AI-rule and compact overflow in both
+query layouts, including open-menu locale/geometry changes and short windows.
+
+PR 筛选菜单参照 Primer AnchoredOverlay：优先向下展开，与 GitHub PR 工具栏
+一致采用右对齐，距按钮 4px。锚点使用持续更新的按钮完整边界；缩放、滚动、语言
+切换后仍跟随按钮。边界避让以实际可见滚动视口为准，不能使用整页内容高度；下方
+空间不足时可向上或侧向展开、切换左右对齐，再平移及限高并内部滚动。定位复用
+固定版本的 Rust Floating UI 核心及 offset/flip/shift/size 中间件，禁止另写功能级
+碰撞算法。紧凑断点替换按钮时关闭菜单。验收覆盖两种查询布局、
+Reviews、Assignee、排序、AI 规则及紧凑菜单，并检查展开时切换语言、几何和短窗口。
+PR 菜单（包括 UI Components 示例）通过 `GitHubPullRequestMenuOverlay` 挂到窗口
+根层，后续章节背景和滚动裁剪不得遮挡它。参考 Primer 的滚动监听，按钮可见时
+持续更新定位；Usher 额外规定按钮完全离开可见页面视口时关闭，滚回后不自动重开。
+这是应用生命周期策略，不代表 Primer 规定所有滚动都关闭。菜单内部滚动保持展开；
+切换路由或隐藏 PR Tab 关闭浮层。选择事件只返回打开菜单的组件实例，演示选择
+不得调用 Workflow 业务 callback。
+
 The current product supports the following workflow:
 
 1. A selected project optionally displays counts of open changes targeting `fat`, `uat`, and `prod`.
@@ -332,12 +369,18 @@ viewport state.
 41. Shell/header/navigation changes do not alter Files changed source or file
     tree colors and fonts. Those values remain owned by the diff/file-tree
     content contract and require an explicit, separately reviewed change.
-42. Filter/sort popovers compose the generic `GitHubFilterMenu*` ActionMenu
-    controls, including 14 px toolbar triggers, compact 12 px option labels,
-    and overlays anchored to the actual trigger edge. Filter rows use the
-    bordered GitHub SelectMenu variant: a muted 1 px bottom divider, weight-500
-    selected label, and default-foreground Check without persistent selected
-    fill. PR code provides only feature option values and grouping. Each PR
+42. Filter/sort popovers use Primer inset ActionList styling: 8 px outer padding,
+    14 px labels, 32 px rows, and a default-foreground Check without persistent
+    selected fill or extra selected weight. The 256 px menus have no row dividers
+    or redundant title/close header; Sort separates field (Created on/Last
+    updated) and Order, mapping to the existing four provider sort values. The
+    compact combined menu separates its groups. AI rules use the shared
+    `GitHubPullRequestRuleMenu`: 320 px width, 48 px description rows, semibold
+    labels and normal-weight 12 px secondary text. The scroll extent includes
+    every rule plus padding; only the visible overlay is capped at 432 px or
+    available viewport space. UI Components reuses these production menus with
+    isolated 2/14-rule fixtures. Below the shared 768 px breakpoint toolbars show
+    the AI rule label only; wider rule labels are capped at 220 px. Each PR
     row's state icon is vertically centered on the title line.
 43. The root navigation sidebar and its right-edge decoration paint above the
     PR route during native resize and sidebar motion. Review content must not
@@ -435,11 +478,15 @@ Rust `virtualizer` 引擎，Feature 只依赖本地门面。轻量行指标与�
     禁止用 Unicode 字符代替图标。
 41. 页头、外壳和导航调整不得修改 Files changed 代码区或文件树的字体与颜色；
     这些值由 diff/文件树内容契约独立拥有，只有明确且单独评审的变更才可调整。
-42. 筛选/排序弹层必须组合通用 `GitHubFilterMenu*` ActionMenu 控件；PR 层只提供
-    功能选项值与分组，并统一使用组件自带的 14px 工具栏触发器、12px 紧凑选项
-    标签及按触发器实际边界定位的弹层。筛选行使用带边框的 GitHub SelectMenu 变体：
-    每行底部有 1px muted 分隔线，选中标签为 500 字重，Check 使用默认前景色且没有
-    持续选中背景。每条 PR 的状态图标必须与标题行垂直居中。
+42. 筛选/排序弹层采用 Primer inset ActionList：8px 外围留白、14px 标签、32px 行高，
+    Check 使用默认前景色，无持续选中背景和额外选中字重。256px 菜单没有逐行分隔线
+    或多余的标题/关闭栏；Sort 分为字段（创建时间/最后更新）与方向两组，映射到现有
+    四种 Provider 排序值；紧凑组合菜单只在分组间分隔。
+    AI 规则复用 `GitHubPullRequestRuleMenu`：320px 宽、48px 双行选项，主标签半粗体、
+    12px 说明文字为常规字重。滚动内容高度必须包括全部规则和留白，仅可见浮层限制到
+    432px 或可用视口高度。UI Components 用隔离的 2/14 条规则复用生产组件。
+    共享 768px 断点以下仅显示 AI 规则标签，更宽时标签最多占 220px。
+    每条 PR 的状态图标必须与标题行垂直居中。
 43. 原生 Resize 与侧栏运动期间，根导航侧栏及其右边界装饰必须绘制在 PR 路由之上。
     审核内容不得覆盖侧栏、边界描边/阴影或越界显示的侧栏 Tooltip；PR Modal 遮罩仍
     必须覆盖并屏蔽侧栏。

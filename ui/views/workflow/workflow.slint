@@ -17,6 +17,9 @@ import { I18n } from "@i18n";
 
 
 export component GitHubWorkflowPage inherits GitHubPageView {
+    in property <length> overlay-viewport-x;
+    in property <length> overlay-viewport-y;
+    in property <length> overlay-viewport-width;
     // The root scroll view already contributes the title-bar gap. Avoid a
     // second 16px inset before the repository header.
     content-top-padding: 0px;
@@ -247,10 +250,10 @@ export component GitHubWorkflowPage inherits GitHubPageView {
                 y: 16px;
                 width: parent.width - (root.compact-workflow-layout ? 32px : 48px);
                 vertical-stretch: 0;
-                viewport-global-x: root.absolute-position.x;
-                viewport-global-y: root.absolute-position.y;
-                viewport-width: root.width;
-                viewport-height: root.height;
+                viewport-global-x: root.overlay-viewport-x;
+                viewport-global-y: root.overlay-viewport-y;
+                viewport-width: root.overlay-viewport-width;
+                viewport-height: root.viewport-height;
                 code-font-family: root.code-font-family;
                 repo-project-id: root.pr-repo-project-id;
                 repo-type: root.pr-repo-type;

@@ -1,6 +1,6 @@
 import { GitHubTooltip } from "../github_tooltip.slint";
 import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint";
-import { GitHubActionListItem, GitHubActionMenu } from "../github_action_menu.slint";
+import { GitHubPrMenuState, GitHubPrMenuProjection, GitHubPrMenuAnchor } from "./github_pr_menu_overlay.slint";
 import { GitHubCenteredLoadingState } from "../github_spinner.slint";
 import { GitHubButton } from "../settings/github_settings_controls.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
@@ -25,8 +25,9 @@ import { I18n } from "@i18n";
 
 
 
-import { GitHubPullRequestSearchField, GitHubPullRequestClearQueryButton, GitHubPullRequestStateButton, GitHubPullRequestFilterMoreButton, GitHubPullRequestFilterMenu, GitHubPullRequestListStatePanel, WorkflowPullRequestItem } from "./github_pr_list_components.slint";
+import { GitHubPullRequestSearchField, GitHubPullRequestClearQueryButton, GitHubPullRequestStateButton, GitHubPullRequestFilterMoreButton, GitHubPullRequestListStatePanel, WorkflowPullRequestItem } from "./github_pr_list_components.slint";
 export { WorkflowPullRequestItem } from "./github_pr_list_components.slint";
+
 export component GitHubPullRequestFlow {
     in property <length> viewport-global-x: 0px;
     in property <length> viewport-global-y: 0px;
@@ -67,6 +68,46 @@ export component GitHubPullRequestFlow {
     callback open-settings();
 
     private property <string> active-menu: "";
+    private property <int> menu-owner: 0;
+    init => {
+        GitHubPrMenuState.next-owner += 1;
+        root.menu-owner = GitHubPrMenuState.next-owner;
+    }
+    private property <GitHubPrMenuProjection> menu-projection: {
+        owner: root.menu-owner, menu: root.active-menu, anchor: root.menu-anchor,
+        rules: root.ai-review-rule-options, review: root.pr-review-filter,
+        assignee: root.pr-assignee-filter, sort: root.pr-sort-filter,
+    };
+    changed menu-projection => {
+        if root.active-menu != "" {
+            GitHubPrMenuState.current = root.menu-projection;
+        } else if GitHubPrMenuState.current.owner == root.menu-owner {
+            GitHubPrMenuState.close();
+        }
+    }
+    private property <bool> portal-open:
+        GitHubPrMenuState.current.owner == root.menu-owner && GitHubPrMenuState.current.menu != "";
+    changed portal-open => {
+        if !root.portal-open { root.active-menu = ""; }
+    }
+    private property <int> menu-action-revision: GitHubPrMenuState.action-revision;
+    changed menu-action-revision => {
+        if GitHubPrMenuState.action-owner == root.menu-owner {
+            if GitHubPrMenuState.action-kind == "ai-rule" {
+                root.set-ai-review-rule(GitHubPrMenuState.action-value);
+            } else if GitHubPrMenuState.action-kind == "reviews" {
+                root.change-review-filter(GitHubPrMenuState.action-value);
+            } else if GitHubPrMenuState.action-kind == "assignee" {
+                root.change-assignee-filter(GitHubPrMenuState.action-value);
+            } else {
+                root.change-sort-filter(GitHubPrMenuState.action-value);
+            }
+            root.active-menu = "";
+        }
+    }
+    changed visible => {
+        if !root.visible { root.active-menu = ""; }
+    }
     private property <string> hovered-inline-tooltip: "";
     private property <length> hovered-inline-tooltip-x: 42px;
     private property <length> hovered-inline-tooltip-y: 0px;
@@ -102,9 +143,12 @@ export component GitHubPullRequestFlow {
         && root.pr-page-count > 1;
     // Footer is 16px gap + 32px controls + 8px trailing inset below the card.
     private property <length> pagination-block-height: root.show-pagination ? 56px : 0px;
-    // Capture the real trigger edge when opening. Label typography can then
-    // change without drifting the end-aligned overlay away from its button.
-    private property <length> menu-anchor-right: 0px;
+    // Keep the complete window-space trigger bounds current while open.
+    private property <GitHubPrMenuAnchor> menu-anchor;
+    changed compact-filters => { root.active-menu = ""; }
+    function track-anchor(kind: string, bounds: GitHubPrMenuAnchor) {
+        if root.active-menu == kind { root.menu-anchor = bounds; }
+    }
     // Lock geometry so a taller Workflow panel cannot stretch the list card
     // and pull the pagination footer inside its border.
     height: root.query-area-height + root.list-height + root.pagination-block-height;
@@ -195,7 +239,7 @@ export component GitHubPullRequestFlow {
                 }
             }
 
-            if !root.canonical-state-query: GitHubPullRequestStateButton {
+            if !root.canonical-state-query: total-state-btn := GitHubPullRequestStateButton {
                 x: 4px;
                 label: I18n.pr-list-total;
                 value: "total";
@@ -223,63 +267,89 @@ export component GitHubPullRequestFlow {
                     alignment: end;
 
                     if root.ai-review-rule-options.length > 0: rule-btn := GitHubFilterMenuButton {
-                        label: I18n.pr-list-ai-rule + ": " + root.ai-review-project-rule-name;
+                        private property <GitHubPrMenuAnchor> bounds: {
+                            x: self.absolute-position.x, y: self.absolute-position.y,
+                            width: self.width, height: self.height,
+                        };
+                        changed bounds => { root.track-anchor("ai-rule", self.bounds); }
+                        label: root.width < GitHubMetrics.breakpoint-medium ? I18n.pr-list-ai-rule
+                            : I18n.pr-list-ai-rule + ": " + root.ai-review-project-rule-name;
+                        maximum-label-width: 220px;
                         menu-open: root.active-menu == "ai-rule";
                         selected: root.active-menu == "ai-rule" || root.ai-review-project-rule-id != "";
                         clicked => {
-                            root.menu-anchor-right = self.absolute-position.x
-                                - root.absolute-position.x + self.width;
+                            root.menu-anchor = self.bounds;
                             root.active-menu = root.active-menu == "ai-rule" ? "" : "ai-rule";
                         }
                     }
 
                     if !root.compact-filters && root.supports-review-filter: reviews-btn := GitHubFilterMenuButton {
+                        private property <GitHubPrMenuAnchor> bounds: {
+                            x: self.absolute-position.x, y: self.absolute-position.y,
+                            width: self.width, height: self.height,
+                        };
+                        changed bounds => { root.track-anchor("reviews", self.bounds); }
                         label: I18n.pr-list-reviews;
                         menu-open: root.active-menu == "reviews";
                         selected: root.active-menu == "reviews" || root.pr-review-filter != "all";
                         clicked => {
-                            root.menu-anchor-right = self.absolute-position.x
-                                - root.absolute-position.x + self.width;
+                            root.menu-anchor = self.bounds;
                             root.active-menu = root.active-menu == "reviews" ? "" : "reviews";
                         }
                     }
                     if !root.compact-filters && root.supports-assignee-filter: assignee-btn := GitHubFilterMenuButton {
+                        private property <GitHubPrMenuAnchor> bounds: {
+                            x: self.absolute-position.x, y: self.absolute-position.y,
+                            width: self.width, height: self.height,
+                        };
+                        changed bounds => { root.track-anchor("assignee", self.bounds); }
                         label: I18n.pr-list-assignee;
                         menu-open: root.active-menu == "assignee";
                         selected: root.active-menu == "assignee" || root.pr-assignee-filter != "any";
                         clicked => {
-                            root.menu-anchor-right = self.absolute-position.x
-                                - root.absolute-position.x + self.width;
+                            root.menu-anchor = self.bounds;
                             root.active-menu = root.active-menu == "assignee" ? "" : "assignee";
                         }
                     }
                     if !root.compact-filters: sort-btn := GitHubFilterMenuButton {
+                        private property <GitHubPrMenuAnchor> bounds: {
+                            x: self.absolute-position.x, y: self.absolute-position.y,
+                            width: self.width, height: self.height,
+                        };
+                        changed bounds => { root.track-anchor("sort", self.bounds); }
                         label: I18n.pr-list-sort;
                         menu-open: root.active-menu == "sort";
                         selected: root.active-menu == "sort" || root.pr-sort-filter != "newest";
                         clicked => {
-                            root.menu-anchor-right = self.absolute-position.x
-                                - root.absolute-position.x + self.width;
+                            root.menu-anchor = self.bounds;
                             root.active-menu = root.active-menu == "sort" ? "" : "sort";
                         }
                     }
-                    if root.compact-filters && root.supports-assignee-filter: GitHubFilterMenuButton {
+                    if root.compact-filters && root.supports-assignee-filter: compact-assignee-btn := GitHubFilterMenuButton {
+                        private property <GitHubPrMenuAnchor> bounds: {
+                            x: self.absolute-position.x, y: self.absolute-position.y,
+                            width: self.width, height: self.height,
+                        };
+                        changed bounds => { root.track-anchor("assignee", self.bounds); }
                         label: I18n.pr-list-assignee;
                         menu-open: root.active-menu == "assignee";
                         selected: root.active-menu == "assignee" || root.pr-assignee-filter != "any";
                         clicked => {
-                            root.menu-anchor-right = self.absolute-position.x
-                                - root.absolute-position.x + self.width;
+                            root.menu-anchor = self.bounds;
                             root.active-menu = root.active-menu == "assignee" ? "" : "assignee";
                         }
                     }
-                    if root.compact-filters: GitHubPullRequestFilterMoreButton {
+                    if root.compact-filters: more-btn := GitHubPullRequestFilterMoreButton {
+                        private property <GitHubPrMenuAnchor> bounds: {
+                            x: self.absolute-position.x, y: self.absolute-position.y,
+                            width: self.width, height: self.height,
+                        };
+                        changed bounds => { root.track-anchor(root.supports-review-filter ? "more" : "sort", self.bounds); }
                         selected: root.active-menu == (root.supports-review-filter ? "more" : "sort")
                             || (root.supports-review-filter && root.pr-review-filter != "all")
                             || root.pr-sort-filter != "newest";
                         clicked => {
-                            root.menu-anchor-right = self.absolute-position.x
-                                - root.absolute-position.x + self.width;
+                            root.menu-anchor = self.bounds;
                             root.active-menu = root.active-menu
                                 == (root.supports-review-filter ? "more" : "sort")
                                 ? ""
@@ -1124,59 +1194,4 @@ export component GitHubPullRequestFlow {
         text: root.hovered-inline-tooltip;
     }
 
-    if root.active-menu != "": GitHubActionMenu {
-        z: 100;
-        open: root.active-menu != "";
-        viewport-x: root.viewport-global-x - root.absolute-position.x;
-        viewport-y: root.viewport-global-y - root.absolute-position.y;
-        viewport-width: root.viewport-width;
-        viewport-height: root.viewport-height;
-        anchor-x: root.menu-anchor-right;
-        anchor-y: 0px;
-        anchor-width: 0px;
-        anchor-height: root.header-height;
-        menu-width: 200px;
-        content-height: root.active-menu == "ai-rule"
-            ? min(320px, max(48px, root.ai-review-rule-options.length * 48px))
-            : (root.active-menu == "assignee"
-            ? 128px
-            : (root.active-menu == "more" ? 313px : 160px));
-        menu-max-height: 432px;
-        align: "end";
-        dismiss-requested => { root.active-menu = ""; }
-
-        if root.active-menu == "ai-rule": VerticalLayout {
-            width: parent.width;
-            spacing: 0px;
-            for rule in root.ai-review-rule-options: GitHubActionListItem {
-                text: rule.name;
-                description: rule.inherited ? I18n.pr-list-follows-settings-default : I18n.pr-list-project-override;
-                selectable: true;
-                selected: rule.selected;
-                activated => {
-                    root.set-ai-review-rule(rule.id);
-                    root.active-menu = "";
-                }
-            }
-        }
-
-        if root.active-menu != "ai-rule": GitHubPullRequestFilterMenu {
-            width: parent.width;
-            menu-type: root.active-menu;
-            review-selected-value: root.pr-review-filter;
-            assignee-selected-value: root.pr-assignee-filter;
-            sort-selected-value: root.pr-sort-filter;
-            selected(kind, value) => {
-                if kind == "reviews" {
-                    root.change-review-filter(value);
-                } else if kind == "assignee" {
-                    root.change-assignee-filter(value);
-                } else {
-                    root.change-sort-filter(value);
-                }
-                root.active-menu = "";
-            }
-            close => { root.active-menu = ""; }
-        }
-    }
 }

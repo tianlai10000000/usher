@@ -1,0 +1,86 @@
+import { GitHubPullRequestFlow } from "../workflow/github_pr_flow.slint";
+import { AiReviewRuleChoice } from "@ai-review";
+import { GitHubButton } from "../settings/github_settings_controls.slint";
+import { I18n } from "@i18n";
+
+// Fixture state is local: selections never reach project configuration.
+export component GitHubPrMenuShowcase inherits Rectangle {
+    in property <length> viewport-global-x;
+    in property <length> viewport-global-y;
+    in property <length> viewport-width;
+    in property <length> viewport-height;
+    private property <bool> many-rules: true;
+    private property <string> rule-id: "";
+    private property <string> review: "all";
+    private property <string> assignee: "any";
+    private property <string> sort: "newest";
+    private property <string> state: "open";
+    private property <string> query: "is:pr is:open";
+    private property <[AiReviewRuleChoice]> short-rules: [
+        { id: "", name: I18n.common-default + " (Security baseline)", inherited: true, selected: root.rule-id == "" },
+        { id: "Security baseline", name: "Security baseline", inherited: false, selected: root.rule-id == "Security baseline" }
+    ];
+    private property <[AiReviewRuleChoice]> long-rules: [
+        { id: "", name: I18n.common-default + " (Security baseline)", inherited: true, selected: root.rule-id == "" },
+        { id: "Security baseline", name: "Security baseline", inherited: false, selected: root.rule-id == "Security baseline" },
+        { id: "Rust correctness", name: "Rust correctness", inherited: false, selected: root.rule-id == "Rust correctness" },
+        { id: "Async and event-loop safety", name: "Async and event-loop safety", inherited: false, selected: root.rule-id == "Async and event-loop safety" },
+        { id: "API compatibility", name: "API compatibility", inherited: false, selected: root.rule-id == "API compatibility" },
+        { id: "Accessibility and keyboard navigation", name: "Accessibility and keyboard navigation", inherited: false, selected: root.rule-id == "Accessibility and keyboard navigation" },
+        { id: "Internationalization", name: "Internationalization", inherited: false, selected: root.rule-id == "Internationalization" },
+        { id: "Performance", name: "Performance", inherited: false, selected: root.rule-id == "Performance" },
+        { id: "Test coverage", name: "Test coverage", inherited: false, selected: root.rule-id == "Test coverage" },
+        { id: "Database migrations", name: "Database migrations", inherited: false, selected: root.rule-id == "Database migrations" },
+        { id: "Dependency updates", name: "Dependency updates", inherited: false, selected: root.rule-id == "Dependency updates" },
+        { id: "Release readiness", name: "Release readiness", inherited: false, selected: root.rule-id == "Release readiness" },
+        { id: "Documentation", name: "Documentation", inherited: false, selected: root.rule-id == "Documentation" },
+        { id: "Repository conventions", name: "Repository conventions", inherited: false, selected: root.rule-id == "Repository conventions" }
+    ];
+    height: flow.height + 48px;
+    background: transparent;
+
+    HorizontalLayout {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: 32px;
+        spacing: 8px;
+        alignment: start;
+        short-rules-button := GitHubButton { text: I18n.ui-components-short-rules; selected: !root.many-rules; clicked => { root.many-rules = false; root.rule-id = ""; } }
+        long-rules-button := GitHubButton { text: I18n.ui-components-long-rules; selected: root.many-rules; clicked => { root.many-rules = true; } }
+    }
+
+    flow := GitHubPullRequestFlow {
+        y: 48px;
+        width: root.width;
+        viewport-global-x: root.viewport-global-x;
+        viewport-global-y: root.viewport-global-y;
+        viewport-width: root.viewport-width;
+        viewport-height: root.viewport-height;
+        repo-type: "github";
+        pr-state: root.state;
+        pr-query: root.query;
+        pr-review-filter: root.review;
+        pr-assignee-filter: root.assignee;
+        pr-sort-filter: root.sort;
+        pr-total: 4;
+        pr-total-exact: true;
+        pr-open-total: 24;
+        pr-closed-total: 12;
+        ai-review-rule-options: root.many-rules ? root.long-rules : root.short-rules;
+        ai-review-project-rule-id: root.rule-id;
+        ai-review-project-rule-name: root.rule-id == "" ? "Security baseline" : root.rule-id;
+        pr-items: [
+            { number: "1842", title: "Fix anchored menu placement near window edges", state: root.state, author: "octocat", source-branch: "fix/anchored-menu", target-branch: "main", review-status: "review_required", conversation-count: 12, updated-at: I18n.ui-components-two-hours-ago },
+            { number: "1841", title: "Improve keyboard navigation and accessibility in review filters", state: root.state, author: "mona", source-branch: "feature/keyboard-navigation", target-branch: "main", review-status: "approved", conversation-count: 3, updated-at: I18n.ui-components-five-hours-ago },
+            { number: "1840", title: "Keep project settings isolated during asynchronous refresh", state: root.state, author: "hubot", source-branch: "fix/project-state-isolation", target-branch: "main", review-status: "changes_requested", conversation-count: 28, updated-at: I18n.ui-components-one-day-ago },
+            { number: "1839", title: "Update translations for review actions", state: root.state, author: "dependabot", source-branch: "chore/translations", target-branch: "main", review-status: "none", conversation-count: 0, updated-at: I18n.ui-components-two-days-ago }
+        ];
+        change-state(value) => { root.state = value; root.query = "is:pr is:" + value; }
+        change-query(value) => { root.query = value; }
+        change-review-filter(value) => { root.review = value; }
+        change-assignee-filter(value) => { root.assignee = value; }
+        change-sort-filter(value) => { root.sort = value; }
+        set-ai-review-rule(value) => { root.rule-id = value; }
+    }
+}
