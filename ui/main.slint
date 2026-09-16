@@ -831,6 +831,7 @@ export component MainWindow inherits Window {
     in property <bool> shell-drawer-cursor-visible: false;
     in property <bool> shell-drawer-running: false;
     in property <bool> shell-drawer-connected: false;
+    in property <bool> shell-drawer-input-failed: false;
     in-out property <[string]> shell-drawer-init-commands: [];
     in-out property <length> shell-drawer-height: 280px;
     in-out property <bool> shell-drawer-fullscreen: false;
@@ -1610,6 +1611,7 @@ export component MainWindow inherits Window {
                         cursor-visible: root.shell-drawer-cursor-visible;
                         running: root.shell-drawer-running;
                         connected: root.shell-drawer-connected;
+                        input-failed: root.shell-drawer-input-failed;
                         initial-height: 280px;
                         available-height: root.shell-drawer-fullscreen
                             ? root.workflow-terminal-fullscreen-height

@@ -7,6 +7,8 @@ use crate::workflow::bindings::{show_error, show_success};
 use crate::workflow::state::{SharedWorkflowState, default_tag_steps, initialize_current_ui};
 use crate::{MainWindow, Route};
 use slint::ComponentHandle;
+use std::fmt;
+use std::io;
 use std::path::Path;
 use std::process::{Command as StdCommand, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,6 +26,7 @@ use super::version::{
 
 const TAG_MODE_LOCAL: &str = "local";
 const TAG_MODE_REMOTE: &str = "remote";
+const LOCAL_TAG_ERROR_DETAIL_CHARS: usize = 320;
 
 pub(super) use super::command_output::{clamp_step_log, run_command};
 
@@ -32,6 +35,123 @@ fn format_command_log(rendered: &str, stdout: &str, stderr: &str) -> String {
     lines.extend(stdout.lines().map(str::to_owned));
     lines.extend(stderr.lines().map(str::to_owned));
     clamp_step_log(lines.join("\n"))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LocalTagReadError {
+    RepositoryMissing,
+    GitNotFound,
+    GitPermissionDenied,
+    XcodeLicenseNotAccepted,
+    DeveloperToolsUnavailable,
+    NotRepository,
+    UnsafeRepository,
+    GitStartFailed { detail: String },
+    GitFailed { status: String, detail: String },
+    GitFailedWithoutDetail { status: String },
+}
+
+impl LocalTagReadError {
+    fn from_spawn(error: io::Error) -> Self {
+        match error.kind() {
+            io::ErrorKind::NotFound => Self::GitNotFound,
+            io::ErrorKind::PermissionDenied => Self::GitPermissionDenied,
+            _ => Self::GitStartFailed {
+                detail: bounded_diagnostic_detail(error.to_string().as_str()),
+            },
+        }
+    }
+
+    fn from_output(status: std::process::ExitStatus, stdout: &[u8], stderr: &[u8]) -> Self {
+        let stdout = String::from_utf8_lossy(stdout);
+        let stderr = String::from_utf8_lossy(stderr);
+        let combined = format!("{stderr}\n{stdout}");
+        Self::classify_failed_output(
+            status
+                .code()
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "signal".to_string()),
+            combined.as_str(),
+        )
+    }
+
+    fn classify_failed_output(status: String, combined: &str) -> Self {
+        let normalized = combined.to_ascii_lowercase();
+
+        if normalized.contains("xcode and apple sdks license")
+            || normalized.contains("xcode license agreement")
+        {
+            Self::XcodeLicenseNotAccepted
+        } else if normalized.contains("invalid active developer path")
+            || normalized.contains("requires the command line developer tools")
+            || normalized.contains("unable to find utility \"git\"")
+        {
+            Self::DeveloperToolsUnavailable
+        } else if normalized.contains("not a git repository") {
+            Self::NotRepository
+        } else if normalized.contains("detected dubious ownership") {
+            Self::UnsafeRepository
+        } else if normalized.contains("permission denied")
+            || normalized.contains("operation not permitted")
+        {
+            Self::GitPermissionDenied
+        } else {
+            let detail = bounded_diagnostic_detail(combined);
+            if detail.is_empty() {
+                Self::GitFailedWithoutDetail { status }
+            } else {
+                Self::GitFailed { status, detail }
+            }
+        }
+    }
+
+    fn localized(&self) -> LocalizedText {
+        match self {
+            Self::RepositoryMissing => LocalizedText::message("tag.load_local_repo_missing"),
+            Self::GitNotFound => LocalizedText::message("tag.load_local_git_not_found"),
+            Self::GitPermissionDenied => {
+                LocalizedText::message("tag.load_local_git_permission_denied")
+            }
+            Self::XcodeLicenseNotAccepted => LocalizedText::message("tag.load_local_xcode_license"),
+            Self::DeveloperToolsUnavailable => {
+                LocalizedText::message("tag.load_local_developer_tools")
+            }
+            Self::NotRepository => LocalizedText::message("tag.load_local_not_repository"),
+            Self::UnsafeRepository => LocalizedText::message("tag.load_local_unsafe_repository"),
+            Self::GitStartFailed { detail } => LocalizedText::message_with(
+                "tag.load_local_git_start_failed",
+                [("detail", detail.clone())],
+            ),
+            Self::GitFailed { status, detail } => LocalizedText::message_with(
+                "tag.load_local_git_failed",
+                [("status", status.clone()), ("detail", detail.clone())],
+            ),
+            Self::GitFailedWithoutDetail { status } => LocalizedText::message_with(
+                "tag.load_local_git_failed_without_detail",
+                [("status", status.clone())],
+            ),
+        }
+    }
+}
+
+impl fmt::Display for LocalTagReadError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}", self.localized().source_text())
+    }
+}
+
+fn bounded_diagnostic_detail(detail: &str) -> String {
+    let normalized = detail.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut chars = normalized.chars();
+    let bounded = chars
+        .by_ref()
+        .take(LOCAL_TAG_ERROR_DETAIL_CHARS)
+        .collect::<String>();
+    if chars.next().is_some() {
+        format!("{bounded}...")
+    } else {
+        bounded
+    }
 }
 
 pub(super) fn set_step_log(step: &mut JobStepData, log: impl Into<String>) {
@@ -294,7 +414,11 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 move || read_latest_local_tag(&local_repo)
             })
             .await
-            .map_err(|error| format!("Failed to join latest local tag task: {}", error))
+            .map_err(|error| LocalTagReadError::GitStartFailed {
+                detail: bounded_diagnostic_detail(
+                    format!("Failed to join latest local Tag task: {error}").as_str(),
+                ),
+            })
             .and_then(|result| result);
 
             let _ = slint::invoke_from_event_loop(move || {
@@ -331,8 +455,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                                 entry.tag_remove_target = "v0.0.0".to_string();
                                 entry.tag_add_initializing = false;
                                 entry.tag_add_ready = false;
-                                entry.tag_result =
-                                    LocalizedText::message("tag.load_local_failed");
+                                entry.tag_result = error.localized();
                             }
                         }
                         if current_project_id != project_id {
@@ -1220,7 +1343,11 @@ pub(crate) fn refresh_tag_context(
             move || read_latest_local_tag(&local_repo)
         })
         .await
-        .map_err(|error| format!("Failed to join latest local tag task: {}", error))
+        .map_err(|error| LocalTagReadError::GitStartFailed {
+            detail: bounded_diagnostic_detail(
+                format!("Failed to join latest local Tag task: {error}").as_str(),
+            ),
+        })
         .and_then(|result| result);
 
         let _ = slint::invoke_from_event_loop(move || {
@@ -1262,13 +1389,14 @@ pub(crate) fn refresh_tag_context(
                             "[Workflow][Tag] Refresh context failed to read tags: {}",
                             error
                         );
-                        maybe_error = Some(error.clone());
+                        let localized_error = error.localized();
+                        maybe_error = Some(localized_error.clone());
                         entry.tag_current_version = "v0.0.0".to_string();
                         entry.tag_next_version = next_semver("v0.0.0", bump_mode);
                         entry.tag_remove_target = "v0.0.0".to_string();
                         entry.tag_add_initializing = false;
                         entry.tag_add_ready = false;
-                        entry.tag_result = LocalizedText::message("tag.load_local_failed");
+                        entry.tag_result = localized_error;
                     }
                 }
                 if current_project_id != project_id {
@@ -1280,8 +1408,8 @@ pub(crate) fn refresh_tag_context(
                 );
             }
             initialize_current_ui(&ui, &state_task);
-            if maybe_error.is_some() {
-                show_error(&ui, crate::i18n::tr("tag.load_local_failed").as_ref());
+            if let Some(error) = maybe_error {
+                show_error(&ui, error.resolve().as_str());
             }
             log::info!("[Workflow][Tag] Refresh context finished");
         });
@@ -1834,7 +1962,7 @@ where
     Ok((latest, combined_log))
 }
 
-fn read_latest_local_tag(local_repo: &str) -> Result<String, String> {
+fn read_latest_local_tag(local_repo: &str) -> Result<String, LocalTagReadError> {
     log::info!(
         "[Workflow][Tag] Reading latest local tag from repo='{}'",
         local_repo
@@ -1848,19 +1976,23 @@ fn read_latest_local_tag(local_repo: &str) -> Result<String, String> {
             "[Workflow][Tag] Local repo path does not exist: '{}'",
             local_repo
         );
-        return Err("The selected local repository path does not exist.".to_string());
+        return Err(LocalTagReadError::RepositoryMissing);
     }
 
     let output = StdCommand::new("git")
         .args(["-C", local_repo, "tag", "--list", "--sort=-version:refname"])
         .output()
-        .map_err(|error| format!("Failed to inspect local tags: {}", error))?;
+        .map_err(LocalTagReadError::from_spawn)?;
     if !output.status.success() {
         log::warn!(
             "[Workflow][Tag] Failed reading local tags, git exit status={}",
             output.status
         );
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        return Err(LocalTagReadError::from_output(
+            output.status,
+            output.stdout.as_slice(),
+            output.stderr.as_slice(),
+        ));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1965,7 +2097,11 @@ fn run_command_blocking(command: Vec<String>) -> Result<BlockingCommandSuccess, 
 
 #[cfg(test)]
 mod tests {
-    use super::{format_command_log, run_command};
+    use super::{
+        LOCAL_TAG_ERROR_DETAIL_CHARS, LocalTagReadError, bounded_diagnostic_detail,
+        format_command_log, run_command,
+    };
+    use crate::i18n::test_locale_guard;
     use crate::jobs::{JobConclusion, JobStepData, JobStepDefinition};
     use slint::Model;
     use std::sync::Arc;
@@ -1993,6 +2129,77 @@ mod tests {
                 "error: pathspec did not match\n",
             ),
             "Run git -C /repo checkout release\nerror: pathspec did not match"
+        );
+    }
+
+    #[test]
+    fn local_tag_error_identifies_unaccepted_xcode_license() {
+        let _locale_guard = test_locale_guard();
+        let error = LocalTagReadError::classify_failed_output(
+            "69".into(),
+            "You have not agreed to the Xcode and Apple SDKs license.",
+        );
+
+        assert_eq!(error, LocalTagReadError::XcodeLicenseNotAccepted);
+        assert!(
+            error
+                .localized()
+                .source_text()
+                .contains("sudo xcodebuild -license accept")
+        );
+        usher_i18n::activate_preference("zh-CN");
+        assert!(error.localized().resolve().contains("尚未接受 Xcode"));
+        usher_i18n::activate_preference(usher_i18n::fallback_locale().id);
+    }
+
+    #[test]
+    fn local_tag_error_classifies_common_git_failures() {
+        assert_eq!(
+            LocalTagReadError::classify_failed_output(
+                "128".into(),
+                "fatal: not a git repository (or any parent directories): .git",
+            ),
+            LocalTagReadError::NotRepository
+        );
+        assert_eq!(
+            LocalTagReadError::classify_failed_output(
+                "128".into(),
+                "fatal: detected dubious ownership in repository at '/repo'",
+            ),
+            LocalTagReadError::UnsafeRepository
+        );
+        assert_eq!(
+            LocalTagReadError::classify_failed_output(
+                "1".into(),
+                "xcrun: error: invalid active developer path",
+            ),
+            LocalTagReadError::DeveloperToolsUnavailable
+        );
+    }
+
+    #[test]
+    fn unknown_git_failure_retains_bounded_diagnostic_and_exit_status() {
+        let diagnostic = "unexpected failure ".repeat(64);
+        let error = LocalTagReadError::classify_failed_output("42".into(), &diagnostic);
+        let LocalTagReadError::GitFailed { status, detail } = error else {
+            panic!("expected generic Git failure");
+        };
+
+        assert_eq!(status, "42");
+        assert!(detail.ends_with("..."));
+        assert_eq!(
+            detail.trim_end_matches("...").chars().count(),
+            LOCAL_TAG_ERROR_DETAIL_CHARS
+        );
+        assert_eq!(
+            bounded_diagnostic_detail(" one\n two\tthree "),
+            "one two three"
+        );
+        assert_eq!(
+            LocalTagReadError::classify_failed_output("128".into(), " \n\t"),
+            LocalTagReadError::GitFailedWithoutDetail {
+                status: "128".into()
+            }
         );
     }
 

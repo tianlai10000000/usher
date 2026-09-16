@@ -21,7 +21,7 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | [Reusable job runs](jobs.md) | Current: typed lifecycle/durations, bounded output, virtualized logs, safe blank rows and fixed run pages with output-only scrolling / 当前：类型化生命周期/耗时、有界输出与日志虚拟化、空行安全处理及固定运行页/仅输出区滚动 | `src/jobs/`, `ui/views/job_run.slint`, `ui/components/jobs/`, feature controllers |
 | [Application Hooks](hooks.md) | Current: bounded syntax text and native cursor/selection; macOS cursor visual QA passed / 当前：有界语法文本与原生光标/选区，macOS 光标视觉验收通过 | `src/hooks/`, `src/project/`, Settings, PR/AI completion sources, notifications and shutdown drains |
 | [Tag workflow](tag.md) | Current / 当前 | `src/workflow/tag.rs`, `src/workflow/tag/`, `src/workflow/state.rs`, `ui/views/workflow/` |
-| [Terminal behavior](terminal.md) | Current / 当前 | `src/terminal/`, `ui/components/drawer/terminal_drawer.slint`, `ui/main.slint` |
+| [Terminal behavior](terminal.md) | Bounded I/O and asynchronous session shutdown barrier / 有界 IO 与异步会话退出屏障 | `src/terminal/`, `ui/components/drawer/terminal_drawer.slint`, `ui/main.slint` |
 | [Application keyboard shortcuts](shortcuts.md) | Current / 当前 | `src/shortcuts/`, `ui/main.slint`, `src/platform/` |
 | [Application status bar](status-bar.md) | Current / 当前 | `ui/components/status_bar.slint`, `ui/main.slint`, shortcut/notification/network/update state owners |
 | [Application message center](messages.md) | Current: 20-record pages, filter scroll preservation and row-bounded corner clipping / 当前：每页 20 条、筛选保留滚动位置与行级圆角裁剪 | `crates/usher-messages/`, `src/message_center.rs`, `src/notification.rs`, message/status UI |

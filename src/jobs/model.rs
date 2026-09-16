@@ -1,10 +1,10 @@
 //! Application-wide reusable Job definitions and runtime snapshots.
 
 #[cfg(test)]
-use super::log_model::parse_log_line;
-#[cfg(test)]
 use super::log_model::LogModel;
 use super::log_model::LogSnapshot;
+#[cfg(test)]
+use super::log_model::parse_log_line;
 use crate::i18n::LocalizedText;
 use crate::{JobLogLineItem, JobStepItem};
 use slint::{ModelRc, SharedString};
@@ -267,8 +267,8 @@ pub(crate) fn format_duration(duration: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        format_duration, parse_log_line, JobConclusion, JobExecutionStatus, JobSnapshot,
-        JobStepData, JobStepDefinition,
+        JobConclusion, JobExecutionStatus, JobSnapshot, JobStepData, JobStepDefinition,
+        format_duration, parse_log_line,
     };
     use slint::Model;
     use std::time::Duration;

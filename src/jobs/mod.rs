@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 pub(crate) use model::{
-    format_duration, JobConclusion, JobSnapshot, JobStepData, JobStepDefinition, JobStepStatus,
+    JobConclusion, JobSnapshot, JobStepData, JobStepDefinition, JobStepStatus, format_duration,
 };
 
 #[derive(Debug, Clone)]

@@ -55,6 +55,19 @@ cargo test --lib --locked
 git diff --check
 ```
 
+Run the complete local quality sequence without rewriting source:
+
+```sh
+./scripts/check-quality.sh
+```
+
+It runs formatting, architecture/UI/i18n gates, script tests, default compilation,
+library tests, and whitespace checks, then reports every failure with a nonzero
+exit status. It requires `cargo`, `rg`, `python3`, and `git`; library HTTP fixtures
+need localhost listening permission. Known structure overruns remain blocking;
+their ownership plan and batch A/B evidence are in [batch 64](docs/p6-64-quality.md).
+This command does not enable hosted CI or replace targeted UI/performance checks.
+
 AI Code Review is a detachable Cargo feature enabled by the default product
 build. For a constrained build without its core package or UI/settings bridge:
 

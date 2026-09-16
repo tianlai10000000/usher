@@ -52,6 +52,11 @@ Git command plans, progress reporting, and cancellation.
 14. Switching Add/Remove, Patch/Minor/Major, or Local/Remote while idle resets
     the pending plan and current Job Run descriptor. A prior run can be reopened
     only while the configuration still exposes its current/latest run action.
+15. Local Tag initialization reports a specific, localized failure for a missing
+    repository, unavailable Git executable, Apple developer-tools/license setup,
+    repository ownership, repository validity, and permissions. Unclassified Git
+    failures include a bounded diagnostic excerpt and exit status; the same semantic
+    error is used by the configuration result and Toast.
 
 1. Tag 状态按所选项目隔离；切换项目不得复用其他项目的 running 标记、版本、步骤、
    结果或仓库路径。
@@ -84,6 +89,9 @@ Git command plans, progress reporting, and cancellation.
     总耗时和可视 Job 表面统一使用[可复用 Job Run](jobs.md)契约。
 14. 空闲时切换 Add/Remove、Patch/Minor/Major 或 Local/Remote，必须重置待执行计划
     和当前 Job Run 描述符；只有配置面仍展示当前/最近运行操作时才能重新打开该运行。
+15. Local Tag 初始化必须针对仓库缺失、Git 可执行文件不可用、Apple 开发者工具/许可、
+    仓库所有权、仓库合法性和权限分别显示明确且已本地化的错误。未分类的 Git 失败必须
+    包含有界诊断摘要和退出状态；配置结果与 Toast 使用同一语义错误。
 
 ## Ownership / 职责
 

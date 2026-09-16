@@ -4456,6 +4456,46 @@ key = "tag.load_local_failed"
 text = "The latest local Tag could not be loaded. Check the repository and try again."
 
 [[messages]]
+key = "tag.load_local_repo_missing"
+text = "The configured local repository path does not exist. Update the project's local repository path."
+
+[[messages]]
+key = "tag.load_local_git_not_found"
+text = "Git was not found in the application environment. Install Git or add it to the application's PATH, then restart Usher."
+
+[[messages]]
+key = "tag.load_local_git_permission_denied"
+text = "Git could not access the local repository because permission was denied. Check the Git executable and repository permissions."
+
+[[messages]]
+key = "tag.load_local_xcode_license"
+text = "Apple Git is blocked because the Xcode and Apple SDKs license has not been accepted. Run 'sudo xcodebuild -license accept', then restart Usher."
+
+[[messages]]
+key = "tag.load_local_developer_tools"
+text = "Apple Git is unavailable because Xcode Command Line Tools are not configured. Run 'xcode-select --install', then restart Usher."
+
+[[messages]]
+key = "tag.load_local_not_repository"
+text = "The configured local path is not a Git repository. Update the project to use a cloned Git repository."
+
+[[messages]]
+key = "tag.load_local_unsafe_repository"
+text = "Git rejected the repository because its ownership is considered unsafe. Review Git's safe.directory configuration for this repository."
+
+[[messages]]
+key = "tag.load_local_git_start_failed"
+text = "Git could not be started: {detail}"
+
+[[messages]]
+key = "tag.load_local_git_failed"
+text = "Git failed while reading local Tags (exit {status}): {detail}"
+
+[[messages]]
+key = "tag.load_local_git_failed_without_detail"
+text = "Git failed while reading local Tags with exit status {status}, but returned no diagnostic output."
+
+[[messages]]
 key = "tag.load_remote_failed"
 text = "The latest remote Tag could not be loaded. Check the repository and network, then try again."
 

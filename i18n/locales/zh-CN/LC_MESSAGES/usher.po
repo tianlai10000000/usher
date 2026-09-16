@@ -3378,6 +3378,46 @@ msgctxt "tag.load_local_failed"
 msgid "The latest local Tag could not be loaded. Check the repository and try again."
 msgstr "无法加载最新本地 Tag。请检查仓库后重试。"
 
+msgctxt "tag.load_local_repo_missing"
+msgid "The configured local repository path does not exist. Update the project's local repository path."
+msgstr "配置的本地仓库路径不存在。请更新项目的本地仓库路径。"
+
+msgctxt "tag.load_local_git_not_found"
+msgid "Git was not found in the application environment. Install Git or add it to the application's PATH, then restart Usher."
+msgstr "应用运行环境中找不到 Git。请安装 Git 或将其加入应用的 PATH，然后重启 Usher。"
+
+msgctxt "tag.load_local_git_permission_denied"
+msgid "Git could not access the local repository because permission was denied. Check the Git executable and repository permissions."
+msgstr "Git 因权限不足无法访问本地仓库。请检查 Git 可执行文件和仓库权限。"
+
+msgctxt "tag.load_local_xcode_license"
+msgid "Apple Git is blocked because the Xcode and Apple SDKs license has not been accepted. Run 'sudo xcodebuild -license accept', then restart Usher."
+msgstr "Apple Git 因尚未接受 Xcode 和 Apple SDK 许可而被阻止。请运行 'sudo xcodebuild -license accept'，然后重启 Usher。"
+
+msgctxt "tag.load_local_developer_tools"
+msgid "Apple Git is unavailable because Xcode Command Line Tools are not configured. Run 'xcode-select --install', then restart Usher."
+msgstr "Apple Git 因未配置 Xcode Command Line Tools 而不可用。请运行 'xcode-select --install'，然后重启 Usher。"
+
+msgctxt "tag.load_local_not_repository"
+msgid "The configured local path is not a Git repository. Update the project to use a cloned Git repository."
+msgstr "配置的本地路径不是 Git 仓库。请将项目更新为已克隆的 Git 仓库路径。"
+
+msgctxt "tag.load_local_unsafe_repository"
+msgid "Git rejected the repository because its ownership is considered unsafe. Review Git's safe.directory configuration for this repository."
+msgstr "Git 因认为仓库所有权不安全而拒绝访问。请检查该仓库的 Git safe.directory 配置。"
+
+msgctxt "tag.load_local_git_start_failed"
+msgid "Git could not be started: {detail}"
+msgstr "无法启动 Git：{detail}"
+
+msgctxt "tag.load_local_git_failed"
+msgid "Git failed while reading local Tags (exit {status}): {detail}"
+msgstr "Git 读取本地 Tag 失败（退出状态 {status}）：{detail}"
+
+msgctxt "tag.load_local_git_failed_without_detail"
+msgid "Git failed while reading local Tags with exit status {status}, but returned no diagnostic output."
+msgstr "Git 读取本地 Tag 失败，退出状态为 {status}，但未返回诊断信息。"
+
 msgctxt "tag.load_remote_failed"
 msgid "The latest remote Tag could not be loaded. Check the repository and network, then try again."
 msgstr "无法加载最新远程 Tag。请检查仓库和网络后重试。"

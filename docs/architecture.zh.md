@@ -957,6 +957,17 @@ ScrollView、Spinner、Button/IconButton、token 与焦点契约。首次进入�
 
 ### Terminal
 
+`session.rs` 拥有 PTY Reader、单个 Writer 及其退出回收；`io.rs` 拥有输入准入与
+短写重试。输出使用 64 × 8 KiB 的有界队列，满队列背压到 PTY；Crossbeam select
+等待容量通知或独立取消信号，不轮询空位。输入的 1 MiB/
+128 项预算包含正在写入的缓冲，UI 按键/粘贴和解析器应答只做整次入队。
+用户输入拒绝投影为可即时切换语言的错误提示；Writer 或应答失败会停止会话。
+关闭先取消数据发布，Reader 在 Child 回收期间继续排空内核输出，再停止并 join
+两个 IO Worker，避免 macOS 满 PTY 输出导致 wait 卡住；展示锁内不等待退出。
+`lifecycle.rs` 持有尚未完成的 Session 回收任务，在共享异步退出阶段统一等待。
+排空先关闭新会话准入，再摘下活动 PTY。原高优先级 pre-shutdown 注册保留，
+仅调度清理，不在 event loop 等待。
+
 Terminal 状态感知项目；同一项目重新打开时复用。关闭 Drawer 只隐藏展示，PTY 与 Rust 渲染状态继续工作，Slint model 刷新延迟到重新打开。切换项目时先原子地摘下旧 Session、重置展示与工作目录，再由共享 Runtime 的 blocking Worker 终止旧进程树，UI callback 不等待优雅退出窗口；Session ID 会丢弃被替换项目迟到的输出与退出事件。稳定行为契约见 [specs/terminal.md](specs/terminal.md)。
 
 `GitHubTerminalDrawer` 只负责 Drawer 外壳、viewport 上报、输入与单元格展示；
@@ -1117,6 +1128,10 @@ Interceptor 按注册顺序执行。Request hook 可修改 header；Response hoo
 - 滚动和窗口缩放期间避免重建 layout/model，精确计算应延迟到交互稳定后。
 
 ## 验证要求
+
+`scripts/check-quality.sh` 是不改写源码的本地统一检查入口，顺序执行 fmt、结构/UI/i18n、
+脚本回归、默认 check、库测试与 diff 检查。普通失败后继续采集，最终汇总返回失败；
+中断立即停止。该入口不豁免既有结构超限，也不替代功能专项 UI/Release A/B 验收。
 
 Rust 或 Slint 改动至少运行：
 

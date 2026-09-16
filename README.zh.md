@@ -55,6 +55,17 @@ cargo test --lib --locked
 git diff --check
 ```
 
+统一运行本地质量检查（不改写源码）：
+
+```sh
+./scripts/check-quality.sh
+```
+
+依次检查格式、结构/UI/i18n、脚本测试、默认编译、库测试及空白错误，最后汇总所有
+失败并返回非零退出码。需要 `cargo`、`rg`、`python3`、`git`；库测试的 HTTP 夹具
+需要本地监听权限。已知结构超限仍会阻断；职责方案与本批 A/B 证据见
+[第 64 批](docs/p6-64-quality.md)。该命令不会启用托管 CI，也不替代专项 UI/性能验收。
+
 AI Code Review 是默认产品构建启用的可拆卸 Cargo feature。受限构建可排除其核心包和
 UI/Settings bridge：
 

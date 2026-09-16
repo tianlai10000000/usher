@@ -53,8 +53,8 @@ jobs:
       - name: Check i18n catalogs
         run: ./scripts/check-i18n.sh
 
-      - name: Test benchmark threshold policy
-        run: python3 -m unittest discover -s scripts/tests -p 'test_*thresholds.py'
+      - name: Test quality gates and benchmark threshold policy
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 
       - name: Test workspace
         # The repository's documented baseline has one failing logger doctest;

@@ -1225,6 +1225,21 @@ persistence/HTTP work onto the event loop.
 
 ### Terminal
 
+`session.rs` owns the PTY Reader, single ordered Writer and their termination;
+`io.rs` owns input admission and partial-write retries. Output uses a bounded
+64 x 8 KiB queue that backpressures the PTY. Crossbeam selection waits for capacity
+or independent cancellation without polling. The 1 MiB/128-item input budget
+includes the in-flight write; UI keys/paste and parser replies only enqueue
+whole inputs. Rejected user input projects a locale-reactive error; Writer or
+protocol-reply failure stops the session. Shutdown cancels publication but keeps
+draining kernel output while reaping the child, then stops and joins both I/O
+workers. This prevents macOS wait from hanging on full PTY output; termination
+never waits under the presentation-state lock.
+`lifecycle.rs` retains pending session retirements and joins them in the shared
+asynchronous shutdown drain. The drain closes session admission before detaching
+the active PTY. The existing high-priority pre-shutdown registration remains,
+but only schedules cleanup and never waits on the event loop.
+
 Terminal state is project-aware and persists while reopening the same project. Closing the drawer only hides its presentation; the PTY and Rust render state remain active, while Slint model refresh is deferred until reopen. Switching projects atomically detaches the old session, resets presentation and working directory, and terminates the detached process tree on a shared-runtime blocking worker so UI callbacks never wait for the graceful-exit window. Session IDs reject late output and exit events from the replaced project. The stable contract is documented in [specs/terminal.md](specs/terminal.md).
 
 `GitHubTerminalDrawer` owns only drawer chrome, viewport reporting, input, and
@@ -1403,6 +1418,12 @@ Interceptors execute in registration order. Request hooks may mutate headers; re
 - Avoid layout/model rebuilds during scroll and window resize; defer precise work until interaction settles.
 
 ## Validation
+
+`scripts/check-quality.sh` is the local read-only validation entry point. It runs
+fmt, structure/UI/i18n gates, script regressions, default check, library tests and
+diff checks sequentially, continuing after ordinary failures and returning a
+failing aggregate status. Interrupts stop the sequence. It does not waive known
+structure overruns or replace feature-specific UI/Release A/B acceptance.
 
 Minimum validation for Rust or Slint changes:
 

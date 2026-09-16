@@ -155,6 +155,8 @@ git diff --check
 
 Additional expectations:
 
+- Every optimization batch requires self-tests and a recorded baseline/candidate A/B comparison before handoff. Tooling-only changes compare gate behavior using positive and negative fixtures; do not claim runtime gains. Runtime/performance changes require controlled Release A/B with raw evidence and the repository's acceptance thresholds. Record failures, unexecuted checks, and the adopt/reject decision; do not advance a failed candidate into the next batch.
+- 每个优化批次交付前必须完成自测并记录基线/候选 A/B 对照。纯工具改动使用正反例比较检查行为，不宣称运行时收益；运行时/性能改动必须执行受控 Release A/B，保留原始证据并遵守仓库验收门槛。记录失败、未执行检查及采用/拒绝结论，失败候选不得进入下一批基线。
 - HTTP changes: add unit tests for classification/options/interceptor behavior where practical; search for direct reqwest client creation.
 - Slint changes: compile the full root UI and manually inspect affected route/layout behavior.
 - Terminal changes: follow the regression matrix in `docs/specs/terminal.md`.

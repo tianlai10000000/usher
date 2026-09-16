@@ -1,5 +1,8 @@
+mod benchmark;
 mod diagnostics;
 mod input;
+mod io;
+mod lifecycle;
 mod refresh;
 mod render;
 mod session;
@@ -20,7 +23,6 @@ use std::rc::Rc;
 use std::sync::{
     Arc, Mutex, OnceLock,
     atomic::{AtomicBool, Ordering},
-    mpsc::{self},
 };
 use std::time::{Duration, Instant};
 
@@ -72,6 +74,7 @@ struct TerminalDrawerState {
     cursor: TerminalCursorState,
     running: bool,
     connected: bool,
+    input_failed: bool,
     rows: u16,
     cols: u16,
     dirty: bool,
@@ -83,6 +86,7 @@ struct TerminalDrawerState {
     suppressed_pty_output_bytes: usize,
     render: TerminalRenderState,
     session: Option<PtySession>,
+    retirement: lifecycle::SessionRetirement,
 }
 
 impl Default for TerminalDrawerState {
@@ -108,6 +112,7 @@ impl Default for TerminalDrawerState {
             cursor: TerminalCursorState::default(),
             running: false,
             connected: false,
+            input_failed: false,
             rows: DEFAULT_ROWS,
             cols: DEFAULT_COLS,
             dirty: false,
@@ -119,6 +124,7 @@ impl Default for TerminalDrawerState {
             suppressed_pty_output_bytes: 0,
             render,
             session: None,
+            retirement: lifecycle::SessionRetirement::default(),
         }
     }
 }
@@ -135,6 +141,10 @@ pub fn setup_terminal(ui: &MainWindow) {
     let _ = TERMINAL_UI_WEAK.set(ui.as_weak());
     initialize_ui(ui, &shared_state);
     bind_terminal(ui, shared_state.clone());
+    crate::shutdown::register_async_drain("terminal_sessions", move || {
+        Box::pin(lifecycle::drain(shared_state))
+    });
+    benchmark::setup(ui);
 }
 
 pub fn shutdown_terminal() {
@@ -145,12 +155,9 @@ pub fn shutdown_terminal() {
         return;
     };
     log::info!("[Terminal] Shutdown requested, terminating active PTY session");
-    let session = detach_session_locked(&mut guard);
+    guard.retirement.closing = true;
+    terminate_session_locked(&mut guard);
     reset_terminal_view_state(&mut guard);
-    drop(guard);
-    if let Some(mut session) = session {
-        session.terminate();
-    }
 }
 
 pub fn set_dark_mode(ui: &MainWindow, is_dark: bool) {
@@ -291,7 +298,7 @@ pub fn reset_terminal_for_project(
         return;
     }
 
-    let previous_session = detach_session_locked(&mut guard);
+    terminate_session_locked(&mut guard);
     guard.project_key = project_key.to_string();
     guard.cwd = if cwd.trim().is_empty() {
         default_terminal_cwd()
@@ -301,8 +308,6 @@ pub fn reset_terminal_for_project(
     guard.drawer_visible = false;
     reset_terminal_view_state(&mut guard);
     drop(guard);
-
-    terminate_session_in_background(previous_session, "project-switch");
 
     ui.set_shell_drawer_visible(false);
     ui.set_shell_drawer_input_text("".into());
@@ -598,6 +603,7 @@ fn initialize_ui(ui: &MainWindow, shared_state: &SharedTerminalState) {
     ui.set_shell_drawer_cursor_visible(guard.cursor.visible);
     ui.set_shell_drawer_running(guard.running);
     ui.set_shell_drawer_connected(guard.connected);
+    ui.set_shell_drawer_input_failed(guard.input_failed);
 }
 
 fn ensure_session_started(ui: &MainWindow, shared_state: SharedTerminalState) {
@@ -609,6 +615,9 @@ fn ensure_session_started(ui: &MainWindow, shared_state: SharedTerminalState) {
         let Ok(mut guard) = shared_state.lock() else {
             return;
         };
+        if guard.retirement.closing {
+            return;
+        }
         guard.drawer_visible = true;
         if guard.session.is_some() {
             guard.connected = true;
@@ -617,7 +626,7 @@ fn ensure_session_started(ui: &MainWindow, shared_state: SharedTerminalState) {
             schedule_refresh(ui_weak, shared_state.clone());
             return;
         }
-        let (tx, rx) = mpsc::channel::<SessionEvent>();
+        let (tx, rx) = crossbeam_channel::bounded::<SessionEvent>(session::OUTPUT_CHUNKS);
         match PtySession::spawn(&cwd, guard.cols, guard.rows, tx.clone()) {
             Ok(session) => {
                 let session_id = guard.next_session_id;
@@ -633,6 +642,7 @@ fn ensure_session_started(ui: &MainWindow, shared_state: SharedTerminalState) {
                 guard.session = Some(session);
                 guard.active_session_id = Some(session_id);
                 guard.connected = true;
+                guard.input_failed = false;
                 guard.running = false;
                 guard.dirty = true;
                 log_terminal_diagnostics("session_started", &mut guard, None, true);
@@ -659,7 +669,7 @@ fn ensure_session_started(ui: &MainWindow, shared_state: SharedTerminalState) {
 
 fn spawn_session_event_bridge(
     shared_state: SharedTerminalState,
-    rx: std::sync::mpsc::Receiver<SessionEvent>,
+    rx: crossbeam_channel::Receiver<SessionEvent>,
     ui_weak: slint::Weak<MainWindow>,
     session_id: u64,
 ) {
@@ -691,11 +701,11 @@ fn spawn_session_event_bridge(
                     guard.output_dirty = guard.selection_mode || !ENABLE_TERMINAL_SPAN_RENDER;
                     for reply in replies {
                         if let Some(session) = guard.session.as_mut() {
-                            match session.write_bytes(&reply) {
+                            match session.enqueue_input(&reply) {
                                 Ok(()) => {
                                     if terminal_verbose_logging_enabled() {
                                         log::info!(
-                                            "[Terminal][Reply] Sent terminal reply: len={}, preview={}",
+                                            "[Terminal][Reply] Queued terminal reply: len={}, preview={}",
                                             reply.len(),
                                             format_bytes_for_log(&reply)
                                         );
@@ -706,11 +716,21 @@ fn spawn_session_event_bridge(
                                         "[Terminal][Reply] Failed to send terminal reply: {}",
                                         error
                                     );
+                                    stop_session_locked(&mut guard, true);
+                                    guard.input_failed = true;
+                                    should_exit = true;
+                                    break;
                                 }
                             }
                         }
                     }
                     guard.dirty = true;
+                }
+                SessionEvent::WriteFailed => {
+                    stop_session_locked(&mut guard, true);
+                    guard.input_failed = true;
+                    guard.dirty = true;
+                    should_exit = true;
                 }
                 SessionEvent::Exit => {
                     log::info!("[Terminal][Lifecycle] PTY session exit received");
@@ -774,11 +794,16 @@ fn send_input_bytes(shared_state: SharedTerminalState, bytes: &[u8]) {
         schedule_refresh_after_write = true;
     }
     if let Some(session) = guard.session.as_mut() {
-        match session.write_bytes(bytes) {
+        match session.enqueue_input(bytes) {
             Ok(()) => {
+                if guard.input_failed {
+                    guard.input_failed = false;
+                    guard.dirty = true;
+                    schedule_refresh_after_write = true;
+                }
                 if terminal_verbose_logging_enabled() {
                     log::info!(
-                        "[Terminal][Input] PTY write succeeded: len={}, preview={}",
+                        "[Terminal][Input] PTY input queued: len={}, preview={}",
                         bytes.len(),
                         format_bytes_for_log(bytes)
                     );
@@ -786,6 +811,7 @@ fn send_input_bytes(shared_state: SharedTerminalState, bytes: &[u8]) {
             }
             Err(error) => {
                 log::error!("[Terminal] Failed to write PTY input: {}", error);
+                guard.input_failed = true;
                 let prefix = selection_output_without_notice(&guard);
                 set_selection_notice(&mut guard, prefix, "terminal.write_failed");
                 guard.output_dirty = false;
@@ -925,8 +951,8 @@ fn begin_refresh_schedule(guard: &mut TerminalDrawerState, now: Instant) -> Opti
 }
 
 fn terminate_session_locked(guard: &mut TerminalDrawerState) {
-    if let Some(mut session) = detach_session_locked(guard) {
-        session.terminate();
+    if let Some(session) = detach_session_locked(guard) {
+        guard.retirement.retire(session, "session-exit");
     }
 }
 
@@ -934,22 +960,12 @@ fn detach_session_locked(guard: &mut TerminalDrawerState) -> Option<PtySession> 
     let session = guard.session.take();
     guard.active_session_id = None;
     guard.connected = false;
+    guard.input_failed = false;
     guard.running = false;
     guard.render.set_scrollback(0);
     guard.scrollback_offset = 0;
     guard.max_scrollback_dirty = false;
     session
-}
-
-fn terminate_session_in_background(session: Option<PtySession>, reason: &'static str) {
-    let Some(mut session) = session else {
-        return;
-    };
-    crate::app_runtime::shared_runtime().spawn(async move {
-        if let Err(error) = tokio::task::spawn_blocking(move || session.terminate()).await {
-            log::warn!("[Terminal] PTY termination worker failed ({reason}): {error}");
-        }
-    });
 }
 
 fn set_drawer_visible(shared_state: &SharedTerminalState, visible: bool) {
@@ -1175,6 +1191,27 @@ fn toggle_source_label(ui: &MainWindow) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mounted_input_failure_refreshes_with_runtime_locale() {
+        use i_slint_backend_testing::ElementHandle;
+        let _locale_guard = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().unwrap();
+        ui.set_current_route(Route::Project);
+        ui.set_shell_drawer_visible(true);
+        ui.set_shell_drawer_input_failed(true);
+        for locale in ["en", "zh-CN"] {
+            crate::i18n::apply_preference(locale).unwrap();
+            let message = usher_i18n::translate_for(locale, "terminal.write_failed");
+            assert!(
+                ElementHandle::find_by_accessible_label(&ui, message.as_ref())
+                    .next()
+                    .is_some()
+            );
+        }
+        crate::i18n::apply_preference(usher_i18n::source_locale().id).unwrap();
+    }
 
     #[test]
     fn hidden_drawer_defers_refresh_until_reopened() {

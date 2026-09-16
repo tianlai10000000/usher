@@ -220,7 +220,7 @@ fn loading_logs_state_hides_stale_rows_and_uses_a_full_viewport() {
                 },
                 line_number: 1,
                 visual_lines: ModelRc::new(VecModel::from(vec![
-                    "stale row must stay hidden".into()
+                    "stale row must stay hidden".into(),
                 ])),
                 offset: 0.0,
                 extent: 32.0,

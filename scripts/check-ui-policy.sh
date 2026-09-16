@@ -62,11 +62,14 @@ done
 
 # Tooltip surfaces may differ in factory-local state/labels, but all placement
 # must flow through the same content-neutral geometry component.
+# Hooks owns the fixed-action Settings factory portal specified in tooltips.md;
+# allow that exact owner, not arbitrary components beneath settings/.
 floating_geometry_consumers=$(rg -l 'GitHubFloatingOverlayHost[[:space:]]*\{' \
     ui --glob '*.slint' || true)
 unexpected_floating_geometry=$(echo "$floating_geometry_consumers" \
     | rg -v '^ui/components/github_tooltip_overlay\.slint$' \
     | rg -v '^ui/components/messages/github_message_tooltip\.slint$' \
+    | rg -v '^ui/components/settings/github_hook_tooltip\.slint$' \
     | rg -v '^ui/components/input/github_select\.slint$' \
     || true)
 if [ -n "$unexpected_floating_geometry" ]; then

@@ -1,5 +1,8 @@
 # Usher 项目缺陷分析与优化提案
 
+> **最新复审：2026-09-16，HEAD=`209e5c6`，见 [第四轮复审](#21-第四轮范围与结论)。**
+> §0–§20 为对应提交的历史分析/实施记录；其中的“当前”“已完成”、规模、CI 触发方式和测试结果不能直接当作本版本结论。第四轮审查只更新分析与建议；随后第 64 批工具与格式修复已实施并完成行为 A/B，见 §27，没有重跑 Release RSS A/B。
+
 > 首轮审查：2026-08-27 ｜ **第二轮复审：2026-08-30（HEAD=73ae042，见 §9）** ｜ 分支：`feature/pr-review`
 > 方法：5 路并行深度审查（Git Provider 层 / PR&AI Review 控制器 / Slint UI 与渲染 / 基础设施与平台层 / 全局质量体检），所有结论均附代码位置证据，未经证实的猜测不收录。
 
@@ -766,3 +769,262 @@ PR 集成测试改用新 global，并补入 #61 已有的即时空查询取消�
 人工检查完成窄 Diff 中文换行/滚动及 Chat 双向滚动、模式切换和重入；CUA 修饰键
 仍被当作普通字符输入，Find 键盘/导航验收缺口保留。中英文架构及相关 spec 已同步，
 起始工作区干净，没有覆盖无关用户改动，未创建提交。
+
+---
+
+# 第四轮架构、性能与 RSS 复审（2026-09-16，HEAD=209e5c6）
+
+## 21. 第四轮范围与结论
+
+本轮对照根目录提案、`code-quality-proposal.md`、中文 README/架构、spec 索引及相关功能契约，核查 Terminal、PR Review、Hooks、Project Logo、Chat、共享 HTTP/调度、UI 构建边界与检查脚本。方法为源码调用链审查与本地检查，不是全仓逐行审计，也没有测量本提交的桌面 Release 内存或帧耗时。
+
+**判断：项目已有可继续演进的模块化基础，主要问题是资源预算没有贯穿完整链路，以及部分 Controller 的多重职责仍靠调用顺序维持。** 不建议重写技术栈、替换现有 State Store 或全面拆 crate。优先补齐输入/队列/计算预算，再收敛高频数据投影和会话所有权。
+
+### 21.1 对历史结论的校正
+
+| 历史说法/事项 | 本轮核查结果 | 后续方向 |
+| --- | --- | --- |
+| Git Provider 没有统一抽象 | 已有 `src/git/provider.rs` 的 Provider 边界，`src/git/mod.rs` 统一分发，`json.rs` 共享解码 | 不再重复立项引入同名 trait；按实际重复和契约测试改善 adapter |
+| PR Review 完全绕开 State Store | `pr_review/state.rs` 已接入，但只管理 8 类请求 generation；业务缓存、请求、时间线与展示状态仍分散 | 从“接入 Store”转为明确会话事务与资源归属，见 R4-7 |
+| Chat 生产未虚拟化、Find 在 UI 全扫描 | 生产 Chat 已有稳定窗口；Find 已有 `find_worker.rs`/`find_bridge.rs` 的后台计算与取消 | 保留成果；继续检查 Rust 原始历史与 PR 高亮路径 |
+| 持久化快照/Logo 重试无界 | 公共最新快照调度与 Logo 4 并发、3 次尝试已实现 | 不能把旧 bug 重列为待办；下载字节与 Hooks 写入频度是不同的后续问题 |
+| CQ-B1–B8 待优化 | 质量文档已记录完成；本轮抽查 Job typed lifecycle、`set_log`、Diff 类型和 Tag 有界输出与之相符 | 不再机械重复上述重构，未重新验收每批 A/B |
+| 没有 CI，或 CI 已自动覆盖主分支 | CI 与性能脚本存在；当前两个 workflow 均仅 `workflow_dispatch`，Nightly schedule 明确暂停 | 尊重当前运行成本策略；建立本地必跑入口，恢复自动触发另行决策 |
+| Chat offset 9984 测试必然失败 | 本轮默认库测试该项通过，完整结果为 602 通过、0 失败、2 忽略 | 保留历史环境差异；不能继续把它写成本轮失败 |
+| 全屏 footprint 高水位等于 Rust 泄漏 | 旧实验已区分 IOSurface、堆及平台期；本轮无新测量 | 不由 RSS 一项反推泄漏，也不由旧 WGPU 静态收益改变生产渲染器 |
+
+本轮规模按 `src/`、`crates/` 内 `.rs` 和 `ui/` 内 `.slint` 的物理行统计，含测试、空行和 build script，不含 target 生成代码及 vendored 代码：Rust **90,049 行**，Slint **35,884 行**；workspace 为 **11 个 member（含根包）**。此口径与首轮不同，不能直接用差值推断业务复杂度增幅。
+
+### 21.2 当前结构热点
+
+| 位置 | 当前物理行数 | 判断 |
+| --- | ---: | --- |
+| `src/lib.rs` | 1,038 | 仍处于现有结构预算内，保持装配职责 |
+| `src/workflow/pr_review/controller.rs` | 4,315 | 含测试；加载、范围、定位、上下文展开及展示编排仍集中 |
+| `src/ai_review/controller.rs` | 3,876 | 超现有 3,850 行预算，任务、对话、响应投影仍同文件 |
+| `src/chat/interactive.rs` | 2,174 | 接近 2,200 行预算；已有 viewport/message owner，不宜重新切碎 |
+| `src/git/gitee/mod.rs` | 3,708 | 接近预算；需按协议/用例分工，不能由行数判为低质量 |
+| `src/hooks/bridge.rs` | 1,585 | 新热点：词法着色、Settings、通知、启动、日志回放、Job 投影混合 |
+| `src/workflow/pr_review/controller/actions.rs` | 688 | 超 580 行预算；新增 Hook payload 与动作/能力投影混合 |
+| `ui/main.slint` | 3,044 / 420 个根属性 | 超 3,000 行 / 410 属性预算；根 contract 继续扩大 |
+
+“面条代码”应以一次变更跨越多少状态所有者、是否依赖隐含执行顺序、能否脱离 UI 验证为依据。文件长是定位线索，搬测试、增加转发层或抬高预算均不能单独算作治理完成。
+
+## 22. 第四轮发现与改造建议
+
+### R4-1【高·代码确认，压力影响待测】Terminal 输出无界，输入仍可阻塞事件循环
+
+**证据**：`src/terminal/mod.rs:620` 创建 `std::sync::mpsc::channel<SessionEvent>`；`session.rs:67` 的 Reader 每读最多 8 KiB 就 `to_vec()` 入队，发送失败也未立即退出。`mod.rs:660` 的 bridge 持共享状态锁解析输出和写终端回复。另一方面，按键/提交/粘贴 callback（`:419`、`:430`、`:515`；Slint 契约在 `ui/main.slint`）直接进入 `send_input_bytes()`（`:765`），锁内执行 `PtySession::write_bytes()` 的同步 `write_all + flush`（`session.rs:96`）。
+
+**影响**：1000 行 scrollback 和有界可见 model 只限制解析后的历史，不限制尚未消费的输出。生产速度超过解析速度时，队列可持续积累；子进程暂不读 stdin 时，大块粘贴可能阻塞 UI，并阻止其他线程获得同一状态锁。这里确认的是路径与上限缺失，未给出未经测量的 RSS 增幅或卡顿时长。
+
+**建议**：Terminal owner 分离 PTY Reader、Writer 和 parser；输出使用按字节计费的有界通道，对 Reader 施加背压，不能丢弃或“只保留最新”ANSI 字节。输入在 event loop 非阻塞提交给唯一 Writer，保证按键/粘贴/终端回复顺序，满队列采用显式反馈或受控分块。I/O 不持展示状态锁；session ID、取消、Reader/Writer join 与关闭屏障必须同批设计，防止引入满队列退出死锁。
+
+**验收**：固定高速 ANSI/Unicode 输出、隐藏 Drawer、慢消费、大粘贴且子进程不读输入、A→B→A、输出中关闭；记录 queued bytes、UI callback P95、RSS/footprint 斜率、退出时间。队列峰值必须有确定预算，终端语义与 `docs/specs/terminal.md` 矩阵全部保持。
+
+### R4-2【高·代码确认】PR 高亮没有计算准入/协作取消，过期任务仍会改 loading
+
+**证据**：`pr_review/controller.rs:2056` 每个未命中文件都独立 `spawn_blocking`；`render_full_file()`（`:2578`）同样启动完整高亮。`src/workflow/syntax_highlight.rs:46` 扫描所有行，无取消 token。generation 只在任务完成、排到 UI 后检查；两个完成闭包均在检查 generation **之前**清除 loading（`:2070`、`:2610`）。现有 `LatestCompute` 已用于 Find/Preview/Job，可作为局部调度参考。
+
+**影响**：快速切换未缓存文件会同时保留旧文件、token 结果和待回写闭包；离开页面不代表旧计算立即停止。旧任务 A 完成时还可能提前隐藏仍在计算的 B 的 loading。增加 Tokio worker 数无法解决旧任务浪费，可能进一步放大峰值。
+
+**建议**：每个 Review 会话最多一个执行中高亮和一个可替换输入，循环按行检查取消；单行特别大时提供明确的纯文本降级/工作量预算。完成回调先校验 project/session/file/generation，再修改包括 loading 在内的任何 UI 状态。只合并可替代的读取/高亮任务，不能把远端 merge/review 等有副作用操作按同样方式丢弃。
+
+**验收**：慢 A→快 B、快 A→慢 B、连续 50 次未命中切换、PR/项目切换、关闭；断言并发及待处理数、B 的 loading、最终文件正确、取消后 owned bytes 释放。已有大 Diff 显式加载与旧代码保留展示行为不回退。
+
+### R4-3【高·代码确认】响应体预算没有贯穿下载阶段
+
+**证据**：`src/http/mod.rs:919` 的 `bytes_raw()` 无上限累积 `Vec<u8>`，`text()`/`json()` 复用该路径。`src/project/logo.rs:275` 全量下载 Logo 后才写磁盘；`logo_loader.rs:78` 允许 4 个并发。`logo_prepare.rs:12` 的 8 MiB 源文件、64 MiB 解码限制是**后续读取/解码**限制，不能限制前一阶段下载。AI 流式 parser 有 16 MiB 上限（`src/ai/agent.rs:15`），但非流式 JSON 完成路径（`:424`）仍使用通用无上限读取。
+
+**影响**：超大成功响应可以先占用完整 buffer，随后才被 Logo/Preview 拒绝；并发使预算相乘。超时只限制时间，不能限制高吞吐服务在截止前返回多少字节；JSON 解析还会与原始响应 buffer 同时存活。
+
+**建议**：在统一 HTTP 模块支持可配置的响应字节预算，按实际收到的 chunk 累计，Content-Length 仅用于提前拒绝。Logo 下载与本地读取统一 8 MiB 契约；Provider JSON、源码、AI JSON 各自选择合理预算和类型化超限结果。更新包保持独立的流式落盘策略，不能套用小 JSON 的限制。网络和本地文件入口都在分配前执行上限，避免“收完再截断”。
+
+**验收**：无 Content-Length、错误长度、连续 chunk、4 路超限 Logo、超大 JSON、边界值及取消；越界停止读取且不留下有效缓存文件，不新增 HTTP client，不破坏统一错误/重试/静默反馈。
+
+### R4-4【中·代码确认】Hook journal 的“2 MiB”与回放预算不是同一口径
+
+**证据**：`src/hooks/runner.rs:112` 按 `text.len()` 累计 2 MiB 输出；实际 `record()`（`:49`）写入的 JSON 还包含关联 ID、序号、时间、stream 与转义开销。`read_output()`（`:414`）一次 read 就生成一个输出事件，4 KiB 是最大值而非最小聚合量。`src/hooks/mod.rs:326` 的回放却拒绝物理文件超过 16 MiB；之后全量读入并构造 `Vec<HookEvent>`。`bridge.rs:1534` 再创建格式化字符串列表、join 字符串、Job 原文与解析模型。
+
+**影响**：细碎输出可能在原文未达 2 MiB 时就使 journal 超过回放限制；“总输出有界”不等于完整磁盘日志受 2 MiB 限制。回放同时持有多种表示；反复点击会独立启动读取，最终 ID 检查只阻止错误展示，没有取消旧读取。
+
+**建议**：明确区分原始输出 bytes、序列化 journal bytes、内存 tail 与回放 page。按实际序列化长度设置磁盘上限并预留生命周期结束记录；按时间/字节合并同一 stream 的细碎输出，保留顺序和截断事件。回放用有界记录/字节页与 seq 游标，流式解析，按选中 run 管理 generation/取消，Job 只保留需要的页。读取预算应在读取过程中生效，不能仅先 stat 再整文件读取。
+
+**验收**：1 字节小块、含大量转义字符、超长单行、生命周期记录保留、超过上限后的最终状态、运行中回放、快速切换/关闭和损坏尾记录。记录文件实际字节、回放峰值/取消数，证明正常产生的日志不会被自身读取限制拒绝。
+
+### R4-5【中·代码确认】Hook 日志更新放大配置复制、持久化和无关投影
+
+**证据**：`src/hooks/state.rs:35` 每个 Action 先 clone 整个 `HookState`，其中 `hooks: Vec<HookDefinition>` 包含脚本文本；允许 32 个 Hook、每个 64 KiB。`runner.rs:104` 活跃输出每约 100ms dispatch 一次 Run。每次 changed commit 都提交 `hooks.json` 的完整 pretty JSON（`state.rs:137`），虽然 `HookRun.log` 已 `serde(skip)`，seq 等变化仍会触发写入。`bridge.rs:538` 在 UI 合并之前调用 `project_run()`；该函数重新创建空 JobStep 再 `set_log()`，无法复用上一版 `LogSnapshot` 的解析行。UI 回调还调用 `apply_settings` 与项目 Hook 选项刷新。
+
+**边界**：已有 `latest_ui` 合并、32 KiB tail、稳定选项 model 的相等检查，应继续保留；Settings 未挂载时不会实际更新该页，Project 刷新也仅在表单打开时执行。问题是这些保护不阻止 reducer 的全配置复制、合并前的重复解析及已挂载无关页面的投影计算。配置满载时，仅脚本文本每次深拷贝可接近 2 MiB，但这不是 RSS 实测值。
+
+**建议**：在 Hook facade 内区分配置、持久运行摘要、瞬态输出的变更语义；配置用 `Arc` 结构共享。持久摘要通过 selector/独立 revision 只对持久字段变化提交，明确可丢中间进度、不可丢终态的恢复契约，继续自动 commit 持久化和 shutdown flush。Settings/Project 按配置及摘要 selector 刷新；Job 按选中 run 的 seq 增量解析，并在合并后准备投影。不能用随处手写 save 或新建私有 Tokio runtime 解决。
+
+**验收**：32 个大脚本、64 条历史、2 个并发输出，分别打开 Home/Settings/Project 表单/Job；记录 reducer 分配、写入次数、投影次数与解析行复用率。只有日志进展时配置页面不重投影，隐藏 Job 不做完整日志解析，最后状态与 seq 正确落盘。
+
+### R4-6【中·已知残留与新核查】有界 UI 不等于 Rust 内容有字节上限
+
+| 所有者 | 代码依据与现状 | 改善方向 |
+| --- | --- | --- |
+| PR 高亮、范围 Diff、源码 | `pr_review/cache.rs:12` 只有 4/4/3 条目预算；`expanded_files` 随展开文件数增长，基础 Diff 本身也完整保留 | 保留条目上限，增加估算字节预算和超大单项不入缓存策略；区分活动文档与可淘汰缓存 |
+| PR 源码复制 | `source_files` 为 `BoundedCache<String>`；`get_cloned()` 深拷贝（如 `controller.rs:2190`）；`:2586` 在 UI 入口构造完整源码行 | 源码改共享不可变文本；全文行构建移至后台，结果代际校验；不能只优化高亮而留下前置同步分配 |
+| PR 列表历史页 | `src/workflow/pr_list.rs:18` 的 `visited_pages` 按访问页存 `HashMap`，同查询未设容量 | 在实测深度分页后设页数/字节 LRU，保留删除后退页与刷新语义 |
+| Chat 已载入历史 | `src/chat/session.rs:168` prepend、`:295` append，保留本会话所有已载入内容；UI 的 32 行不限制这些原文 | 测量双模式深历史；按消息页/bytes 管理内存，可从 JSONL 重载，保留稳定 ID 锚点与正文预览 |
+| Chat 分页 I/O | `src/chat/persistence.rs:177` 每次 `load_before` 都从头读取并解析整个文件 | 用可重建的稀疏 byte-offset 索引或反向分页游标；当前 N 条记录连续加载 K 页约为 O(KN) 扫描，而非只读取 K 页 |
+| Job 完整日志布局 | `jobs/log_model.rs:112` 每个测量快照复制全部 ParsedText；`log_viewport.rs:33` 对全篇保存 wrapped 字符串，`:202` 的窗口缓存最多保留 16 个 model/布局，没有字节预算 | 先让快照共享 immutable 解析行；保留精确 extent，按可见行生成展示文本；测量 Hook 全日志与跨来源保留量 |
+
+这些路径部分是有意保留或用户主动加载，不应统一称为“泄漏”。先用 owned bytes、命中率、路由生命周期确认主要贡献，再分别改动。Chat 内存分页和 PR eviction 改变可重载策略，实施时必须同步对应 spec 与双语架构；禁止通过清空正在运行的会话或冻结 scrollbar 掩盖增长。
+
+### R4-7【中·维护风险】职责拆分尚未收敛状态所有权
+
+**证据**：`pr_review/controller.rs:88` 仍有多把锁分别保存 project alias、active request、cache、action state、conversation/commits loaded 与数据。`pr_review/state.rs:23` 仅保存 generation；reset/select/open 仍需逐处协调。`controller/actions.rs` 虽已提取，但以 `impl WorkflowPrReviewController` 访问父 Controller 字段，仍与完整会话耦合。AI controller 同时包含队列请求、取消映射、Review Ask、响应投影；Hooks bridge 同时承担六类变化原因。
+
+**建议的应用内边界**（按变更触发逐个建立，不先新建一批空模块）：
+
+- PR：`session` 管理不可变会话身份、加载状态及请求 ticket；`content_loader` 管理 Diff/源码/高亮资源；`actions` 只接收捕获的动作上下文并返回 typed outcome；`presenter` 负责 Slint 投影。保留现有 cache/find/hunk 纯算法 owner。
+- AI：在当前 headless crate 与 app adapter 分工上，提取 task runner/context preparation、Review Ask 会话、response presenter；不把 Slint 或全局 Settings 反向引入领域 crate。
+- Hooks：从 `bridge.rs` 提取纯 editor highlighting、Settings 投影/绑定、run replay/Job presenter；启动/通知接线保留薄 facade。注册事件的知识归来源 feature 或装配层，避免通用执行器持续堆业务 payload。
+- Root UI：新增功能优先使用 feature-owned contract/global；独立 factory 仍需显式桥接，不能假设同名 global 跨 crate 共享。
+
+不是把全部缓存和瞬态选区塞进一个大 Store。跨页面共享状态通过 feature facade/typed Action，重数据通过 `Arc` 与明确缓存 owner 持有；hover/焦点保留局部。尤其不能直接用 **Store 总 revision 替代每类请求 generation**，否则无关 Action 会误判仍有效的请求过期。验收应覆盖项目切换事务、旧结果拒绝、依赖方向及脱离 MainWindow 的状态测试。
+
+### R4-8【中·实跑确认】检查与规范发生漂移，缺少稳定执行入口
+
+结构脚本本轮失败 4 项：AI controller 3876/3850、根 Slint 3044/3000、根属性 420/410、PR actions 688/580。提取文件已有自己的预算，说明不能只检查主 Controller；新增 Hooks 热点还应按职责加入检查。
+
+UI policy 本轮报告 `ui/components/settings/github_hook_tooltip.slint`。检查 `scripts/check-ui-policy.sh:64` 可见它仅允许 3 个浮层使用文件；而 Tooltip spec 明确列出 Hook factory 的固定文案独立 Surface，实际实现也使用 `GitHubFloatingOverlayHost`（Hook Tooltip `:187`）。这是**允许列表与已记录实现的冲突**，不能据脚本失败认定应合并固定动作组件或退回通用动态文案，修正检查时仍须遵循 factory 隔离契约。
+
+建议建立一个本地质量入口统一 fmt/check/unit/结构/UI/i18n，按当前允许的手动 CI 使用相同命令；性能场景选取与慢测试分层。先修复可重复红项，再讨论轻量 PR 自动检查及按需 macOS 性能运行，不能为“恢复 CI”擅自恢复已暂停的托管 runner 定时任务。静态门禁补少量高价值规则：生产 Terminal 禁止无界字节通道、下载必须声明响应预算、新提取纯模块不得反向引用 Controller。为例外列出 owner 和原因，不使用宽泛白名单。
+
+### R4-9【中·代码确认】Hooks 新展示路径仍有英文原文与机器状态泄露
+
+`hooks/bridge.rs:486` 把 `running`/`HookConclusion::label()` 放入通知正文；`:642` 的历史标签也直接使用机器状态；`:1518` 的过期记录 Toast 为硬编码英文；Settings 失败结果直接展示 `run.detail`（`:669`），其中混有 Runner 的宿主英文与外部诊断。`HookConclusion` 已是 typed enum，具备统一语义投影基础。
+
+建议将宿主失败建模为错误类别和参数，在 UI 边界进入 `LocalizedText`/共享 catalog，外部脚本 stderr 保留日志原文。持久数据保存语义值，语言切换后重新投影历史、当前 Job 和错误。已有 `check-i18n.sh` 本轮通过，说明 catalog 完整性不等于新 Rust 展示路径无硬编码；补源语言与 `zh-CN` 的运行时切换验收，不能只加翻译条目而遗漏重投影。
+
+## 23. RSS 归因与优化决策
+
+### 23.1 先区分五类内存
+
+| 类别 | 本项目代表路径 | 要记录的指标 | 不应采用的推论 |
+| --- | --- | --- | --- |
+| 原始领域数据 | PR Diff、Chat 历史、AI Session | 唯一 Arc 对象、原文字节、容量、生命周期 | UI 只有几十行，所以领域数据也有界 |
+| 派生表示/缓存 | 高亮 token、布局、Job 日志、图片像素 | 条目与 bytes、命中/淘汰、单项最大值 | 有 LRU 条数就有严格内存上限 |
+| 在途工作 | PTY queue、HTTP body、旧高亮、Hook 回放 | queued bytes、执行数、待处理数、过期结果数 | 后台执行就不会影响 UI 或峰值 |
+| 分配器驻留 | 已释放对象对应的堆页与碎片 | malloc live/resident、释放前后稳定值 | Arc 数下降后 RSS 必须立即等量下降 |
+| 图形与子进程 | IOSurface/窗口、PTY shell、Hook Node | 父进程 footprint、图形分类、子进程单独采样 | Usher 父进程 RSS 包含全部 GPU 与脚本成本 |
+
+当前生产默认是 FemtoVG/OpenGL，共享 Tokio runtime 固定 2 个 async worker；`spawn_blocking` 并不因此只有 2 个并发任务。不要把切换 renderer、减少 async worker、换 allocator、清 target 或减可执行文件体积当作上述资源链路问题的直接修复。
+
+旧 P5 的峰值 RSS 下降（如 Job 长行 253.02→143.61 MiB、Find 313.88→139.34 MiB）只证明当时的固定夹具有效。本轮不重新确认这些数字，也不承诺某项新建议能节省固定百分比。已有 Nightly 的 256 MiB 等阈值是场景门禁，不是整个应用/任意数据规模的内存承诺。
+
+### 23.2 建议新增的测量矩阵
+
+| 场景 | 输入与操作 | 关键结果 |
+| --- | --- | --- |
+| Terminal 压力 | 固定字节数的彩色/宽字符输出，慢 parser，隐藏/重开，慢 stdin 粘贴 | 输出/输入队列峰值、UI P95、取消/退出、父进程与 shell 分开采样 |
+| PR 高亮切换 | 固定大型 Diff，反复选择未缓存文件/全文/范围 | 同时计算数、丢弃工作量、loading 正确性、token/源码 bytes |
+| 下载预算 | 本地 HTTP fixture，4 路超大/无长度 Logo 与大 JSON | 接受/拒绝字节边界、瞬时峰值、缓存残留、取消 |
+| Hooks 压力与回放 | 32 配置、64 历史、2 并发，细碎输出和频繁打开历史 | journal 真实大小、写入频率、重复解析、回放任务、Node RSS |
+| 深历史 | Chat 双模式 100/1000/10000 条固定消息，PR 连续分页 | 扫描字节/耗时、保留原文、分页锚点、回收与重载 |
+| 生命周期/图形 | 大内容→Home→返回→真正不可达，重复 resize/fullscreen | RSS 与 footprint、UI owned bytes、第一循环高水位与后续斜率 |
+
+沿用仓库已有 `benchmark-memory.sh`、`benchmark-hot-paths.py` 和 P5 fixture 框架：隔离配置/数据、固定 release binary hash/feature/renderer/机器/尺寸/缩放，A/B 每侧至少 3 个新进程并交替顺序。采样涵盖准备前、负载峰值、停止、清理后稳定段；重复路由循环并补 15–30 分钟 soak，报告中位数、最大峰值、循环稳定值斜率及原始数据。诊断开销必须一致。
+
+每批先声明目标与回退标准：资源类改动首先证明字节/并发上限和取消正确；内存收益沿用既有证据门槛，不能只比较一对最好的样本。若只有 owned bytes 改善而 RSS 不变，明确报告；若响应性、语义或视觉回退，候选不能进入下一批基线。所有这里的新场景和收益均为**待测**。
+
+## 24. 架构与模块组织路线
+
+保持以下方向：UI view → feature bridge/facade → typed domain/use case → 统一 HTTP/Runtime/持久化。跨功能由装配层连接窄接口，禁止 Preview/Jobs 等通用模块了解 PR Provider 或 Hooks 配置细节。
+
+实施时每批同时交付“状态/资源所有者、输入、输出、取消/关闭、测试边界”五项。例如 PR loader 的输入是已捕获的会话与文件快照，输出是带 generation 的不可变内容；不能把整个 Controller 克隆到所有新模块再称为解耦。进程执行可共享 UTF-8 分块、字节预算等纯机制，但 PTY 与 Hook/Tag pipe 的生命周期不同，暂不引入一个包办所有进程类型的巨大 runner。
+
+**构建优化单列，不与 RSS 混为一谈。** `crates/usher-ui/build.rs` 仍编译完整 `ui/main.slint`，普通 `.slint` 文件拆分不等于增量编译隔离。优先使用已有 `ui-check`、live-preview、dev-shell 和独立 IDE profile。按 `docs/build-performance.md` 已记录结果，`experimental-module-builds` 与统一 build-override 实验未通过，不能再次凭理论重启；PR ComponentFactory 若立项，先用最小原型验证真正减少根生成树/热编译时间，并覆盖 factory 全局隔离、i18n、Tooltip、焦点、快捷键、路由生命周期及 RSS，再决定是否保留。
+
+本次仅修改提案，没有改变运行行为、模块所有权或稳定不变量，因此不把这些目标写入双语架构/spec 充当现状。实施每批时再同步其真实变化；旧 memory backlog/结构审计中的状态应标明日期，避免旧“当前”覆盖已核查的新路径。
+
+## 25. 第六批建议路线图
+
+沿用编号 #64 起；#64 已实施并完成自测/行为 A/B，见 §27；#65 已实现并通过自测与固定显示条件的 Release A/B，手工矩阵仍有缺口，见 §28；#66–#72 待实施。后续所有批次必须自测及 A/B：工具批次做检查行为对照，运行时/性能批次做受控 Release 对照，保留原始数据与采用/拒绝结论；涉及性能时一次只比较一个候选。
+
+| 顺序 | 编号 | 改造范围 | 完成标准 |
+| --- | --- | --- | --- |
+| P6-A 基线 | 64 | 已完成：fmt/UI policy 修复、4 项结构职责方案、统一本地检查入口 | 自测及行为 A/B 通过；真实入口 7 项通过、结构仍失败，原预算不变；见 §27 |
+| P6-B 资源通路 | 65 | 保留修订实现：有界 IO、通知/取消等待、异步会话回收屏障 | 自测及固定显示条件 A/B 通过；失败记录与手工矩阵缺口见 §28 |
+| P6-B 资源通路 | 66 | PR 高亮单执行/最新输入/协作取消；先校验再改 loading | R4-2 乱序与关闭测试通过，过期计算与峰值受控 |
+| P6-B 输入预算 | 67 | HTTP response budget，先接 Logo/AI JSON/源码 | R4-3 chunk 边界测试及下载峰值通过，Provider 行为不回退 |
+| P6-C Hooks | 68 | journal 实际字节预算、可取消分页回放 | 本服务生成的日志始终可回放，读写/内存预算一致 |
+| P6-C Hooks | 69 | 配置共享、摘要持久化 selector、合并后增量投影 | 高频日志不放大全配置复制与无关 UI 刷新，终态 durable |
+| P6-D 数据保留 | 70 | PR bytes LRU/共享源码、Chat 索引及内存页、Job 快照共享分别做 A/B | 每项先确认主导贡献，锚点/重载/全文复制不回退 |
+| P6-E 职责与文案 | 71 | 随上述用例收敛 PR/AI/Hooks owners；类型化 Hook 宿主错误并接 catalog | 无反向依赖，状态变更可独立测，英文/中文即时切换通过 |
+| P6-F 持续验证 | 72 | 新增 Terminal/Hooks/深历史/并发切换基准并接按需门禁 | 具备固定 fixture、原始证据、取消与长期斜率；失败不静默跳过 |
+
+推荐先完成 #64 与 #65–#67，再依据测量决定 #68–#70 的次序。#71 跟随所属批次收口，避免单独进行一次全仓改名/搬文件。#29 PR 编译边界、#31 平台 FFI 迁移及既往发布签名/凭据事项不因本轮静态审查自动重启，也未在本轮重新验收。
+
+## 26. 本轮检查记录与限制
+
+审查起始工作区干净，HEAD 为 `209e5c6`。最终仅更新本文件，无源码、依赖、vendor、CI 或运行配置改动，无用户既存未提交修改需要合并。
+
+| 实际命令 | 结果 |
+| --- | --- |
+| `cargo check --locked` | 通过，36.45s；本次发生 UI crate 编译，不作为受控热编译性能基线 |
+| `cargo test --lib --locked` | 通过：602 passed、0 failed、2 ignored；测试执行 74.29s，编译 53.06s；含真实 Chat 分页布局测试 |
+| `cargo fmt --all` | 命令成功，但改写了既有 3 个 Jobs 文件的导入排序/尾逗号；本轮文档范围内已精确还原这些格式化改动 |
+| `cargo fmt --all -- --check`（还原后） | 失败：`src/jobs/mod.rs`、`src/jobs/model.rs`、`src/jobs/scroll_tests.rs` 的既存格式差异，不能宣称 fmt 基线全绿 |
+| `./scripts/check-architecture-structure.sh` | 失败：4 项超预算，见 R4-8 |
+| `./scripts/check-ui-policy.sh` | 失败：Hook Tooltip 不在浮层使用允许列表，见 R4-8 |
+| `./scripts/check-i18n.sh` | 通过；不覆盖所有 Rust 动态文案，见 R4-9 |
+| `git diff --check` | 通过；最终 diff 仅含本提案文档 |
+
+库测试链接仍有 `__eh_frame` 超过 compact unwind 编码范围的警告。未运行完整 workspace/integration/clippy、禁用默认 feature 的构建、Windows 检查、完整 doctest、桌面手工验收、新 Release A/B 或 soak；已知 logger doctest 不在本轮库测试范围内。§19–§20 的 Find 快捷键/导航手工验收缺口本轮也未关闭。代码确认的风险、历史实测与建议目标已分别标注，不把静态分析写成性能收益或实际 OOM 结论。
+
+## 27. 第 64 批实施与行为 A/B（2026-09-16）
+
+基线 `209e5c6`；保留上一轮未提交的第四轮审查内容。完整范围、四项结构职责方案、
+命令及原始证据见 [`docs/p6-64-quality.md`](docs/p6-64-quality.md)。
+
+- 采用 `cargo fmt --all` 产生的三个 Jobs 文件格式修复；应用逻辑不变。
+- UI policy 精确登记 spec 中已有的 Hook factory Portal，不放宽目录级规则，
+  不改动 Tooltip 实现。相同六项正反例在 A 为 5 通过/1 误报，B 为 6 通过；
+  未登记浮层、内置 Tooltip、私有 Material、工厂缺 Portal、重复 Preview 均继续拒绝。
+- 新增 `scripts/check-quality.sh` 统一入口，普通失败后继续检查、最终非零退出，
+  中断停止；3 项调度测试通过，全部 Python 脚本回归 21 项通过。
+- 真实 B 入口为 7 项通过、结构检查失败，退出码 1。fmt、UI、i18n、默认 check、
+  完整库测试及 diff 均通过。A/B 允许本地监听时库测试均为 602 通过、0 失败、
+  2 忽略；A 首次沙箱执行的 2 项本地监听权限失败已保留原始记录。
+- 四项结构超限的原值/原预算保持，职责方案按 #66/#71 等后续批次分配；本批完成
+  不表示结构债已经修复。没有恢复 CI 自动触发，手动 CI 仅扩展 Python 测试发现范围。
+- README、双语架构与结构审计入口已同步；`AGENTS.md` 明确后续每批必须自测和 A/B。
+
+结论：**采用本批工具与格式修复**，不宣称 RSS/运行时性能提升。未运行 Release A/B、
+原生 Tooltip 视觉矩阵、远端 CI、workspace/clippy/Windows/disabled-feature/doctest。
+完整库测试仍有既有链接器 unwind 警告。本批止于 #64，后续批次尚未开始。
+
+## 28. P6-B 第 65 批：Terminal 有界 IO（2026-09-16，自动验收通过）
+
+实现与完整证据说明见 [`docs/p6-65-terminal.md`](docs/p6-65-terminal.md)。
+
+- 输出改为 64 × 8 KiB 有界队列，满时背压到 PTY；不丢弃活动会话字节。
+  解析后的 scrollback、UI model 和内核缓冲不属于这 512 KiB 队列预算。
+- 按键、粘贴、终端应答改由单独 Writer 顺序发送，输入以 1 MiB/128 项做整次
+  准入，在途写入也计账。UI 不再同步 write/flush；拒绝显示可即时切换语言的提示。
+- 自测暴露并修复 macOS 满 PTY 输出时过早停止 Reader 导致 Child wait 卡住：
+  现在关闭发布但继续排空内核 PTY，回收 Child 后才停止并 join IO Worker。
+- 最终 Terminal 专项 20 通过；首版关闭压力案例额外连续 10 次通过。
+  最终完整库测试 614 通过、0 失败、2 忽略；脚本测试 25 通过；
+  fmt、UI policy、i18n、编译和 diff 检查通过。
+- 退出调用链复核后新增异步回收屏障，等待活动和已摘下 Session；保留原关闭
+  优先级，UI 不再等待 PTY 退出，退出期间拒绝创建新会话。
+- 首组三组 Release A/B 内存/心跳通过，但输出约 300ms -> 500–800ms，首版拒绝。
+  修订移除满队列 2ms 轮询，使用容量通知与独立取消通道；驱动补充吞吐门槛及
+  回归测试。修订首次重测的最终 footprint 超限仍保留为失败；日志显示采样期间
+  footprint 突降而 RSS/堆稳定，因此增加临时显示唤醒，以相同二进制/门槛复核。
+- 固定显示条件三对 Release A/B 全部运行完成，汇总通过：周期 299 -> 306ms，
+  稳定 RSS 125.77 -> 125.67MiB，最终 footprint 136.86 -> 136.50MiB，
+  心跳 p95 均 52.178ms，退出中位数 663.0 -> 143.4ms。保留修订实现；
+  不宣称显著 RSS 降低，环境因素仍为推断。结构门禁仍为 4 项超限，root 因
+  必要错误投影新增 2 行/1 个 property；原预算没有提高。
+- 已确认真实按键与 Drawer 全屏切换，粘贴/中文手工输入、窄宽 resize、选择复制
+  等完整手工矩阵仍有缺口；不把 Debug 冒烟数据当作 Release RSS 改善证据。
+
+#66 PR 高亮与 #67 HTTP 预算尚未实施，后续分别建立独立自测与 A/B，不混入本批结论。

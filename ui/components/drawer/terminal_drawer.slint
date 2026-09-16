@@ -46,6 +46,7 @@ export component GitHubTerminalDrawer inherits Rectangle {
     in property <bool> cursor-visible: false;
     in property <bool> running: false;
     in property <bool> connected: false;
+    in property <bool> input-failed: false;
     in property <length> initial-height: 280px;
     in property <length> available-height: self.height;
     in-out property <length> drawer-height: 0px;
@@ -405,10 +406,18 @@ export component GitHubTerminalDrawer inherits Rectangle {
                     width: parent.width;
                     height: parent.height;
 
+                    if root.input-failed: Text {
+                        text: I18n.terminal-write-failed;
+                        color: GitHubTheme.danger-fg;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                        vertical-stretch: 0;
+                    }
+
                     Rectangle {
                         width: parent.width;
                         vertical-stretch: 1;
-                        min-height: 120px;
+                        min-height: root.input-failed ? 80px : 120px;
                         background: root.canvas-default;
                         clip: true;
 
