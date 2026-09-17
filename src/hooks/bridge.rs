@@ -1,8 +1,6 @@
+use super::projection::{ProjectionCache, RunProjection, project_run};
 use super::*;
-use crate::{
-    MainWindow, Route, i18n,
-    jobs::{self, JobConclusion, JobRunDescriptor, JobSnapshot, JobStepData, JobStepDefinition},
-};
+use crate::{MainWindow, Route, i18n, jobs};
 use chrono::{DateTime, Local};
 use slint::{ComponentHandle, Model, ModelRc, Timer, TimerMode, VecModel};
 use std::{
@@ -21,6 +19,15 @@ static SELECTED_RUN: Mutex<String> = Mutex::new(String::new());
 static LAST_PROJECTION: Mutex<Option<(String, u64, bool)>> = Mutex::new(None);
 
 static UI_SUBSCRIPTION: Mutex<Option<Subscription>> = Mutex::new(None);
+static REPLAY_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static REPLAY_TASK: Mutex<Option<tokio::task::AbortHandle>> = Mutex::new(None);
+
+pub(crate) fn cancel_replay() {
+    REPLAY_GENERATION.fetch_add(1, Ordering::AcqRel);
+    if let Some(task) = REPLAY_TASK.lock().unwrap().take() {
+        task.abort();
+    }
+}
 
 const MAX_HOOK_HIGHLIGHT_BYTES: usize = 32 * 1024;
 pub(super) const MAX_HOOK_HIGHLIGHT_LINES: usize = 256;
@@ -520,30 +527,76 @@ pub(crate) fn setup(
         }
     }));
     let settings_for_delivery = settings.clone();
-    let deliver = crate::app_runtime::latest_ui(
-        ui.as_weak(),
-        move |ui, (state, projection): (Arc<HookState>, Option<RunProjection>)| {
+    let revisions = Mutex::new(None);
+    let requested = Mutex::new(None);
+    let cache = Arc::new(Mutex::new(ProjectionCache::default()));
+    let preparation =
+        crate::app_runtime::latest_compute::LatestCompute::<HookRun, RunProjection>::new();
+    let deliver = crate::app_runtime::latest_ui(ui.as_weak(), move |ui, state: Arc<HookState>| {
+        let next = (state.catalog_revision, state.durable_revision);
+        let previous = revisions.lock().unwrap().replace(next);
+        if previous != Some(next) {
             settings_for_delivery.apply_hooks(&state);
+        }
+        if previous.is_none_or(|(catalog, _)| catalog != state.catalog_revision) {
             crate::project::refresh_hook_choices(ui);
-            if let Some(projection) = projection {
-                if ui.get_current_route() == Route::JobRun
-                    && ui.get_job_run_source() == "hooks"
-                    && *SELECTED_RUN.lock().unwrap() == projection.id
-                {
-                    apply_run(ui, projection);
-                }
-            }
-        },
-    );
-    let subscription = service.state.subscribe(Arc::new(move |snapshot| {
+        }
+        if ui.get_current_route() != Route::JobRun || ui.get_job_run_source() != "hooks" {
+            preparation.cancel();
+            requested.lock().unwrap().take();
+            return;
+        }
         let selected = SELECTED_RUN.lock().unwrap().clone();
-        let projection = snapshot
-            .state()
-            .runs
-            .iter()
-            .find(|r| r.id == selected)
-            .map(project_run);
-        deliver((snapshot.state_arc(), projection));
+        let Some(run) = state.runs.iter().find(|run| run.id == selected) else {
+            return;
+        };
+        let key = (run.id.clone(), run.seq);
+        if requested.lock().unwrap().replace(key.clone()) == Some(key) {
+            return;
+        }
+        if LAST_PROJECTION
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|(id, seq, _)| id == &run.id && *seq >= run.seq)
+        {
+            return;
+        }
+        let cache = cache.clone();
+        let worker = preparation.clone();
+        let weak = ui.as_weak();
+        preparation.submit(
+            run.clone(),
+            move |run, token| {
+                if token.cancelled() {
+                    return None;
+                }
+                let projection = cache.lock().unwrap().prepare(&run);
+                (!token.cancelled()).then_some(projection)
+            },
+            move || {
+                let worker = worker.clone();
+                let weak = weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    worker.acknowledge();
+                    let Some(projection) = worker.take_output() else {
+                        return;
+                    };
+                    let Some(ui) = weak.upgrade() else {
+                        return;
+                    };
+                    if ui.get_current_route() == Route::JobRun
+                        && ui.get_job_run_source() == "hooks"
+                        && *SELECTED_RUN.lock().unwrap() == projection.id
+                    {
+                        apply_run(&ui, projection);
+                    }
+                });
+            },
+        );
+    });
+    let subscription = service.state.subscribe(Arc::new(move |snapshot| {
+        deliver(snapshot.state_arc());
     }));
     let stop_service = service.clone();
     let log_service = service.clone();
@@ -574,12 +627,22 @@ pub(crate) fn setup(
     });
     crate::shutdown::register_async_drain("hooks", move || {
         Box::pin(async move {
+            cancel_replay();
             service.shutdown().await;
             UI_SUBSCRIPTION.lock().unwrap().take();
         })
     });
     *UI_SUBSCRIPTION.lock().unwrap() = Some(subscription);
+    super::benchmark::setup(ui, current().unwrap());
     Ok(())
+}
+
+pub(super) fn benchmark_replay_ready(id: &str) -> bool {
+    LAST_PROJECTION
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|(current, _, full)| current == id && *full)
 }
 
 fn prune_logs(service: &HookService) {
@@ -682,6 +745,28 @@ pub(crate) fn sync_language(page: &GitHubSettingsPage) {
     }
 }
 
+pub(crate) fn sync_job_language(ui: &MainWindow) {
+    if ui.get_job_run_source() != "hooks" {
+        return;
+    }
+    let rows = ui.get_job_run_steps();
+    let Some(model) = rows.as_any().downcast_ref::<VecModel<crate::JobStepItem>>() else {
+        return;
+    };
+    for index in 0..model.row_count() {
+        let Some(mut row) = model.row_data(index) else {
+            continue;
+        };
+        let key = match row.status.as_str() {
+            "queued" => "hooks.queued",
+            "in_progress" => "hooks.running",
+            _ => continue,
+        };
+        row.detail = i18n::tr(key).into_owned().into();
+        model.set_row_data(index, row);
+    }
+}
+
 fn event_label(event: &str) -> String {
     match event {
         PR_REVIEW_APPROVED => i18n::tr("hooks.event_pr_approved").into_owned(),
@@ -716,14 +801,14 @@ fn category_label(category: &str) -> String {
 
 fn category_order(state: &HookState) -> Vec<String> {
     let mut categories = Vec::new();
-    for event in &state.events {
+    for event in state.events.iter() {
         if state.hooks.iter().any(|hook| hook.event == event.name)
             && !categories.contains(&event.category)
         {
             categories.push(event.category.clone());
         }
     }
-    for hook in &state.hooks {
+    for hook in state.hooks.iter() {
         let category = event_category(state, &hook.event);
         if !categories.iter().any(|known| known == category) {
             categories.push(category.to_owned());
@@ -762,7 +847,7 @@ fn hook_summaries(state: &HookState) -> Vec<HookSummary> {
 
 fn event_choices(state: &HookState) -> Vec<HookEventChoice> {
     let mut categories = Vec::new();
-    for event in &state.events {
+    for event in state.events.iter() {
         if !categories.contains(&event.category) {
             categories.push(event.category.clone());
         }
@@ -1407,69 +1492,6 @@ fn settings_command(
     });
 }
 
-struct RunProjection {
-    id: String,
-    seq: u64,
-    full_log: bool,
-    descriptor: JobRunDescriptor,
-    job: JobSnapshot,
-    detail: String,
-    running: bool,
-}
-
-fn project_run(run: &HookRun) -> RunProjection {
-    let mut step = JobStepData::queued(
-        JobStepDefinition::new(run.name.clone(), Vec::new()),
-        i18n::LocalizedText::message("hooks.queued"),
-    );
-    if run.started_at_ms.is_some() {
-        step.start(i18n::LocalizedText::message("hooks.running"));
-    }
-    step.set_log(run.log.as_ref().clone());
-    step.log_requested = true;
-    let mut job = JobSnapshot::queued(vec![step.clone()]);
-    if run.started_at_ms.is_some() {
-        job.start(vec![step.clone()]);
-    }
-    if let Some(conclusion) = run.conclusion {
-        let conclusion = match conclusion {
-            HookConclusion::Success => JobConclusion::Success,
-            HookConclusion::Cancelled | HookConclusion::Skipped => JobConclusion::Cancelled,
-            _ => JobConclusion::Failure,
-        };
-        let duration = Duration::from_millis(
-            run.finished_at_ms
-                .unwrap_or(run.created_at_ms)
-                .saturating_sub(run.started_at_ms.unwrap_or(run.created_at_ms))
-                .max(0) as u64,
-        );
-        step.finish(conclusion, Some(duration), run.detail.clone(), true);
-        job.finish(conclusion, duration, vec![step]);
-    }
-    RunProjection {
-        id: run.id.clone(),
-        seq: run.seq,
-        full_log: false,
-        descriptor: JobRunDescriptor {
-            active: true,
-            source: "hooks".into(),
-            run_title: run.name.clone().into(),
-            workflow_name: "Hooks".into(),
-            context_name: run.project.clone().unwrap_or_else(|| "Usher".into()),
-            job_name: run.name.clone(),
-            trigger_detail: format!(
-                "{} · {}{}",
-                run.event,
-                run.id,
-                if run.test { " · test" } else { "" }
-            )
-            .into(),
-        },
-        job,
-        detail: run.detail.clone(),
-        running: run.conclusion.is_none(),
-    }
-}
 fn apply_run(ui: &MainWindow, projection: RunProjection) {
     {
         let mut last = LAST_PROJECTION.lock().unwrap();
@@ -1485,6 +1507,18 @@ fn apply_run(ui: &MainWindow, projection: RunProjection) {
     if !projection.running && !projection.full_log {
         if let Some(service) = current() {
             load_full_log(service, ui.as_weak(), projection.id.clone());
+        }
+    }
+    if projection.full_log && crate::app_paths::benchmark_offline_mode() {
+        if let Ok(batch) = std::env::var("USHER_P6_BENCHMARK") {
+            log::info!(
+                "[P6][{batch}] replay_applied terminal={}",
+                projection
+                    .job
+                    .steps
+                    .iter()
+                    .any(|s| s.log.contains("[hook.finished]"))
+            );
         }
     }
     jobs::apply_job_run(
@@ -1532,8 +1566,10 @@ fn open_run(ui: &MainWindow, id: &str) {
     load_full_log(service, ui.as_weak(), id.into());
 }
 fn load_full_log(service: Arc<HookService>, weak: slint::Weak<MainWindow>, id: String) {
-    crate::app_runtime::shared_runtime().spawn(async move {
-        // Capture the summary before IO so replay never claims a newer sequence.
+    cancel_replay();
+    let generation = REPLAY_GENERATION.load(Ordering::Acquire);
+    let task = crate::app_runtime::shared_runtime().spawn(async move {
+        // Live replay uses the captured sequence; recovered runs have no writer.
         let Some(mut run) = service
             .state
             .snapshot()
@@ -1545,27 +1581,17 @@ fn load_full_log(service: Arc<HookService>, weak: slint::Weak<MainWindow>, id: S
         else {
             return;
         };
-        match service.events_after(&id, 0).await {
-            Ok(events) => {
-                run.log = Arc::new(
-                    events
-                        .iter()
-                        .filter(|event| event.seq <= run.seq)
-                        .map(|e| {
-                            if e.kind == "output" {
-                                format!(
-                                    "[{}] {}",
-                                    e.data["stream"].as_str().unwrap_or("stdout"),
-                                    e.data["text"].as_str().unwrap_or_default()
-                                )
-                            } else {
-                                format!("[{}] {}\n", e.kind, e.data)
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .join(""),
-                )
-            }
+        let result = replay::read_log(
+            &service.directory.join(format!("{id}.jsonl")),
+            &mut run,
+            || REPLAY_GENERATION.load(Ordering::Acquire) != generation,
+        )
+        .await;
+        if REPLAY_GENERATION.load(Ordering::Acquire) != generation {
+            return;
+        }
+        match result {
+            Ok(text) => run.log = Arc::new(text),
             Err(error) => {
                 run.log = Arc::new(format!("[log.unavailable] {error}\n{}", run.log));
             }
@@ -1573,13 +1599,17 @@ fn load_full_log(service: Arc<HookService>, weak: slint::Weak<MainWindow>, id: S
         let mut projection = project_run(&run);
         projection.full_log = true;
         let _ = slint::invoke_from_event_loop(move || {
-            if *SELECTED_RUN.lock().unwrap() == id {
+            if REPLAY_GENERATION.load(Ordering::Acquire) == generation
+                && *SELECTED_RUN.lock().unwrap() == id
+            {
                 if let Some(ui) = weak.upgrade() {
-                    if ui.get_job_run_source() == "hooks" {
+                    if ui.get_job_run_source() == "hooks" && ui.get_current_route() == Route::JobRun
+                    {
                         apply_run(&ui, projection);
                     }
                 }
             }
         });
     });
+    *REPLAY_TASK.lock().unwrap() = Some(task.abort_handle());
 }

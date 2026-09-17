@@ -1,6 +1,7 @@
 //! Send-safe incremental parsing and bounded, lazy Slint line materialization.
 use crate::JobLogLineItem;
 use slint::{Model, ModelNotify, ModelTracker};
+use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -11,6 +12,30 @@ pub(super) struct ParsedText {
     pub prefix: String,
     pub text: String,
 }
+impl ParsedText {
+    pub(super) fn display_text(&self) -> Cow<'_, str> {
+        if self.prefix.is_empty() {
+            Cow::Borrowed(&self.text)
+        } else {
+            Cow::Owned(format!("{}{}", self.prefix, self.text))
+        }
+    }
+
+    pub(super) fn display_range(&self, range: std::ops::Range<usize>) -> Cow<'_, str> {
+        let boundary = self.prefix.len();
+        if range.end <= boundary {
+            Cow::Borrowed(&self.prefix[range])
+        } else if range.start >= boundary {
+            Cow::Borrowed(&self.text[range.start - boundary..range.end - boundary])
+        } else {
+            Cow::Owned(format!(
+                "{}{}",
+                &self.prefix[range.start..],
+                &self.text[..range.end - boundary]
+            ))
+        }
+    }
+}
 #[derive(Debug)]
 struct Line {
     raw: String,
@@ -19,6 +44,50 @@ struct Line {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct LogSnapshot(Arc<Vec<Arc<Line>>>);
 impl LogSnapshot {
+    pub(super) fn iter(&self) -> impl Iterator<Item = &ParsedText> {
+        self.0.iter().map(|line| &line.parsed)
+    }
+
+    pub(super) fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub(super) fn line(&self, index: usize) -> &ParsedText {
+        &self.0[index].parsed
+    }
+
+    pub(super) fn from_parsed(lines: impl Iterator<Item = ParsedText>) -> Self {
+        Self(Arc::new(
+            lines
+                .map(|parsed| {
+                    Arc::new(Line {
+                        raw: String::new(),
+                        parsed,
+                    })
+                })
+                .collect(),
+        ))
+    }
+
+    pub(super) fn retained_text_bytes(&self) -> usize {
+        self.0
+            .iter()
+            .map(|line| {
+                line.raw.capacity()
+                    + line.parsed.kind.capacity()
+                    + line.parsed.prefix.capacity()
+                    + line.parsed.text.capacity()
+            })
+            .sum()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn shared_rows(&self, other: &Self) -> usize {
+        self.0
+            .iter()
+            .filter(|line| other.0.iter().any(|candidate| Arc::ptr_eq(line, candidate)))
+            .count()
+    }
     pub(crate) fn update(&self, raw: &str) -> Self {
         let mut known: HashMap<&str, Arc<Line>> = self
             .0
@@ -50,6 +119,12 @@ pub(super) struct LogModel {
     notify: ModelNotify,
 }
 impl LogModel {
+    pub(super) fn retained_text_bytes(&self) -> usize {
+        self.snapshot.borrow().retained_text_bytes()
+    }
+    pub(super) fn shares_snapshot(&self, snapshot: &LogSnapshot) -> bool {
+        Arc::ptr_eq(&self.snapshot.borrow().0, &snapshot.0)
+    }
     pub(super) fn new(snapshot: LogSnapshot) -> Self {
         Self {
             revision: Cell::new(0),
@@ -97,19 +172,15 @@ impl LogModel {
             }
         }
     }
-    pub(super) fn measurement_lines(&self) -> Arc<Vec<ParsedText>> {
-        Arc::new(
-            self.snapshot
-                .borrow()
-                .0
-                .iter()
-                .map(|line| line.parsed.clone())
-                .collect(),
-        )
+    pub(super) fn measurement_lines(&self) -> LogSnapshot {
+        self.snapshot.borrow().clone()
     }
 }
 impl Model for LogModel {
     type Data = JobLogLineItem;
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn row_count(&self) -> usize {
         self.snapshot.borrow().0.len()
     }
@@ -210,6 +281,53 @@ pub(super) fn parse_log_line(line: &str) -> ParsedText {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn measurement_downcast_shares_snapshot_without_materializing_ui_rows() {
+        let first = LogSnapshot::default().update("first\nwarning: retained\npartial");
+        let model = std::rc::Rc::new(LogModel::new(first.clone()));
+        let erased: slint::ModelRc<JobLogLineItem> = model.clone().into();
+        let actual = erased
+            .as_any()
+            .downcast_ref::<LogModel>()
+            .expect("production downcast");
+        let measurement = actual.measurement_lines();
+        assert!(Arc::ptr_eq(&measurement.0, &first.0));
+        assert!(model.cache.borrow().is_empty());
+
+        let next = first.update("warning: retained\npartial completed\nlast");
+        model.update(next.clone());
+        assert_eq!(measurement.line(0).text, "first");
+        assert_eq!(measurement.line(2).text, "partial");
+        assert!(model.shares_snapshot(&next));
+        assert!(!model.shares_snapshot(&measurement));
+        assert!(Arc::ptr_eq(&measurement.0[1], &next.0[0]));
+        assert!(model.cache.borrow().is_empty());
+    }
+
+    #[test]
+    fn display_ranges_match_joined_semantic_text_at_all_unicode_boundaries() {
+        for raw in [
+            "",
+            "plain \u{6d88}\u{606f}",
+            "::warning::\u{6d88}\u{606f}%0A%0Anext",
+            "error: path",
+        ] {
+            let parsed = parse_log_line(raw);
+            let joined = format!("{}{}", parsed.prefix, parsed.text);
+            let boundaries: Vec<_> = joined
+                .char_indices()
+                .map(|(index, _)| index)
+                .chain(std::iter::once(joined.len()))
+                .collect();
+            for &start in &boundaries {
+                for &end in boundaries.iter().filter(|&&end| end >= start) {
+                    assert_eq!(parsed.display_range(start..end), joined[start..end]);
+                }
+            }
+        }
+    }
+
     #[test]
     fn append_and_tail_eviction_reuse_parsed_lines_and_bound_ui_cache() {
         let first = LogSnapshot::default().update("first\nwarning: retained\npartial");

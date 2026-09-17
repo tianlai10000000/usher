@@ -1,5 +1,8 @@
 # P6-B #66: PR highlighting / PR 高亮调度
 
+后续只修 loading 回写的独立尝试已通过验收，见
+[p6-66-correctness.md](p6-66-correctness.md)。下文仍保留宽范围候选的拒绝结论。
+
 日期：2026-09-16；基线 `47b0892`，起始工作区干净。
 
 ## 被拒绝的候选实现与边界

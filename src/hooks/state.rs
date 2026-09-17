@@ -1,20 +1,61 @@
 use super::types::*;
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use usher_state_store::{PersistentStore, Reduction, StoreSnapshot, Subscription};
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct HookState {
     pub enabled: bool,
-    pub hooks: Vec<HookDefinition>,
+    #[serde(
+        serialize_with = "serialize_hooks",
+        deserialize_with = "deserialize_hooks"
+    )]
+    pub hooks: Arc<Vec<HookDefinition>>,
     pub runs: Vec<HookRun>,
     #[serde(skip)]
-    pub events: Vec<EventDefinition>,
+    pub events: Arc<Vec<EventDefinition>>,
     #[serde(skip)]
     pub ready: bool,
     #[serde(skip)]
     pub error: String,
+    #[serde(skip)]
+    pub durable_revision: u64,
+    #[serde(skip)]
+    pub catalog_revision: u64,
+}
+
+fn serialize_hooks<S: serde::Serializer>(
+    hooks: &Arc<Vec<HookDefinition>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    hooks.as_ref().serialize(serializer)
+}
+fn deserialize_hooks<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Arc<Vec<HookDefinition>>, D::Error> {
+    Vec::<HookDefinition>::deserialize(deserializer).map(Arc::new)
+}
+
+fn same_durable_run(a: &HookRun, b: &HookRun) -> bool {
+    a.id == b.id
+        && a.hook_id == b.hook_id
+        && a.config_revision == b.config_revision
+        && a.name == b.name
+        && a.event_id == b.event_id
+        && a.event == b.event
+        && a.project == b.project
+        && a.test == b.test
+        && a.created_at_ms == b.created_at_ms
+        && a.started_at_ms == b.started_at_ms
+        && a.finished_at_ms == b.finished_at_ms
+        && a.conclusion == b.conclusion
+        && a.exit_code == b.exit_code
+        && a.signal == b.signal
+        && a.detail == b.detail
 }
 
 pub(super) enum Action {
@@ -31,6 +72,11 @@ pub(super) enum Action {
 
 fn reduce(state: &HookState, action: Action) -> Reduction<HookState, Result<(), String>> {
     let mut next = state.clone();
+    let catalog_changed = !matches!(&action, Action::Run(_) | Action::ClearRuns(_));
+    let mut durable_changed = !matches!(
+        &action,
+        Action::Hydrate(_) | Action::LoadFailed(_) | Action::Register(_)
+    );
     match action {
         Action::Hydrate(mut loaded) => {
             loaded.events = next.events;
@@ -42,7 +88,7 @@ fn reduce(state: &HookState, action: Action) -> Reduction<HookState, Result<(), 
             if next.events.iter().any(|e| e.name == event.name) {
                 return Reduction::unchanged(next, Ok(()));
             }
-            next.events.push(event);
+            Arc::make_mut(&mut next.events).push(event);
         }
         Action::Enable(enabled) => {
             if !state.ready {
@@ -50,6 +96,9 @@ fn reduce(state: &HookState, action: Action) -> Reduction<HookState, Result<(), 
                     next,
                     Err("Hook configuration has not loaded.".into()),
                 );
+            }
+            if next.enabled == enabled {
+                return Reduction::unchanged(next, Ok(()));
             }
             next.enabled = enabled;
         }
@@ -60,12 +109,13 @@ fn reduce(state: &HookState, action: Action) -> Reduction<HookState, Result<(), 
                     Err("Hook configuration has not loaded.".into()),
                 );
             }
-            let Some(hook) = next.hooks.iter_mut().find(|hook| hook.id == id) else {
+            let Some(index) = next.hooks.iter().position(|hook| hook.id == id) else {
                 return Reduction::unchanged(next, Err("Hook definition was not found.".into()));
             };
-            if hook.enabled == enabled {
+            if next.hooks[index].enabled == enabled {
                 return Reduction::unchanged(next, Ok(()));
             }
+            let hook = &mut Arc::make_mut(&mut next.hooks)[index];
             hook.enabled = enabled;
             hook.revision += 1;
         }
@@ -85,12 +135,15 @@ fn reduce(state: &HookState, action: Action) -> Reduction<HookState, Result<(), 
                     Err("This Hook event is not registered by an enabled module.".into()),
                 );
             }
-            if let Some(existing) = next.hooks.iter_mut().find(|h| h.id == hook.id) {
+            if let Some(existing) = Arc::make_mut(&mut next.hooks)
+                .iter_mut()
+                .find(|h| h.id == hook.id)
+            {
                 hook.revision = existing.revision + 1;
                 *existing = hook;
             } else if next.hooks.len() < 32 {
                 hook.revision = 1;
-                next.hooks.push(hook);
+                Arc::make_mut(&mut next.hooks).push(hook);
             } else {
                 return Reduction::unchanged(
                     next,
@@ -98,7 +151,12 @@ fn reduce(state: &HookState, action: Action) -> Reduction<HookState, Result<(), 
                 );
             }
         }
-        Action::Delete(id) => next.hooks.retain(|h| h.id != id),
+        Action::Delete(id) => {
+            if !next.hooks.iter().any(|h| h.id == id) {
+                return Reduction::unchanged(next, Ok(()));
+            }
+            Arc::make_mut(&mut next.hooks).retain(|h| h.id != id);
+        }
         Action::ClearRuns(ids) => {
             next.runs
                 .retain(|run| run.conclusion.is_none() || !ids.contains(&run.id));
@@ -108,6 +166,7 @@ fn reduce(state: &HookState, action: Action) -> Reduction<HookState, Result<(), 
         }
         Action::Run(run) => {
             if let Some(existing) = next.runs.iter_mut().find(|r| r.id == run.id) {
+                durable_changed = !same_durable_run(existing, &run);
                 *existing = run;
             } else {
                 next.runs.push(run);
@@ -120,6 +179,8 @@ fn reduce(state: &HookState, action: Action) -> Reduction<HookState, Result<(), 
             }
         }
     }
+    next.durable_revision = state.durable_revision + u64::from(durable_changed);
+    next.catalog_revision = state.catalog_revision + u64::from(catalog_changed);
     Reduction::changed(next, Ok(()))
 }
 
@@ -132,13 +193,21 @@ pub(crate) struct HookStateFacade {
 impl HookStateFacade {
     pub(super) fn new(path: PathBuf) -> std::io::Result<Self> {
         let destination = path.clone();
+        let persisted_revision = Mutex::new(0);
         let store = PersistentStore::new_deferred(
             HookState::default(),
             reduce,
             "hook-state",
             move |state| {
+                let mut persisted = persisted_revision.lock().unwrap();
+                if *persisted == state.durable_revision {
+                    return Ok(());
+                }
+                super::benchmark::record_write();
                 let data = serde_json::to_vec_pretty(state).map_err(|e| e.to_string())?;
-                usher_fs::atomic_write_private(&destination, &data).map_err(|e| e.to_string())
+                usher_fs::atomic_write_private(&destination, &data).map_err(|e| e.to_string())?;
+                *persisted = state.durable_revision;
+                Ok(())
             },
             |_, error| log::error!("[Hooks] event=persistence.failed reason={error}"),
         )?;
@@ -167,7 +236,7 @@ impl HookStateFacade {
                 return Err("Hook configuration exceeds retention limits.".into());
             }
             let mut ids = std::collections::HashSet::new();
-            for hook in &mut state.hooks {
+            for hook in Arc::make_mut(&mut state.hooks) {
                 if hook.event == LEGACY_PR_REVIEW_SUBMITTED {
                     hook.event = PR_REVIEW_APPROVED.into();
                 }

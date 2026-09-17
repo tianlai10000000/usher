@@ -52,19 +52,32 @@ impl Journal {
         run: &mut HookRun,
         kind: &str,
         data: serde_json::Value,
-    ) {
-        run.seq += 1;
+    ) -> bool {
         let mut event = HookEvent {
             run_id: run.id.clone(),
             hook_id: run.hook_id.clone(),
             event_id: run.event_id.clone(),
-            seq: run.seq,
+            seq: run.seq + 1,
             time_ms: now_ms(),
             kind: kind.into(),
             data,
         };
         let mut json = serde_json::to_vec(&event).expect("serializable Hook event");
         json.push(b'\n');
+        let limit = if kind == "output" {
+            MAX_OUTPUT_BYTES
+        } else {
+            MAX_JOURNAL_BYTES
+        };
+        if self.bytes.saturating_add(json.len()) > limit || json.len() > MAX_RECORD_BYTES {
+            if kind == "output" {
+                return false;
+            }
+            self.error = Some("Hook lifecycle record exceeds journal budget.".into());
+            self.file = None;
+        }
+        self.bytes += json.len();
+        run.seq = event.seq;
         if let Some(file) = self.file.as_mut() {
             if let Err(e) = file.write_all(&json).await {
                 self.error = Some(format!("Cannot write Hook log: {e}"));
@@ -107,6 +120,7 @@ impl Journal {
             self.last_delivery = Instant::now();
         }
         service.publish(event, run);
+        true
     }
 
     async fn output(
@@ -116,7 +130,18 @@ impl Journal {
         stream: &str,
         text: String,
     ) {
-        if self.bytes + text.len() > MAX_OUTPUT_BYTES {
+        if self.truncated {
+            return;
+        }
+        if !self
+            .record(
+                service,
+                run,
+                "output",
+                serde_json::json!({"stream": stream, "text": text}),
+            )
+            .await
+        {
             if !self.truncated {
                 self.truncated = true;
                 self.record(
@@ -127,16 +152,7 @@ impl Journal {
                 )
                 .await;
             }
-            return;
         }
-        self.bytes += text.len();
-        self.record(
-            service,
-            run,
-            "output",
-            serde_json::json!({"stream": stream, "text": text}),
-        )
-        .await;
     }
 
     async fn finish(
@@ -168,6 +184,95 @@ impl Journal {
             "exit_code": run.exit_code, "signal": run.signal}),
         )
         .await;
+    }
+}
+
+pub(super) async fn benchmark_journal(service: &HookService) -> HookRun {
+    let hook = HookDefinition {
+        name: "P6 journal".into(),
+        script: "true".into(),
+        ..Default::default()
+    };
+    let trigger = HookTrigger::new(PR_REVIEW_APPROVED, "fixture", serde_json::json!({}));
+    let mut run = HookRun::queued(&hook, &trigger);
+    run.started_at_ms = Some(now_ms());
+    let mut journal = Journal::open(service, &run).await;
+    journal
+        .record(
+            service,
+            &mut run,
+            "execution.started",
+            serde_json::json!({}),
+        )
+        .await;
+    for _ in 0..9000 {
+        journal
+            .output(service, &mut run, "stdout", "x".into())
+            .await;
+    }
+    for _ in 0..1024 {
+        journal
+            .output(service, &mut run, "stderr", "\u{0001}".repeat(1024))
+            .await;
+    }
+    journal
+        .finish(service, &mut run, HookConclusion::Success, String::new())
+        .await;
+    let bytes = tokio::fs::metadata(service.directory.join(format!("{}.jsonl", run.id)))
+        .await
+        .unwrap()
+        .len();
+    log::info!(
+        "[P6][{}] journal_bytes={bytes}",
+        std::env::var("USHER_P6_BENCHMARK").unwrap_or_default()
+    );
+    run
+}
+
+#[cfg(test)]
+mod journal_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn escaped_output_leaves_room_for_failure_details_and_terminal_record() {
+        let (_dir, service) = super::super::tests::service();
+        let hook = HookDefinition::default();
+        let trigger = HookTrigger::new(PR_REVIEW_APPROVED, "test", serde_json::json!({}));
+        let mut run = HookRun::queued(&hook, &trigger);
+        let mut journal = Journal::open(&service, &run).await;
+        for _ in 0..600 {
+            journal
+                .output(&service, &mut run, "stderr", "\u{0000}".repeat(4096))
+                .await;
+        }
+        journal
+            .finish(
+                &service,
+                &mut run,
+                HookConclusion::Failure,
+                "\u{0000}".repeat(8192),
+            )
+            .await;
+        let path = service.directory.join(format!("{}.jsonl", run.id));
+        let bytes = tokio::fs::metadata(&path).await.unwrap().len() as usize;
+        assert_eq!(bytes, journal.bytes);
+        assert!(bytes <= MAX_JOURNAL_BYTES);
+        let mut last = String::new();
+        super::super::replay::scan(
+            &path,
+            0,
+            u64::MAX,
+            || false,
+            |event| {
+                last = event.kind;
+                true
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(last, "hook.finished");
+        assert_eq!(run.conclusion, Some(HookConclusion::Failure));
+        service.shutdown().await;
     }
 }
 

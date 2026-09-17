@@ -1,12 +1,12 @@
 //! Exact log extents, measured off-loop; scrolling only projects a bounded window.
 use super::log_layout::LogLayout;
-use super::log_model::{LogModel, ParsedText};
+use super::log_model::{LogModel, LogSnapshot, ParsedText};
 use crate::app_runtime::latest_compute::LatestCompute;
 use crate::{JobLogLineItem, JobLogVirtualRow, JobLogWindow, MainWindow};
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use std::cell::RefCell;
+use std::ops::Range;
 use std::rc::Rc;
-use std::sync::Arc;
 use usher_virtual_list::{VirtualList, VirtualWindow};
 
 #[derive(Clone, PartialEq, Eq)]
@@ -19,14 +19,14 @@ struct Key {
 
 struct Request {
     key: Key,
-    lines: Arc<Vec<ParsedText>>,
+    lines: LogSnapshot,
     collection: parley::fontique::Collection,
 }
 
 struct Measurement {
     key: Key,
-    lines: Arc<Vec<ParsedText>>,
-    wrapped: Vec<Vec<String>>,
+    lines: LogSnapshot,
+    wrapped: Vec<Vec<Range<usize>>>,
     extents: Vec<u32>,
 }
 
@@ -38,13 +38,13 @@ fn measure(request: Request, cancelled: impl Fn() -> bool) -> Option<Measurement
         if cancelled() {
             return None;
         }
-        let text = format!("{}{}", line.prefix, line.text);
-        let visual = layout.wrap(&text, f32::from_bits(request.key.width));
+        let text = line.display_text();
+        let visual = layout.line_ranges(&text, f32::from_bits(request.key.width));
         let height = f32::from_bits(request.key.line_height)
             + visual.len().saturating_sub(1) as f32 * 20.0
             + 18.0;
         extents.push(height.max(32.0).ceil() as u32);
-        wrapped.push(visual.iter().map(ToString::to_string).collect());
+        wrapped.push(visual);
     }
     Some(Measurement {
         key: request.key,
@@ -105,16 +105,11 @@ impl Viewport {
             let lines = if let Some(model) = self.model.as_any().downcast_ref::<LogModel>() {
                 model.measurement_lines()
             } else {
-                Arc::new(
-                    self.model
-                        .iter()
-                        .map(|line| ParsedText {
-                            text: line.text.to_string(),
-                            prefix: line.prefix.to_string(),
-                            kind: line.kind.to_string(),
-                        })
-                        .collect(),
-                )
+                LogSnapshot::from_parsed(self.model.iter().map(|line| ParsedText {
+                    text: line.text.to_string(),
+                    prefix: line.prefix.to_string(),
+                    kind: line.kind.to_string(),
+                }))
             };
             self.requested = Some(key.clone());
             let request = Request {
@@ -162,7 +157,7 @@ impl Viewport {
                 .items
                 .iter()
                 .map(|item| {
-                    let line = &measurement.lines[item.index];
+                    let line = measurement.lines.line(item.index);
                     JobLogVirtualRow {
                         line: JobLogLineItem {
                             text: line.text.as_str().into(),
@@ -173,7 +168,7 @@ impl Viewport {
                         visual_lines: ModelRc::new(VecModel::from(
                             measurement.wrapped[item.index]
                                 .iter()
-                                .map(|text| text.as_str().into())
+                                .map(|range| line.display_range(range.clone()).as_ref().into())
                                 .collect::<Vec<_>>(),
                         )),
                         offset: item.start as f32,
@@ -214,7 +209,7 @@ pub(super) fn setup(ui: &MainWindow) {
                 viewports.push(Viewport::new(model.clone()));
                 viewports.len() - 1
             };
-            viewports[index].layout(
+            let window = viewports[index].layout(
                 Key {
                     revision,
                     count: model.row_count(),
@@ -224,7 +219,32 @@ pub(super) fn setup(ui: &MainWindow) {
                 offset,
                 height,
                 &weak,
-            )
+            );
+            if super::retention_benchmark::enabled() {
+                let mut bytes = super::retention_benchmark::Retained::default();
+                for view in viewports.iter() {
+                    if let Some(model) = view.model.as_any().downcast_ref::<LogModel>() {
+                        bytes.source += model.retained_text_bytes();
+                    }
+                    if let Some(measurement) = &view.measurement {
+                        if !view
+                            .model
+                            .as_any()
+                            .downcast_ref::<LogModel>()
+                            .is_some_and(|model| model.shares_snapshot(&measurement.lines))
+                        {
+                            bytes.measurement += measurement.lines.retained_text_bytes();
+                        }
+                        bytes.wrapped += measurement
+                            .wrapped
+                            .iter()
+                            .map(|ranges| ranges.capacity() * std::mem::size_of::<Range<usize>>())
+                            .sum::<usize>();
+                    }
+                }
+                super::retention_benchmark::observe(&model, &window, bytes);
+            }
+            window
         },
     );
 }
@@ -232,6 +252,35 @@ pub(super) fn setup(ui: &MainWindow) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn production_log_model_layout_retains_shared_rows_and_exact_visible_text() {
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().unwrap();
+        let snapshot =
+            LogSnapshot::default().update("::warning::\u{6d88}\u{606f}%0A%0Anext\n\nplain");
+        let model = Rc::new(LogModel::new(snapshot));
+        let mut viewport = Viewport::new(model.clone().into());
+        for width in [1.0f32, 160.0, 800.0] {
+            let key = Key {
+                revision: 0,
+                count: 3,
+                width: width.to_bits(),
+                line_height: 14.0f32.to_bits(),
+            };
+            let window = viewport.layout(key, 0.0, 10000.0, &ui.as_weak());
+            assert!(!window.loading);
+            let measured = viewport.measurement.as_ref().unwrap();
+            assert!(model.shares_snapshot(&measured.lines));
+            let mut reference = LogLayout::new();
+            for (index, row) in window.rows.iter().enumerate() {
+                let line = measured.lines.line(index);
+                let expected = reference.wrap(&line.display_text(), width);
+                assert_eq!(row.visual_lines.iter().collect::<Vec<_>>(), expected);
+                assert_eq!(row.line_number, (index + 1) as i32);
+            }
+        }
+    }
 
     #[test]
     fn scrolling_reuses_measurement_and_same_count_revision_replaces_it() {
@@ -287,23 +336,29 @@ mod tests {
                 width: 120.0f32.to_bits(),
                 line_height: 14.0f32.to_bits(),
             },
-            lines: Arc::new(vec![
-                ParsedText {
-                    text: "".into(),
-                    prefix: "".into(),
-                    kind: "plain".into(),
-                },
-                ParsedText {
-                    text: "消息\n\nnext".into(),
-                    prefix: "Warning: ".into(),
-                    kind: "warning".into(),
-                },
-            ]),
+            lines: LogSnapshot::from_parsed(
+                vec![
+                    ParsedText {
+                        text: "".into(),
+                        prefix: "".into(),
+                        kind: "plain".into(),
+                    },
+                    ParsedText {
+                        text: "消息\n\nnext".into(),
+                        prefix: "Warning: ".into(),
+                        kind: "warning".into(),
+                    },
+                ]
+                .into_iter(),
+            ),
             collection: LogLayout::new().collection(),
         };
         assert!(measure(request(), || true).is_none());
         let measured = measure(request(), || false).unwrap();
-        assert_eq!(measured.wrapped[0], vec![String::new()]);
+        assert_eq!(
+            measured.wrapped[0],
+            std::iter::once(0..0).collect::<Vec<_>>()
+        );
         assert_eq!(measured.extents[0], 32);
         assert!(measured.extents[1] > 32);
     }

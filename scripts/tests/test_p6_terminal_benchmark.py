@@ -67,6 +67,57 @@ class TerminalBudgetTests(unittest.TestCase):
         rows["B"][1]["small_responses"] = 5
         self.assertFalse(BENCHMARK.summarize(rows)["passed"])
 
+    def test_hook_journal_gate_requires_bounded_files_and_terminal_replay(self):
+        rows = results()
+        for side in "AB":
+            for row in rows[side]:
+                row.update(batch=68, journal_bytes=[2_000_000] * 3,
+                           replay_successes=3, replay_failures=0, terminal_replay_cycles=[True] * 3)
+        self.assertTrue(BENCHMARK.summarize(rows)["passed"])
+        rows["B"][0]["journal_bytes"][0] = 3_000_000
+        self.assertFalse(BENCHMARK.summarize(rows)["passed"])
+        rows["B"][0]["journal_bytes"][0] = 2_000_000
+        rows["B"][1]["replay_failures"] = 1
+        self.assertFalse(BENCHMARK.summarize(rows)["passed"])
+
+    def test_hook_state_gate_requires_no_output_writes_and_shared_configuration(self):
+        rows = results()
+        for side in "AB":
+            for row in rows[side]:
+                row.update(batch=69, output_writes=[0 if side == "B" else 10] * 3,
+                           shared_snapshots=[100 if side == "B" else 0] * 6,
+                           replay_successes=3, prepared=[10] * 3, terminal_replay_cycles=[True] * 3)
+        self.assertTrue(BENCHMARK.summarize(rows)["passed"])
+        rows["B"][0]["output_writes"][0] = 1
+        self.assertFalse(BENCHMARK.summarize(rows)["passed"])
+        rows["B"][0]["output_writes"][0] = 0
+        rows["B"][1]["shared_snapshots"][0] = 99
+        self.assertFalse(BENCHMARK.summarize(rows)["passed"])
+
+    def test_duplicate_terminal_replays_cannot_hide_a_later_failed_cycle(self):
+        log = ("[P6][69] replay_applied terminal=true\n" * 3
+               + "[P6][69] cycle=0 completed_ms=100\n"
+               + "[P6][69] replay_applied terminal=false\n"
+               + "[P6][69] cycle=1 completed_ms=100\n"
+               + "[P6][69] cycle=2 completed_ms=100\n")
+        self.assertEqual(BENCHMARK.terminal_replay_cycles(log, 69), [True, False, False])
+
+    def test_job_retention_requires_every_source_in_every_cycle(self):
+        rows = results()
+        for side in "AB":
+            for row in rows[side]:
+                row.update(batch=70, retained_layouts=[dict(cycle=c, source=s, source_bytes=100,
+                           measurement_bytes=0 if side == "B" else 100, wrapped_bytes=50)
+                           for c in range(3) for s in range(16)])
+        self.assertTrue(BENCHMARK.summarize(rows)["passed"])
+        rows["B"][0]["retained_layouts"][0]["measurement_bytes"] = 1
+        self.assertFalse(BENCHMARK.summarize(rows)["passed"])
+        rows["B"][0]["retained_layouts"][0]["measurement_bytes"] = 0
+        rows["B"][0]["retained_layouts"][-1]["source"] = 14
+        self.assertFalse(BENCHMARK.summarize(rows)["passed"])
+        rows["B"][0]["retained_layouts"].pop()
+        self.assertFalse(BENCHMARK.summarize(rows)["passed"])
+
 
 if __name__ == "__main__":
     unittest.main()

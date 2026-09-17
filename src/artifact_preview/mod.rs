@@ -31,39 +31,18 @@ mod benchmark;
 mod fixtures;
 mod measurement;
 pub(crate) mod performance;
+pub(crate) mod presentation;
 mod projection_model;
 mod virtual_layout;
 
+use presentation::{PresentationFacade, PresentationMode};
 use virtual_layout::MarkdownVirtualLayoutBridge;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PresentationMode {
-    Docked,
-    Detached,
-}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ArtifactPreviewContext {
     #[default]
     Application,
     PrReviewSidePanel,
-}
-
-impl PresentationMode {
-    fn from_index(index: i32) -> Self {
-        if index == 1 {
-            Self::Detached
-        } else {
-            Self::Docked
-        }
-    }
-
-    fn setting_value(self) -> &'static str {
-        match self {
-            Self::Docked => "docked",
-            Self::Detached => "detached",
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -105,6 +84,8 @@ impl UiPayload {
 
 struct PreviewUiRuntime {
     mode: PresentationMode,
+    presentation_subscription: Option<usher_state_store::Subscription>,
+    presentation_revision: Option<u64>,
     context: ArtifactPreviewContext,
     current: Option<UiPayload>,
     loading_title: Option<slint::SharedString>,
@@ -118,6 +99,8 @@ impl Default for PreviewUiRuntime {
     fn default() -> Self {
         Self {
             mode: PresentationMode::Docked,
+            presentation_subscription: None,
+            presentation_revision: None,
             context: ArtifactPreviewContext::Application,
             current: None,
             loading_title: None,
@@ -134,6 +117,8 @@ thread_local! {
 }
 
 static HOST_VISUAL_GENERATION: AtomicU64 = AtomicU64::new(0);
+const DETACHED_INITIAL_WIDTH: f32 = 920.0;
+const DETACHED_INITIAL_HEIGHT: f32 = 720.0;
 
 struct PreviewService {
     registry: RwLock<PreviewRegistry>,
@@ -612,11 +597,7 @@ pub(crate) fn setup(ui: &MainWindow, settings: &PreviewSettings) -> ArtifactPrev
     };
 
     PREVIEW_UI.with(|runtime| {
-        runtime.borrow_mut().mode = if settings.presentation_mode == "detached" {
-            PresentationMode::Detached
-        } else {
-            PresentationMode::Docked
-        };
+        runtime.borrow_mut().mode = PresentationMode::from_setting(&settings.presentation_mode);
     });
 
     let open_handle = handle.clone();
@@ -667,23 +648,37 @@ pub(crate) fn setup(ui: &MainWindow, settings: &PreviewSettings) -> ArtifactPrev
         }
     });
 
+    let preference =
+        PresentationFacade::open(PresentationMode::from_setting(&settings.presentation_mode))
+            .expect("preview presentation worker");
     let ui_weak = ui.as_weak();
-    AppState::get(ui).on_set_artifact_preview_presentation_mode(move |index| {
-        let mode = PresentationMode::from_index(index);
-        if let Some(ui) = ui_weak.upgrade() {
-            AppState::get(&ui).set_artifact_preview_presentation_mode(index.clamp(0, 1));
-            switch_mode(&ui, mode);
-        }
-        let setting = mode.setting_value().to_string();
-        shared_runtime().spawn(async move {
-            let result = tokio::task::spawn_blocking(move || {
-                crate::settings::save_preview_presentation_mode(&setting)
-            })
-            .await;
-            if let Ok(Err(error)) = result {
-                log::error!("[ArtifactPreview] Failed to persist presentation mode: {error}");
+    let subscription = preference.subscribe(Arc::new(move |snapshot| {
+        let weak = ui_weak.clone();
+        // Store commits may arrive from workers; all host changes stay on the UI loop.
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(ui) = weak.upgrade() {
+                let accepted = PREVIEW_UI.with(|runtime| {
+                    let mut runtime = runtime.borrow_mut();
+                    if runtime
+                        .presentation_revision
+                        .is_some_and(|revision| revision >= snapshot.revision())
+                    {
+                        return false;
+                    }
+                    runtime.presentation_revision = Some(snapshot.revision());
+                    true
+                });
+                if !accepted {
+                    return;
+                }
+                AppState::get(&ui).set_artifact_preview_presentation_mode(snapshot.state().index());
+                switch_mode(&ui, *snapshot.state());
             }
         });
+    }));
+    PREVIEW_UI.with(|runtime| runtime.borrow_mut().presentation_subscription = Some(subscription));
+    AppState::get(ui).on_set_artifact_preview_presentation_mode(move |index| {
+        preference.select(PresentationMode::from_index(index));
     });
 
     let provider_service = service.clone();
@@ -1199,8 +1194,12 @@ fn switch_mode(ui: &MainWindow, mode: PresentationMode) {
         if runtime.mode == mode {
             return;
         }
+        let same_host =
+            runtime.mode != PresentationMode::Detached && mode != PresentationMode::Detached;
         runtime.mode = mode;
-        present_runtime(ui, &mut runtime);
+        if !same_host {
+            present_runtime(ui, &mut runtime);
+        }
     });
 }
 
@@ -1224,7 +1223,7 @@ fn present_runtime(ui: &MainWindow, runtime: &mut PreviewUiRuntime) {
     );
     let has_content = runtime.current.is_some() || runtime.loading_title.is_some();
     if !has_content {
-        if runtime.mode == PresentationMode::Docked {
+        if runtime.mode != PresentationMode::Detached {
             begin_main_host_close(ui, runtime.docked_virtual_layout.clone());
         } else {
             clear_main_host_immediately(ui, &runtime.docked_virtual_layout);
@@ -1236,7 +1235,7 @@ fn present_runtime(ui: &MainWindow, runtime: &mut PreviewUiRuntime) {
     }
 
     match runtime.mode {
-        PresentationMode::Docked => {
+        PresentationMode::Docked | PresentationMode::Floating => {
             if let Some(payload) = runtime.current.as_ref() {
                 apply_payload_to_main(ui, payload);
             } else if let Some(title) = runtime.loading_title.as_ref() {
@@ -1272,14 +1271,42 @@ fn install_detached_live_resize_bridge(window: &ArtifactPreviewWindow) {
     // adapter is idempotent once it observes the current native window.
     crate::platform::install_artifact_preview_live_resize(window);
     crate::platform::install_artifact_preview_titlebar_actions(window);
-    for delay in [30, 120] {
+    for (delay, reveal) in [(30, false), (120, true)] {
         let weak = window.as_weak();
         slint::Timer::single_shot(std::time::Duration::from_millis(delay), move || {
             if let Some(window) = weak.upgrade() {
                 crate::platform::install_artifact_preview_live_resize(&window);
                 crate::platform::install_artifact_preview_titlebar_actions(&window);
+                if reveal {
+                    crate::platform::set_artifact_preview_presentation_hidden(&window, false);
+                }
             }
         });
+    }
+}
+
+fn install_detached_render_bridge(window: &ArtifactPreviewWindow) {
+    let first_frame = std::cell::Cell::new(true);
+    let weak = window.as_weak();
+    if let Err(error) = window.window().set_rendering_notifier(move |state, _| {
+        if matches!(state, slint::RenderingState::BeforeRendering) {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            if first_frame.get() {
+                // The native handle exists at this point, but winit has not mapped
+                // the window yet. Keep it transparent while AppKit chrome settles.
+                crate::platform::set_artifact_preview_presentation_hidden(&window, true);
+                crate::platform::install_artifact_preview_live_resize(&window);
+                crate::platform::install_artifact_preview_titlebar_actions(&window);
+            }
+            performance::before_detached_rendering(&window);
+        } else if matches!(state, slint::RenderingState::AfterRendering) {
+            first_frame.set(false);
+            performance::after_detached_rendering();
+        }
+    }) {
+        log::warn!("[ArtifactPreview] Detached rendering notifier unavailable: {error:?}");
     }
 }
 
@@ -1304,6 +1331,13 @@ fn ensure_detached_window(
     window.set_code_font_family(ui.get_workflow_pr_review_code_font_family());
     window.set_performance_optimized(ui.get_artifact_preview_performance_optimized());
     window.set_native_titlebar_actions(cfg!(target_os = "macos"));
+    // Mark the native adapter's size as explicit before its first show. Relying
+    // only on Slint preferred dimensions can expose the backend's temporary
+    // default-size window before the layout pass applies the final dimensions.
+    window.window().set_size(slint::LogicalSize::new(
+        DETACHED_INITIAL_WIDTH,
+        DETACHED_INITIAL_HEIGHT,
+    ));
     let detached_virtual_layout =
         Rc::new(RefCell::new(MarkdownVirtualLayoutBridge::from_environment()));
     let weak = window.as_weak();
@@ -1336,7 +1370,7 @@ fn ensure_detached_window(
             window
         },
     );
-    performance::install_detached_render_trace(&window);
+    install_detached_render_bridge(&window);
     let ui_weak = ui.as_weak();
     window.on_dismiss_requested(move || {
         if let Some(ui) = ui_weak.upgrade() {
@@ -1376,6 +1410,7 @@ pub(crate) fn sync_detached_effective_theme(dark_mode: bool) {
     PREVIEW_UI.with(|runtime| {
         if let Some(window) = runtime.borrow().detached.as_ref() {
             window.set_effective_dark_mode(dark_mode);
+            crate::platform::sync_artifact_preview_appearance(window);
         }
     });
 }
@@ -1456,7 +1491,7 @@ fn apply_loading_to_window(
 fn clear_hosts(ui: &MainWindow) {
     PREVIEW_UI.with(|runtime| {
         let mut runtime = runtime.borrow_mut();
-        let animate_docked_close = runtime.mode == PresentationMode::Docked;
+        let animate_docked_close = runtime.mode != PresentationMode::Detached;
         runtime.current = None;
         runtime.loading_title = None;
         runtime.loading_copy = crate::i18n::LocalizedText::message("preview.preparing");
@@ -1747,7 +1782,7 @@ mod tests {
         assert_eq!(PresentationMode::from_index(-1), PresentationMode::Docked);
         assert_eq!(PresentationMode::from_index(0), PresentationMode::Docked);
         assert_eq!(PresentationMode::from_index(1), PresentationMode::Detached);
-        assert_eq!(PresentationMode::from_index(2), PresentationMode::Docked);
+        assert_eq!(PresentationMode::from_index(2), PresentationMode::Floating);
     }
 
     #[test]
@@ -1777,6 +1812,13 @@ mod tests {
         );
         assert!(detached.get_effective_dark_mode());
         assert!(detached.get_palette_synchronized());
+        assert_eq!(
+            detached.window().size(),
+            slint::PhysicalSize::new(
+                DETACHED_INITIAL_WIDTH as u32,
+                DETACHED_INITIAL_HEIGHT as u32
+            )
+        );
         assert_eq!(AppState::get(&detached).get_theme_mode(), 1);
         assert!(AppState::get(&detached).get_effective_dark_mode());
 

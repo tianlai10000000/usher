@@ -312,13 +312,14 @@ export component GitHubSettingsPane inherits Rectangle {
                     wrap: word-wrap;
                 }
 
-                HorizontalLayout {
+                preview-placement := Rectangle {
                     width: parent.width;
-                    height: 32px;
-                    spacing: 8px;
-                    alignment: start;
+                    height: self.width < 460px ? 112px : 32px;
+                    background: transparent;
 
-                    GitHubSegment {
+                    split-choice := GitHubSegment {
+                        x: 0px;
+                        y: 0px;
                         text: I18n.settings-general-right-panel;
                         selected: AppState.artifact-preview-presentation-mode == 0;
                         clicked => {
@@ -326,7 +327,19 @@ export component GitHubSettingsPane inherits Rectangle {
                             AppState.set-artifact-preview-presentation-mode(0);
                         }
                     }
+                    floating-choice := GitHubSegment {
+                        x: parent.width < 460px ? 0px : split-choice.width + 8px;
+                        y: parent.width < 460px ? 40px : 0px;
+                        text: I18n.settings-general-floating-panel;
+                        selected: AppState.artifact-preview-presentation-mode == 2;
+                        clicked => {
+                            AppState.artifact-preview-presentation-mode = 2;
+                            AppState.set-artifact-preview-presentation-mode(2);
+                        }
+                    }
                     GitHubSegment {
+                        x: parent.width < 460px ? 0px : floating-choice.x + floating-choice.width + 8px;
+                        y: parent.width < 460px ? 80px : 0px;
                         text: I18n.settings-general-separate-window;
                         selected: AppState.artifact-preview-presentation-mode == 1;
                         clicked => {

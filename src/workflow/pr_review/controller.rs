@@ -61,6 +61,7 @@ mod diff_bindings;
 use actions::{apply_action_state, readiness_label_key, reset_action_ui};
 mod diagnostics;
 mod highlight_benchmark;
+mod highlight_completion;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ReviewRequest {
@@ -2070,15 +2071,14 @@ impl WorkflowPrReviewController {
                 let Some(ui) = ui_weak.upgrade() else {
                     return;
                 };
-                ui.set_workflow_pr_review_code_loading(false);
-                ui.set_workflow_pr_review_large_diff_loading(false);
-                if !controller
-                    .state
-                    .is_current(ReviewRequestKind::Highlight, generation)
-                {
-                    return;
-                }
-                if ui.get_workflow_pr_review_selected_file_path().as_str() != file.path {
+                if !highlight_completion::finish(
+                    &controller.state,
+                    &ui,
+                    generation,
+                    index,
+                    &file.path,
+                    false,
+                ) {
                     return;
                 }
                 let Ok(highlighted) = highlighted else {
@@ -2608,16 +2608,14 @@ impl WorkflowPrReviewController {
                 let Some(ui) = ui_weak.upgrade() else {
                     return;
                 };
-                ui.set_workflow_pr_review_code_loading(false);
-                if !controller
-                    .state
-                    .is_current(ReviewRequestKind::Highlight, generation)
-                {
-                    return;
-                }
-                if ui.get_workflow_pr_review_selected_file_index() != selected_index as i32
-                    || !ui.get_workflow_pr_review_viewing_file()
-                {
+                if !highlight_completion::finish(
+                    &controller.state,
+                    &ui,
+                    generation,
+                    selected_index,
+                    &full_file.path,
+                    true,
+                ) {
                     return;
                 }
                 match highlighted {

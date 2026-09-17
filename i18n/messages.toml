@@ -648,7 +648,11 @@ text = "Release channel"
 
 [[messages]]
 key = "settings.general.right_panel"
-text = "Right panel"
+text = "Three-column layout"
+
+[[messages]]
+key = "settings.general.floating_panel"
+text = "Floating panel"
 
 [[messages]]
 key = "settings.general.separate_window"

@@ -84,7 +84,7 @@ pub struct DiagnosticsSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreviewSettings {
-    /// `docked` (default) or `detached`.
+    /// `docked` (split layout, default), `floating`, or `detached`.
     #[serde(default = "default_preview_presentation_mode")]
     pub presentation_mode: String,
     #[serde(default)]
@@ -589,11 +589,10 @@ impl SettingsManager {
 
     pub fn set_preview_presentation_mode(&self, mode: &str) {
         if let Ok(mut settings) = self.settings.write() {
-            settings.preview.presentation_mode = if mode == "detached" {
-                "detached".to_string()
-            } else {
-                "docked".to_string()
-            };
+            settings.preview.presentation_mode =
+                crate::artifact_preview::presentation::PresentationMode::from_setting(mode)
+                    .setting_value()
+                    .to_string();
         }
     }
 
@@ -901,11 +900,10 @@ pub fn setup_settings(app: &MainWindow, settings: &AppSettings) {
     app_state.set_memory_diagnostics_logging(settings.diagnostics.memory_diagnostics_logging);
     app_state.set_ui_sound_effects(settings.ui_sound_effects);
     app_state.set_artifact_preview_presentation_mode(
-        if settings.preview.presentation_mode == "detached" {
-            1
-        } else {
-            0
-        },
+        crate::artifact_preview::presentation::PresentationMode::from_setting(
+            &settings.preview.presentation_mode,
+        )
+        .index(),
     );
     app_state.set_artifact_preview_markdown_enabled(settings.preview.providers.markdown);
     app_state.set_artifact_preview_image_enabled(settings.preview.providers.image);
@@ -1205,6 +1203,19 @@ application_console_logging = false
         assert!(serialized.contains("presentation_mode = \"detached\""));
         assert!(serialized.contains("[preview.providers]"));
         assert!(serialized.contains("image = false"));
+    }
+
+    #[test]
+    fn preview_placement_round_trips_all_modes_without_changing_provider_settings() {
+        for mode in ["docked", "floating", "detached"] {
+            let mut settings = AppSettings::default();
+            settings.preview.presentation_mode = mode.into();
+            settings.preview.providers.image = false;
+            let serialized = toml::to_string(&settings).unwrap();
+            let restored: AppSettings = toml::from_str(&serialized).unwrap();
+            assert_eq!(restored.preview.presentation_mode, mode);
+            assert!(!restored.preview.providers.image);
+        }
     }
 
     #[test]

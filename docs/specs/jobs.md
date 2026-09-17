@@ -33,6 +33,12 @@ References:
 
 ## Contract / 契约
 
+Long log rows use bounded UTF-8 shaping pieces (32 KiB) with the unfinished
+measured visual line carried forward, avoiding Parley 0.10's 16-bit cluster
+offset overflow. Extents continue to come from measured visual lines.
+长日志按最多 32 KiB 的 UTF-8 片段测量，并保留末尾未完成的视觉行继续测量，
+避免 Parley 0.10 的 16 位字形簇偏移溢出；extent 仍来自实际测量的视觉行。
+
 1. The immutable input is an ordered `Vec<JobStepDefinition>`. Every definition
    contains only a display name and a command argument vector. Commands must not
    be flattened into a shell string for execution.
@@ -212,6 +218,22 @@ References:
 - 验证 Stop 与日志懒加载只分发给当前 source key。
 
 ## Output and viewport budgets / 输出与视口预算
+
+- Application-owned `LogModel` must expose its concrete identity through Slint's
+  `Model::as_any`; its measurement requests/results share the immutable parsed
+  snapshot. Preparing measurement must not materialize every Slint row or copy
+  every parsed string. External/static models retain a conversion fallback.
+  Wrapped layout retains UTF-8 ranges into the semantic prefix/body plus exact
+  extents. Only visible source rows create visual-line strings; empty rows,
+  annotation newlines, raw text, source numbers and wrapping remain unchanged.
+  Revisions/layout keys still reject obsolete results. The 16-entry viewport
+  retention policy is unchanged and must not be described as a heap byte limit.
+- 应用自有 `LogModel` 必须通过 Slint 的 `Model::as_any` 暴露具体类型；测量请求
+  和结果共享不可变解析快照，不得逐条物化全部 Slint 行或复制所有解析字符串。
+  外部/静态 model 保留转换兜底。布局保存语义前缀/正文上的 UTF-8 区间和精确
+  extent，仅可见源行构造视觉行字符串；空行、注解换行、原文、行号及换行结果
+  保持不变。revision/layout key 继续拒绝旧结果。16 项视口保留策略不变，不应
+  将其描述为堆内存字节上限。
 
 - Wrapped visual lines within one source row use a 20 px pitch at 12 px font
   size. Parley shapes rows on the shared cancellable blocking pool; Slint paints

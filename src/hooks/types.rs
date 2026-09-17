@@ -14,6 +14,9 @@ pub(crate) const CATEGORY_OTHER: &str = "other";
 pub(super) const MAX_RUNS: usize = 64;
 pub(super) const MAX_SCRIPT_BYTES: usize = 64 * 1024;
 pub(super) const MAX_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
+pub(super) const MAX_JOURNAL_BYTES: usize = MAX_OUTPUT_BYTES + 64 * 1024;
+pub(super) const MAX_REPLAY_BYTES: usize = 16 * 1024 * 1024;
+pub(super) const MAX_RECORD_BYTES: usize = 64 * 1024;
 pub(super) const MAX_TAIL_BYTES: usize = 32 * 1024;
 
 pub(crate) fn new_id(prefix: &str) -> String {

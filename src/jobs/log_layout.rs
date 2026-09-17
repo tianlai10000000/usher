@@ -1,9 +1,9 @@
 //! Shape visible source rows separately from their explicit visual line pitch.
 use parley::style::{FontFamily, FontFamilyName, OverflowWrap};
 use parley::{FontContext, LayoutContext, StyleProperty};
-use slint::SharedString;
 #[cfg(test)]
-use slint::{ComponentHandle, ModelRc, VecModel};
+use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use std::ops::Range;
 
 pub(super) struct LogLayout {
     fonts: FontContext,
@@ -36,12 +36,50 @@ impl LogLayout {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn wrap(&mut self, text: &str, width: f32) -> Vec<SharedString> {
+        self.line_ranges(text, width)
+            .into_iter()
+            .map(|range| text[range].into())
+            .collect()
+    }
+
+    pub(super) fn line_ranges(&mut self, text: &str, width: f32) -> Vec<Range<usize>> {
         // Parley shapes empty text with a synthetic space whose range is 0..1.
         // Keep blank source rows without slicing that range into the original.
         if text.is_empty() {
-            return vec![SharedString::default()];
+            return std::iter::once(0..0).collect();
         }
+        // Parley 0.10 stores cluster offsets in u16. Shape bounded pieces and
+        // carry the unfinished visual line forward, preserving measured wraps.
+        let mut lines = Vec::new();
+        let mut start = 0;
+        while start < text.len() {
+            let mut end = (start + 32 * 1024).min(text.len());
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            let part = &text[start..end];
+            let ranges = self.wrap_ranges(part, width);
+            let carry = if end < text.len() && ranges.len() > 1 {
+                ranges
+                    .last()
+                    .map(|range| range.start)
+                    .filter(|offset| *offset > 0)
+            } else {
+                None
+            };
+            let count = ranges.len() - usize::from(carry.is_some());
+            lines.extend(ranges.into_iter().take(count).map(|range| {
+                let end = range.start + part[range.clone()].trim_end_matches(['\r', '\n']).len();
+                start + range.start..start + end
+            }));
+            start += carry.unwrap_or(part.len());
+        }
+        lines
+    }
+
+    fn wrap_ranges(&mut self, text: &str, width: f32) -> Vec<std::ops::Range<usize>> {
         let mut builder = self
             .context
             .ranged_builder(&mut self.fonts, text, 1.0, false);
@@ -50,20 +88,36 @@ impl LogLayout {
         builder.push_default(StyleProperty::OverflowWrap(OverflowWrap::Anywhere));
         let mut layout = builder.build(text);
         layout.break_all_lines(Some(width.max(1.0)));
-        layout
-            .lines()
-            .map(|line| {
-                text[line.text_range()]
-                    .trim_end_matches(['\r', '\n'])
-                    .into()
-            })
-            .collect()
+        layout.lines().map(|line| line.text_range()).collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_log_rows_cross_u16_offsets_without_losing_text_or_changing_short_wraps() {
+        let mut layout = LogLayout::new();
+        for text in [
+            "[stdout] x".repeat(9000),
+            "\u{0001}".repeat(100_000),
+            "消息 log ".repeat(10_000),
+        ] {
+            for width in [160.0, 800.0] {
+                let lines = layout.wrap(&text, width);
+                assert_eq!(lines.concat(), text);
+                assert!(lines.len() > 1);
+            }
+        }
+        let text = "value ".repeat(10_000);
+        let reference: Vec<SharedString> = layout
+            .wrap_ranges(&text, 800.0)
+            .into_iter()
+            .map(|range| text[range].into())
+            .collect();
+        assert_eq!(layout.wrap(&text, 800.0), reference);
+    }
 
     #[test]
     fn empty_rows_remain_one_visual_line_across_resize_and_layout_reuse() {

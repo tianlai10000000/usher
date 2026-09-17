@@ -136,6 +136,16 @@ language switch, including an already-open editor and picker. / 事件/分类标
   configuration directory. The file contains definitions and the latest 64 run
   summaries. Output is omitted from state persistence. Corrupt/oversized input is
   preserved and disables configuration/execution rather than overwriting it.
+  Definitions and event registration are immutable shared snapshots; configuration
+  edits use copy-on-write. Output-only sequence/tail commits still notify live
+  subscribers but do not rewrite hooks.json. Configuration and durable run-summary
+  changes advance a separate persistence revision; terminal commits participate
+  in the same automatic worker flush/shutdown barrier. No manual save path is added.
+  UI delivery coalesces snapshots before preparing the selected Job projection;
+  Settings/history refresh only on durable/catalog changes, and project choices
+  only on catalog changes. One bounded live-tail parser cache reuses unchanged
+  rows; a different run drops that cache. Runtime locale changes refresh the
+  existing Job row text without replacing its log model.
 
 - 设置页有独立的 **Hooks** Tab，位于 **Diagnostics** 前；宽屏和窄屏顺序一致。
   支持总开关、最多 32 个有独立开关的 Hook、事件、运行方式、解释器、
@@ -194,6 +204,12 @@ language switch, including an already-open editor and picker. / 事件/分类标
 - `HookStateFacade` 隐藏具体 Store；强类型 Action 和自动持久化均在 Worker 上。
   配置目录的私有 `hooks.json` 原子保存定义和最近 64 个运行摘要，不保存输出正文。
   损坏/超限文件保留原样并禁用操作，不静默覆盖。
+  定义与事件目录使用不可变共享快照，配置修改才写时复制。纯 seq/日志尾部更新仍通知
+  活跃订阅者，但不重写 hooks.json；配置及持久摘要变化推进独立持久化版本，终态
+  继续通过同一自动 Worker 的 flush/退出屏障保存，不新增手工 save 路径。
+  UI 先合并快照，再后台准备所选 Job；设置/历史只随持久摘要或目录变化刷新，项目
+  选项只随目录变化刷新。仅缓存一个有界活动日志尾部并复用未变化的解析行，切换 run
+  丢弃旧解析缓存。运行时切换语言更新原 Job 行文案，不替换日志 model。
 - 多行源码编辑器拥有独立垂直视口，代码区上的滚轮直接滚动源码而不移动弹窗表单。
   单个常驻原生 `StyledText` 提供 Primer 语义色（红色关键词、蓝色字符串/常量、紫色
   类型及灰色注释），不创建逐 token UI 节点。高亮限制为最多 256 行、32 KiB 源码和
@@ -314,8 +330,10 @@ stdout/stderr 不能伪造生命周期，分别保持读取顺序，不保证两
   `USHER_HOOK_TEST` identify execution. The working directory comes from the
   captured event, or a temporary directory when the event has no project.
 - stdout/stderr are drained concurrently with 4 KiB reads and a bounded channel.
-  Memory keeps a 32 KiB tail; journal output is capped at 2 MiB per run and emits
-  `output.truncated`. Lifecycle records remain outside that output cap. Journals
+  Memory keeps a 32 KiB tail; output admission counts serialized JSONL bytes
+  (including metadata, escaping and newline) against 2 MiB per run and emits
+  one `output.truncated`. Total journal size is bounded by 2 MiB + 64 KiB,
+  reserving completion space. Each record is at most 64 KiB. Journals
   live at `hooks/runs/<run-id>.jsonl` in the data directory; their retention follows
   summaries. Diagnostic log switches affect mirrors, not execution history.
 - Upper presentation owns start/end Inbox, Banner and native notifications; both
@@ -340,8 +358,9 @@ stdout/stderr 不能伪造生命周期，分别保持读取顺序，不保证两
   相对于脚本文件；项目模块可通过显式 file URL 导入。
 - `USHER_HOOK_CONTEXT` 指向临时 JSON 文件，另外提供 run ID 和测试标识；cwd
   来自触发时的项目，没有项目时使用临时目录。
-- 两路输出并发读取，有界通道和 32 KiB 内存尾部；单次持久输出上限 2 MiB，超限
-  明确标记，生命周期不受此上限影响。历史位于数据目录的 `hooks/runs/`，跟随摘要
+- 两路输出并发读取，有界通道和 32 KiB 内存尾部；2 MiB 输出准入预算按完整 JSONL
+  字节计算，包含字段、转义和换行；超限只标记一次并继续排空输出。日志物理总上限
+  2 MiB + 64 KiB，预留终态空间，单记录最多 64 KiB。历史位于 `hooks/runs/`，跟随摘要
   保留；关闭诊断日志不会关闭流程历史。
 - 上层负责开始/结束通知和相同的流程入口，复用 Job Run。UI 更新仅在 event loop。
   退出时先异步排空 Hook，再按原顺序清理持久化、消息和 UI；异常 event-loop 返回
@@ -349,6 +368,26 @@ stdout/stderr 不能伪造生命周期，分别保持读取顺序，不保证两
   等待已提交的配置操作完成，再停止持久化。
 
 ## Regression checklist / 回归清单
+
+Replay streams records with bounded buffers and an enforced 16 MiB read budget
+(including legacy journals), rather than trusting file metadata. Unterminated
+live/crash tails are ignored until a later read; malformed complete records fail
+explicitly. `events_after` returns at most 256 events and stops at approximately
+256 KiB (at most one extra bounded record); callers resume from the last sequence.
+UI replay captures the summary sequence and formats directly into one string.
+Crash-recovered interrupted runs have no active writer; their display watermark
+comes from the complete journal records, so skipped output-only summary writes
+cannot hide durable pre-crash output. Their interrupted conclusion is retained.
+Repeated history opens and leaving Job Run cancel older work; stale completions
+cannot overwrite the selected run. Scrolling reuses the shared Job virtualizer.
+
+回放使用有界缓冲区和实际读取累计 16 MiB 上限（兼容旧日志），不只信任文件大小。
+活动/崩溃日志未结束的尾记录等待下次读取；损坏的完整记录明确报错。
+`events_after` 每页最多 256 条，约 256 KiB（最多多一个有界记录），以上页末 seq 续读。
+UI 回放捕获摘要 seq 并直接格式化到一个字符串；连续打开历史及离开 Job Run 会取消
+旧工作，旧完成回调不得覆盖当前选择。滚动继续复用共享 Job 虚拟化。
+崩溃恢复的 interrupted 运行已经没有写入方，其显示水位从日志的完整记录恢复，
+避免跳过纯输出摘要写入后丢失已落盘输出；结论仍保持 interrupted，不重放脚本。
 
 - Switches, project/outcome filtering, config revision, event deduplication.
 - Default-empty migration, selection save/edit/clear/restart, mixed parent and

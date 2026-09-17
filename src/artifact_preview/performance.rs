@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use slint::{ComponentHandle, Model};
+use slint::Model;
 
 use crate::{ArtifactPreviewWindow, MainWindow};
 
@@ -237,30 +237,26 @@ pub(crate) fn after_main_rendering() {
     }
 }
 
-pub(crate) fn install_detached_render_trace(window: &ArtifactPreviewWindow) {
+pub(crate) fn before_detached_rendering(window: &ArtifactPreviewWindow) {
     let Some(trace) = shared_trace() else {
         return;
     };
     if trace.borrow().path.is_none() {
         return;
     }
-    let weak = window.as_weak();
-    if let Err(error) = window.window().set_rendering_notifier(move |state, _| {
-        if matches!(state, slint::RenderingState::BeforeRendering) {
-            let Some(window) = weak.upgrade() else {
-                return;
-            };
-            before_rendering(
-                &trace,
-                TraceHost::DetachedWindow,
-                window.get_layout_resizing(),
-                window.get_markdown_blocks().row_count(),
-            );
-        } else if matches!(state, slint::RenderingState::AfterRendering) {
-            after_rendering(&trace, TraceHost::DetachedWindow);
-        }
-    }) {
-        log::warn!("[ArtifactPreview::Performance] detached notifier unavailable: {error:?}");
+    before_rendering(
+        &trace,
+        TraceHost::DetachedWindow,
+        window.get_layout_resizing(),
+        window.get_markdown_blocks().row_count(),
+    );
+}
+
+pub(crate) fn after_detached_rendering() {
+    if let Some(trace) = shared_trace()
+        && trace.borrow().path.is_some()
+    {
+        after_rendering(&trace, TraceHost::DetachedWindow);
     }
 }
 

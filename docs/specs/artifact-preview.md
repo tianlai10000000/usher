@@ -44,7 +44,7 @@ Markdown 只是一个 Provider，不拥有整个框架。
 | `src/agent_response/` | Bounded compact projection of agent Markdown and opaque repository-file action tokens. It does not read files, trust model paths, or own a host. |
 | `ui/components/artifact_preview/` | Shared Primer preview shell, Markdown/text/image surfaces, docked panel, and detached native window. It performs no I/O or parsing. |
 | `ui/main.slint` | Root placement of the docked host and the stable Rust-facing preview contract. |
-| `src/settings.rs`, `src/settings_page.rs` | Persistent preference and explicit bridge into the independently generated Settings page. |
+| `src/artifact_preview/presentation.rs`, `src/settings.rs`, `src/settings_page.rs` | Typed placement Store, ordered worker actions, automatic persistence and explicit projection into the independently generated Settings page. |
 | Feature callers | Construct `ArtifactSource` and call the facade. They do not select providers or hosts. |
 
 The AI Review controller owns token lookup and task binding; the agent-response
@@ -137,9 +137,11 @@ Provider 和可选解析依赖都不得进入安装包。
 
 `PresentationMode::Docked` is the default. It mounts one application-level panel
 at the right edge of `MainWindow`, outside every route. The panel is therefore
-available to Chat, Workflow, Project, and future routes. On wide windows it
-reserves content width; on narrow windows it overlays the route instead of
-compressing it below its usable minimum. Its surface starts at the root-window
+available to Chat, Workflow, Project, and future routes. It always reserves
+content width, including narrow windows: the sidebar, route and preview form
+three adjacent columns. Dragging changes the route and preview widths together.
+The minimum pane widths adapt to the available content area instead of silently
+changing presentation mode. Its surface starts at the root-window
 top edge and a continuous one-pixel hairline separates it from route content.
 Opening and closing drive both panes from one 260ms animated progress value: a
 complete, right-anchored panel is revealed or clipped at the moving divider while
@@ -164,11 +166,36 @@ line and shows a column-resize cursor; direct dragging changes the panel width
 within bounded panel/main-content limits. The preferred width survives close,
 reopen, mode changes, route changes, and temporary window clamps for the current
 application session, but is not durable user configuration.
+The complete divider hit target must sit above the preview host, including its
+scroll viewport, so the first press captures a drag from either side on every
+owning route. Modal overlays disable the divider.
 While open, the docked host owns the trailing title-bar region and paints above
 ordinary shell title-bar actions, so shell controls cannot overlap preview
 controls. Header actions form one right-aligned compact group: Close is always
 last, optional External Open and Copy precede it, and hidden actions reserve no
 space.
+
+Settings > General > File preview offers Three-column layout (`docked`, the
+backward-compatible default), Floating panel (`floating`), and Separate window
+(`detached`). Floating uses the same root panel and divider, but reserves no
+route width at any window size. Switching between split and floating preserves
+the prepared document and its model; only host geometry changes. PR-context
+previews continue to reuse the existing AI side-panel slot for either in-app
+mode. Placement actions are reduced in order on the shared runtime; the feature
+Store auto-persists changed commits on its persistence worker and drains on
+shutdown. Subscribers reject stale revisions. A write failure is logged and
+keeps the in-memory selection; the next changed preference retries persistence.
+The Settings placement choices stack vertically below 460px of available pane
+width, so all three remain reachable while a split preview is open.
+
+设置 > 常规 > 文件预览提供“三栏布局”（`docked`，兼容旧配置并作为默认）、
+“浮动面板”（`floating`）与“独立窗口”（`detached`）。三栏模式在窄窗口也预留
+中间栏和右栏宽度，拖动时二者同步变化；最小宽度按可用空间自适应，不再自动改成覆盖。
+浮动模式复用相同的根层面板和分割线，但不占用底下路由的布局宽度。两种内嵌模式切换
+保留已准备文档与 model，仅改变 Host 几何。PR 上下文预览在两种内嵌模式下均继续复用
+原有 AI 侧栏槽位。设置 Action 在共享 Runtime 按序归约，有效 commit 由 Feature Store
+自动交给持久化 Worker，退出时排空；订阅者拒绝过期 revision。写盘失败记录日志并保留
+内存选择，后续有效设置变更重试持久化。
 
 `PresentationMode::Detached` shows the same prepared payload in one reusable
 native Slint window belonging to the Usher process. It is modeless and does not
@@ -183,17 +210,41 @@ Because that window owns an independent Slint component tree, the Preview facade
 must explicitly synchronize the resolved effective dark mode when creating or
 reusing it and whenever the application theme changes; its local theme and
 standard-widget palette must never fall back to their default Light state.
+On macOS this synchronization includes NSWindow appearance. Creation/reopening
+must restore an opaque window background and standard opaque title bar before
+the accessory installation can return early; the title bar must never expose
+the desktop through the backend's default transparent window surface.
+The initial 920 x 720 logical size is committed to the window adapter before
+the first `show()`. The first mapped native frame must therefore use the final
+size and position instead of briefly exposing the backend's temporary default
+geometry. Reusing an already-open detached window preserves its user-resized
+dimensions.
+On macOS the first rendering callback keeps the native window at alpha zero
+while its opaque appearance, title-bar accessory and prepared Slint frame are
+installed. The post-show bridge retries native installation and reveals once
+after bounded settle turns. Later renders and payload replacement never hide
+an already-visible window.
+
+macOS 独立窗口同步主题时必须同时更新 NSWindow 外观。创建或重开窗口时，在标题栏
+附件安装函数提前返回之前恢复不透明窗口背景与标准不透明标题栏，禁止后端默认透明
+窗口表面导致标题栏透出桌面。
+首次 `show()` 前必须向窗口适配器提交 920 x 720 逻辑尺寸，使首个可见原生帧直接使用
+最终尺寸与位置，不得短暂显示后端的临时默认几何。复用已经打开的独立窗口时保留用户
+调整后的尺寸。
+macOS 首次渲染回调在安装不透明外观、标题栏附件和准备后的 Slint 帧期间保持原生窗口
+alpha 为零；显示后的桥接在有界 settle 周期内重试原生安装，随后仅揭示一次。后续渲染
+和内容替换不得再次隐藏已经可见的窗口。
 
 Changing the setting is immediate:
 
-1. persist and publish the new mode;
+1. commit and publish the new mode, automatically scheduling persistence;
 2. if no preview is open, update policy only;
 3. if a preview is open, mount the destination host from the current prepared payload;
 4. reveal the destination, then unmount and clear the old host;
 5. never leave both heavy surfaces mounted after the event-loop turn.
 
 `PresentationMode::Docked` 默认启用，在 `MainWindow` 右侧根层挂载，不属于任何
-路由；宽窗口预留内容宽度，窄窗口改为覆盖，避免把页面压缩到不可用。
+路由；宽窄窗口均预留内容宽度，栏宽下限随可用空间自适应，覆盖行为只由浮动模式启用。
 右侧面板从根窗口顶边开始，并以连续 1px 分隔线与路由内容分开。开启和关闭时，面板与
 主内容共享一个 260ms 动画 progress：完整宽度的面板始终靠右，只在移动分割线处揭示或
 裁剪，主内容同步预留或回收完全相同的宽度；Preview 与 Chat 文档树在过渡期间保持稳定
@@ -209,6 +260,8 @@ clip 移动时逐帧重放所有后代；Header、背景、分隔线和路由 Su
 拥有更宽的透明 resize 命中区；hover 时强化线条并显示列缩放光标，直接拖拽在面板和主内容
 的安全宽度范围内调整尺寸。用户偏好宽度在当前应用会话内跨关闭、重开、模式切换、路由切换
 和临时窗口 clamp 保留，但不作为持久设置保存。
+分割线完整命中区必须位于预览 Host 及其滚动视口上方，确保各所属路由从分割线两侧
+首次按下均可捕获拖动。Modal 浮层打开时禁用分割线。
 停靠面板打开时接管标题栏右侧区域，并绘制在普通 Shell 标题栏操作之上，Shell 控件不得
 覆盖预览控件。Header 操作使用一个右对齐的紧凑操作组：关闭始终在最右侧，可选的外部
 打开与复制依次位于其左侧；隐藏操作不得保留空白槽位。
@@ -544,9 +597,17 @@ known retained-memory caveat are recorded in
 ## Regression checklist / 回归清单
 
 - Old settings load with Docked and all built-ins enabled.
+- Verify all three placement choices survive TOML reload; unknown values default
+  to split. Switch mounted Settings between English and Chinese, then choose each
+  mode and verify the independent Settings factory forwards its exact value.
+- With the sidebar shown at 800px and 1280px, assert split content ends at the
+  divider on every drag step; floating leaves underlying content width unchanged.
 - Switching Docked <-> Detached while content is open moves it immediately and leaves one host.
 - Hover and drag the docked divider at narrow and wide sizes; verify cursor,
   bounded width, cancel restoration, and session-width restoration after a clamp.
+- Press the left edge, center, and right edge of the divider on Chat, Home, and
+  Project in English and Chinese; each first press must capture a continuous
+  bidirectional drag. Repeat after reopening; modal overlays must block resize.
 - Markdown, PNG/JPEG, and UTF-8 text select their expected providers.
 - Runtime disabling prevents provider prepare and closes an active session.
 - Chat shows readable content plus a title action using the global selected host.

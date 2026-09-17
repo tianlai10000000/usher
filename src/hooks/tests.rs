@@ -1,7 +1,7 @@
 use super::*;
 use std::time::Duration;
 
-fn service() -> (tempfile::TempDir, Arc<HookService>) {
+pub(super) fn service() -> (tempfile::TempDir, Arc<HookService>) {
     service_with_selector(Arc::new(|_, _| false))
 }
 
@@ -72,7 +72,7 @@ fn legacy_review_submitted_hooks_migrate_to_the_approved_event() {
     std::fs::write(
         &path,
         serde_json::to_vec(&HookState {
-            hooks: vec![legacy],
+            hooks: vec![legacy].into(),
             ..Default::default()
         })
         .unwrap(),
@@ -804,7 +804,17 @@ async fn output_is_bounded_even_without_newlines_and_context_is_data() {
     let run = finished(&service, &id).await;
     assert_eq!(run.conclusion, Some(HookConclusion::Success));
     assert!(run.log.len() <= MAX_TAIL_BYTES);
-    let events = service.events_after(&id, 0).await.unwrap();
+    let mut events = Vec::new();
+    loop {
+        let page = service
+            .events_after(&id, events.last().map_or(0, |e: &HookEvent| e.seq))
+            .await
+            .unwrap();
+        if page.is_empty() {
+            break;
+        }
+        events.extend(page);
+    }
     assert_eq!(
         events
             .iter()
@@ -1244,7 +1254,7 @@ fn dialog_cancel_discards_edits_and_validation_keeps_the_editor_open() {
     g.set_test_run(run.id.clone().into());
     let snapshot = HookState {
         ready: true,
-        hooks: vec![saved.clone()],
+        hooks: vec![saved.clone()].into(),
         runs: vec![run],
         ..Default::default()
     };
@@ -1553,8 +1563,9 @@ fn hook_rows_and_event_select_share_module_categories() {
                 project_scoped: true,
                 sample: serde_json::json!({}),
             },
-        ],
-        hooks: vec![ai_hook, pr_hook_one, pr_hook_two],
+        ]
+        .into(),
+        hooks: vec![ai_hook, pr_hook_one, pr_hook_two].into(),
         ..Default::default()
     };
     bridge::apply_settings(&page, &state);

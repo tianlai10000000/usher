@@ -2,6 +2,16 @@
 
 Specifications describe stable behavior and invariants. Architecture documents explain ownership and flow; historical notes explain how a problem was investigated. Do not mix those three roles.
 
+PR Review requires guarded highlight completion writes. Hooks defines serialized
+journal budgets and bounded, cancellable replay. / PR Review 要求校验高亮完成回写；
+Hooks 定义序列化日志预算和有界、可取消回放。
+Hooks also requires shared configuration snapshots, durable-only automatic
+writes and coalesced incremental Job projection; Jobs bounds shaping offsets.
+/ Hooks 还要求共享配置快照、只随持久变化自动写盘及合并后的增量 Job 投影；Jobs 约束排版偏移范围。
+Jobs also requires shared immutable measurement snapshots and UTF-8 wrap ranges,
+with visual text materialized only for visible source rows. / Jobs 还要求共享
+不可变测量快照并保存 UTF-8 换行区间，仅对可见源行物化视觉文本。
+
 Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历史记录描述问题排查过程。三者不要混写。
 
 | Spec | Status | Code owners |
@@ -15,7 +25,7 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | [AI Code Review](ai-code-review.md) | Current: bounded task persistence and UI delivery / 当前：有界任务持久化与 UI 投递 | `crates/usher-ai-review/`, `src/ai_review/` (controller, sessions, task persistence), `src/agent_response/`, PR list/detail and Settings bridges |
 | [Diagnostic logging](diagnostics.md) | Current: grouped settings and legacy-key migration / 当前：配置分类与旧键迁移 | `src/settings.rs`, `src/diagnostics.rs`, `src/logger/`, `src/memory_diagnostics.rs`, `src/terminal/`, Settings UI and bridges |
 | [Chat behavior](chat.md) | Current: history boundary anchoring, bidirectional viewport coverage, and mode-switch tail mounting / 当前：历史边界锚定、双向视口覆盖与模式切换尾部挂载 | `src/chat/` (interactive, viewport policy, message model), `ui/views/chat.slint`, `ui/components/chat/`, `ui/main.slint` |
-| [Artifact preview framework](artifact-preview.md) | Current: cancellable exact worker layout and virtual code lines / 当前：可取消的后台精确布局与代码行虚拟化 | `crates/usher-preview/`, `src/artifact_preview/`, `ui/components/artifact_preview/`, Settings and all preview callers |
+| [Artifact preview framework](artifact-preview.md) | Current: split/floating/detached modes, placement persistence, full divider capture and stable detached first frames / 当前：三栏/浮动/独立窗口、模式持久化、完整分割线捕获与稳定的独立窗口首帧 | `crates/usher-preview/`, `src/artifact_preview/`, `src/platform/`, `ui/components/artifact_preview/`, Settings and all preview callers |
 | [Project repository metadata](project-repository.md) | Current: explicit Hook opt-in with disabled-row restoration, bounded Logo retries and projection / 当前：Hook 显式选择与禁用行恢复、Logo 有界重试与投影 | `src/project/mod.rs`, `src/git/`, `src/codereview/api/` |
 | [Pull request workflow](pr-review.md) | Current / 当前 | `src/workflow/pr_list.rs`, `src/workflow/pr_review.rs`, `src/workflow/pr_review/`, `src/git/`, `ui/features/pr_review/`, `ui/views/workflow/`, `ui/components/workflow/` |
 | [Reusable job runs](jobs.md) | Current: typed lifecycle/durations, bounded output, virtualized logs, safe blank rows and fixed run pages with output-only scrolling / 当前：类型化生命周期/耗时、有界输出与日志虚拟化、空行安全处理及固定运行页/仅输出区滚动 | `src/jobs/`, `ui/views/job_run.slint`, `ui/components/jobs/`, feature controllers |

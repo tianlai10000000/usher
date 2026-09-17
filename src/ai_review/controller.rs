@@ -1169,7 +1169,7 @@ impl ControllerInner {
 
     fn close_panel(self: &Arc<Self>, ui: &MainWindow) {
         let docked_contextual_preview = ui.get_artifact_preview_pr_side_context()
-            && crate::AppState::get(ui).get_artifact_preview_presentation_mode() == 0;
+            && crate::AppState::get(ui).get_artifact_preview_presentation_mode() != 1;
         if docked_contextual_preview {
             ui.invoke_artifact_preview_dismiss();
         }

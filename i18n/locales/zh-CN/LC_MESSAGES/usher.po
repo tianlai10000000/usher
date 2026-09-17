@@ -651,8 +651,12 @@ msgid "Release channel"
 msgstr "发布通道"
 
 msgctxt "settings.general.right_panel"
-msgid "Right panel"
-msgstr "右侧面板"
+msgid "Three-column layout"
+msgstr "三栏布局"
+
+msgctxt "settings.general.floating_panel"
+msgid "Floating panel"
+msgstr "浮动面板"
 
 msgctxt "settings.general.separate_window"
 msgid "Separate window"

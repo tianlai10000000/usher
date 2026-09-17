@@ -254,6 +254,7 @@ fn ui(
                 artifact_preview::sync_language(&app);
                 terminal::sync_language(&app);
                 project::sync_language(&app);
+                hooks::sync_job_language(&app);
                 chat::sync_language(&app);
                 #[cfg(feature = "ai-code-review")]
                 ai_review::sync_language(&app);

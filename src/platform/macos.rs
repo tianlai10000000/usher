@@ -528,6 +528,7 @@ unsafe fn layout_artifact_preview_titlebar(
 /// same entry point also refreshes optional action visibility as payloads are
 /// replaced in the reusable window.
 pub(crate) fn install_artifact_preview_titlebar_actions(preview: &crate::ArtifactPreviewWindow) {
+    sync_artifact_preview_appearance(preview);
     let Some(native_window) = native_window_for_slint_window(preview.window()) else {
         return;
     };
@@ -685,6 +686,36 @@ pub(crate) fn install_artifact_preview_titlebar_actions(preview: &crate::Artifac
         }
         *state.borrow_mut() = Some(titlebar);
     });
+}
+
+pub(crate) fn sync_artifact_preview_appearance(preview: &crate::ArtifactPreviewWindow) {
+    let Some(window) = native_window_for_slint_window(preview.window()) else {
+        return;
+    };
+    unsafe {
+        if let Some(appearance) = appearance(preview.get_effective_dark_mode()) {
+            let _: () = msg_send![window, setAppearance: appearance];
+        }
+        // Slint's winit backend creates transparent windows. The Slint canvas
+        // covers only the content view, leaving native chrome without a backdrop.
+        let color: *mut Object = msg_send![class!(NSColor), windowBackgroundColor];
+        let _: () = msg_send![window, setBackgroundColor: color];
+        let _: () = msg_send![window, setOpaque: true];
+        let _: () = msg_send![window, setTitlebarAppearsTransparent: false];
+    }
+}
+
+pub(crate) fn set_artifact_preview_presentation_hidden(
+    preview: &crate::ArtifactPreviewWindow,
+    hidden: bool,
+) {
+    let Some(window) = native_window_for_slint_window(preview.window()) else {
+        return;
+    };
+    unsafe {
+        let alpha: f64 = if hidden { 0.0 } else { 1.0 };
+        let _: () = msg_send![window, setAlphaValue: alpha];
+    }
 }
 
 /// Point size for sidebar/back/forward SF Symbols inside the 28 pt accessory

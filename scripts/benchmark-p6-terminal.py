@@ -17,6 +17,20 @@ def percentile(values, fraction):
     return sorted(values)[int((len(values) - 1) * fraction)] if values else None
 
 
+def terminal_replay_cycles(log, batch):
+    marker = re.escape(f"[P6][{batch}]")
+    pattern = re.compile(marker + r" (?:replay_applied terminal=(true|false)|cycle=\d+ completed_ms=\d+)")
+    last_replay = None
+    cycles = []
+    for match in pattern.finditer(log):
+        if match.group(1) is not None:
+            last_replay = match.group(1) == "true"
+        else:
+            cycles.append(last_replay is True)
+            last_replay = None
+    return cycles
+
+
 def run(binary, directory, seconds, batch=65):
     state = directory / "state/default/run-0"
     state.mkdir(parents=True)
@@ -74,6 +88,17 @@ def run(binary, directory, seconds, batch=65):
                   cpu_p95=percentile([s["cpu_percent"] for s in samples], .95),
                   framebuffer_errors=log.count("Invalid framebuffer"),
                   premature_loading_clears=log.count(f"[P6][{batch}] premature_loading_clear"),
+                  journal_bytes=[int(v) for v in re.findall(marker + r" journal_bytes=(\d+)", log)],
+                  replay_successes=log.count(f"[P6][{batch}] replay_applied terminal=true"),
+                  replay_failures=log.count(f"[P6][{batch}] replay_applied terminal=false"),
+                  terminal_replay_cycles=terminal_replay_cycles(log, batch),
+                  output_writes=[int(v) for v in re.findall(marker + r" output_writes=(\d+)", log)],
+                  prepared=[int(v) for v in re.findall(marker + r" output_writes=\d+ prepared=(\d+)", log)],
+                  shared_snapshots=[int(v) for v in re.findall(marker + r" shared_snapshots=(\d+)", log)],
+                  retained_layouts=[dict(cycle=int(c), source=int(s), source_bytes=int(raw),
+                                         measurement_bytes=int(measured), wrapped_bytes=int(wrapped))
+                                    for c, s, raw, measured, wrapped in re.findall(
+                                        marker + r" layout_ready cycle=(\d+) source=(\d+) source_bytes=(\d+) measurement_bytes=(\d+) wrapped_bytes=(\d+)", log)],
                   oversized_rejections=log.count(f"[P6][{batch}] response large=true rejected"),
                   small_responses=len(re.findall(marker + r" response large=false accepted_bytes=\d+", log)))
     (directory / "result.json").write_text(json.dumps(result, indent=2))
@@ -110,6 +135,33 @@ def summarize(results):
                       for row in results["B"] if row.get("batch") == 67)
         passed &= all(row.get("small_responses") == 6
                       for row in results["A"] if row.get("batch") == 67)
+        passed &= all(row.get("replay_successes") == 3 and row.get("replay_failures") == 0
+                      and len(row.get("journal_bytes", [])) == 3
+                      for rows in results.values() for row in rows if row.get("batch") == 68)
+        passed &= all(row.get("terminal_replay_cycles") == [True] * 3
+                      for rows in results.values() for row in rows if row.get("batch") in (68, 69))
+        passed &= all(max(row["journal_bytes"], default=0) <= 2 * 1024 * 1024 + 64 * 1024
+                      for row in results["B"] if row.get("batch") == 68)
+        passed &= all(row.get("output_writes") == [0, 0, 0]
+                      and row.get("shared_snapshots") == [100] * 6
+                      and row.get("replay_successes", 0) >= 3
+                      and len(row.get("prepared", [])) == 3
+                      and all(0 < count <= 200 for count in row["prepared"])
+                      for row in results["B"] if row.get("batch") == 69)
+        passed &= all(len(row.get("output_writes", [])) == 3
+                      and all(count > 0 for count in row["output_writes"])
+                      and row.get("shared_snapshots") == [0] * 6
+                      for row in results["A"] if row.get("batch") == 69)
+        passed &= all([(entry["cycle"], entry["source"]) for entry in row.get("retained_layouts", [])]
+                      == [(cycle, source) for cycle in range(3) for source in range(16)]
+                      for rows in results.values() for row in rows if row.get("batch") == 70)
+        passed &= all(entry.get("source_bytes", 0) > 0 and entry.get("measurement_bytes") == 0
+                      and entry.get("wrapped_bytes", 0) > 0
+                      for row in results["B"] if row.get("batch") == 70
+                      for entry in row.get("retained_layouts", []))
+        passed &= all(entry.get("measurement_bytes", 0) > 0 and entry.get("wrapped_bytes", 0) > 0
+                      for row in results["A"] if row.get("batch") == 70
+                      for entry in row.get("retained_layouts", []))
     return dict(valid=valid, medians=medians, passed=passed)
 
 
@@ -119,7 +171,7 @@ def main():
     parser.add_argument("--b", type=Path, required=True)
     parser.add_argument("--seconds", type=float, default=30)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--batch", type=int, choices=[65, 66, 67], default=65)
+    parser.add_argument("--batch", type=int, choices=[65, 66, 67, 68, 69, 70], default=65)
     args = parser.parse_args()
     if args.seconds < 30:
         parser.error("At least 30 seconds per fresh process is required")

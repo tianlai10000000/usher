@@ -26,6 +26,12 @@ ActionMenu，操作复用 Button/IconButton，空白与错误状态使用 Blanks
 
 ## Controller ownership / 控制器职责
 
+Highlight completions may clear loading or apply results only when their request
+generation, selected file index/path and diff/full-file mode still match.
+Closing/resetting the session invalidates those completions before any UI write.
+高亮完成回调必须先匹配请求代次、所选文件索引/路径及 Diff/全文模式，才能清除
+loading 或应用结果；关闭/重置会话必须先使旧回调失效。
+
 `src/workflow/pr_review/controller.rs` owns context, loading and navigation;
 `controller/actions.rs` owns remote actions and capability presentation.
 `controller/diff_bindings.rs` owns the event-loop Diff geometry, selection,

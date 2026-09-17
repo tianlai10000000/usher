@@ -3,6 +3,9 @@ mod log_model;
 mod log_viewport;
 mod model;
 mod presenter;
+mod retention_benchmark;
+#[cfg(test)]
+mod retention_tests;
 #[cfg(test)]
 mod scroll_tests;
 
@@ -58,6 +61,7 @@ thread_local! {
 
 pub(crate) fn setup_job_run(ui: &MainWindow) {
     log_layout::setup(ui);
+    retention_benchmark::setup(ui);
     let ui_weak = ui.as_weak();
     ui.on_job_run_stop(move || {
         let Some(ui) = ui_weak.upgrade() else {

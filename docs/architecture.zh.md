@@ -20,6 +20,22 @@ PR Review 通过稳定的 Slint `@pr-review` feature package 入口暴露，与�
 
 ## 系统上下文
 
+PR Diff/全文高亮完成回调共用 `controller/highlight_completion.rs`，先检查
+请求代次、索引、路径和显示模式，再回写 loading/model；Worker 调度保持不变。
+
+Hook 日志按序列化 JSONL 字节预算（2 MiB 输出准入及 64 KiB 生命周期预留）。
+`hooks/replay.rs` 流式读取新旧日志，总读取上限 16 MiB、单记录 64 KiB。
+Hook bridge 在回放被替换或离开 Job Run 时取消旧任务；完成回写再次匹配代次和 run。
+Hook 状态共享不可变配置/事件目录，持久摘要版本与输出 seq 分离，自动持久化 Worker
+跳过未变化的持久投影。UI 先合并快照，再由 `hooks/projection.rs` 在共享阻塞池准备
+所选 Job；单个日志尾部解析缓存复用未变化的行。目录版本控制项目选项刷新，持久
+摘要版本还控制设置历史刷新。Job 日志按有界 UTF-8 片段测量并接续未完成视觉行，
+避免上游 16 位字形簇偏移在超长连续输出时溢出。
+`jobs/log_model.rs` 显式暴露 Slint model 类型，排版请求共享不可变解析快照，
+不再通过 UI 行逐条转换全文。`jobs/log_viewport.rs` 保留精确 extent 和语义
+前缀/正文上的 UTF-8 换行区间，仅可见源行生成视觉行字符串。原有 16 项视口缓存
+仍是条目预算，不是字节上限。
+
 人工与 AI Review Hook 的 payload 共享 PR 标题、源/目标分支、作者标签及可空的
 作者姓名/邮箱。Git adapter 在 diff 详情中保留平台明确返回的 PR 作者身份，
 由 PR 缓存和持久化 AI 任务目标传递到完成事件，不额外查询资料或推断 commit 作者。
@@ -255,7 +271,13 @@ Provider/Session 所有权的前提下限制正文恢复的一次性成本。清
 Feature 自有的虚拟 rows、extent、projection guard 以及 Parley 字体/layout 缓存，同时
 保留根 callback 使用的稳定 Slint model 身份。预览模块自有的 resize-handle 组件负责稳定命中区、光标、
 hover 反馈和 pointer cancel 生命周期；根 Shell 持有有界的会话宽度，并对预览与路由面板
-对称应用。
+对称应用。停靠分割线的完整命中区位于预览 Host 上方，确保各所属路由在分割线两侧
+首次按下即可捕获拖动；Modal 浮层打开时禁用该命中区。
+设置可选择三栏布局（`docked`，默认）、浮动面板（`floating`）或独立窗口。
+三栏始终预留右栏并同步调整中间栏/预览宽度；浮动不改变底下路由宽度。窄窗口下最小栏宽
+自适应，不自动切换模式。PR 上下文在两种内嵌选择下均保留专用 AI 侧栏槽位。
+`artifact_preview/presentation.rs` 拥有强类型偏好 Store、Runtime 有序 Action、
+自动后台持久化和退出排空，UI 通过 Feature 门面订阅。
 
 Preview resize 的几何契约与 Provider 渲染分离。拖动固定面板分割线时，根 Shell
 只更新可见面板边界并裁剪 Preview Surface，共享 Preview Panel 则把准备后的文档树
@@ -267,6 +289,12 @@ macOS 独立 Host 保留 AppKit 文档标题，并将 capability 驱动的复制
 Header。该 accessory 每个原生预览窗口只安装一次，并且仅在 prepared payload 的
 capability 变化时重新紧凑排列，不进入文档滚动、动画或 Live Resize 渲染路径。其他
 平台继续使用共享内容 Header 及其控件。
+平台适配器在创建或重开时恢复不透明原生窗口背景与标准标题栏，并在 effective theme
+变化时同步原生外观；Slint 正文背景本身不覆盖 AppKit 标题栏。
+独立 Host 在第一次原生映射前提交初始逻辑尺寸，避免后端显示中间态默认尺寸；之后替换
+预览内容时保留用户已经调整的窗口几何。
+首次渲染回调以 alpha 零门控原生展示，等待不透明外观、标题栏附件和准备后的内容帧
+稳定后再揭示；普通渲染与内容更新不会重新进入该门控。
 两种手势松开后均只提交一次精确最终内容宽度；Markdown、图片和文本 Provider 不感知
 Host 形态与 resize 生命周期。
 原生 Markdown Surface 使用独立 `MarkdownParserLoader` 与语言解析器 Registry。

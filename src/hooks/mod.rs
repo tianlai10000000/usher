@@ -1,15 +1,23 @@
 //! Application-wide, event-driven user scripts. Feature modules publish domain
 //! events; this service owns execution and history independently of UI routes.
+mod benchmark;
 mod bridge;
 mod process_tree;
+mod projection;
+mod replay;
+#[cfg(test)]
+mod replay_tests;
 mod runner;
 mod state;
+#[cfg(test)]
+mod state_tests;
 #[cfg(test)]
 mod tests;
 mod types;
 
 pub(crate) use bridge::{
-    apply_settings, bind_settings, handle_dialog_key, open_target, setup, sync_language,
+    apply_settings, bind_settings, cancel_replay, handle_dialog_key, open_target, setup,
+    sync_job_language, sync_language,
 };
 pub(crate) use state::{HookState, HookStateFacade};
 pub(crate) use types::*;
@@ -330,27 +338,22 @@ impl HookService {
             return Err("Hook run was not found or has expired.".into());
         }
         let path = self.directory.join(format!("{id}.jsonl"));
-        if tokio::fs::metadata(&path)
-            .await
-            .map_err(|e| e.to_string())?
-            .len()
-            > 16 * 1024 * 1024
-        {
-            return Err("Hook journal exceeds the 16 MiB read limit.".into());
-        }
-        let contents = tokio::fs::read(path).await.map_err(|e| e.to_string())?;
         let mut events = Vec::new();
-        for line in contents
-            .split(|b| *b == b'\n')
-            .filter(|line| !line.is_empty())
-        {
-            // A live journal may end in a partially written record; the next replay reads it.
-            if let Ok(event) = serde_json::from_slice::<HookEvent>(line) {
-                if event.seq > seq {
-                    events.push(event);
-                }
-            }
-        }
+        // A page is bounded in both record count and decoded input bytes. Resume
+        // with the last returned sequence; consumers need not retain earlier pages.
+        let mut bytes = 0;
+        replay::scan(
+            &path,
+            seq,
+            u64::MAX,
+            || false,
+            |event| {
+                bytes += serde_json::to_vec(&event).map_or(MAX_RECORD_BYTES, |record| record.len());
+                events.push(event);
+                events.len() < 256 && bytes < 256 * 1024
+            },
+        )
+        .await?;
         Ok(events)
     }
 

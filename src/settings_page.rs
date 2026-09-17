@@ -760,7 +760,8 @@ fn bind_callbacks(
     let page_weak = page.as_weak();
     let window_weak = window.as_weak();
     state.on_set_artifact_preview_presentation_mode(move |mode| {
-        let mode = mode.clamp(0, 1);
+        let mode =
+            crate::artifact_preview::presentation::PresentationMode::from_index(mode).index();
         if let Some(page) = page_weak.upgrade() {
             SettingsAppState::get(&page).set_artifact_preview_presentation_mode(mode);
         }
@@ -1869,6 +1870,7 @@ mod tests {
 
     #[test]
     fn preview_state_and_callbacks_cross_the_settings_factory_boundary() {
+        let _locale_guard = crate::i18n::test_locale_guard();
         i_slint_backend_testing::init_no_event_loop();
         let window = MainWindow::new().expect("main window");
         let page = GitHubSettingsPage::new().expect("settings page");
@@ -1900,18 +1902,42 @@ mod tests {
         bind_callbacks(&window, &page, None);
         window_state.set_artifact_preview_presentation_mode(0);
         page_state.set_artifact_preview_presentation_mode(0);
-        page_state.invoke_set_artifact_preview_presentation_mode(1);
+        page_state.invoke_set_artifact_preview_presentation_mode(2);
         page_state.invoke_set_artifact_preview_provider_enabled(IMAGE_PROVIDER_ID.into(), false);
 
-        assert_eq!(forwarded_mode.get(), 1);
-        assert_eq!(page_state.get_artifact_preview_presentation_mode(), 1);
-        assert_eq!(window_state.get_artifact_preview_presentation_mode(), 1);
+        assert_eq!(forwarded_mode.get(), 2);
+        assert_eq!(page_state.get_artifact_preview_presentation_mode(), 2);
+        assert_eq!(window_state.get_artifact_preview_presentation_mode(), 2);
         assert!(!page_state.get_artifact_preview_image_enabled());
         assert!(!window_state.get_artifact_preview_image_enabled());
         assert_eq!(
             forwarded_provider.borrow().as_ref(),
             Some(&(IMAGE_PROVIDER_ID.to_owned(), false))
         );
+
+        for width in [252.0, 550.0, 1200.0] {
+            page.set_viewport_width(width);
+            page.set_viewport_height(1200.0);
+            for (locale, labels) in [
+                (
+                    "en",
+                    ["Three-column layout", "Floating panel", "Separate window"],
+                ),
+                ("zh-CN", ["三栏布局", "浮动面板", "独立窗口"]),
+            ] {
+                slint::select_bundled_translation(locale).unwrap();
+                i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(200));
+                for (label, mode) in labels.into_iter().zip([0, 2, 1]) {
+                    let choice = ElementHandle::find_by_accessible_label(&page, label)
+                        .next()
+                        .unwrap();
+                    assert!(choice.absolute_position().x + choice.size().width <= width);
+                    choice.mock_single_click(PointerEventButton::Left);
+                    assert_eq!(forwarded_mode.get(), mode);
+                    assert_eq!(page_state.get_artifact_preview_presentation_mode(), mode);
+                }
+            }
+        }
     }
 
     #[test]

@@ -90,6 +90,14 @@ features when their shared state is materially changed.
 - A persistence failure is observable through the facade callback and bounded
   logs/diagnostics. The feature must document retry, rollback, or memory-only
   degradation and must not silently block UI dispatch.
+- Feature workers may skip serialization/writes when a separate durable revision
+  is unchanged. Output-only commits still notify live subscribers and satisfy
+  the flush barrier because the durable projection has already been written.
+  Advance the durable revision for every configuration/summary transition,
+  especially terminal state; failed writes must not advance the saved revision.
+  / Feature Worker 可按独立持久版本跳过序列化/写盘；纯输出 commit 仍通知活跃订阅者，
+  因持久投影已落盘可完成 flush 屏障。所有配置/摘要变化尤其终态必须推进持久版本，
+  写入失败不得推进已保存版本。
 - Ephemeral UI state such as hover, focus, an open menu, or a local confirmation
   timer does not enter the durable Store unless another page genuinely consumes it.
 

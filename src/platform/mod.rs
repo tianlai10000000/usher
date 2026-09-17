@@ -43,8 +43,9 @@ pub(crate) use macos::{
     install_artifact_preview_live_resize, install_artifact_preview_titlebar_actions,
     install_memory_benchmark_window_control, install_shortcut_input_bridge,
     install_titlebar_settings_button, play_ui_click, prepare_startup_reveal, set_app_appearance,
-    set_startup_presentation_hidden, set_title_bar_color, setup_pr_review_fonts,
-    startup_native_chrome_ready, update_titlebar_navigation_controls,
+    set_artifact_preview_presentation_hidden, set_startup_presentation_hidden, set_title_bar_color,
+    setup_pr_review_fonts, startup_native_chrome_ready, sync_artifact_preview_appearance,
+    update_titlebar_navigation_controls,
 };
 
 #[cfg(target_os = "windows")]
@@ -86,6 +87,16 @@ pub(crate) fn install_artifact_preview_live_resize(_window: &crate::ArtifactPrev
 
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn install_artifact_preview_titlebar_actions(_window: &crate::ArtifactPreviewWindow) {}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn sync_artifact_preview_appearance(_window: &crate::ArtifactPreviewWindow) {}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn set_artifact_preview_presentation_hidden(
+    _window: &crate::ArtifactPreviewWindow,
+    _hidden: bool,
+) {
+}
 
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn set_startup_presentation_hidden(_window: &MainWindow, _hidden: bool) {}

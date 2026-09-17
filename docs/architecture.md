@@ -22,6 +22,28 @@ On macOS, entering or leaving full screen re-aligns native title-bar controls af
 
 ## System context
 
+PR highlight completion validation is shared by diff and full-file callbacks in
+`controller/highlight_completion.rs`: generation, index, path and display mode
+are checked before loading/model writes. Worker scheduling remains unchanged.
+
+Hook journals budget serialized JSONL bytes (2 MiB output admission plus 64 KiB
+lifecycle reserve). `hooks/replay.rs` streams legacy/new logs with a 16 MiB read
+budget and 64 KiB record limit. The Hook bridge cancels superseded replay and
+route-exit replay; completion also checks generation and selected run.
+Hook state shares immutable configuration/event catalogs and tracks durable
+summary revisions independently of output sequence changes. The automatic
+persistence worker skips unchanged durable projections. UI snapshots are
+coalesced before `hooks/projection.rs` prepares the selected Job on the shared
+blocking pool; one tail parser cache retains unchanged rows. Catalog revisions
+gate project-option refresh, while durable revisions also refresh Settings history.
+Job log layout shapes bounded UTF-8 pieces and carries incomplete measured lines
+to avoid upstream 16-bit cluster-offset overflow on long uninterrupted output.
+`jobs/log_model.rs` exposes its concrete Slint model identity so layout requests
+share the immutable parsed snapshot instead of materializing all UI rows.
+`jobs/log_viewport.rs` retains exact extents and UTF-8 wrap ranges over semantic
+prefix/body text; only visible source rows allocate visual-line strings. The
+existing 16-entry viewport cache remains an entry budget, not a byte limit.
+
 PR and AI review Hooks share PR title, source/target branch, author label, and
 nullable author name/email in their payloads. Git adapters retain explicitly
 returned PR author identity in diff details; the PR cache and persisted AI target
@@ -302,7 +324,16 @@ guards, and Parley font/layout caches while preserving the stable Slint model
 identity used by the root callback. A preview-owned resize-handle component owns
 the stable hit target, cursor, hover feedback, and pointer-cancel lifecycle; the
 root shell owns the bounded session width and applies it symmetrically to the
-preview and route panes.
+preview and route panes. The complete docked-divider hit target sits above the
+preview host, so either side captures the first press on every owning route;
+modal overlays disable the handle.
+Settings selects split (`docked`, default), floating (`floating`), or detached
+preview presentation. Split always reserves a column and adjusts route/preview
+widths together; floating leaves the route width unchanged. Pane minimums adapt
+to narrow windows without switching modes. PR-context previews retain their
+dedicated AI side-panel slot for both in-app choices. `artifact_preview/presentation.rs`
+owns the typed preference Store, ordered runtime actions, automatic worker
+persistence and shutdown drain; the UI subscribes through the feature facade.
 
 Preview resize has a separate geometry contract from provider rendering. During
 a docked-divider drag, the root shell updates the visible pane boundary and
@@ -318,6 +349,15 @@ content Header. The accessory is installed once per native preview window and
 only reflows when a prepared payload changes capabilities, so it does not enter
 the document scroll, animation, or live-resize render paths. Other platforms
 retain the shared content Header and its controls.
+The platform adapter also restores an opaque native window background and standard
+title bar after creation/reopening, and synchronizes native appearance on effective
+theme changes. Slint's content background alone does not cover AppKit chrome.
+The detached host commits its initial logical size before its first native map,
+so the backend never presents an intermediate default-size frame. Subsequent
+payload replacement keeps the current user-resized window geometry.
+Its first rendering callback gates native presentation at alpha zero until the
+opaque appearance, title-bar accessory and prepared content frame have settled;
+the normal render and payload-update path does not re-enter that gate.
 Releasing either gesture commits the exact final content width once. Markdown,
 image, and text providers remain unaware of host shape and resize lifecycle.
 The native Markdown surface uses an independent `MarkdownParserLoader` and a

@@ -207,19 +207,22 @@ export component MainWindow inherits Window {
     out property <bool> artifact-preview-pr-side-docked-visible:
         root.artifact-preview-visible
             && root.artifact-preview-pr-side-context
-            && AppState.artifact-preview-presentation-mode == 0
+            && AppState.artifact-preview-presentation-mode != 1
             && root.current-route == Route.PrReview
             && root.ai-review-panel-visible;
     private property <bool> artifact-preview-docked-visible:
         root.artifact-preview-visible
-            && AppState.artifact-preview-presentation-mode == 0
+            && AppState.artifact-preview-presentation-mode != 1
             && !root.artifact-preview-pr-side-docked-visible;
     private property <length> artifact-preview-available-width:
         max(0px, root.width - GitHubMetrics.application-sidebar-width * root.sidebar-layout-progress);
     private property <bool> artifact-preview-panel-overlays:
-        root.artifact-preview-available-width < 900px;
-    private property <length> artifact-preview-panel-min-width: 320px;
-    private property <length> artifact-preview-main-min-width: 520px;
+        AppState.artifact-preview-presentation-mode == 2;
+    private property <length> artifact-preview-panel-min-width:
+        root.artifact-preview-panel-overlays ? 320px
+            : min(320px, root.artifact-preview-available-width * 0.45);
+    private property <length> artifact-preview-main-min-width:
+        min(520px, root.artifact-preview-available-width * 0.45);
     private property <length> artifact-preview-panel-max-width: max(
         root.artifact-preview-panel-min-width,
         min(
@@ -1860,8 +1863,10 @@ export component MainWindow inherits Window {
         height: root.height - LayoutConstants.status-bar-height;
         visible: root.artifact-preview-docked-visible
             && root.artifact-preview-panel-progress > 0.999;
-        resize-enabled: self.visible;
-        z: 81;
+        resize-enabled: self.visible && !root.modal-overlay-visible;
+        // The full hit target must sit above the preview host (z:790),
+        // including its leading scroll viewport, to capture the first press.
+        z: 791;
         drag-started => {
             root.artifact-preview-panel-resizing = true;
             root.artifact-preview-panel-drag-start-width = root.artifact-preview-panel-width;
