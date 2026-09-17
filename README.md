@@ -201,6 +201,9 @@ scripts/benchmark-memory.sh --runs 3 --scenarios home --fixture home-v1
 
 The command builds the selected release renderer, starts a fresh process per run, exercises fixed window/fullscreen phases, and writes raw TSV samples, summaries, and application logs under the ignored `memory-benchmark-results/` directory. Window automation requires Accessibility permission. Use `--prepare-hook` for fixed Workflow, PR Review, Chat, or Terminal fixtures; the executable receives `PID RUN SCENARIO`. See `--help` for renderer and sampling options.
 
+The [P6 regression protocol](docs/p6-regression.md) documents the on-demand
+Terminal/Hooks/Job suite, paired Release runs and real 15-minute workloads.
+
 The hosted Nightly performance schedule is temporarily paused to avoid
 automatic macOS runner usage. The complete workflow remains available through
 manual `workflow_dispatch`; restore its commented `schedule` block when daily

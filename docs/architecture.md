@@ -22,6 +22,12 @@ On macOS, entering or leaving full screen re-aligns native title-bar controls af
 
 ## System context
 
+P6 validation is owned by `scripts/benchmark-p6-regression.py` and opt-in
+feature fixtures sharing `src/p6_benchmark.rs` duration control. Historical
+migration gates remain separate from current/current regression gates. The
+manual performance workflow runs real repeated workloads with cycle correctness,
+memory slopes and resource-growth checks; see [protocol](p6-regression.md).
+
 PR highlight completion validation is shared by diff and full-file callbacks in
 `controller/highlight_completion.rs`: generation, index, path and display mode
 are checked before loading/model writes. Worker scheduling remains unchanged.
@@ -36,6 +42,11 @@ persistence worker skips unchanged durable projections. UI snapshots are
 coalesced before `hooks/projection.rs` prepares the selected Job on the shared
 blocking pool; one tail parser cache retains unchanged rows. Catalog revisions
 gate project-option refresh, while durable revisions also refresh Settings history.
+`hooks/errors.rs` owns typed host/validation errors; `hooks/presentation.rs`
+maps run semantics to catalog copy and versioned notification metadata. The
+Settings/Job bridges re-project on locale changes, retaining log models. Inbox,
+Banner and the application native-notification adapter resolve Hook metadata at
+delivery; technical diagnostics and external output remain original journal text.
 Job log layout shapes bounded UTF-8 pieces and carries incomplete measured lines
 to avoid upstream 16-bit cluster-offset overflow on long uninterrupted output.
 `jobs/log_model.rs` exposes its concrete Slint model identity so layout requests

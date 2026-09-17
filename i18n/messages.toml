@@ -2,6 +2,123 @@
 # keys; translators only edit locale PO files under i18n/locales/.
 
 [[messages]]
+key = "hooks.conclusion.success"
+text = "Succeeded"
+slint = false
+[[messages]]
+key = "hooks.conclusion.failure"
+text = "Failed"
+slint = false
+[[messages]]
+key = "hooks.conclusion.timed_out"
+text = "Timed out"
+slint = false
+[[messages]]
+key = "hooks.conclusion.start_failed"
+text = "Could not start"
+slint = false
+[[messages]]
+key = "hooks.conclusion.interrupted"
+text = "Interrupted"
+slint = false
+[[messages]]
+key = "hooks.conclusion.skipped"
+text = "Skipped"
+slint = false
+[[messages]]
+key = "hooks.error.journal"
+text = "Could not save the execution log. Check available storage and permissions."
+slint = false
+[[messages]]
+key = "hooks.error.preparation"
+text = "Could not prepare the Hook working files. Check storage and permissions."
+slint = false
+[[messages]]
+key = "hooks.error.working_directory"
+text = "The working directory is unavailable. Check that it exists and is accessible."
+slint = false
+[[messages]]
+key = "hooks.error.interpreter_start"
+text = "Could not start the interpreter. Check its executable path and permissions."
+slint = false
+[[messages]]
+key = "hooks.error.process_tree"
+text = "Could not establish process cancellation. Execution was stopped."
+slint = false
+[[messages]]
+key = "hooks.error.wait"
+text = "Could not read the interpreter exit status. See the execution log."
+slint = false
+[[messages]]
+key = "hooks.error.output_drain"
+text = "Output collection timed out. A child process may still hold an output pipe."
+slint = false
+[[messages]]
+key = "hooks.error.invalid_definition"
+text = "The Hook configuration is invalid. Review its fields before retrying."
+slint = false
+[[messages]]
+key = "hooks.error.execution"
+text = "Hook execution failed. See the execution log."
+slint = false
+[[messages]]
+key = "hooks.error.exit_code"
+text = "Interpreter exited with code {code}. See the execution log."
+slint = false
+[[messages]]
+key = "hooks.error.signal"
+text = "Interpreter stopped by signal {signal}. See the execution log."
+slint = false
+[[messages]]
+key = "hooks.error.configuration"
+text = "Could not load Hook configuration. The saved file has been preserved."
+slint = false
+[[messages]]
+key = "hooks.error.command"
+text = "The Hook operation could not be completed. See diagnostics for details."
+slint = false
+[[messages]]
+key = "hooks.error.expired"
+text = "Hook run was not found or has expired."
+slint = false
+[[messages]]
+key = "hooks.validation.invalid_id"
+text = "Invalid Hook ID."
+slint = false
+[[messages]]
+key = "hooks.validation.name_required"
+text = "Hook name is required."
+slint = false
+[[messages]]
+key = "hooks.validation.script_empty"
+text = "Hook script is empty."
+slint = false
+[[messages]]
+key = "hooks.validation.script_too_large"
+text = "Hook script exceeds 64 KiB."
+slint = false
+[[messages]]
+key = "hooks.validation.timeout_range"
+text = "Timeout must be between 1 and 3600 seconds."
+slint = false
+[[messages]]
+key = "hooks.validation.field_too_long"
+text = "Hook configuration field is too long."
+slint = false
+[[messages]]
+key = "hooks.validation.interpreter_path"
+text = "Interpreter must be one executable path."
+slint = false
+[[messages]]
+key = "hooks.validation.timeout_integer"
+text = "Timeout must be a whole number of seconds."
+slint = false
+[[messages]]
+key = "hooks.notification_body"
+text = "{event} · {status}"
+slint = false
+
+[[messages]]
 key = "hooks.runtime"
 text = "Run with"
 

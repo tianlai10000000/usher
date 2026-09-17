@@ -13,6 +13,20 @@ use usher_messages::{
 
 use crate::{AppState, MainWindow, app_paths, app_runtime, startup};
 
+struct LocalizedDesktopNotifier;
+impl usher_messages::DesktopNotifier for LocalizedDesktopNotifier {
+    fn show(&self, message: &usher_messages::Message) -> std::result::Result<(), String> {
+        let mut display = message.clone();
+        if let Some((title, body)) =
+            crate::hooks::notification_copy(message, usher_i18n::active_locale().id)
+        {
+            display.title = title;
+            display.body = body;
+        }
+        usher_messages::DesktopNotifier::show(&NotifyRustDesktopNotifier, &display)
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct MessagePageBridge {
     center: MessageCenter,
@@ -25,7 +39,7 @@ impl MessagePageBridge {
         timeline: &startup::StartupTimeline,
     ) -> Result<(MessageCenter, Self)> {
         let center = if let Some(path) = app_paths::message_store_path() {
-            MessageCenter::open_deferred_with(path, Arc::new(NotifyRustDesktopNotifier))
+            MessageCenter::open_deferred_with(path, Arc::new(LocalizedDesktopNotifier))
         } else {
             MessageCenter::open_default_deferred()
         }
@@ -299,43 +313,49 @@ fn apply_page_snapshot(page: &GitHubMessagesPage, snapshot: MessageSnapshot) {
         .messages
         .into_iter()
         .cloned()
-        .map(|message| MessageListItem {
-            id: message.id.into(),
-            title: localized_message_value(
-                locale,
-                message.source.as_str(),
-                message.channel.as_str(),
-                message.category.as_str(),
-                message.title.as_str(),
-                DIAGNOSTIC_TITLE_KEYS,
-            )
-            .into(),
-            body: localized_message_value(
-                locale,
-                message.source.as_str(),
-                message.channel.as_str(),
-                message.category.as_str(),
-                message.body.as_str(),
-                DIAGNOSTIC_BODY_KEYS,
-            )
-            .into(),
-            source: message.source.into(),
-            category_label: category_label(&message.category).into(),
-            category: message.category.into(),
-            created_at: message
-                .created_at
-                .with_timezone(&Local)
-                .format("%Y-%m-%d %H:%M")
-                .to_string()
+        .map(|mut message| {
+            if let Some((title, body)) = crate::hooks::notification_copy(&message, locale) {
+                message.title = title;
+                message.body = body;
+            }
+            MessageListItem {
+                id: message.id.into(),
+                title: localized_message_value(
+                    locale,
+                    message.source.as_str(),
+                    message.channel.as_str(),
+                    message.category.as_str(),
+                    message.title.as_str(),
+                    DIAGNOSTIC_TITLE_KEYS,
+                )
                 .into(),
-            level: match message.severity {
-                MessageSeverity::Info => MessageLevel::Info,
-                MessageSeverity::Success => MessageLevel::Success,
-                MessageSeverity::Warning => MessageLevel::Warning,
-                MessageSeverity::Error => MessageLevel::Error,
-            },
-            read: message.read,
-            target: message.target.unwrap_or_default().into(),
+                body: localized_message_value(
+                    locale,
+                    message.source.as_str(),
+                    message.channel.as_str(),
+                    message.category.as_str(),
+                    message.body.as_str(),
+                    DIAGNOSTIC_BODY_KEYS,
+                )
+                .into(),
+                source: message.source.into(),
+                category_label: category_label(&message.category).into(),
+                category: message.category.into(),
+                created_at: message
+                    .created_at
+                    .with_timezone(&Local)
+                    .format("%Y-%m-%d %H:%M")
+                    .to_string()
+                    .into(),
+                level: match message.severity {
+                    MessageSeverity::Info => MessageLevel::Info,
+                    MessageSeverity::Success => MessageLevel::Success,
+                    MessageSeverity::Warning => MessageLevel::Warning,
+                    MessageSeverity::Error => MessageLevel::Error,
+                },
+                read: message.read,
+                target: message.target.unwrap_or_default().into(),
+            }
         })
         .collect::<Vec<_>>();
     let total = snapshot.messages.len();

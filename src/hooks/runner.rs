@@ -1,3 +1,4 @@
+use super::{HookFailureKind, errors::HookHostError};
 use super::{HookService, state::Action, types::*};
 use std::{
     process::Stdio,
@@ -91,13 +92,14 @@ impl Journal {
                 }
             }
             if let Some(error) = &self.error {
+                run.failure_kind = Some(HookFailureKind::Journal);
                 if !run.detail.contains(error) {
                     run.detail.push_str(&format!("\n{error}"));
                 }
                 if run.conclusion == Some(HookConclusion::Success) {
                     run.conclusion = Some(HookConclusion::Failure);
                 }
-                event.data = serde_json::json!({"conclusion": run.conclusion, "detail": run.detail, "exit_code": run.exit_code, "signal": run.signal});
+                event.data = serde_json::json!({"conclusion": run.conclusion, "detail": run.detail, "failure_kind": run.failure_kind, "exit_code": run.exit_code, "signal": run.signal});
             }
         }
         let line = if kind == "output" {
@@ -171,6 +173,7 @@ impl Journal {
             }
         }
         if let Some(error) = &self.error {
+            run.failure_kind = Some(HookFailureKind::Journal);
             run.detail.push_str(&format!("\n{error}"));
             if conclusion == HookConclusion::Success {
                 run.conclusion = Some(HookConclusion::Failure);
@@ -180,7 +183,7 @@ impl Journal {
             service,
             run,
             "hook.finished",
-            serde_json::json!({"conclusion": run.conclusion, "detail": run.detail,
+            serde_json::json!({"conclusion": run.conclusion, "detail": run.detail, "failure_kind": run.failure_kind,
             "exit_code": run.exit_code, "signal": run.signal}),
         )
         .await;
@@ -310,6 +313,7 @@ pub(super) async fn run(
         .record(&service, &mut run, "hook.queued", serde_json::json!({}))
         .await;
     if let Some(error) = journal.error.clone() {
+        run.failure_kind = Some(HookFailureKind::Journal);
         journal
             .finish(&service, &mut run, HookConclusion::StartFailed, error)
             .await;
@@ -370,8 +374,14 @@ pub(super) async fn run(
     let (mut command, _temporary) = match prepared {
         Ok(prepared) => prepared,
         Err(error) => {
+            run.failure_kind = Some(error.kind);
             journal
-                .finish(&service, &mut run, HookConclusion::StartFailed, error)
+                .finish(
+                    &service,
+                    &mut run,
+                    HookConclusion::StartFailed,
+                    error.diagnostic,
+                )
                 .await;
             return;
         }
@@ -410,6 +420,7 @@ pub(super) async fn run(
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
+            run.failure_kind = Some(HookFailureKind::InterpreterStart);
             journal.finish(&service, &mut run, HookConclusion::StartFailed,
                 format!("Cannot start {} interpreter '{}': {error}. Check its executable path, permissions, and working directory.", hook.language.label(), interpreter(&hook))).await;
             return;
@@ -419,6 +430,7 @@ pub(super) async fn run(
     let tree = match super::process_tree::ProcessTree::attach(&child) {
         Ok(tree) => tree,
         Err(error) => {
+            run.failure_kind = Some(HookFailureKind::ProcessTree);
             let _ = child.kill().await;
             journal
                 .finish(
@@ -461,7 +473,10 @@ pub(super) async fn run(
                         break if status.success() { (HookConclusion::Success, "Execution completed successfully.".into()) }
                             else { (HookConclusion::Failure, format!("Interpreter exited with {status}.")) };
                     }
-                    Err(error) => break (HookConclusion::Failure, format!("Cannot wait for interpreter: {error}")),
+                    Err(error) => {
+                        run.failure_kind = Some(HookFailureKind::Wait);
+                        break (HookConclusion::Failure, format!("Cannot wait for interpreter: {error}"));
+                    }
                 }
             }
             chunk = output.recv(), if readers_open => {
@@ -492,6 +507,7 @@ pub(super) async fn run(
         .await
         .is_err()
     {
+        run.failure_kind = Some(HookFailureKind::OutputDrain);
         detail.push_str(" Output drain timed out; a detached process may still hold a pipe.");
         if conclusion == HookConclusion::Success {
             conclusion = HookConclusion::Failure;
@@ -573,13 +589,19 @@ async fn prepare(
     hook: &HookDefinition,
     trigger: &HookTrigger,
     run_id: &str,
-) -> Result<(Command, tempfile::TempDir), String> {
-    hook.validate()?;
+) -> Result<(Command, tempfile::TempDir), HookHostError> {
+    hook.validate()
+        .map_err(|e| HookHostError::new(HookFailureKind::InvalidDefinition, e))?;
     let temporary =
         tokio::task::spawn_blocking(|| tempfile::Builder::new().prefix("usher-hook-").tempdir())
             .await
-            .map_err(|e| e.to_string())?
-            .map_err(|e| format!("Cannot create Hook working files: {e}"))?;
+            .map_err(|e| HookHostError::new(HookFailureKind::Preparation, e))?
+            .map_err(|e| {
+                HookHostError::new(
+                    HookFailureKind::Preparation,
+                    format!("Cannot create Hook working files: {e}"),
+                )
+            })?;
     let extension = match hook.language {
         HookLanguage::Shell => {
             if cfg!(windows) {
@@ -592,27 +614,39 @@ async fn prepare(
     };
     let script = temporary.path().join(format!("hook.{extension}"));
     let context = temporary.path().join("context.json");
-    tokio::fs::write(&script, &hook.script)
-        .await
-        .map_err(|e| format!("Cannot write Hook script: {e}"))?;
+    tokio::fs::write(&script, &hook.script).await.map_err(|e| {
+        HookHostError::new(
+            HookFailureKind::Preparation,
+            format!("Cannot write Hook script: {e}"),
+        )
+    })?;
     tokio::fs::write(
         &context,
-        serde_json::to_vec_pretty(trigger).map_err(|e| e.to_string())?,
+        serde_json::to_vec_pretty(trigger)
+            .map_err(|e| HookHostError::new(HookFailureKind::Preparation, e))?,
     )
     .await
-    .map_err(|e| format!("Cannot write Hook context: {e}"))?;
+    .map_err(|e| {
+        HookHostError::new(
+            HookFailureKind::Preparation,
+            format!("Cannot write Hook context: {e}"),
+        )
+    })?;
     let cwd = trigger
         .cwd
         .as_ref()
         .unwrap_or(&temporary.path().to_path_buf())
         .to_path_buf();
-    let metadata = tokio::fs::metadata(&cwd)
-        .await
-        .map_err(|e| format!("Working directory '{}': {e}", cwd.display()))?;
+    let metadata = tokio::fs::metadata(&cwd).await.map_err(|e| {
+        HookHostError::new(
+            HookFailureKind::WorkingDirectory,
+            format!("Working directory '{}': {e}", cwd.display()),
+        )
+    })?;
     if !metadata.is_dir() {
-        return Err(format!(
-            "Working directory '{}' is not a directory.",
-            cwd.display()
+        return Err(HookHostError::new(
+            HookFailureKind::WorkingDirectory,
+            format!("Working directory '{}' is not a directory.", cwd.display()),
         ));
     }
     let mut command = Command::new(interpreter(hook));
@@ -630,9 +664,12 @@ async fn prepare(
         } else {
             "import { createInterface } from 'node:readline';\nimport { pathToFileURL } from 'node:url';\nconst gate = createInterface({ input: process.stdin });\nawait new Promise(resolve => gate.once('line', resolve));\ngate.close();\nawait import(pathToFileURL(process.env.USHER_HOOK_SCRIPT).href);\n"
         };
-        tokio::fs::write(&bootstrap, source)
-            .await
-            .map_err(|e| format!("Cannot write Hook bootstrap: {e}"))?;
+        tokio::fs::write(&bootstrap, source).await.map_err(|e| {
+            HookHostError::new(
+                HookFailureKind::Preparation,
+                format!("Cannot write Hook bootstrap: {e}"),
+            )
+        })?;
         command.env("USHER_HOOK_SCRIPT", &script);
         bootstrap
     };

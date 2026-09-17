@@ -2,6 +2,10 @@
 //! events; this service owns execution and history independently of UI routes.
 mod benchmark;
 mod bridge;
+mod errors;
+mod presentation;
+#[cfg(test)]
+mod presentation_tests;
 mod process_tree;
 mod projection;
 mod replay;
@@ -19,6 +23,8 @@ pub(crate) use bridge::{
     apply_settings, bind_settings, cancel_replay, handle_dialog_key, open_target, setup,
     sync_job_language, sync_language,
 };
+pub(crate) use errors::{HookFailureKind, HookValidationError};
+pub(crate) use presentation::notification_copy;
 pub(crate) use state::{HookState, HookStateFacade};
 pub(crate) use types::*;
 

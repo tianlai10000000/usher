@@ -81,6 +81,13 @@ jobs:
             --binary target/release/usher \
             --output memory-benchmark-results/hot-paths
 
+      - name: Run P6 regression and sustained workloads
+        if: ${{ !cancelled() && steps.release.outcome == 'success' }}
+        run: |
+          python3 scripts/benchmark-p6-regression.py \
+            --binary target/release/usher \
+            --output memory-benchmark-results/p6
+
       - name: Upload benchmark evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -89,4 +96,5 @@ jobs:
           path: |
             memory-benchmark-results/nightly/
             memory-benchmark-results/hot-paths/
+            memory-benchmark-results/p6/
           retention-days: 14

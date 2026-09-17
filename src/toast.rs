@@ -11,6 +11,28 @@ lazy_static! {
 }
 
 static TOAST_GENERATION: AtomicU64 = AtomicU64::new(0);
+static SEMANTIC_TOAST: Mutex<Option<(u64, &'static str)>> = Mutex::new(None);
+
+pub(crate) fn localized_error(ui: &MainWindow, key: &'static str) {
+    ui.global::<ToastManager>().invoke_error(ToastOptions {
+        message: i18n::tr(key).into_owned().into(),
+        duration: 3000,
+        position: "bottom".into(),
+        width: "auto".into(),
+        ..Default::default()
+    });
+    *SEMANTIC_TOAST.lock().unwrap() = Some((TOAST_GENERATION.load(Ordering::Relaxed), key));
+}
+
+pub(crate) fn sync_language(ui: &MainWindow) {
+    if let Some((generation, key)) = *SEMANTIC_TOAST.lock().unwrap()
+        && generation == TOAST_GENERATION.load(Ordering::Relaxed)
+        && ui.global::<ToastManager>().get_visible()
+    {
+        ui.global::<ToastManager>()
+            .set_message(i18n::tr(key).into_owned().into());
+    }
+}
 
 const DEFAULT_DURATION_TEXT: i32 = 2500;
 const DEFAULT_DURATION_SUCCESS: i32 = 2500;

@@ -23,7 +23,7 @@ pub(super) fn setup(ui: &MainWindow, service: Arc<HookService>) {
                 return;
             }
             crate::app_runtime::shared_runtime().spawn(async move {
-                for cycle in 0..3 {
+                for cycle in 0.. {
                     let start = Instant::now();
                     let run = runner::benchmark_journal(&service).await;
                     let id = run.id.clone();
@@ -42,6 +42,9 @@ pub(super) fn setup(ui: &MainWindow, service: Arc<HookService>) {
                         return;
                     }
                     tokio::time::sleep(Duration::from_millis(300)).await;
+                    if !crate::p6_benchmark::next_cycle(cycle + 1) {
+                        break;
+                    }
                 }
                 log::info!("[P6][{batch}] complete");
                 let _ = slint::invoke_from_event_loop(move || {
@@ -108,7 +111,7 @@ async fn state_workload(service: Arc<HookService>, weak: slint::Weak<MainWindow>
     })
     .await
     .unwrap();
-    for cycle in 0..3 {
+    for cycle in 0.. {
         let start = Instant::now();
         let initial = service.state.snapshot();
         let mut runs = Vec::new();
@@ -170,6 +173,9 @@ async fn state_workload(service: Arc<HookService>, weak: slint::Weak<MainWindow>
         });
         if waited.await.is_err() {
             return;
+        }
+        if !crate::p6_benchmark::next_cycle(cycle + 1) {
+            break;
         }
     }
     log::info!("[P6][69] complete");
@@ -263,7 +269,7 @@ fn await_replay(
 
 fn heartbeat(weak: slint::Weak<MainWindow>, batch: String, start: Instant, last: Instant) {
     slint::Timer::single_shot(Duration::from_millis(50), move || {
-        if weak.upgrade().is_none() || start.elapsed() > Duration::from_secs(55) {
+        if weak.upgrade().is_none() || !crate::p6_benchmark::heartbeat_active(55) {
             return;
         }
         log::info!("[P6][{batch}] heartbeat_us={}", last.elapsed().as_micros());

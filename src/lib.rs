@@ -65,6 +65,7 @@ mod app_lifecycle;
 mod app_paths;
 mod app_runtime;
 mod memory_diagnostics;
+mod p6_benchmark;
 mod platform;
 mod shortcuts;
 mod sidebar_motion;
@@ -241,6 +242,7 @@ fn ui(
     let app_weak_language = app.as_weak();
     let settings_page_for_language = settings_page.clone();
     let message_page_for_language = message_page.clone();
+    let messages_for_hook_language = message_center.clone();
     AppState::get(&app).on_set_language(move |preference| {
         let Some(app) = app_weak_language.upgrade() else {
             return;
@@ -255,6 +257,8 @@ fn ui(
                 terminal::sync_language(&app);
                 project::sync_language(&app);
                 hooks::sync_job_language(&app);
+                notification::sync_hook_language(&app, &messages_for_hook_language);
+                toast::sync_language(&app);
                 chat::sync_language(&app);
                 #[cfg(feature = "ai-code-review")]
                 ai_review::sync_language(&app);

@@ -23,7 +23,7 @@ pub(super) fn setup(ui: &MainWindow, controller: WorkflowPrReviewController) {
 
 fn heartbeat(weak: slint::Weak<MainWindow>, start: Instant, last: Instant) {
     slint::Timer::single_shot(Duration::from_millis(50), move || {
-        if weak.upgrade().is_none() || start.elapsed() > Duration::from_secs(26) {
+        if weak.upgrade().is_none() || !crate::p6_benchmark::heartbeat_active(26) {
             return;
         }
         log::info!("[P6][66] heartbeat_us={}", last.elapsed().as_micros());
@@ -103,7 +103,7 @@ fn cycle(weak: slint::Weak<MainWindow>, controller: WorkflowPrReviewController, 
         let started = Instant::now();
         for file_index in 0..8 {
             controller.select_file(&ui, file_index);
-            if index == 1 {
+            if index % 3 == 1 {
                 let file = controller
                     .cache
                     .lock()
@@ -121,7 +121,7 @@ fn cycle(weak: slint::Weak<MainWindow>, controller: WorkflowPrReviewController, 
                 );
             }
         }
-        if index == 2 {
+        if index % 3 == 2 {
             controller.clear_owned_state(&ui);
             install(&ui, &controller);
             controller.select_file(&ui, 7);
@@ -138,10 +138,10 @@ fn await_result(
 ) {
     slint::Timer::single_shot(Duration::from_millis(50), move || {
         let Some(ui) = weak.upgrade() else { return };
-        let expected = if index == 1 { 3001 } else { 3000 };
+        let expected = if index % 3 == 1 { 3001 } else { 3000 };
         let current = ui.get_workflow_pr_review_selected_file_path() == "fixture-7.rs"
             && ui.get_workflow_pr_review_lines().row_count() == expected
-            && ui.get_workflow_pr_review_viewing_file() == (index == 1);
+            && ui.get_workflow_pr_review_viewing_file() == (index % 3 == 1);
         if !current || ui.get_workflow_pr_review_code_loading() {
             if !current && !ui.get_workflow_pr_review_code_loading() {
                 log::warn!("[P6][66] premature_loading_clear cycle={index}");
@@ -155,7 +155,7 @@ fn await_result(
             "[P6][66] cycle={index} completed_ms={}",
             started.elapsed().as_millis()
         );
-        if index == 2 {
+        if !crate::p6_benchmark::next_cycle(index + 1) {
             controller.clear_owned_state(&ui);
             ui.set_current_route(Route::Project);
             log::info!("[P6][66] complete");

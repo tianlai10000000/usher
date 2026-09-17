@@ -56,6 +56,7 @@ fn same_durable_run(a: &HookRun, b: &HookRun) -> bool {
         && a.exit_code == b.exit_code
         && a.signal == b.signal
         && a.detail == b.detail
+        && a.failure_kind == b.failure_kind
 }
 
 pub(super) enum Action {
@@ -127,7 +128,7 @@ fn reduce(state: &HookState, action: Action) -> Reduction<HookState, Result<(), 
                 );
             }
             if let Err(error) = hook.validate() {
-                return Reduction::unchanged(next, Err(error));
+                return Reduction::unchanged(next, Err(error.into()));
             }
             if !state.events.iter().any(|event| event.name == hook.event) {
                 return Reduction::unchanged(

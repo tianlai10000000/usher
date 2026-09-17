@@ -49,7 +49,7 @@ pub(super) fn setup(ui: &MainWindow) {
 
 fn heartbeat(weak: slint::Weak<MainWindow>, start: Instant, last: Instant) {
     slint::Timer::single_shot(Duration::from_millis(50), move || {
-        if weak.upgrade().is_none() || start.elapsed() > Duration::from_secs(85) {
+        if weak.upgrade().is_none() || !crate::p6_benchmark::heartbeat_active(85) {
             return;
         }
         log::info!("[P6][70] heartbeat_us={}", last.elapsed().as_micros());
@@ -126,7 +126,7 @@ fn await_layout(
                     "[P6][70] cycle={cycle} completed_ms={}",
                     started.elapsed().as_millis()
                 );
-                if cycle < 2 {
+                if crate::p6_benchmark::next_cycle(cycle + 1) {
                     open(weak, cycle + 1, 0, Instant::now());
                 } else {
                     log::info!("[P6][70] complete");

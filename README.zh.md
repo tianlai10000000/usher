@@ -188,6 +188,8 @@ scripts/benchmark-memory.sh --runs 3 --scenarios home --fixture home-v1
 该命令会构建选定的 Release 渲染器，每轮启动全新进程，执行固定窗口尺寸/全屏阶段，并把原始 TSV、汇总与应用日志写入已忽略的 `memory-benchmark-results/`。窗口自动化需要辅助功能权限。固定 Workflow、PR Review、Chat 或 Terminal fixture 时使用 `--prepare-hook`；可执行 hook 会收到 `PID RUN SCENARIO`。渲染器与采样选项见 `--help`。
 
 为避免自动消耗托管 macOS runner，Nightly performance 的定时触发目前暂时暂停。
+P6 Terminal/Hooks/Job 等六场景的按需回归与持续循环入口见
+[P6 验证协议](docs/p6-regression.md)，包含独立 A/B、15 分钟真实循环和原始证据。
 完整 workflow 仍可通过 `workflow_dispatch` 手动运行；需要恢复每日性能门禁时，取消
 其中 `schedule` 配置的注释即可。
 

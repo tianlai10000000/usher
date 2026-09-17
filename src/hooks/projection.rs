@@ -12,7 +12,9 @@ pub(super) struct RunProjection {
     pub full_log: bool,
     pub descriptor: JobRunDescriptor,
     pub job: JobSnapshot,
-    pub detail: String,
+    pub detail: i18n::LocalizedText,
+    pub event: String,
+    pub test: bool,
     pub running: bool,
 }
 
@@ -63,7 +65,7 @@ fn project(run: &HookRun, previous: Option<JobStepData>) -> RunProjection {
                 .saturating_sub(run.started_at_ms.unwrap_or(run.created_at_ms))
                 .max(0) as u64,
         );
-        step.finish(conclusion, Some(duration), run.detail.clone(), true);
+        step.finish(conclusion, Some(duration), run.detail_text(), true);
         job.finish(conclusion, duration, vec![step]);
     } else if run.started_at_ms.is_some() {
         job.start(vec![step]);
@@ -81,16 +83,12 @@ fn project(run: &HookRun, previous: Option<JobStepData>) -> RunProjection {
             workflow_name: "Hooks".into(),
             context_name: run.project.clone().unwrap_or_else(|| "Usher".into()),
             job_name: run.name.clone(),
-            trigger_detail: format!(
-                "{} · {}{}",
-                run.event,
-                run.id,
-                if run.test { " · test" } else { "" }
-            )
-            .into(),
+            trigger_detail: i18n::LocalizedText::empty(),
         },
         job,
-        detail: run.detail.clone(),
+        detail: run.detail_text(),
+        event: run.event.clone(),
+        test: run.test,
         running: run.conclusion.is_none(),
     }
 }
@@ -122,7 +120,7 @@ mod tests {
         let lines = original.row_data(0).unwrap().log_lines;
         for locale in ["en", "zh-CN", "en"] {
             crate::i18n::apply_preference(locale).unwrap();
-            super::super::bridge::sync_job_language(&ui);
+            super::super::bridge::refresh_job_copy(&ui, &run);
             let current = ui.get_job_run_steps();
             assert!(std::ptr::eq(original.as_any(), current.as_any()));
             assert!(std::ptr::eq(

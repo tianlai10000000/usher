@@ -23,7 +23,16 @@ PR Review 通过稳定的 Slint `@pr-review` feature package 入口暴露，与�
 PR Diff/全文高亮完成回调共用 `controller/highlight_completion.rs`，先检查
 请求代次、索引、路径和显示模式，再回写 loading/model；Worker 调度保持不变。
 
+P6 验证由 `scripts/benchmark-p6-regression.py` 及各功能显式启用的夹具负责，
+`src/p6_benchmark.rs` 共享持续时长控制。历史迁移门禁和当前版本回归分开；
+手动性能 Workflow 检查真实重复负载的逐轮正确性、内存斜率及资源增长，
+详见 [验证协议](p6-regression.md)。
+
 Hook 日志按序列化 JSONL 字节预算（2 MiB 输出准入及 64 KiB 生命周期预留）。
+`hooks/errors.rs` 拥有类型化宿主/校验错误；`hooks/presentation.rs` 将运行语义映射
+为 catalog 文案和带版本的通知元数据。Settings/Job 桥在语言切换时重新投影，保留
+日志 model；Inbox、Banner 和应用系统通知适配器在展示边界解析 Hook 元数据，
+技术诊断及外部输出仍保留日志原文。
 `hooks/replay.rs` 流式读取新旧日志，总读取上限 16 MiB、单记录 64 KiB。
 Hook bridge 在回放被替换或离开 Job Run 时取消旧任务；完成回写再次匹配代次和 run。
 Hook 状态共享不可变配置/事件目录，持久摘要版本与输出 seq 分离，自动持久化 Worker

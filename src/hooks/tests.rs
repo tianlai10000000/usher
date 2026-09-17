@@ -752,6 +752,8 @@ async fn missing_interpreter_and_bad_working_directory_are_start_failures() {
     let run = finished(&service, &id).await;
     assert_eq!(run.conclusion, Some(HookConclusion::StartFailed));
     assert!(run.detail.contains("/missing/usher-node-runtime"));
+    assert_eq!(run.failure_kind, Some(HookFailureKind::InterpreterStart));
+    assert!(!run.detail_text().source_text().contains("/missing/"));
     assert!(run.started_at_ms.is_none());
     let events = service.events_after(&id, 0).await.unwrap();
     assert!(!events.iter().any(|e| e.kind == "execution.started"));
@@ -760,12 +762,9 @@ async fn missing_interpreter_and_bad_working_directory_are_start_failures() {
         .test(definition, Some("/missing/usher-working-directory".into()))
         .await
         .unwrap();
-    assert!(
-        finished(&service, &id)
-            .await
-            .detail
-            .contains("Working directory")
-    );
+    let run = finished(&service, &id).await;
+    assert!(run.detail.contains("Working directory"));
+    assert_eq!(run.failure_kind, Some(HookFailureKind::WorkingDirectory));
     service.shutdown().await;
 }
 

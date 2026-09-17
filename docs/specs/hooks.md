@@ -15,6 +15,32 @@ There is no remote-provider polling or automatic script installation.
 
 ## Configuration / 配置
 
+Host failures carry an optional stable `failure_kind` in run summaries and
+terminal journal records. Settings and Job Run resolve friendly catalog copy
+from that kind, conclusion, exit code and signal. Technical `detail` and external
+stdout/stderr stay untranslated in the journal. Legacy summaries without a kind
+use their typed conclusion; unknown future kinds use a generic failure message.
+Validation returns typed categories, including integer/range timeout errors.
+Runtime locale changes refresh mounted history, test feedback and Job headers/
+step details without rebuilding the log model. New editors clear old feedback.
+
+宿主失败在运行摘要和终态日志中保留可选的稳定 `failure_kind`；Settings 和 Job
+按该类别、结论、退出码及信号投影友好文案。技术 `detail` 和外部 stdout/stderr
+在日志中保留原文。无类别的旧记录按类型化结论降级，未知新类别使用通用失败提示。
+表单校验返回类型化错误；切换语言立即刷新历史、测试反馈、Job 摘要及步骤说明，
+不重建日志 model；新编辑器清空旧反馈。
+
+New Hook notifications persist versioned semantic metadata (name, event, stage,
+test flag and conclusion), never rendered translations. Only application/Hook
+messages carrying this version are localized by Inbox, Banner and the native
+delivery adapter. Old/unrecognized messages retain their original publisher copy.
+Mounted banners refresh with the locale; already delivered OS notifications are
+immutable. No script output or arbitrary remote message is classified by its text.
+
+新 Hook 通知只保存带版本的语义元数据，不保存翻译结果。Inbox、Banner 及系统通知
+发送适配器只翻译来源匹配且版本已知的应用 Hook 消息；旧通知和未知消息保持原文。
+已挂载 Banner 随语言刷新，已发出的系统通知不会重发或修改。
+
 Event and execution-history pickers use separate mounted option trees.
 Rows use the shared Select 32 px geometry and explicit indexed positions;
 single-option popups fit their content, and bottom-edge popups open above the

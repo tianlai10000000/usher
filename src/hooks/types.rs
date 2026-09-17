@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use super::{HookFailureKind, HookValidationError};
 use serde::{Deserialize, Serialize};
 
 pub(crate) const PR_REVIEW_APPROVED: &str = "pr.review.approved.v1";
@@ -86,31 +87,31 @@ impl Default for HookDefinition {
 }
 
 impl HookDefinition {
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(&self) -> Result<(), HookValidationError> {
         if !valid_id(&self.id) {
-            return Err("Invalid Hook ID.".into());
+            return Err(HookValidationError::InvalidId);
         }
         if self.name.trim().is_empty() {
-            return Err("Hook name is required.".into());
+            return Err(HookValidationError::NameRequired);
         }
         if self.script.trim().is_empty() {
-            return Err("Hook script is empty.".into());
+            return Err(HookValidationError::ScriptEmpty);
         }
         if self.script.len() > MAX_SCRIPT_BYTES {
-            return Err("Hook script exceeds 64 KiB.".into());
+            return Err(HookValidationError::ScriptTooLarge);
         }
         if !(1..=3600).contains(&self.timeout_seconds) {
-            return Err("Timeout must be between 1 and 3600 seconds.".into());
+            return Err(HookValidationError::TimeoutRange);
         }
         if self.name.len() > 256
             || self.interpreter.len() > 4096
             || self.project.len() > 4096
             || self.outcome.len() > 128
         {
-            return Err("Hook configuration field is too long.".into());
+            return Err(HookValidationError::FieldTooLong);
         }
         if self.interpreter.contains(['\0', '\n', '\r']) {
-            return Err("Interpreter must be one executable path.".into());
+            return Err(HookValidationError::InterpreterPath);
         }
         Ok(())
     }
@@ -211,6 +212,9 @@ pub(crate) struct HookRun {
     pub exit_code: Option<i32>,
     pub signal: Option<i32>,
     pub detail: String,
+    /// Optional for backward compatibility; detail remains untranslated diagnostic text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_kind: Option<HookFailureKind>,
     pub seq: u64,
     #[serde(skip)]
     pub log: Arc<String>,
@@ -234,6 +238,7 @@ impl HookRun {
             exit_code: None,
             signal: None,
             detail: String::new(),
+            failure_kind: None,
             seq: 0,
             log: Arc::default(),
         }

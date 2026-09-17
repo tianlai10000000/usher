@@ -1,5 +1,13 @@
 # Specifications / 规格索引
 
+Hooks requires typed host/validation errors and semantic notification metadata,
+with immediate locale refresh of mounted history, feedback and Job/Banner copy.
+Hooks 约束类型化宿主/校验错误、语义通知元数据及已挂载文案的即时语言切换。
+
+The [P6 regression protocol](../p6-regression.md) defines opt-in repeated-load
+validation, paired and absolute gates, cancellation and raw evidence requirements.
+P6 回归协议统一真实重复负载、成对/绝对门禁、取消与原始证据要求。
+
 Specifications describe stable behavior and invariants. Architecture documents explain ownership and flow; historical notes explain how a problem was investigated. Do not mix those three roles.
 
 PR Review requires guarded highlight completion writes. Hooks defines serialized

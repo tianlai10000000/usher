@@ -23,7 +23,7 @@ pub(super) fn setup(ui: &MainWindow) {
 
 fn heartbeat(weak: slint::Weak<MainWindow>, start: Instant, last: Instant) {
     Timer::single_shot(Duration::from_millis(50), move || {
-        if weak.upgrade().is_none() || start.elapsed() > Duration::from_secs(26) {
+        if weak.upgrade().is_none() || !crate::p6_benchmark::heartbeat_active(26) {
             return;
         }
         log::info!("[P6][65] heartbeat_us={}", last.elapsed().as_micros());
@@ -65,14 +65,16 @@ fn await_tail(weak: slint::Weak<MainWindow>, cycle: usize, started: Instant) {
             "[P6][65] cycle={cycle} completed_ms={}",
             started.elapsed().as_millis()
         );
-        if cycle < 2 {
+        if crate::p6_benchmark::next_cycle(cycle + 1) {
             // Hide/reopen preserves the session; project replacement starts a fresh one.
-            if cycle == 0 {
+            if cycle % 3 == 0 {
                 ui.invoke_shell_drawer_close();
                 ui.set_shell_drawer_visible(false);
                 open_terminal_for_project(&ui, "P6 Terminal", "p6-a", "/tmp");
-            } else {
+            } else if cycle % 3 == 1 {
                 open_terminal_for_project(&ui, "P6 Terminal B", "p6-b", "/tmp");
+            } else {
+                open_terminal_for_project(&ui, "P6 Terminal", "p6-a", "/tmp");
             }
             run_cycle(weak, cycle + 1);
         } else {

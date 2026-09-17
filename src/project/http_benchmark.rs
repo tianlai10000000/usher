@@ -28,7 +28,7 @@ pub(super) fn setup(ui: &MainWindow) {
 
 fn heartbeat(weak: slint::Weak<MainWindow>, start: Instant, last: Instant) {
     slint::Timer::single_shot(Duration::from_millis(50), move || {
-        if weak.upgrade().is_none() || start.elapsed() > Duration::from_secs(26) {
+        if weak.upgrade().is_none() || !crate::p6_benchmark::heartbeat_active(26) {
             return;
         }
         log::info!("[P6][67] heartbeat_us={}", last.elapsed().as_micros());
@@ -80,7 +80,7 @@ async fn download(large: bool) -> Result<bool, Box<dyn std::error::Error + Send 
 }
 
 async fn exercise() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    for cycle in 0..3 {
+    for cycle in 0.. {
         let started = Instant::now();
         if !download(false).await? {
             return Err("initial small response failed".into());
@@ -94,6 +94,9 @@ async fn exercise() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             started.elapsed().as_millis()
         );
         tokio::time::sleep(Duration::from_millis(500)).await;
+        if !crate::p6_benchmark::next_cycle(cycle + 1) {
+            break;
+        }
     }
     log::info!("[P6][67] complete");
     Ok(())

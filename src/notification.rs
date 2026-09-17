@@ -370,11 +370,13 @@ pub(crate) fn show_recorded_message(
         MessageSeverity::Error => NotificationType::Error,
     };
     let target = message.target.clone().unwrap_or_default();
+    let (title, body) = crate::hooks::notification_copy(message, usher_i18n::active_locale().id)
+        .unwrap_or_else(|| (message.title.clone(), message.body.clone()));
     let mut notification = create_notification_with_defaults(
         kind,
         NotificationOptions {
-            title: message.title.clone().into(),
-            message: message.body.clone().into(),
+            title: title.into(),
+            message: body.into(),
             source: message.source.clone().into(),
             category: message.category.clone().into(),
             tag: target.into(),
@@ -390,6 +392,33 @@ pub(crate) fn show_recorded_message(
     let id = notification.id;
     push_notification(&NotificationManager::get(ui), notification, &None, center);
     start_auto_close_timer(ui.as_weak(), id, Duration::from_secs(5), None);
+}
+
+pub(crate) fn sync_hook_language(ui: &MainWindow, center: &MessageCenter) {
+    let snapshot = center.snapshot();
+    let model = banner_queue_model(&NotificationManager::get(ui));
+    for index in 0..model.row_count() {
+        let Some(mut row) = model.row_data(index) else {
+            continue;
+        };
+        let Some(message) = snapshot
+            .messages
+            .iter()
+            .find(|m| m.id == row.message_id.as_str())
+        else {
+            continue;
+        };
+        if let Some((title, body)) =
+            crate::hooks::notification_copy(message, usher_i18n::active_locale().id)
+        {
+            row.title = title.into();
+            row.message = body.into();
+            row.actions = ModelRc::new(VecModel::from(vec![
+                i18n::tr("hooks.view_run").into_owned().into(),
+            ]));
+            model.set_row_data(index, row);
+        }
+    }
 }
 
 fn clear_banner_queue(

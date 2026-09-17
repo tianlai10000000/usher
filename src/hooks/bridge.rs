@@ -8,7 +8,7 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-use usher_messages::{MessageCenter, MessageDraft, MessageSeverity, NativeDelivery};
+use usher_messages::{MessageCenter, MessageSeverity, NativeDelivery};
 use usher_state_store::Subscription;
 use usher_ui_settings::{
     GitHubSettingsPage, HookChoice, HookCodeLine, HookCodeToken, HookEventChoice,
@@ -474,31 +474,7 @@ pub(crate) fn setup(
         if event.kind != "execution.started" && event.kind != "hook.finished" {
             return;
         }
-        let name = if run.test {
-            i18n::tr_args("hooks.test_prefix", &[("name", run.name.as_str())])
-        } else {
-            run.name.clone()
-        };
         let started = event.kind == "execution.started";
-        let title = i18n::tr_args(
-            if started {
-                "hooks.started"
-            } else {
-                "hooks.finished"
-            },
-            &[("name", &name)],
-        );
-        let body = format!(
-            "{} · {}",
-            run.event,
-            if started {
-                "running"
-            } else {
-                run.conclusion
-                    .map(HookConclusion::label)
-                    .unwrap_or("unknown")
-            }
-        );
         let severity = if started {
             MessageSeverity::Info
         } else if run.conclusion == Some(HookConclusion::Success) {
@@ -507,11 +483,8 @@ pub(crate) fn setup(
             MessageSeverity::Warning
         };
         match center.publish(
-            MessageDraft::new(title, body)
-                .source("Hooks")
-                .category("hooks")
+            presentation::notification_draft(run, started)
                 .severity(severity)
-                .target(format!("hook-run:{}", run.id))
                 .native_delivery(NativeDelivery::WhenUnfocused),
         ) {
             Ok(message) => {
@@ -703,7 +676,7 @@ pub(crate) fn apply_settings(page: &GitHubSettingsPage, state: &HookState) {
                 label: format!(
                     "{} · {} · {}",
                     r.name,
-                    r.conclusion.map(HookConclusion::label).unwrap_or("running"),
+                    i18n::tr(r.status_key()),
                     DateTime::from_timestamp_millis(r.created_at_ms)
                         .map(|t| t.with_timezone(&Local).format("%m-%d %H:%M:%S").to_string())
                         .unwrap_or_default()
@@ -714,7 +687,10 @@ pub(crate) fn apply_settings(page: &GitHubSettingsPage, state: &HookState) {
     ));
     if !state.error.is_empty() {
         global.set_result_error(true);
-        global.set_result(state.error.clone().into());
+        set_feedback(
+            page,
+            i18n::LocalizedText::message("hooks.error.configuration"),
+        );
     }
     let test_id = global.get_test_run();
     if let Some(run) = state.runs.iter().find(|r| r.id == test_id.as_str()) {
@@ -731,7 +707,7 @@ pub(crate) fn apply_settings(page: &GitHubSettingsPage, state: &HookState) {
         );
         global.set_result(
             if run.conclusion.is_some_and(|c| c != HookConclusion::Success) {
-                run.detail.clone().into()
+                run.detail_text().resolve().into()
             } else {
                 "".into()
             },
@@ -743,12 +719,37 @@ pub(crate) fn sync_language(page: &GitHubSettingsPage) {
     if let Some(service) = current() {
         apply_settings(page, service.state.snapshot().state());
     }
+    FEEDBACK.with(|slot| {
+        if let Some((owner, text)) = slot.borrow().as_ref()
+            && owner
+                .upgrade()
+                .is_some_and(|owner| std::ptr::eq(owner.window(), page.window()))
+            && page.global::<HookSettingsState>().get_test_run().is_empty()
+        {
+            page.global::<HookSettingsState>()
+                .set_result(text.resolve().into());
+        }
+    });
 }
 
 pub(crate) fn sync_job_language(ui: &MainWindow) {
     if ui.get_job_run_source() != "hooks" {
         return;
     }
+    let selected = SELECTED_RUN.lock().unwrap().clone();
+    let Some(service) = current() else { return };
+    let snapshot = service.state.snapshot();
+    let Some(run) = snapshot.state().runs.iter().find(|r| r.id == selected) else {
+        return;
+    };
+    refresh_job_copy(ui, run);
+}
+
+pub(super) fn refresh_job_copy(ui: &MainWindow, run: &HookRun) {
+    ui.set_job_run_summary(run.detail_text().resolve().into());
+    ui.set_job_run_trigger_detail(
+        presentation::trigger_detail(&run.event, &run.id, run.test).into(),
+    );
     let rows = ui.get_job_run_steps();
     let Some(model) = rows.as_any().downcast_ref::<VecModel<crate::JobStepItem>>() else {
         return;
@@ -757,23 +758,13 @@ pub(crate) fn sync_job_language(ui: &MainWindow) {
         let Some(mut row) = model.row_data(index) else {
             continue;
         };
-        let key = match row.status.as_str() {
-            "queued" => "hooks.queued",
-            "in_progress" => "hooks.running",
-            _ => continue,
-        };
-        row.detail = i18n::tr(key).into_owned().into();
+        row.detail = run.detail_text().resolve().into();
         model.set_row_data(index, row);
     }
 }
 
 fn event_label(event: &str) -> String {
-    match event {
-        PR_REVIEW_APPROVED => i18n::tr("hooks.event_pr_approved").into_owned(),
-        PR_MERGED => i18n::tr("hooks.event_pr_merged").into_owned(),
-        "ai.review.completed.v1" => i18n::tr("hooks.event_ai_review").into_owned(),
-        event => event.to_owned(),
-    }
+    presentation::event_label_for(usher_i18n::active_locale().id, event)
 }
 
 fn event_category<'a>(state: &'a HookState, event_name: &str) -> &'a str {
@@ -904,6 +895,7 @@ fn sync_choices<T: Clone + PartialEq + 'static>(current: ModelRc<T>, next: Vec<T
 }
 
 fn set_draft_metadata(page: &GitHubSettingsPage, hook: &HookDefinition) {
+    FEEDBACK.with(|slot| slot.borrow_mut().take());
     let g = page.global::<HookSettingsState>();
     g.set_draft_id(hook.id.clone().into());
     g.set_draft_name(hook.name.clone().into());
@@ -974,7 +966,7 @@ fn open_editor_draft(
     );
 }
 
-fn draft(page: &GitHubSettingsPage) -> Result<HookDefinition, String> {
+fn draft(page: &GitHubSettingsPage) -> Result<HookDefinition, HookValidationError> {
     let g = page.global::<HookSettingsState>();
     let hook = HookDefinition {
         id: g.get_draft_id().into(),
@@ -994,20 +986,45 @@ fn draft(page: &GitHubSettingsPage) -> Result<HookDefinition, String> {
             .get_draft_timeout()
             .trim()
             .parse()
-            .map_err(|_| "Timeout must be a whole number of seconds.")?,
+            .map_err(|_| HookValidationError::TimeoutInteger)?,
     };
     hook.validate()?;
     Ok(hook)
 }
 
-fn show_error(page: &GitHubSettingsPage, error: String) {
+thread_local! {
+    static FEEDBACK: std::cell::RefCell<Option<(slint::Weak<GitHubSettingsPage>, i18n::LocalizedText)>> = const { std::cell::RefCell::new(None) };
+}
+
+fn set_feedback(page: &GitHubSettingsPage, text: i18n::LocalizedText) {
+    page.global::<HookSettingsState>()
+        .set_result(text.resolve().into());
+    FEEDBACK.with(|slot| *slot.borrow_mut() = Some((page.as_weak(), text)));
+}
+
+trait SettingsError {
+    fn feedback(&self) -> i18n::LocalizedText;
+}
+impl SettingsError for HookValidationError {
+    fn feedback(&self) -> i18n::LocalizedText {
+        self.localized()
+    }
+}
+impl SettingsError for String {
+    fn feedback(&self) -> i18n::LocalizedText {
+        log::warn!("[Hooks] Settings operation failed: {self}");
+        i18n::LocalizedText::message("hooks.error.command")
+    }
+}
+
+fn show_error(page: &GitHubSettingsPage, error: impl SettingsError) {
     let g = page.global::<HookSettingsState>();
     g.set_test_run("".into());
     if g.get_test_status() == "running" {
         g.set_test_status("failure".into());
     }
     g.set_result_error(true);
-    g.set_result(error.into());
+    set_feedback(page, error.feedback());
 }
 
 pub(crate) fn bind_settings(ui: &MainWindow, page: &GitHubSettingsPage) {
@@ -1258,7 +1275,7 @@ pub(super) fn bind_settings_with_service(
                         match result {
                             Ok(()) => {
                                 g.set_result_error(false);
-                                g.set_result(i18n::tr("hooks.saved").into_owned().into());
+                                set_feedback(&page, i18n::LocalizedText::message("hooks.saved"));
                             }
                             Err(error) => show_error(&page, error),
                         }
@@ -1294,11 +1311,10 @@ pub(super) fn bind_settings_with_service(
                         match result {
                             Ok(()) => {
                                 g.set_result_error(false);
-                                g.set_result(i18n::tr("hooks.saved").into_owned().into());
+                                set_feedback(&page, i18n::LocalizedText::message("hooks.saved"));
                             }
                             Err(error) => {
-                                g.set_result_error(true);
-                                g.set_result(error.into());
+                                show_error(&page, error);
                             }
                         }
                     }
@@ -1327,6 +1343,7 @@ pub(super) fn bind_settings_with_service(
 }
 
 fn reset_test_feedback(page: &GitHubSettingsPage) {
+    FEEDBACK.with(|slot| slot.borrow_mut().take());
     let g = page.global::<HookSettingsState>();
     g.set_test_run("".into());
     g.set_test_status("".into());
@@ -1483,7 +1500,7 @@ fn settings_command(
                             close_editor(&page);
                         }
                         g.set_result_error(false);
-                        g.set_result(i18n::tr(success).into_owned().into());
+                        set_feedback(&page, i18n::LocalizedText::message(success));
                     }
                     Err(error) => show_error(&page, error),
                 }
@@ -1492,7 +1509,7 @@ fn settings_command(
     });
 }
 
-fn apply_run(ui: &MainWindow, projection: RunProjection) {
+fn apply_run(ui: &MainWindow, mut projection: RunProjection) {
     {
         let mut last = LAST_PROJECTION.lock().unwrap();
         if last.as_ref().is_some_and(|(id, seq, full)| {
@@ -1521,11 +1538,13 @@ fn apply_run(ui: &MainWindow, projection: RunProjection) {
             );
         }
     }
+    projection.descriptor.trigger_detail =
+        presentation::trigger_detail(&projection.event, &projection.id, projection.test).into();
     jobs::apply_job_run(
         ui,
         &projection.descriptor,
         &projection.job,
-        &projection.detail.into(),
+        &projection.detail,
         projection.running,
     );
 }
@@ -1549,14 +1568,7 @@ fn open_run(ui: &MainWindow, id: &str) {
         .iter()
         .any(|r| r.id == id)
     {
-        ui.global::<crate::ToastManager>()
-            .invoke_error(crate::ToastOptions {
-                message: "Hook run was not found or has expired.".into(),
-                duration: 3000,
-                position: "bottom".into(),
-                width: "auto".into(),
-                ..Default::default()
-            });
+        crate::toast::localized_error(ui, "hooks.error.expired");
         return;
     }
     *SELECTED_RUN.lock().unwrap() = id.into();
@@ -1593,7 +1605,11 @@ fn load_full_log(service: Arc<HookService>, weak: slint::Weak<MainWindow>, id: S
         match result {
             Ok(text) => run.log = Arc::new(text),
             Err(error) => {
-                run.log = Arc::new(format!("[log.unavailable] {error}\n{}", run.log));
+                let diagnostic: String = run.detail.chars().take(MAX_TAIL_BYTES / 4).collect();
+                run.log = Arc::new(format!(
+                    "[log.unavailable] {error}\n[summary.detail] {diagnostic}\n{}",
+                    run.log
+                ));
             }
         }
         let mut projection = project_run(&run);
