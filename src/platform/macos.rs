@@ -2091,14 +2091,14 @@ pub(crate) fn update_titlebar_navigation_controls(window: &MainWindow) {
 
 /// Register GitHub's macOS UI and monospace faces without bundling Apple fonts.
 pub(crate) fn setup_pr_review_fonts(app: &MainWindow) {
-    use slint::fontique_010::fontique;
+    use slint::fontique_011::fontique;
 
     const SF_MONO_FONTS: &[&str] = &[
         "/System/Applications/Utilities/Terminal.app/Contents/Resources/Fonts/SF-Mono-Regular.otf",
         "/System/Applications/Utilities/Terminal.app/Contents/Resources/Fonts/SF-Mono-RegularItalic.otf",
         "/System/Applications/Utilities/Terminal.app/Contents/Resources/Fonts/SF-Mono-Semibold.otf",
     ];
-    let mut collection = slint::fontique_010::shared_collection();
+    let mut collection = slint::fontique_011::shared_collection();
     let mut regular_registered = false;
     for (index, path) in SF_MONO_FONTS.iter().enumerate() {
         let Ok(bytes) = std::fs::read(path) else {

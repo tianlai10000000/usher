@@ -34,7 +34,7 @@ fn main() {
         .with_library_paths(HashMap::from([
             (
                 "material".to_string(),
-                repository_root.join("material-1.7.1-fixed/material.slint"),
+                repository_root.join("material-1.18.0/material.slint"),
             ),
             ("ui-components".to_string(), ui_components_library),
             ("pr-review".to_string(), pr_review_library),

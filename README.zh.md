@@ -236,7 +236,7 @@ src/main.rs
      -> crates/usher-search/   通用文本匹配、结果导航与视口揭示算法
      -> src/update/            更新检查、下载和安装
      -> src/{toast,notification,message_center,dialog}.rs
-material-1.7.1-fixed/            内置 Slint v1.17.1 Material 库
+material-1.18.0/            Slint v1.18.0 标签中的原版 Material 源码
 ```
 
 模块职责、生命周期、数据流和扩展点参见 [docs/architecture.zh.md](docs/architecture.zh.md)。Coding agent 还必须遵守 [AGENTS.md](AGENTS.md)。
@@ -294,4 +294,4 @@ push `v*` tag 是唯一的自动构建触发器，只会启动 Release workflow�
 
 Usher 为**专有、非开源**软件。详见 [`LICENSE.txt`](LICENSE.txt)：版权所有，未经版权方书面许可不得使用、复制、修改或分发。
 
-第三方组件仍保留各自许可证（例如 Material 见 `material-1.7.1-fixed/LICENSE.md`）。
+第三方组件仍保留各自许可证（例如 Material 见 `material-1.18.0/LICENSE.md`）。

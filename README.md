@@ -252,7 +252,7 @@ src/main.rs
      -> crates/usher-search/   shared text matching, result navigation, viewport reveal
      -> src/update/            update checks, download, install
      -> src/{toast,notification,message_center,dialog}.rs
-material-1.7.1-fixed/            vendored Slint v1.17.1 Material library
+material-1.18.0/            exact Material source from the Slint v1.18.0 tag
 ```
 
 Read [docs/architecture.md](docs/architecture.md) for ownership, lifecycle, data flows, and extension points. Coding agents must also follow [AGENTS.md](AGENTS.md).
@@ -311,4 +311,4 @@ CI remains available through manual `workflow_dispatch` when needed.
 
 Usher is **proprietary, non-open-source** software. See [`LICENSE.txt`](LICENSE.txt): all rights reserved; use requires explicit permission from the copyright holder.
 
-Third-party components keep their own licenses (for example Material in `material-1.7.1-fixed/LICENSE.md`).
+Third-party components keep their own licenses (for example Material in `material-1.18.0/LICENSE.md`).

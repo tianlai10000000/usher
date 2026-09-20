@@ -10,7 +10,7 @@ otherwise use the Software, in whole or in part, except as expressly permitted
 in a separate written agreement with the copyright holder.
 
 Third-party components bundled with the Software remain under their own
-licenses (for example Material under `material-1.7.1-fixed/LICENSE.md`, and
+licenses (for example Material under `material-1.18.0/LICENSE.md`, and
 other vendored dependencies under their respective notices). Those third-party
 terms are not changed by this notice.
 

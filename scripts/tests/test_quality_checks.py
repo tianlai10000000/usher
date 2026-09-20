@@ -69,7 +69,7 @@ class PolicyTests(unittest.TestCase):
     def test_allowlisted_hook_path_still_rejects_private_material(self):
         self.write(
             "ui/components/settings/github_hook_tooltip.slint",
-            'import { Tooltip } from "material-1.7.1-fixed/private.slint";\n',
+            'import { Tooltip } from "material-1.18.0/private.slint";\n',
         )
         result = self.check()
         self.assertEqual(result.returncode, 1)

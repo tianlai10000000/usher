@@ -569,6 +569,10 @@ export component GitHubTerminalDrawer inherits Rectangle {
                                 }
                             }
 
+                            // The fallback text and copy-selection editor are
+                            // the two multiline native surfaces in this fixed
+                            // PTY grid. Their native line boxes must use the
+                            // same pitch as the ANSI cell rows above.
                             terminal-text := Text {
                                 visible: root.lines.length == 0 && !root.selection-mode;
                                 x: root.terminal-padding;
@@ -578,6 +582,8 @@ export component GitHubTerminalDrawer inherits Rectangle {
                                 wrap: no-wrap;
                                 font-size: root.terminal-font-size;
                                 font-family: "Menlo";
+                                line-height-factor:
+                                    root.terminal-line-height / max(1px, char-measure.preferred-height);
                                 color: root.fg-muted;
                             }
 
@@ -593,6 +599,8 @@ export component GitHubTerminalDrawer inherits Rectangle {
                                 wrap: no-wrap;
                                 font-size: root.terminal-font-size;
                                 font-family: "Menlo";
+                                line-height-factor:
+                                    root.terminal-line-height / max(1px, char-measure.preferred-height);
                                 color: root.fg-muted;
                                 selection-background-color: root.accent-fg.with-alpha(0.22);
                                 selection-foreground-color: root.fg-default;

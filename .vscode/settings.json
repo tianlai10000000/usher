@@ -1,6 +1,6 @@
 {
     "slint.libraryPaths": {
-        "material": "./material-1.7.1-fixed/material.slint"
+        "material": "./material-1.18.0/material.slint"
     },
     "rust-analyzer.check.allTargets": true,
     "rust-analyzer.check.extraArgs": [

@@ -86,13 +86,11 @@ impl LazyPrDiffLineModel {
 
     /// Raw provider lines backing this model. In-diff find scans these directly
     /// so a full-file search never materializes (or evicts) converted rows.
-    #[cfg(test)]
     pub(super) fn source_file(&self) -> &PullRequestDiffFile {
         &self.file
     }
 
     /// Display-row projection over [`Self::source_file`], in model row order.
-    #[cfg(test)]
     pub(super) fn source_projection(&self) -> &[DiffRowProjection] {
         &self.rows_projection
     }
@@ -106,7 +104,7 @@ impl LazyPrDiffLineModel {
     }
 
     #[cfg(test)]
-    fn cached_row_count(&self) -> usize {
+    pub(super) fn cached_row_count(&self) -> usize {
         self.rows.borrow().entries.len()
     }
 }

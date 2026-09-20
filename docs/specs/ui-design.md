@@ -758,10 +758,13 @@ expanded/collapsed, and success confirmation.
 - `GitHubTextField` and `GitHubCompactTextField`: visible label when used as a
   form control, 32 px medium input, focus outline, disabled/loading handling,
   caption, and descriptive validation message. Error color alone is
-  insufficient. A transformed loading visual must be mounted above the field as
+  insufficient. Single-line editors retain their full content width inside the
+  clipped field and automatically scroll horizontally during pointer selection,
+  keeping the dragged endpoint visible beyond either edge. A transformed loading visual must be mounted above the field as
   a sibling of the clipped TextInput surface, not inside its clip subtree, so
   continuous animation cannot destabilize text antialiasing on non-Retina
-  60 Hz displays.
+  60 Hz displays. / 单行编辑器在裁剪框内保留完整内容宽度；鼠标拖选越过左右边界时
+  必须自动横向滚动，使拖动端点始终可见。
 - `GitHubToggle`: immediate-save boolean setting only; permanently visible
   external label/caption supplied by its owner, 24 px minimum target, loading
   and disabled protection, Enter/Space activation, and keyboard-visible focus.
@@ -1014,29 +1017,29 @@ Material may be used only as a replaceable low-level Slint implementation
 library:
 
 - import public controls through `@material`;
-- never import a file from `material-1.7.1-fixed/` directly;
+- never import a file from `material-1.18.0/` directly;
 - never edit vendored Material source;
 - do not consume Material palette, typography, or style metrics as product
   design tokens;
 - implement GitHub/Primer visual behavior in application-owned `ui/` files.
 - treat the complete vendored directory as read-only in every migration batch
   and verify it has no working-tree changes before handoff.
-- the application allowlist is limited to `MaterialWindowAdapter` in
-  `ui/main.slint` and public `ListView`/`ScrollView` virtualization in
-  `ui/views/workflow/pr_review_workspace.slint`, `ui/features/ai_review/full.slint`,
-  `ui/components/artifact_preview/github_artifact_preview.slint` and
-  `ui/components/jobs/job.slint`;
+- the direct `@material` allowlist is limited to `MaterialWindowAdapter` in
+  `ui/main.slint`, ordinary `ScrollView` usage in the PR Review workspace, and
+  the public `ScrollView` base used by the application-owned exact-name
+  `ListView` compatibility wrapper in `ui/components/github_scroll_view.slint`;
 - run `./scripts/check-ui-policy.sh` to enforce the Material and icon boundary.
 
 Material 只能作为可替换的底层 Slint 实现库：必须通过 `@material` 导入公开控件，
-禁止直接导入或修改 `material-1.7.1-fixed/`，禁止把 Material palette、
+禁止直接导入或修改 `material-1.18.0/`，禁止把 Material palette、
 typography 或 style metrics 当作产品设计令牌，GitHub/Primer 视觉行为必须在
 项目自有 `ui/` 文件中实现。
-当前应用白名单仅包含 `ui/main.slint` 的 `MaterialWindowAdapter`，以及
-`ui/views/workflow/pr_review_workspace.slint` 用于大型 model 虚拟化的公开
-`ListView`/`ScrollView`，以及 AI Review full、artifact preview 与 Jobs 组件中的
-公开 `ListView`（具体文件路径由脚本逐项列举）。`./scripts/check-ui-policy.sh` 自动检查 Material 与
-图标边界。
+当前直接 `@material` 白名单仅包含 `ui/main.slint` 的
+`MaterialWindowAdapter`、PR Review 工作区的普通 `ScrollView`，以及
+`ui/components/github_scroll_view.slint` 中应用自有精确名称 `ListView`
+兼容 wrapper 所继承的公开 `ScrollView`。AI Review、Artifact Preview、Jobs 与
+PR Diff 的虚拟列表只导入该应用自有 wrapper。`./scripts/check-ui-policy.sh`
+自动检查 Material 与图标边界。
 
 ## 10. Validation and batch gate / 验证与批次门禁
 

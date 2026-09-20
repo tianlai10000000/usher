@@ -273,8 +273,9 @@ export component GitHubSelectableDiffCode inherits Rectangle {
         root.find-active && (root.find-end-col > root.find-start-col || root.find-text != "");
     clip: true;
 
-    // Single-line font box — wrap selection Y steps by this pitch so it tracks
-    // the auto-wrapped Text (Skia word-wrap) instead of a fixed 22px grid.
+    // Measure the natural font box once, then use Slint's native line-height
+    // control to make paint, exact row extents and selection geometry share the
+    // same nominal pitch.
     wrap-line-probe := Text {
         x: 0px;
         y: 0px;
@@ -288,8 +289,12 @@ export component GitHubSelectableDiffCode inherits Rectangle {
         overflow: clip;
         wrap: no-wrap;
     }
-    private property <length> wrap-line-pitch:
+    private property <length> natural-line-height:
         max(1px, wrap-line-probe.preferred-height);
+    private property <float> wrapped-line-height-factor:
+        root.nominal-row-height / root.natural-line-height;
+    private property <length> wrap-line-pitch:
+        root.wrap-content ? root.nominal-row-height : root.natural-line-height;
     // Selection rectangles only exist for selected, visible ListView rows.
     // Normal scrolling remains token-only and keeps the lazy model bounded.
     if root.in-multi-sel && root.multi-sel-select-all: Rectangle {
@@ -596,6 +601,7 @@ export component GitHubSelectableDiffCode inherits Rectangle {
         font-family: root.code-font-family;
         font-size: root.code-font-size;
         font-weight: 400;
+        line-height-factor: root.wrap-content ? root.wrapped-line-height-factor : 1;
         color: root.fg-default;
         selection-foreground-color: root.fg-default;
         selection-background-color: transparent;

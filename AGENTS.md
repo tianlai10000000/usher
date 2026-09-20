@@ -20,6 +20,7 @@ Keep Usher a responsive desktop application with explicit module ownership, even
 6. Before adding or changing any Tooltip, read [Tooltip implementation contract](docs/specs/tooltips.md). Follow its factory-isolation rules and acceptance matrix; a build-only check is insufficient.
 7. Before any UI change, read [Internationalization](docs/specs/i18n.md). Every new or changed user-facing string must use the shared semantic catalog, and dynamic Rust projections must refresh immediately when the runtime locale changes.
 8. For variable-height lists or unstable scrollbars, read [Exact virtual scrolling](docs/specs/virtual-scrolling.md). Reuse exact extents, shared virtualization and the worker/layout acceptance matrix; do not patch estimated ranges by freezing the thumb.
+9. Before changing multiline `Text`, direct `TextInput`, `StyledText`, `TextEdit`, or any wrap/line-height measurement, read [Multiline text layout](docs/specs/text-layout.md). Use the supported native line-height API and keep every fallback, worker measurement and virtual extent on the same layout contract.
 
 1. 阅读对应语言的 README 和架构文档。
 2. 阅读 `docs/specs/README.md` 以及对应功能 spec。
@@ -29,6 +30,7 @@ Keep Usher a responsive desktop application with explicit module ownership, even
 6. **新增或修改任何 Tooltip 前，必须先阅读 [Tooltip 实现规范](docs/specs/tooltips.md)**，遵守组件工厂隔离规则并完成对应验收矩阵，不能仅凭编译通过交付。
 7. **任何 UI 改动前都必须阅读 [国际化规范](docs/specs/i18n.md)**。所有新增或修改的用户可见文案必须进入共享语义 catalog；Rust 动态投影必须在运行时切换语言后立即刷新。
 8. 可变行高列表或滚动条不稳定问题先读 [精确虚拟滚动](docs/specs/virtual-scrolling.md)，复用精确 extent、共享虚拟化及 Worker/布局验收矩阵，禁止仅冻结滑块来掩盖估算范围问题。
+9. 修改多行 `Text`、直接 `TextInput`、`StyledText`、`TextEdit` 或任何换行/行高测量前，先读 [多行文本排版规范](docs/specs/text-layout.md)。优先使用已支持的原生行高 API，并保证所有 fallback、Worker 测量和虚拟 extent 遵循同一布局契约。
 
 ## Canonical references / 主文档
 
@@ -36,7 +38,9 @@ Keep Usher a responsive desktop application with explicit module ownership, even
 - `docs/architecture.md` and `docs/architecture.zh.md`: ownership and data flow.
 - `docs/specs/`: stable behavior contracts.
 - `docs/terminal_viewport_iteration_notes.md`: historical investigation, not current truth.
-- `material-1.7.1-fixed/`: vendored upstream source; treat as third-party code.
+- `material-1.18.0/`: byte-for-byte upstream `ui-libraries/material/src` from
+  Slint v1.18.0 (`bd20dab8529add087b5cbc81aec70bf30861ae4c`); treat it as
+  replace-only third-party code.
 
 ## Module ownership / 模块边界
 
@@ -108,6 +112,7 @@ Keep Usher a responsive desktop application with explicit module ownership, even
 - Reuse existing FAB, card-action, modal, toast, notification, and terminal components before adding variants.
 - Any new root property/callback must have a consistent name in `ui/main.slint` and Rust.
 - Every UI change must preserve full multi-language behavior: no hard-coded user-facing prose, no persisted translated strings, and no stale Rust-projected copy after a locale switch. Validate at least the source locale and one packaged non-source locale.
+- For multiline native Slint `Text` and direct `TextInput`, prefer the official `line-height-factor`. Never simulate inter-line leading with padding, injected blank lines or invisible glyphs, or a fixed-height wrapper. On Slint 1.18, `StyledText` and the standard `TextEdit` wrapper require a documented exception and synchronized paint/measurement/virtual-extent metrics.
 
 - Hover 命中节点应常驻，用 opacity/state 控制。
 - 滚动和 resize 期间不要重建大型 model。
@@ -115,17 +120,20 @@ Keep Usher a responsive desktop application with explicit module ownership, even
 - 新建变体前先复用现有 FAB、卡片操作、Modal、Toast、Notification、Terminal 组件。
 - 根 property/callback 在 `ui/main.slint` 和 Rust 中必须命名一致。
 - 每次 UI 改动都必须保持完整多语言行为：不得硬编码用户可见文案，不得持久化翻译后的字符串，运行时切换语言后 Rust 投影文案不得残留旧语言；至少验证源语言和一种内置非源语言。
+- 多行原生 Slint `Text` 和直接 `TextInput` 应优先使用官方 `line-height-factor`。禁止用 padding、注入空行/不可见字符或固定高度容器伪造行间距。Slint 1.18 下的 `StyledText` 与标准 `TextEdit` 包装仍须记录例外，并同步绘制、测量和虚拟 extent 指标。
 
 ### Vendored Material / 内置 Material
 
 - Prefer `@material` imports.
-- Never edit `material-1.7.1-fixed/` or any other vendored Slint Material UI source.
+- Never edit `material-1.18.0/` or any other vendored Slint Material UI source.
 - Implement every application behavior and visual adaptation in application-owned `ui/` code so Material UI can be upgraded by replacement.
+- Keep compatibility aliases, input-policy changes, and other upstream adaptations in application-owned wrappers; a Material upgrade must be an upstream directory replacement, not a patch rebase.
 - New code must not import private files from the vendored implementation path; use `@material` and project-owned wrappers.
 
 - 优先通过 `@material` 导入。
-- 绝对禁止修改 `material-1.7.1-fixed/` 或任何其他 vendored Slint Material UI 源码。
+- 绝对禁止修改 `material-1.18.0/` 或任何其他 vendored Slint Material UI 源码。
 - 所有应用行为和视觉适配都必须在项目自有 `ui/` 代码中实现，保证 Material UI 可直接替换升级。
+- 兼容别名、输入策略及其他上游适配必须进入项目自有 wrapper；Material 升级必须直接替换上游目录，禁止重新向 vendor 打补丁。
 - 新代码禁止引用 vendored 实现路径中的私有文件；必须使用 `@material` 和项目自有包装组件。
 
 ## Documentation discipline / 文档同步

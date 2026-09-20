@@ -52,6 +52,9 @@ where
     } else {
         CODE_LINE_HEIGHT
     };
+    let max_cells = (safe_code_width / safe_cell_width)
+        .floor()
+        .clamp(1.0, i32::MAX as f32) as i32;
     let row_height = |index: usize| {
         if index == start {
             return start_height.max(1.0);
@@ -66,15 +69,8 @@ where
                 HUNK_LINE_HEIGHT
             };
         }
-        let columns = if side.is_empty() {
-            line.left_columns
-        } else {
-            line.left_columns.max(line.right_columns)
-        }
-        .max(0) as f32;
-        let visual_lines = ((columns * safe_cell_width) / safe_code_width)
-            .ceil()
-            .max(1.0);
+        let visual_lines =
+            diff_row_soft_wrap_visual_line_count(&line, !side.is_empty(), max_cells) as f32;
         // Soft-wrapped rows use font line pitch; single-line rows stay on the
         // nominal 22px code line height used by unwrapped delegates.
         if visual_lines > 1.0 {
@@ -215,10 +211,43 @@ fn side_content<'a>(line: &'a WorkflowPrDiffLine, side: &str) -> &'a str {
 /// Character index where the soft-wrapped visual line containing `caret` begins.
 ///
 /// Uses a greedy display-column fill with breaks at the last whitespace when
-/// possible — close to Skia's word-wrap fallback for `Text.char-wrap`, so
-/// selection X on continuation lines lines up with the auto-wrapped Text.
+/// possible, matching the lightweight word-wrap contract used by diff extents
+/// and selection geometry.
 pub(super) fn soft_wrap_line_start(content: &str, caret: i32, max_cells: i32) -> i32 {
     soft_wrap_line_range_at_caret(content, caret, max_cells).0
+}
+
+/// Number of visual lines produced by the shared display-column word-wrap
+/// contract. Empty diff rows still occupy one visual line.
+pub(super) fn soft_wrap_visual_line_count(content: &str, max_cells: i32) -> u32 {
+    let chars: Vec<char> = content.chars().collect();
+    if chars.is_empty() {
+        return 1;
+    }
+    let max_cells = max_cells.max(1) as u32;
+    let mut line_start = 0usize;
+    let mut visual_lines = 0u32;
+    while line_start < chars.len() {
+        line_start = soft_wrap_next_line_end(&chars, line_start, max_cells);
+        visual_lines = visual_lines.saturating_add(1);
+    }
+    visual_lines.max(1)
+}
+
+/// Word-wrapped row count shared by cross-row selection and virtual extents.
+/// Split rows occupy the taller of their two code panes.
+pub(super) fn diff_row_soft_wrap_visual_line_count(
+    line: &WorkflowPrDiffLine,
+    split: bool,
+    max_cells: i32,
+) -> u32 {
+    if split {
+        soft_wrap_visual_line_count(line.left_content.as_str(), max_cells).max(
+            soft_wrap_visual_line_count(line.right_content.as_str(), max_cells),
+        )
+    } else {
+        soft_wrap_visual_line_count(line.content.as_str(), max_cells)
+    }
 }
 
 /// Zero-based visual line containing `caret`, using the same word-wrap
@@ -769,6 +798,32 @@ mod tests {
             wrapped_test_hit,
         );
         assert_eq!((rounded.line, rounded.column), (0, 5));
+    }
+
+    #[test]
+    fn cross_row_hit_uses_word_aware_wrapped_extent() {
+        let wrapped = "let greeting = \"中文 Latin 😀 mixed glyphs and super_long_identifier_abcdefghijklmnopqrstuvwxyz_0123456789\";";
+        let lines = ModelRc::new(VecModel::from(vec![
+            line(wrapped, wrapped, wrapped),
+            line(wrapped, wrapped, wrapped),
+            line(wrapped, wrapped, wrapped),
+        ]));
+
+        let hit = resolve_diff_selection_hit(
+            &lines,
+            0,
+            40.0,
+            158.0,
+            88.0,
+            300.0,
+            7.2,
+            22.0,
+            "",
+            |_, _, _| unreachable!("wrapped rows use soft-wrap geometry"),
+            wrapped_test_hit,
+        );
+
+        assert_eq!(hit.line, 1);
     }
 
     #[test]

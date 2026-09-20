@@ -463,7 +463,7 @@ fn highlighted_hook_editor_keeps_native_cursor_blink_and_selection() {
         "transparent text skips the entire native drawing pass"
     );
     assert!(input.text_cursor_width().get() >= 1.0);
-    let visible = input.visual_representation(None);
+    let visible = input.visual_representation();
     assert!(visible.cursor_position.is_some());
     assert_eq!(visible.cursor_color.alpha(), 255);
     if cfg!(target_os = "macos") {
@@ -471,9 +471,9 @@ fn highlighted_hook_editor_keeps_native_cursor_blink_and_selection() {
     }
 
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(501));
-    assert!(input.visual_representation(None).cursor_position.is_none());
+    assert!(input.visual_representation().cursor_position.is_none());
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(501));
-    assert!(input.visual_representation(None).cursor_position.is_some());
+    assert!(input.visual_representation().cursor_position.is_some());
     page.window()
         .dispatch_event(slint::platform::WindowEvent::KeyPressed {
             text: slint::platform::Key::Shift.into(),
@@ -490,7 +490,7 @@ fn highlighted_hook_editor_keeps_native_cursor_blink_and_selection() {
         .dispatch_event(slint::platform::WindowEvent::KeyReleased {
             text: slint::platform::Key::Shift.into(),
         });
-    let selected = input.visual_representation(None);
+    let selected = input.visual_representation();
     assert!(!selected.selection_range.is_empty());
     assert!(input.selection_background_color().alpha() > 0);
     assert!(selected.cursor_position.is_none());

@@ -50,8 +50,8 @@ name = "usher"
 # 生产构建只启用 FemtoVG/OpenGL。Skia 与 FemtoVG/WGPU 仅用于显式诊断构建：
 #   SLINT_BACKEND=winit-skia cargo run --no-default-features --features renderer-skia
 #   SLINT_BACKEND=winit-femtovg-wgpu cargo run --no-default-features --features renderer-femtovg-wgpu
-slint = { version = "1.17.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "raw-window-handle-06", "unstable-fontique-010"] }
-i-slint-core = "=1.17.1"
+slint = { version = "1.18.0", default-features = false, features = ["std", "compat-1-2", "backend-winit", "raw-window-handle-06", "unstable-fontique-011"] }
+i-slint-core = "=1.18.0"
 usher-ui = { path = "crates/usher-ui", default-features = false }
 usher-ui-settings = { path = "crates/usher-ui-settings", default-features = false }
 usher-fs = { path = "crates/usher-fs" }
@@ -62,7 +62,7 @@ usher-ai-review = { path = "crates/usher-ai-review", optional = true }
 usher-state-store = { path = "crates/usher-state-store" }
 usher-search = { path = "crates/usher-search" }
 usher-virtual-list = { path = "crates/usher-virtual-list" }
-parley = "0.10"
+parley = "0.11"
 lazy_static = "1.4"
 log = "0.4"
 fern = { version = "0.7", features = ["colored"] }
@@ -80,7 +80,7 @@ tar = "0.4"
 flate2 = "1.0"
 tray-icon = "0.24"
 image = "0.25"
-resvg = { version = "0.47", default-features = false, features = ["text", "raster-images"] }
+resvg = { version = "0.48", default-features = false, features = ["text", "raster-images"] }
 pulldown-cmark = "0.13"
 config = { version = "0.15", default-features = false, features = ["toml"] }
 directories = "6.0"
@@ -96,7 +96,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "std"]
 rand = "0.10"
 signal-hook = "0.4.3"
 fs2 = "0.4.3"
-base64 = "0.22.1"
+base64 = { version = "0.23.1", default-features = false, features = ["std"] }
 portable-pty = "0.9.0"
 vt100 = "0.16.2"
 libc = "0.2"
@@ -106,8 +106,8 @@ tempfile = "3.27"
 raw-window-handle = "0.6"
 objc = "0.2"
 block2 = "0.6.2"
-core-foundation = "0.9.4"
-system-configuration = "0.7.0"
+core-foundation = "0.10.1"
+system-configuration = "0.8.0"
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1.1.4", features = ["fs"] }
@@ -121,7 +121,10 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Stora
 dark-light = { version = "3.0.0", default-features = false }
 
 [dev-dependencies]
-i-slint-backend-testing = "=1.17.1"
+i-slint-backend-testing = "=1.18.0"
+
+[build-dependencies]
+usher-i18n = { path = "crates/usher-i18n" }
 
 # [target.'cfg(target_arch = "wasm32")'.dependencies]
 # wasm-bindgen = { version = "0.2" }

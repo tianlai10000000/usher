@@ -226,8 +226,8 @@ component HookCodeEditor inherits Rectangle {
         && (HookSettingsState.native-cursor-uses-selection-color || !text-input.has-focus);
     accessible-role: AccessibleRole.text-input;
     out property <bool> has-focus: text-input.has-focus;
-    in-out property <length> viewport-x <=> scroll-view.viewport-x;
-    in-out property <length> viewport-y <=> scroll-view.viewport-y;
+    in-out property <length> viewport-x <=> scroll-view.content-x;
+    in-out property <length> viewport-y <=> scroll-view.content-y;
     callback edited(string);
 
     public function begin-viewport-reset() {
@@ -244,14 +244,14 @@ component HookCodeEditor inherits Rectangle {
 
     scroll-view := ScrollView {
         x: 0px; y: 0px; width: parent.width; height: parent.height;
-        viewport-width: max(self.visible-width,
+        content-width: max(self.visible-width,
             text-input.preferred-width + 2 * root.content-padding-x);
-        viewport-height: max(self.visible-height,
+        content-height: max(self.visible-height,
             text-input.preferred-height + 2 * root.content-padding-y);
 
         code-content := Rectangle {
-            width: scroll-view.viewport-width;
-            height: scroll-view.viewport-height;
+            width: scroll-view.content-width;
+            height: scroll-view.content-height;
             background: transparent;
 
             text-input := TextInput {
@@ -289,25 +289,25 @@ component HookCodeEditor inherits Rectangle {
                     }
                     if (cpos.x + root.content-padding-x + root.viewport-x < 0px) {
                         root.viewport-x = min(0px,
-                            max(scroll-view.visible-width - scroll-view.viewport-width,
+                            max(scroll-view.visible-width - scroll-view.content-width,
                                 -cpos.x - root.content-padding-x));
                     } else if (cpos.x + root.content-padding-x + root.viewport-x
                             > scroll-view.visible-width) {
                         root.viewport-x = min(0px,
-                            max(scroll-view.visible-width - scroll-view.viewport-width,
+                            max(scroll-view.visible-width - scroll-view.content-width,
                                 scroll-view.visible-width - cpos.x - root.content-padding-x));
                     }
                     if (cpos.y + root.content-padding-y + root.viewport-y < 0px) {
                         root.viewport-y = min(
                             0px,
                             scroll-view.visible-height - cpos.y - root.content-padding-y - 20px,
-                            max(scroll-view.visible-height - scroll-view.viewport-height,
+                            max(scroll-view.visible-height - scroll-view.content-height,
                                 -cpos.y - root.content-padding-y),
                         );
                     } else if (cpos.y + root.content-padding-y + root.viewport-y
                             > scroll-view.visible-height - 20px) {
                         root.viewport-y = min(0px,
-                            max(scroll-view.visible-height - scroll-view.viewport-height,
+                            max(scroll-view.visible-height - scroll-view.content-height,
                                 scroll-view.visible-height - cpos.y
                                     - root.content-padding-y - 20px));
                     }

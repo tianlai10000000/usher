@@ -7,7 +7,10 @@ cd "$repo_root"
 
 failed=0
 
-private_material=$(rg -n 'material-1\.7\.1-fixed' ui --glob '*.slint' || true)
+# Application UI may only consume the public @material library mapping. Match
+# every versioned vendored tree so a future directory replacement cannot make
+# this guard silently stale.
+private_material=$(rg -n 'material-[^"/]+/' ui --glob '*.slint' || true)
 if [ -n "$private_material" ]; then
     echo "UI policy: private vendored Material imports are forbidden:" >&2
     echo "$private_material" >&2
@@ -17,10 +20,8 @@ fi
 material_imports=$(rg -n '@material' ui --glob '*.slint' || true)
 unexpected_material=$(echo "$material_imports" \
     | rg -v '^ui/main\.slint:[0-9]+:export \{ MaterialWindowAdapter \} from "@material";' \
-    | rg -v '^ui/views/workflow/pr_review_workspace\.slint:[0-9]+:import \{ ListView, ScrollView \} from "@material";' \
-    | rg -v '^ui/features/ai_review/full\.slint:[0-9]+:import \{ ListView \} from "@material";' \
-    | rg -v '^ui/components/jobs/job\.slint:[0-9]+:import \{ ListView \} from "@material";' \
-    | rg -v '^ui/components/artifact_preview/github_artifact_preview\.slint:[0-9]+:import \{ ListView \} from "@material";' \
+    | rg -v '^ui/views/workflow/pr_review_workspace\.slint:[0-9]+:import \{ ScrollView \} from "@material";' \
+    | rg -v '^ui/components/github_scroll_view\.slint:[0-9]+:import \{ ScrollView as MaterialScrollView \} from "@material";' \
     || true)
 if [ -n "$unexpected_material" ]; then
     echo "UI policy: unexpected @material usage:" >&2

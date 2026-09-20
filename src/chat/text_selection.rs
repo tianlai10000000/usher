@@ -101,7 +101,7 @@ impl TextGeometry {
 #[cfg(not(test))]
 fn chat_font_context() -> FontContext {
     FontContext {
-        collection: slint::fontique_010::shared_collection(),
+        collection: slint::fontique_011::shared_collection(),
         source_cache: SourceCache::default(),
     }
 }

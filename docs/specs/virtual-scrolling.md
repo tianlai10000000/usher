@@ -41,14 +41,16 @@ debounce 测量、按源行数估算、取已见高度最大值，都不能保�
 
 ## Integration / 接入步骤
 
-1. Define a layout key from source identity/revision, final text width, font
-   and paint metrics. Offset, hover and scroll direction must not be in the key.
+1. Define a layout key from source identity/revision, final text width, font,
+   line-height policy and paint metrics. Offset, hover and scroll direction must not be in the key.
    Same-count row edits must advance the revision; model identity alone is not
    a content revision.
 2. Prepare immutable Send-safe source data. Measure expensive wrapping on
    `LatestCompute`, passing the event-loop-selected font collection. Match
-   painting's font, pitch, padding and glyph safety exactly. Cancel obsolete
-   requests and reject results whose key no longer matches.
+   painting's font, `line-height-factor` or documented fallback pitch, wrap mode,
+   padding, glyph safety and line-box rounding exactly. Follow
+   [Multiline text layout](text-layout.md). Cancel obsolete requests and reject
+   results whose key no longer matches.
 3. Install the complete positive row extents into `VirtualList` once per key.
    Use its `content_extent` as the only document-height source. Keep the extent
    stable until an actual source or layout change is committed.
@@ -70,11 +72,12 @@ debounce 测量、按源行数估算、取已见高度最大值，都不能保�
    continue rendering rows from another source. Independent nested output owns
    its gestures; do not put an arbitrating page Flickable above it.
 
-1. Layout key 包含源身份/revision、最终文本宽度、字体和绘制指标，不包含滚动位置、
-   hover 或方向。同数量的行修改也要递增 revision，model 身份不能替代内容版本。
+1. Layout key 包含源身份/revision、最终文本宽度、字体、行高策略和绘制指标，不包含
+   滚动位置、hover 或方向。同数量的行修改也要递增 revision，model 身份不能替代内容版本。
 2. 构造不可变 Send-safe 源数据，昂贵换行交给 `LatestCompute`，传入 event-loop
-   选定的字体 collection；字体、行距、padding、安全余量必须与绘制一致。取消旧
-   请求，拒绝 key 不匹配结果。
+   选定的字体 collection；字体、`line-height-factor` 或已记录的 fallback pitch、wrap
+   mode、padding、安全余量及 line-box rounding 必须与绘制一致，并遵循
+   [多行文本排版规范](text-layout.md)。取消旧请求，拒绝 key 不匹配结果。
 3. 每个 key 只安装一次完整正数行 extent；唯一总高度为 `VirtualList.content_extent`，
    只有真实内容或布局提交才能改变它。
 4. 视口使用精确文档高度，仅挂载有界虚拟窗口，行使用精确 start/extent。复用稳定
@@ -96,6 +99,7 @@ debounce 测量、按源行数估算、取已见高度最大值，都不能保�
 | Thumb travel 25/50/75/100% / 滑块行程 | Same normalized exact offset; final row/continuations reachable at 100% / 归一化精确 offset 一致，100% 可达最后行/续行 |
 | Down then up, drag release / 下滚、上滚、拖动释放 | No gap, overlap, source-number duplication or estimated-range correction / 无空洞、重叠、重复源行号或估算范围回跳 |
 | Resize narrow/wide and normal/tall / 窄宽、普通高窗口 resize | Reflow once per layout key; painting and installed extents agree / 按 key 重排，绘制与 extent 一致 |
+| Line-height factor or fallback pitch change / 行高 factor 或 fallback pitch 变化 | New layout key; worker measurement, painting and all extents change together / 生成新 layout key，Worker 测量、绘制与全部 extent 同步变化 |
 | Append, tail eviction, same-count edit / 追加、尾部截断、同数量修改 | Correct revision/rows/extent; no stale worker result / 版本、行和高度正确，无旧 Worker 结果 |
 | Collapse/reopen and source switch / 折叠重开、切换来源 | Bounded cache, no cross-source content or orphan compute / 有界缓存，无串源或遗留计算 |
 | English + packaged non-source locale / 英文与内置非源语言 | Identical geometry rules, current semantic loading/error copy / 几何规则一致，loading/error 文案即时正确 |

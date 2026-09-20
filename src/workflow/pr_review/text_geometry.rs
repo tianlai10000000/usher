@@ -41,7 +41,7 @@ struct ParleyTextGeometry {
 impl ParleyTextGeometry {
     fn new() -> Self {
         Self::with_font_context(FontContext {
-            collection: slint::fontique_010::shared_collection(),
+            collection: slint::fontique_011::shared_collection(),
             source_cache: SourceCache::default(),
         })
     }

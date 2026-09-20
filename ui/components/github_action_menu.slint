@@ -160,10 +160,10 @@ export component GitHubActionMenu inherits FocusScope {
         menu-scroll := Flickable {
             width: parent.width;
             height: parent.height;
-            viewport-width: self.width;
-            viewport-height: max(self.height, root.content-height);
-            viewport-x: 0px;
-            viewport-y <=> root.scroll-offset-y;
+            content-width: self.width;
+            content-height: max(self.height, root.content-height);
+            content-x: 0px;
+            content-y <=> root.scroll-offset-y;
             interactive: true;
 
             content-host := Rectangle {
@@ -176,7 +176,7 @@ export component GitHubActionMenu inherits FocusScope {
 
         if root.content-height > root.height: scroll-thumb := Rectangle {
             x: parent.width - 7px;
-            y: 2px + (-menu-scroll.viewport-y)
+            y: 2px + (-menu-scroll.content-y)
                 * (parent.height - self.height - 4px)
                 / max(1px, root.content-height - parent.height);
             width: 5px;

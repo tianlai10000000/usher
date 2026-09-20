@@ -319,7 +319,9 @@ tokens used by compact AI Review responses: a 14 px body in a 22 px line box,
 prose and a list group, and no extra space between consecutive list items. It
 uses a 24 px hanging-list gutter with structured ordered/task markers, Primer
 semantic colors, draws no automatic heading rules, and keeps transparent
-quotes with a 4 px leading rule, table separators, and subtle bordered code
+quotes with a square 4 px leading rule, a 16 px rule-to-content gap, and a rule
+height aligned to the text line box rather than its glyph-clipping allowance;
+table separators and subtle bordered code
 surfaces using the platform-registered code font. Fenced code uses a 10 px top
 inset without a language label, a compact 32 px label-and-content inset when a
 language exists, and 10 px bottom padding. Text blocks include explicit
@@ -353,7 +355,8 @@ Slint 1.17 `StyledText` 负责行内强调和链接排版。
 共享 Preview Surface 延续紧凑 AI Review 回复使用的 Codex 排版 token：14px 正文与
 22px 行盒、24/20/17/15px 的 H1-H6、相邻段落 20px、正文与列表组 10px、连续列表项
 不额外加间距。列表使用 24px 悬挂 gutter，并结构化显示有序/任务 marker。Surface
-使用 Primer 语义色、不自动为标题绘制分隔线，并保留透明底加 4px 左侧强调线的引用块、
+使用 Primer 语义色、不自动为标题绘制分隔线，并保留透明底引用块；引用块使用方角 4px
+左侧强调线、强调线到正文 16px 间距，且强调线高度与正文行盒对齐，不计字形裁剪安全量。
 表格分隔，以及使用平台注册代码字体的低对比带边框代码 Surface。文字 block 保留显式
 字形高度安全量。无语言标签的围栏代码顶部为 10px，有语言标签时标签与正文共用紧凑的
 32px 顶部空间，底部为 10px。对于正文，Parley extent bridge 同步稳定宽度、字体、字号、

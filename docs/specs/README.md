@@ -24,6 +24,7 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 
 | Spec | Status | Code owners |
 | --- | --- | --- |
+| [Multiline text layout](text-layout.md) | Mandatory native line-height, documented fallback and measurement/extent synchronization / 强制原生行高、例外记录与测量/extent 同步契约 | `ui/`, feature text-layout adapters, worker measurement and exact virtual extents |
 | [Exact virtual scrolling](virtual-scrolling.md) | Shared contract for variable-height documents and stable thumb geometry / 可变行高文档与稳定滑块几何通用契约 | `crates/usher-virtual-list/`, `src/app_runtime/latest_compute.rs`, `ui/components/github_scroll_view.slint`, feature layout adapters |
 | [HTTP pipeline](http.md) | Explicit response budgets and bounded error reads / 显式响应预算与有界错误读取 | `src/http/mod.rs`, all HTTP callers |
 | [Cross-page state store](state-store.md) | Current: bounded latest snapshots and revision barriers / 当前：有界最新快照与版本屏障 | `crates/usher-state-store/`, all cross-page state owners and UI bridges |

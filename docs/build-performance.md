@@ -273,8 +273,9 @@ Status: implemented and measured on 2026-08-03.
 3. Verify `usher-ui` default features and root feature forwarding. Preserve a
    usable standalone default while ensuring the application root disables it
    and forwards exactly one renderer explicitly.
-4. Correct the stale `material-1.0-fixed` Slint IDE library path to the current
-   application-owned `material-1.7.1-fixed` mapping.
+4. Correct the stale `material-1.0-fixed` Slint IDE library path to the
+   then-current application-owned `material-1.7.1-fixed` mapping (later
+   replaced by the unmodified 1.18.0 source).
 5. After profile/feature identities are finalized, perform one controlled target
    cleanup. Do not present `cargo clean` itself as a compile-speed optimization.
 
@@ -304,8 +305,9 @@ seconds; that one-time warm-up is not included in the warm-edit comparison.
 An empty `usher-ui` standalone default was tested and rejected because Slint's
 winit backend requires a renderer. The package therefore retains FemtoVG for
 direct builds; the application root already uses `default-features = false` and
-continues to select and forward exactly one renderer explicitly. The VS Code
-Material mapping now matches `material-1.7.1-fixed`.
+continues to select and forward exactly one renderer explicitly. At the time,
+the VS Code Material mapping matched `material-1.7.1-fixed`; the current mapping
+was later advanced to the unmodified 1.18.0 source.
 
 A controlled `cargo clean -p usher-ui` removed 13.1 GiB of Cargo artifacts. In
 physical `du` measurements, `target/` fell from about 18.4 GiB to 6.5 GiB and
@@ -882,8 +884,9 @@ feature 组合；修正 IDE 中过期的 `material-1.0-fixed` 路径。每个候
 792,121,424 字节降到 482,158,224 字节，减少 39.1%。首次 profile identity
 迁移预热耗时 2 分 35 秒，不计入热构建对比。实测 `usher-ui` standalone
 default 置空会因 winit 缺少 renderer 而无法独立构建，因此保留 FemtoVG 默认值；
-应用根已有 `default-features = false`，仍只显式选择并转发一个 renderer。VS Code
-Material 路径已同步到 `material-1.7.1-fixed`。
+应用根已有 `default-features = false`，仍只显式选择并转发一个 renderer。当时的
+VS Code Material 路径已同步到 `material-1.7.1-fixed`；当前路径随后升级为未经
+修改的 1.18.0 上游源码。
 
 定向 `cargo clean -p usher-ui` 删除了 13.1 GiB Cargo 逻辑产物；按 `du` 的物理
 占用，`target/` 从约 18.4 GiB 降到 6.5 GiB，`debug/incremental` 从约

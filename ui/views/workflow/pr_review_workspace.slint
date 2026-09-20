@@ -1,4 +1,4 @@
-import { ListView, ScrollView } from "@material";
+import { ScrollView } from "@material";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { AppState } from "../../state/app_state.slint";
 import { TransientOverlayState } from "../../state/transient_overlay_state.slint";
@@ -10,7 +10,7 @@ import { GitHubIconButton } from "../../components/button/github_icon_button.sli
 import { GitHubTooltip } from "../../components/github_tooltip.slint";
 import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint";
 import { GitHubCenteredLoadingState } from "../../components/github_spinner.slint";
-import { GitHubVirtualListScrollbar } from "../../components/github_scroll_view.slint";
+import { GitHubPassiveScrollView, GitHubVirtualListScrollbar, ListView } from "../../components/github_scroll_view.slint";
 import { GitHubActionListItem, GitHubActionMenu, GitHubActionMenuTriggerArea } from "../../components/github_action_menu.slint";
 import { PullRequestReviewPageContract } from "../../features/pr_review/contract.slint";
 import { I18n } from "@i18n";
@@ -45,7 +45,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             && root.commit-range-start < root.commits.length;
     // Rust registers GitHub's preferred macOS monospace face (SFMono-Regular)
     // at startup. Menlo remains the explicit fallback when that system font is
-    // unavailable; Slint 1.17 accepts one family name rather than a CSS stack.
+    // unavailable; Slint accepts one family name rather than a CSS stack.
     private property <length> code-line-height: 22px;
     private property <length> hunk-line-height: 28px;
     // GitHub Commits tab: one shared card per UTC+08:00 date group.
@@ -64,8 +64,6 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
     // hard-coded estimate. Selection, wrapping, and token geometry share it.
     private property <length> code-character-width:
         max(1px, code-cell-measure.preferred-width / 32);
-    private property <length> code-natural-line-height:
-        max(1px, code-cell-measure.preferred-height);
     private property <length> measured-code-width:
         max(root.max-code-columns * root.code-character-width, longest-code-line-measure.preferred-width);
     // GitHub Primer functional tokens (primer/primitives:
@@ -464,6 +462,21 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
         // creating a gap, so keep the contiguous GitHub-style range intact.
     }
 
+    // Keep this helper on the exported component rather than the nested diff
+    // surface. Slint 1.18.0 miscounts parent-frame callback references when a
+    // nested helper is invoked from a repeater (slint-ui/slint#13462).
+    function request-hunk-expansion(
+        line-index: int,
+        direction: string,
+        content-y: length,
+        viewport-y: length,
+    ) {
+        root.hunk-scroll-anchor-screen-y = content-y + viewport-y;
+        root.hunk-scroll-anchor-resolved = false;
+        root.hunk-scroll-restore-pending = true;
+        root.expand-hunk(line-index, direction);
+    }
+
     changed file-filter => { root.filter-files(root.file-filter); }
     changed selected-file-index => {
         root.clear-diff-selection();
@@ -738,13 +751,16 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             height: root.stable-layout-height;
             spacing: 0px;
 
-        Rectangle {
+        pr-header-band := Rectangle {
             width: parent.width;
             height: root.stable-layout-width < 1500px
                 ? 92px
                     + root.compact-title-height-extra
                     + (root.compact-summary-wraps ? 32px : 0px)
-                : (76px
+                // The wide header uses the same 16px top inset as the compact
+                // header. Include it in the band height so the 32/64px summary
+                // row always clears the divider below it at fullscreen widths.
+                : (92px
                     + root.wide-title-height-extra
                     + (root.wide-summary-wraps ? 32px : 0px));
             // Keep action-button tooltips above the following files toolbar and
@@ -856,7 +872,11 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
 
         }
 
-        Rectangle { width: parent.width; height: 1px; background: root.github-border-default; }
+        pr-header-bottom-rule := Rectangle {
+            width: parent.width;
+            height: 1px;
+            background: root.github-border-default;
+        }
 
         review-tabs := Rectangle {
             width: parent.width;
@@ -1194,8 +1214,8 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                 height: parent.height;
                 horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
                 vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
-                viewport-width: self.visible-width;
-                viewport-height: conversation-flow.preferred-height;
+                content-width: self.visible-width;
+                content-height: conversation-flow.preferred-height;
 
                 conversation-flow := VerticalLayout {
                     x: 16px;
@@ -2527,8 +2547,8 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                 private property <bool> location-scroll-awaiting-content-refresh: false;
                 private property <WorkflowPrDiffVirtualWindow> virtual-window;
                 private property <bool> refreshing-virtual-window: false;
-                private property <length> diagnostic-viewport-y: diff-scroll.viewport-y;
-                private property <length> diagnostic-viewport-height: diff-scroll.viewport-height;
+                private property <length> diagnostic-viewport-y: diff-scroll.content-y;
+                private property <length> diagnostic-viewport-height: diff-scroll.content-height;
                 private property <length> diagnostic-visible-height: diff-scroll.visible-height;
                 private property <length> diagnostic-visible-width: diff-scroll.visible-width;
                 private property <bool> diagnostic-find-open: root.diff-find-open;
@@ -2537,21 +2557,14 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                 // retries for the asynchronous highlighted-model replacement.
                 private property <int> hunk-scroll-restore-attempts: 0;
 
-                function request-hunk-expansion(line-index: int, direction: string, content-y: length) {
-                    root.hunk-scroll-anchor-screen-y = content-y + diff-scroll.viewport-y;
-                    root.hunk-scroll-anchor-resolved = false;
-                    root.hunk-scroll-restore-pending = true;
-                    root.expand-hunk(line-index, direction);
-                }
-
                 function emit-scroll-diagnostic(kind: string, requested-y: length) {
                     if root.scroll-diagnostics-enabled {
                         root.diagnose-diff-scroll(
                             kind,
-                            diff-scroll.viewport-y / 1px,
+                            diff-scroll.content-y / 1px,
                             requested-y / 1px,
                             diff-scroll.visible-height / 1px,
-                            diff-scroll.viewport-height / 1px,
+                            diff-scroll.content-height / 1px,
                             root.diff-find-open,
                             root.diff-find-input-focused,
                             root.hunk-scroll-restore-pending,
@@ -2573,7 +2586,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                     let next = root.layout-diff-virtual-window(
                         root.line-content-revision,
                         root.line-metrics,
-                        max(0.0, -diff-scroll.viewport-y / 1px),
+                        max(0.0, -diff-scroll.content-y / 1px),
                         max(1.0, diff-scroll.visible-height / 1px),
                         code-width,
                         root.code-character-width / 1px,
@@ -2582,8 +2595,8 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                     );
                     let clamped-y = -next.scroll-offset * 1px;
                     diff-surface.virtual-window = next;
-                    if Math.abs(diff-scroll.viewport-y - clamped-y) > 0.5px {
-                        diff-scroll.viewport-y = clamped-y;
+                    if Math.abs(diff-scroll.content-y - clamped-y) > 0.5px {
+                        diff-scroll.content-y = clamped-y;
                     }
                     diff-surface.refreshing-virtual-window = false;
                 }
@@ -2591,21 +2604,21 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                 init => {
                     diff-surface.refresh-virtual-window();
                     diff-surface.processed-line-content-revision = root.line-content-revision;
-                    diff-surface.emit-scroll-diagnostic("surface-init", diff-scroll.viewport-y);
+                    diff-surface.emit-scroll-diagnostic("surface-init", diff-scroll.content-y);
                 }
 
                 changed diagnostic-viewport-y => {
                     diff-surface.refresh-virtual-window();
-                    diff-surface.emit-scroll-diagnostic("viewport", diff-scroll.viewport-y);
+                    diff-surface.emit-scroll-diagnostic("viewport", diff-scroll.content-y);
                 }
 
                 changed diagnostic-viewport-height => {
-                    diff-surface.emit-scroll-diagnostic("extent", diff-scroll.viewport-y);
+                    diff-surface.emit-scroll-diagnostic("extent", diff-scroll.content-y);
                 }
 
                 changed diagnostic-visible-height => {
                     diff-surface.refresh-virtual-window();
-                    diff-surface.emit-scroll-diagnostic("visible", diff-scroll.viewport-y);
+                    diff-surface.emit-scroll-diagnostic("visible", diff-scroll.content-y);
                 }
 
                 changed diagnostic-visible-width => {
@@ -2615,7 +2628,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                 changed diagnostic-find-open => {
                     diff-surface.emit-scroll-diagnostic(
                         root.diff-find-open ? "find-open" : "find-close",
-                        diff-scroll.viewport-y
+                        diff-scroll.content-y
                     );
                 }
 
@@ -2634,13 +2647,13 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                         code-width,
                         root.code-character-width / 1px,
                         root.diff-view == "split" ? root.diff-find-cur-side : "",
-                        diff-scroll.viewport-y / 1px,
+                        diff-scroll.content-y / 1px,
                         diff-scroll.visible-height / 1px,
-                        diff-scroll.viewport-height / 1px
+                        diff-scroll.content-height / 1px
                     );
-                    if Math.abs(diff-scroll.viewport-y - target-y * 1px) > 1px {
+                    if Math.abs(diff-scroll.content-y - target-y * 1px) > 1px {
                         diff-surface.emit-scroll-diagnostic("find-write", target-y * 1px);
-                        diff-scroll.viewport-y = target-y * 1px;
+                        diff-scroll.content-y = target-y * 1px;
                     }
                 }
 
@@ -2650,11 +2663,11 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                     }
                     let target-y = root.resolve-location-viewport-y(
                         root.location-row-index,
-                        diff-scroll.viewport-y / 1px,
+                        diff-scroll.content-y / 1px,
                         diff-scroll.visible-height / 1px
                     );
-                    if Math.abs(diff-scroll.viewport-y - target-y * 1px) > 1px {
-                        diff-scroll.viewport-y = target-y * 1px;
+                    if Math.abs(diff-scroll.content-y - target-y * 1px) > 1px {
+                        diff-scroll.content-y = target-y * 1px;
                     }
                 }
 
@@ -2662,8 +2675,8 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                     root.hunk-scroll-restore-pending = false;
                     root.hunk-scroll-anchor-resolved = false;
                     diff-surface.emit-scroll-diagnostic("model-reset-write", 0px);
-                    diff-scroll.viewport-x = 0px;
-                    diff-scroll.viewport-y = 0px;
+                    diff-scroll.content-x = 0px;
+                    diff-scroll.content-y = 0px;
                 }
 
                 changed observed-line-content-revision => {
@@ -2706,12 +2719,12 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                             && root.hunk-scroll-anchor-resolved {
                             let minimum-y = min(
                                 0px,
-                                diff-scroll.visible-height - diff-scroll.viewport-height,
+                                diff-scroll.visible-height - diff-scroll.content-height,
                             );
                             let target-y = root.hunk-scroll-anchor-screen-y
                                 - root.hunk-scroll-anchor-content-y;
                             diff-surface.emit-scroll-diagnostic("hunk-write", target-y);
-                            diff-scroll.viewport-y = max(minimum-y, min(0px, target-y));
+                            diff-scroll.content-y = max(minimum-y, min(0px, target-y));
                             if diff-surface.hunk-scroll-restore-attempts <= 1 {
                                 diff-surface.hunk-scroll-restore-attempts = 0;
                                 root.hunk-scroll-restore-pending = false;
@@ -3118,7 +3131,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                             vertical-stretch: 1;
                             background: transparent;
 
-                        diff-scroll := ScrollView {
+                        diff-scroll := GitHubPassiveScrollView {
                             width: parent.width;
                             height: parent.height;
                             visible: !root.large-diff-deferred && !root.large-diff-loading;
@@ -3126,14 +3139,12 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                             // 8px and cancels the code TouchArea. GitHub treats
                             // dragging code as selection; wheel/touchpad and
                             // the vertical scrollbar continue to scroll this view.
-                            interactive: false;
                             // Diff rows calculate their wrapped height from the
-                            // available code column. Never reserve or expose a
-                            // horizontal track for content that already wraps.
-                            horizontal_scrollbar_policy: ScrollBarPolicy.always_off;
-                            vertical_scrollbar_policy: ScrollBarPolicy.always_off;
-                            viewport_width: self.visible_width;
-                            viewport_height: max(
+                            // available code column. This passive viewport has
+                            // no built-in tracks; the exact scrollbar below
+                            // owns the vertical range.
+                            content-width: self.visible-width;
+                            content-height: max(
                                 self.visible_height,
                                 diff-surface.virtual-window.content-height * 1px
                             );
@@ -3223,7 +3234,14 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                                 }
                                                 hunk-expand-all-touch := TouchArea {
                                                     mouse-cursor: pointer;
-                                                    clicked => { diff-surface.request-hunk-expansion(line.source-index, "all", diff-line-row.y); }
+                                                    clicked => {
+                                                        root.request-hunk-expansion(
+                                                            line.source-index,
+                                                            "all",
+                                                            diff-line-row.y,
+                                                            diff-scroll.content-y,
+                                                        );
+                                                    }
                                                 }
                                             }
                                             if line.expand-down && !line.expand-all: Rectangle {
@@ -3243,7 +3261,14 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                                 }
                                                 hunk-expand-down-touch := TouchArea {
                                                     mouse-cursor: pointer;
-                                                    clicked => { diff-surface.request-hunk-expansion(line.source-index, "down", diff-line-row.y); }
+                                                    clicked => {
+                                                        root.request-hunk-expansion(
+                                                            line.source-index,
+                                                            "down",
+                                                            diff-line-row.y,
+                                                            diff-scroll.content-y,
+                                                        );
+                                                    }
                                                 }
                                             }
                                             if line.expand-up && !line.expand-all: Rectangle {
@@ -3263,7 +3288,14 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                                 }
                                                 hunk-expand-up-touch := TouchArea {
                                                     mouse-cursor: pointer;
-                                                    clicked => { diff-surface.request-hunk-expansion(line.source-index, "up", diff-line-row.y); }
+                                                    clicked => {
+                                                        root.request-hunk-expansion(
+                                                            line.source-index,
+                                                            "up",
+                                                            diff-line-row.y,
+                                                            diff-scroll.content-y,
+                                                        );
+                                                    }
                                                 }
                                             }
                                         }
@@ -3277,9 +3309,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                                 x: 0px;
                                                 y: 0px;
                                                 width: parent.width;
-                                                height: diff-line-row.unified-wraps
-                                                    ? root.code-natural-line-height
-                                                    : root.code-line-height;
+                                                height: root.code-line-height;
                                                 text: line.old-line == 0 ? "" : line.old-line;
                                                 horizontal-alignment: center;
                                                 vertical-alignment: center;
@@ -3299,9 +3329,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                                 x: 0px;
                                                 y: 0px;
                                                 width: parent.width;
-                                                height: diff-line-row.unified-wraps
-                                                    ? root.code-natural-line-height
-                                                    : root.code-line-height;
+                                                height: root.code-line-height;
                                                 text: line.new-line == 0 ? "" : line.new-line;
                                                 horizontal-alignment: center;
                                                 vertical-alignment: center;
@@ -3323,9 +3351,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                                 x: 0px;
                                                 y: 0px;
                                                 width: parent.width;
-                                                height: diff-line-row.unified-wraps
-                                                    ? root.code-natural-line-height
-                                                    : root.code-line-height;
+                                                height: root.code-line-height;
                                                 text: line.kind == "addition" ? "+" : (line.kind == "deletion" ? "-" : "");
                                                 horizontal-alignment: center;
                                                 vertical-alignment: center;
@@ -3674,7 +3700,14 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                         }
                                         split-hunk-expand-all-touch := TouchArea {
                                             mouse-cursor: pointer;
-                                            clicked => { diff-surface.request-hunk-expansion(line.source-index, "all", diff-line-row.y); }
+                                            clicked => {
+                                                root.request-hunk-expansion(
+                                                    line.source-index,
+                                                    "all",
+                                                    diff-line-row.y,
+                                                    diff-scroll.content-y,
+                                                );
+                                            }
                                         }
                                     }
                                     split-hunk-expand-down-action := Rectangle {
@@ -3695,7 +3728,14 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                         }
                                         split-hunk-expand-down-touch := TouchArea {
                                             mouse-cursor: pointer;
-                                            clicked => { diff-surface.request-hunk-expansion(line.source-index, "down", diff-line-row.y); }
+                                            clicked => {
+                                                root.request-hunk-expansion(
+                                                    line.source-index,
+                                                    "down",
+                                                    diff-line-row.y,
+                                                    diff-scroll.content-y,
+                                                );
+                                            }
                                         }
                                     }
                                     split-hunk-expand-up-action := Rectangle {
@@ -3716,7 +3756,14 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                         }
                                         split-hunk-expand-up-touch := TouchArea {
                                             mouse-cursor: pointer;
-                                            clicked => { diff-surface.request-hunk-expansion(line.source-index, "up", diff-line-row.y); }
+                                            clicked => {
+                                                root.request-hunk-expansion(
+                                                    line.source-index,
+                                                    "up",
+                                                    diff-line-row.y,
+                                                    diff-scroll.content-y,
+                                                );
+                                            }
                                         }
                                     }
                                 }
@@ -3728,9 +3775,9 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                             y: 0px;
                             height: parent.height;
                             z: 40;
-                            viewport-y <=> diff-scroll.viewport-y;
+                            viewport-y <=> diff-scroll.content-y;
                             visible-height: diff-scroll.visible-height;
-                            content-height: diff-scroll.viewport-height;
+                            content-height: diff-scroll.content-height;
                             enabled: diff-scroll.visible;
                         }
                         }
@@ -3921,7 +3968,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                 z: 3100;
                 horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
                 vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
-                viewport-height: commit-range-content.preferred-height;
+                content-height: commit-range-content.preferred-height;
 
                 commit-range-content := VerticalLayout {
                     width: commit-range-scroll.visible-width;

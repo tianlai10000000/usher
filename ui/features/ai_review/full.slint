@@ -1,6 +1,5 @@
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
-import { ListView } from "@material";
-import { GitHubScrollView, GitHubVirtualListScrollbar } from "../../components/github_scroll_view.slint";
+import { GitHubScrollView, GitHubVirtualListScrollbar, ListView } from "../../components/github_scroll_view.slint";
 import { GitHubIconButton } from "../../components/button/github_icon_button.slint";
 import { GitHubCenteredLoadingState, GitHubSpinner } from "../../components/github_spinner.slint";
 import { GitHubAiReviewFindingRow, GitHubAiReviewUserMessage } from "../../components/ai_review/github_ai_review_components.slint";
@@ -875,14 +874,14 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
             height: parent.height;
             horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
             vertical-scrollbar-policy: ScrollBarPolicy.always-off;
-            viewport-y <=> root.virtual-response-viewport-y;
+            content-y <=> root.virtual-response-viewport-y;
             changed visible-width => { root.virtual-response-visible-width = self.visible-width; }
             changed visible-height => { root.virtual-response-visible-height = self.visible-height; }
-            changed viewport-height => { root.virtual-response-content-height = self.viewport-height; }
+            changed content-height => { root.virtual-response-content-height = self.content-height; }
             init => {
                 root.virtual-response-visible-width = self.visible-width;
                 root.virtual-response-visible-height = self.visible-height;
-                root.virtual-response-content-height = self.viewport-height;
+                root.virtual-response-content-height = self.content-height;
             }
             scrolled => { root.interaction-started(); }
 
@@ -930,9 +929,9 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
             x: parent.width - self.width;
             width: GitHubMetrics.size-8;
             height: parent.height;
-            viewport-y <=> virtual-response-list.viewport-y;
+            viewport-y <=> virtual-response-list.content-y;
             visible-height: virtual-response-list.visible-height;
-            content-height: virtual-response-list.viewport-height;
+            content-height: virtual-response-list.content-height;
             enabled: !root.layout-resizing;
             z: 20;
         }

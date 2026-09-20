@@ -468,6 +468,11 @@ export component GitHubTextField inherits Rectangle {
     // U+2022 • used by github.com), so shrink + letter-space only while
     // masked so the dots match GitHub password/token field density.
     private property <bool> masking: root.secret && !root.reveal;
+    // Keep the native TextInput as wide as its content. Pointer capture then
+    // remains on the text editor while a selection drag leaves the clipped
+    // field, and cursor-position updates scroll the selected endpoint back
+    // into view.
+    private property <length> input-scroll-x: 0px;
 
     width: 100%;
     private property <string> supporting-text:
@@ -505,11 +510,25 @@ export component GitHubTextField inherits Rectangle {
         clip: true;
 
         field-input := TextInput {
-            x: field-input.has-focus ? 11px : 12px;
+            private property <length> horizontal-padding:
+                field-input.has-focus ? 11px : 12px;
+            private property <length> trailing-reserve:
+                root.loading ? 24px : 0px;
+            private property <length> visible-width:
+                max(1px, parent.width - self.horizontal-padding * 2 - self.trailing-reserve);
+
+            x: self.horizontal-padding + min(
+                0px,
+                max(
+                    self.visible-width - self.width - self.text-cursor-width,
+                    root.input-scroll-x
+                )
+            );
             y: (parent.height - self.preferred-height) / 2;
-            width: parent.width
-                - (field-input.has-focus ? 22px : 24px)
-                - (root.loading ? 24px : 0px);
+            width: max(
+                self.visible-width - self.text-cursor-width,
+                self.preferred-width
+            );
             text <=> root.text;
             enabled: root.enabled && !root.loading;
             input-type: root.masking ? InputType.password : InputType.text;
@@ -523,6 +542,16 @@ export component GitHubTextField inherits Rectangle {
             accessible-enabled: self.enabled;
             accessible-label: root.label;
             accessible-value <=> self.text;
+            cursor_position_changed(cursor-position) => {
+                if cursor-position.x + root.input-scroll-x < 0px {
+                    root.input-scroll-x = -cursor-position.x;
+                } else if cursor-position.x + root.input-scroll-x
+                        > self.visible-width - self.text-cursor-width {
+                    root.input-scroll-x = self.visible-width
+                        - cursor-position.x
+                        - self.text-cursor-width;
+                }
+            }
             edited => { root.edited(self.text); }
         }
 

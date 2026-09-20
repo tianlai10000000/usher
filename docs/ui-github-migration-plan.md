@@ -52,7 +52,7 @@
 - [x] Add application-owned `GitHubTheme` and `GitHubMetrics`.
 - [x] Remove the legacy `ColorsTheme`.
 - [x] Replace Material palette/style/typography token usage in active UI.
-- [x] Remove direct Slint imports from `material-1.7.1-fixed/`; use
+- [x] Remove direct Slint imports from the then-current `material-1.7.1-fixed/`; use
   `@material` public imports where a low-level control is still needed.
 - [x] Centralize active GitHub/Primer functional colors, including PR diff and
   overlay roles.
@@ -85,7 +85,7 @@ the UI Components playground.
   items.
 - [x] Extend `GitHubTextField` with required, disabled, loading, caption, and
   descriptive validation-message states.
-- [x] Keep all `material-1.7.1-fixed/` files unchanged and continue using only
+- [x] Keep all then-current `material-1.7.1-fixed/` files unchanged and continue using only
   public `@material` imports.
 - [x] Update related architecture/spec documents and bug history.
 - [x] User acceptance, including verification of the breadcrumb alignment and
@@ -300,7 +300,7 @@ Its final acceptance is grouped with Batch 4 below.
   activation, Escape dismissal, and keyboard-visible focus to shared controls
   and the Jobs disclosure rows.
 - [x] Limit Material to the public root adapter and PR Review virtualization,
-  keep `material-1.7.1-fixed/` unchanged, and enforce both Material and icon
+  keep the then-current `material-1.7.1-fixed/` tree unchanged, and enforce both Material and icon
   boundaries with `scripts/check-ui-policy.sh`.
 - [x] Verify the live UI Components route at `640x600`, `836x755`, and
   `1280x900`; verify Tab focus and confirm no horizontal overflow, incoherent

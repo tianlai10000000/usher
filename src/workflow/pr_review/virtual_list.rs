@@ -1,5 +1,6 @@
 //! PR Diff adapter for the framework-neutral virtual-list facade.
 
+use std::borrow::Cow;
 use std::rc::Rc;
 
 use slint::{Model, ModelRc, VecModel};
@@ -9,6 +10,11 @@ use crate::{
     WorkflowPrDiffLine, WorkflowPrDiffRowMetric, WorkflowPrDiffVirtualRow,
     WorkflowPrDiffVirtualWindow,
 };
+
+use super::diff_model::LazyPrDiffLineModel;
+use super::diff_projection::DiffRowProjection;
+use super::hunk::sanitize_diff_content;
+use super::selection::{diff_row_soft_wrap_visual_line_count, soft_wrap_visual_line_count};
 
 const DIFF_OVERSCAN_ROWS: usize = 4;
 
@@ -66,18 +72,14 @@ impl PrDiffVirtualListBridge {
         };
         let layout_changed = self.layout_key != Some(key);
         if layout_changed {
-            let extents = metrics
-                .iter()
-                .map(|metric| {
-                    row_extent(
-                        &metric,
-                        code_width,
-                        cell_width,
-                        code_line_height,
-                        hunk_line_height,
-                    )
-                })
-                .collect::<Vec<_>>();
+            let extents = row_extents(
+                metrics,
+                lines,
+                code_width,
+                cell_width,
+                code_line_height,
+                hunk_line_height,
+            );
             self.list
                 .replace_item_extents(extents.as_slice(), DIFF_OVERSCAN_ROWS);
             self.layout_key = Some(key);
@@ -260,8 +262,89 @@ fn virtual_row(
     })
 }
 
+fn row_extents(
+    metrics: &ModelRc<WorkflowPrDiffRowMetric>,
+    lines: &ModelRc<WorkflowPrDiffLine>,
+    code_width: f32,
+    cell_width: f32,
+    code_line_height: f32,
+    hunk_line_height: f32,
+) -> Vec<u32> {
+    let max_cells = max_wrap_cells(code_width, cell_width);
+    let source_model = lines.as_any().downcast_ref::<LazyPrDiffLineModel>();
+    metrics
+        .iter()
+        .enumerate()
+        .map(|(index, metric)| {
+            let visual_lines = source_model
+                .and_then(|model| source_visual_line_count(model, index, max_cells))
+                .or_else(|| {
+                    lines
+                        .row_data(index)
+                        .map(|line| materialized_visual_line_count(&line, max_cells))
+                });
+            row_extent(
+                &metric,
+                visual_lines,
+                code_width,
+                cell_width,
+                code_line_height,
+                hunk_line_height,
+            )
+        })
+        .collect()
+}
+
+fn source_visual_line_count(
+    model: &LazyPrDiffLineModel,
+    row: usize,
+    max_cells: i32,
+) -> Option<u32> {
+    let file = model.source_file();
+    let line_count = |index: usize| {
+        file.lines.get(index).map_or(1, |line| {
+            let content = sanitized_source_text(line.content.as_str());
+            soft_wrap_visual_line_count(content.as_ref(), max_cells)
+        })
+    };
+    Some(match *model.source_projection().get(row)? {
+        DiffRowProjection::Unified(index) => line_count(index),
+        DiffRowProjection::Split {
+            left,
+            right,
+            source_index,
+            spanning,
+        } => {
+            if spanning {
+                line_count(source_index)
+            } else {
+                left.map_or(1, line_count).max(right.map_or(1, line_count))
+            }
+        }
+    })
+}
+
+fn materialized_visual_line_count(line: &WorkflowPrDiffLine, max_cells: i32) -> u32 {
+    diff_row_soft_wrap_visual_line_count(line, line.kind.as_str() == "split", max_cells)
+}
+
+fn sanitized_source_text(content: &str) -> Cow<'_, str> {
+    if content.contains(['\t', '\r', '\n']) {
+        Cow::Owned(sanitize_diff_content(content))
+    } else {
+        Cow::Borrowed(content)
+    }
+}
+
+fn max_wrap_cells(code_width: f32, cell_width: f32) -> i32 {
+    (positive(code_width) / positive(cell_width))
+        .floor()
+        .clamp(1.0, i32::MAX as f32) as i32
+}
+
 fn row_extent(
     metric: &WorkflowPrDiffRowMetric,
+    visual_lines: Option<u32>,
     code_width: f32,
     cell_width: f32,
     code_line_height: f32,
@@ -274,8 +357,13 @@ fn row_extent(
             to_u32(hunk_line_height).max(1)
         };
     }
-    let content_width = metric.columns.max(0) as f32 * positive(cell_width);
-    let visual_lines = (content_width / positive(code_width)).ceil().max(1.0);
+    let visual_lines = visual_lines.map_or_else(
+        || {
+            let content_width = metric.columns.max(0) as f32 * positive(cell_width);
+            (content_width / positive(code_width)).ceil().max(1.0)
+        },
+        |count| count.max(1) as f32,
+    );
     to_u32(visual_lines * positive(code_line_height)).max(1)
 }
 
@@ -305,7 +393,12 @@ fn to_u64(value: f32) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use std::rc::Rc;
+    use std::sync::Arc;
+
     use super::*;
+    use crate::git::{DiffChangeType, PullRequestDiffFile, PullRequestDiffLine};
+    use crate::workflow::syntax_highlight::{HighlightedLine, character_columns};
 
     fn metric(kind: &str, columns: i32, double_hunk: bool) -> WorkflowPrDiffRowMetric {
         WorkflowPrDiffRowMetric {
@@ -318,16 +411,65 @@ mod tests {
     #[test]
     fn row_extent_matches_diff_wrap_contract() {
         assert_eq!(
-            row_extent(&metric("context", 20, false), 100.0, 7.0, 22.0, 28.0),
+            row_extent(&metric("context", 20, false), None, 100.0, 7.0, 22.0, 28.0),
             44
         );
         assert_eq!(
-            row_extent(&metric("hunk", 200, false), 1.0, 7.0, 22.0, 28.0),
+            row_extent(&metric("hunk", 200, false), None, 1.0, 7.0, 22.0, 28.0),
             28
         );
         assert_eq!(
-            row_extent(&metric("hunk", 0, true), 100.0, 7.0, 22.0, 28.0),
+            row_extent(&metric("hunk", 0, true), None, 100.0, 7.0, 22.0, 28.0),
             52
+        );
+    }
+
+    #[test]
+    fn word_wrap_extent_keeps_short_word_before_long_token_reachable() {
+        let content = "let greeting = \"中文 Latin 😀 mixed glyphs and super_long_identifier_abcdefghijklmnopqrstuvwxyz_0123456789\";";
+        let columns = content.chars().map(character_columns).sum::<u32>();
+        let file = PullRequestDiffFile {
+            path: "src/lib.rs".to_string(),
+            old_path: "src/lib.rs".to_string(),
+            change_type: DiffChangeType::Modified,
+            added_lines: 0,
+            removed_lines: 0,
+            viewed: false,
+            lines: vec![PullRequestDiffLine {
+                old_line: 1,
+                new_line: 1,
+                kind: "context".into(),
+                content: content.to_string(),
+            }],
+        };
+        let model = Rc::new(LazyPrDiffLineModel::new(
+            Arc::new(file),
+            Arc::new(vec![HighlightedLine {
+                tokens: Vec::new(),
+                columns,
+            }]),
+            false,
+        ));
+        let metrics = ModelRc::new(VecModel::from(model.row_metrics()));
+        let lines = ModelRc::from(model.clone());
+
+        let extents = row_extents(&metrics, &lines, 300.0, 7.2, 22.0, 28.0);
+
+        assert_eq!(max_wrap_cells(300.0, 7.2), 41);
+        assert_eq!(soft_wrap_visual_line_count(content, 41), 4);
+        assert_eq!(extents, vec![88]);
+        assert_eq!(model.cached_row_count(), 0);
+        assert_eq!(
+            row_extent(
+                &metric("context", columns as i32, false),
+                None,
+                300.0,
+                7.2,
+                22.0,
+                28.0,
+            ),
+            66,
+            "the old total-column estimate clipped the fourth word-wrapped line"
         );
     }
 }

@@ -1,10 +1,45 @@
 import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
+import { ScrollView as MaterialScrollView } from "@material";
+
+// Slint recognizes a virtualizing ListView by this exact component name and
+// the inherited content-*/visible-* geometry contract. Keep this thin entry
+// point application-owned so Material stays replaceable as one upstream tree
+// and ListView lowering remains covered by Usher's integration tests.
+export component ListView inherits MaterialScrollView { }
+
+// A wheel-scrollable viewport that never arbitrates pointer drags. Diff code
+// selection owns those drags, while Flickable still consumes wheel/touchpad
+// input and the application-owned scrollbar writes content-y directly.
+export component GitHubPassiveScrollView inherits Rectangle {
+    out property <length> visible-width <=> flickable.width;
+    out property <length> visible-height <=> flickable.height;
+    in-out property <length> content-width <=> flickable.content-width;
+    in-out property <length> content-height <=> flickable.content-height;
+    in-out property <length> content-x <=> flickable.content-x;
+    in-out property <length> content-y <=> flickable.content-y;
+    callback scrolled <=> flickable.flicked;
+
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    background: transparent;
+    clip: true;
+
+    flickable := Flickable {
+        width: root.width;
+        height: root.height;
+        // Slint 1.18 forwards mouse drags to diff selection when this is
+        // disabled, while touch panning and wheel/touchpad scrolling remain
+        // native Flickable behavior.
+        mouse-drag-pan-enabled: false;
+        @children
+    }
+}
 
 // Application-owned vertical viewport with GitHub/Primer semantic scrollbar
 // colors. Content stays one mounted layout tree while scrolling/resizing.
 export component GitHubScrollView inherits Rectangle {
-    in-out property <length> viewport_x <=> scroll-area.viewport-x;
-    in-out property <length> viewport_y <=> scroll-area.viewport-y;
+    in-out property <length> viewport_x <=> scroll-area.content-x;
+    in-out property <length> viewport_y <=> scroll-area.content-y;
     out property <length> visible_width: scroll-area.width;
     out property <length> visible_height: scroll-area.height;
     out property <length> content_height: content-column.preferred-height;
@@ -182,8 +217,8 @@ export component GitHubScrollView inherits Rectangle {
     scroll-area := Flickable {
         width: parent.width;
         height: parent.height;
-        viewport-width: self.width;
-        viewport-height: root.wheel-enabled
+        content-width: self.width;
+        content-height: root.wheel-enabled
             ? max(self.height, content-column.preferred-height)
             : self.height;
         interactive: root.interactive;
@@ -205,7 +240,7 @@ export component GitHubScrollView inherits Rectangle {
 
         if root.report-pointer-interactions: viewport-interaction := TouchArea {
             width: scroll-area.width;
-            height: scroll-area.viewport-height;
+            height: scroll-area.content-height;
             clicked => { root.pointer-interaction-started(); }
         }
 

@@ -18,13 +18,6 @@ Download and install the [APK for android](https://material.slint.dev/apk/slint_
 
 View the documentation online at https://material.slint.dev/getting-started/
 
-## Usher local patches
-
-- `ui/components/scroll_view.slint` exposes the underlying `Flickable.interactive`
-  property. The archived upstream Material component does not expose it. Usher's
-  PR diff disables pointer-drag scrolling so a vertical code drag remains a text
-  selection; wheel/touchpad and scrollbar scrolling continue to work.
-
 ### Get Started
 
 Clone one of our Material Components for Slint templates and follow the instruction from their README:
@@ -33,3 +26,4 @@ Clone one of our Material Components for Slint templates and follow the instruct
  - C++: https://github.com/slint-ui/material-cpp-template
  - Node.js/Deno: https://github.com/slint-ui/material-nodejs-template
  - Python: https://github.com/slint-ui/material-python-template
+

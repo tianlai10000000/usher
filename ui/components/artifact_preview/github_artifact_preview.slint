@@ -130,7 +130,7 @@ component GitHubArtifactPreviewMarkdownBlock inherits Rectangle {
             || root.previous-kind == ArtifactPreviewBlockKind.Heading6;
     private property <length> content-inset:
         root.is-code ? GitHubMetrics.size-12
-            : root.is-quote ? GitHubMetrics.size-12
+            : root.is-quote ? GitHubMetrics.size-20
             : root.is-list ? root.list-level-inset + root.list-marker-width
             : root.is-table ? GitHubMetrics.size-8
             : 0px;
@@ -177,18 +177,20 @@ component GitHubArtifactPreviewMarkdownBlock inherits Rectangle {
     // Rounded clipping would allocate a texture as tall as the entire fence.
     // The virtual line window clips its own bounded, square viewport instead.
     clip: root.is-code && !root.virtual-code;
-    background: root.is-code ? GitHubTheme.canvas-subtle
-        : root.is-quote ? GitHubTheme.border-default
-        : transparent;
+    background: root.is-code ? GitHubTheme.canvas-subtle : transparent;
     border-width: root.is-code ? GitHubMetrics.border-thin : 0px;
     border-color: root.is-code ? GitHubTheme.border-subtle : transparent;
     border-radius: root.is-code ? GitHubMetrics.radius-medium : 0px;
 
-    if root.is-quote: Rectangle {
-        x: GitHubMetrics.size-4;
-        width: parent.width - self.x;
-        height: parent.height;
-        background: GitHubTheme.canvas-default;
+    if root.is-quote: quote-bar := Rectangle {
+        x: 0px;
+        y: root.block-padding-top;
+        width: GitHubMetrics.size-4;
+        height: max(
+            GitHubMarkdownMetrics.document-body-line-height,
+            block-text.height - GitHubMarkdownMetrics.glyph-safety-height
+        );
+        background: GitHubTheme.border-default;
     }
 
     if root.block.kind == ArtifactPreviewBlockKind.TableRow: Rectangle {
@@ -220,6 +222,9 @@ component GitHubArtifactPreviewMarkdownBlock inherits Rectangle {
     }
 
     block-text := StyledText {
+        // Slint 1.18 exposes line-height-factor for Text/TextInput, but not
+        // StyledText. Preview therefore keeps the measured StyledText height;
+        // changing only the surrounding box would break exact block extents.
         visible: root.block.kind != ArtifactPreviewBlockKind.Rule
             && root.block.kind != ArtifactPreviewBlockKind.CodeBlock;
         x: root.content-inset;
@@ -443,7 +448,7 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
 
         private property <ArtifactPreviewVirtualWindow> virtual-window;
         private property <bool> refreshing-window: false;
-        private property <length> observed-viewport-y: markdown-scroll.viewport-y;
+        private property <length> observed-viewport-y: markdown-scroll.content-y;
         private property <length> observed-visible-height: markdown-scroll.height;
         private property <length> observed-content-width: root.width;
         private property <int> observed-layout-revision: root.markdown-layout-revision;
@@ -454,7 +459,7 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
         private property <float> benchmark-offset: AppState.benchmark-preview-offset;
         changed benchmark-offset => {
             if self.benchmark-offset >= 0 {
-                markdown-scroll.viewport-y = -max(0px, markdown-scroll.viewport-height - markdown-scroll.height) * self.benchmark-offset;
+                markdown-scroll.content-y = -max(0px, markdown-scroll.content-height - markdown-scroll.height) * self.benchmark-offset;
             }
         }
 
@@ -466,7 +471,7 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
             let next = root.layout-markdown-window(
                 root.markdown-layout-revision,
                 root.markdown-blocks,
-                max(0.0, -markdown-scroll.viewport-y / 1px),
+                max(0.0, -markdown-scroll.content-y / 1px),
                 max(1.0, markdown-scroll.height / 1px),
                 max(1.0, root.width / 1px),
                 root.markdown-body-font-family
@@ -478,15 +483,15 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
                     || Math.abs(next.content-height - self.virtual-window.content-height) > 0.5 {
                 self.virtual-window = next;
             }
-            if Math.abs(markdown-scroll.viewport-y - clamped-y) > 0.5px {
-                markdown-scroll.viewport-y = clamped-y;
+            if Math.abs(markdown-scroll.content-y - clamped-y) > 0.5px {
+                markdown-scroll.content-y = clamped-y;
             }
             self.refreshing-window = false;
             if AppState.benchmark-preview-created-lines >= 0 {
                 AppState.benchmark-preview-extent = self.virtual-window.content-height;
                 AppState.benchmark-preview-tail = self.virtual-window.rows.length > 0
                     && self.virtual-window.rows[self.virtual-window.rows.length - 1].index == root.markdown-blocks.length - 1
-                    && Math.abs(markdown-scroll.viewport-y + max(0px, markdown-scroll.viewport-height - markdown-scroll.height)) < 1px;
+                    && Math.abs(markdown-scroll.content-y + max(0px, markdown-scroll.content-height - markdown-scroll.height)) < 1px;
             }
         }
 
@@ -495,15 +500,15 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
         changed observed-visible-height => { self.refresh-window(); }
         changed observed-content-width => { self.refresh-window(); }
         changed observed-layout-revision => {
-            markdown-scroll.viewport-y = 0px;
+            markdown-scroll.content-y = 0px;
             self.refresh-window();
         }
 
         markdown-scroll := Flickable {
             width: parent.width;
             height: parent.height;
-            viewport-width: self.width;
-            viewport-height: max(
+            content-width: self.width;
+            content-height: max(
                 self.height,
                 parent.virtual-window.content-height * 1px
             );
@@ -524,13 +529,13 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
                         1px,
                         parent.height - self.y
                             - (row.start + row.size
-                                    >= markdown-scroll.viewport-height / 1px - 0.5
+                                    >= markdown-scroll.content-height / 1px - 0.5
                                 ? GitHubMetrics.size-32
                                 : 0px)
                     );
                     block: row.block;
                     virtual-code: true;
-                    code-viewport-offset: -markdown-scroll.viewport-y - row.start * 1px - self.y;
+                    code-viewport-offset: -markdown-scroll.content-y - row.start * 1px - self.y;
                     code-viewport-height: markdown-scroll.height;
                     first-block: row.index == 0;
                     previous-kind: row.index > 0
@@ -554,7 +559,7 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
             x: parent.width - self.width;
             y: 0px;
             height: parent.height;
-            viewport-y <=> markdown-scroll.viewport-y;
+            viewport-y <=> markdown-scroll.content-y;
             visible-height: markdown-scroll.height;
             content-height: parent.virtual-window.content-height * 1px;
             enabled: !root.layout-resizing;

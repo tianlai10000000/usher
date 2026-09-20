@@ -14,8 +14,8 @@ renderer-skia = ["slint/renderer-skia"]
 ai-code-review = []
 
 [dependencies]
-slint = { version = "1.17.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "raw-window-handle-06", "unstable-fontique-010"] }
+slint = { version = "1.18.0", default-features = false, features = ["std", "compat-1-2", "backend-winit", "raw-window-handle-06", "unstable-fontique-011"] }
 
 [build-dependencies]
-slint-build = { version = "1.17.1", features = ["experimental-module-builds"] }
+slint-build = { version = "1.18.0", features = ["experimental-module-builds"] }
 usher-i18n = { path = "../usher-i18n" }

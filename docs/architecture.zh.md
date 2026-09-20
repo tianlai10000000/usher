@@ -227,17 +227,23 @@ callback 耗时和夹具效果预算避免相对比较掩盖回归。显式 `--b
 | `ui/components/messages/` | 可复用 GitHub Inbox 消息行，统一已读/未读、语义级别、元数据和常驻行操作，并登记到 UI Components。 |
 | `ui/components/pr_review/` | PR Review 的公开 UI struct、可复用外壳/文件树/Diff 控件；跨区域状态仍留在完整页面实现。 |
 | `ui/theme/github_theme.slint` | 应用自有的 `GitHubTheme` 语义色，以及 `GitHubMetrics` Primer 几何、控件、字体、浮层与断点令牌；功能性 UI 原始颜色统一在此管理。 |
-| `material-1.7.1-fixed/` | 与 Slint v1.17.1 对齐的 Material 源码。 |
-| `vendor/i-slint-live-preview/` | 仅由显式 `live-preview` feature 选择的临时 Slint 1.17.1 override；其中有文档记录的 `mtime` 保护避免 macOS 文件监听误报引发无限重编译。 |
+| `material-1.18.0/` | 与 Slint v1.18.0 commit `bd20dab8529add087b5cbc81aec70bf30861ae4c` 的 `ui-libraries/material/src` 逐字节一致；目录内不保留应用补丁。 |
+| `vendor/i-slint-live-preview/` | 仅由显式 `live-preview` feature 选择的临时 Slint 1.18 override；其中有文档记录的 `mtime` 保护避免 macOS 文件监听误报引发无限重编译。 |
 
 应用 UI 必须通过 `@material` 导入 Material，禁止直接引用 vendored 实现路径。
-绝对禁止为应用行为或外观修改 `material-1.7.1-fixed/` 或其他 vendored Slint
+绝对禁止为应用行为或外观修改 `material-1.18.0/` 或其他 vendored Slint
 Material UI 源码。Material palette、typography 和 style metrics 不定义产品
 外观；应用界面统一消费 `GitHubTheme` 与 `GitHubMetrics`。所有视觉适配必须放在
 项目自有代码中，确保依赖升级时可以直接替换 Material UI 目录而无需迁移补丁。
-当前白名单有意保持最小：`ui/main.slint` 的 `MaterialWindowAdapter`，以及 PR
-Review 工作区用于滚动的公开 `ListView`/`ScrollView`。Artifact Preview 使用应用
-自有 `Flickable` 和共享精确 extent 虚拟化门面。
+兼容别名、输入策略等上游适配统一放在
+`ui/components/github_scroll_view.slint` 等项目自有 wrapper 中；Material
+升级只能替换上游目录，禁止重新基于 vendor 补丁升级。
+当前直接导入白名单有意保持最小：`ui/main.slint` 的
+`MaterialWindowAdapter`、PR Review 工作区的普通 `ScrollView`，以及
+`ui/components/github_scroll_view.slint` 中应用自有精确名称 `ListView` shim
+所继承的公开 `ScrollView`。PR Review、AI Review、Artifact Preview 与 Jobs
+统一导入该 shim，而不是直接导入 vendor 库；Artifact Preview 的其余滚动则使用
+应用自有 `Flickable` 和共享精确 extent 虚拟化门面。
 `scripts/check-ui-policy.sh` 自动检查该边界及 Octicon 命令图标策略。
 
 所有产品页面和复用视觉组件均遵循
@@ -1171,6 +1177,7 @@ Interceptor 按注册顺序执行。Request hook 可修改 header；Response hoo
 - Hover 关键节点应常驻，通过 opacity/state 控制，不要条件创建命中区域。
 - 全窗口 Modal 必须挂在根层。
 - 滚动和窗口缩放期间避免重建 layout/model，精确计算应延迟到交互稳定后。
+- 多行排版遵循[文本布局契约](specs/text-layout.md)：原生 `Text` 和直接 `TextInput` 使用 Slint 已支持的 `line-height-factor`，Slint 1.18 的 `StyledText`/`TextEdit` Surface 则保留明确记录的 fallback。Artifact Preview 与 Agent Response 富文本当前继续使用 `StyledText` 排版及与之匹配的 Worker 测量。任何 factor 或 fallback 变化都属于 layout-key 变化，必须同步更新绘制、preferred height 与精确虚拟 extent。
 
 ## 验证要求
 

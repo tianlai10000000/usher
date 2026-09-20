@@ -93,17 +93,16 @@ export component GitHubToast inherits Rectangle {
     if root.toast-visible: toast-card := Rectangle {
         // Primer Banner is a three-column grid. The leading visual and the
         // dismiss control occupy their own cells; the content cell gets a
-        // 20px text line box for a single line and becomes first-line aligned
-        // once it wraps.
+        // 20px text line box for every line. Slint's native line-height factor
+        // keeps wrapped paint and preferred-height on the same geometry.
         private property <length> banner-text-line-height: GitHubMetrics.size-20;
+        private property <float> banner-text-line-height-factor:
+            self.banner-text-line-height / max(1px, message-line-measure.preferred-height);
         private property <length> message-content-height:
             message-content-measure.preferred-height;
         private property <bool> message-is-multiline:
-            self.message-content-height > message-line-measure.preferred-height + 1px;
-        private property <length> message-display-height:
-            self.message-is-multiline
-                ? self.message-content-height
-                : max(self.banner-text-line-height, self.message-content-height);
+            self.message-content-height > self.banner-text-line-height + 1px;
+        private property <length> message-display-height: self.message-content-height;
         private property <length> message-y: self.message-is-multiline
             ? GitHubMetrics.size-16
             : (self.height - self.message-display-height) / 2;
@@ -164,6 +163,7 @@ export component GitHubToast inherits Rectangle {
             font-size: GitHubMetrics.text-medium;
             color: GitHubTheme.fg-default;
             wrap: word-wrap;
+            line-height-factor: parent.banner-text-line-height-factor;
             vertical-alignment: parent.message-is-multiline ? top : center;
         }
 
@@ -180,6 +180,7 @@ export component GitHubToast inherits Rectangle {
             text: root.message;
             font-size: GitHubMetrics.text-medium;
             wrap: word-wrap;
+            line-height-factor: parent.banner-text-line-height-factor;
         }
 
         if root.type != "loading": GitHubIconButton {

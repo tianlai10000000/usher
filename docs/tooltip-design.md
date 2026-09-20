@@ -71,7 +71,7 @@ Usher 需要统一的 GitHub/Primer 风格 Tooltip，覆盖：
 
 ### C. Slint Material `ToolTip`（未采用）
 
-Vendored `material-1.7.1-fixed` 的 `ToolTip` 是普通局部组件：hover 即显、本地 `tooltip_offset`、无 popup 降级、受祖先 `clip` 限制、Material 色板。仓库策略禁止产品 UI 依赖 Material 私有实现；视觉也不符合 Primer。
+Vendored `material-1.18.0` 的 `ToolTip` 是普通局部组件：hover 即显、本地 `tooltip_offset`、无 popup 降级、受祖先 `clip` 限制、Material 色板。仓库策略禁止产品 UI 依赖 Material 私有实现；视觉也不符合 Primer。
 
 ### D. Slint 1.17 内置 `Tooltip` + `GitHubTooltipContent`（历史尝试）
 

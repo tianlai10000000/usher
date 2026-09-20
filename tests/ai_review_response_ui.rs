@@ -16,13 +16,16 @@ use usher_lib::{
 };
 
 slint::slint! {
+    #[library_path(i18n) = "target/slint-macro-tests/usher-i18n/i18n.slint"]
+    #[library_path(material) = "material-1.18.0/material.slint"]
     import {
         AgentResponseBlockKind,
         AgentResponseBlock,
         GitHubAgentResponse,
     }
         from "ui/components/agent_response/github_agent_response.slint";
-    import { GitHubScrollView } from "ui/components/github_scroll_view.slint";
+    import { GitHubPassiveScrollView, GitHubScrollView }
+        from "ui/components/github_scroll_view.slint";
     import { GitHubAiReviewUserMessage }
         from "ui/components/ai_review/github_ai_review_components.slint";
     import {
@@ -67,6 +70,38 @@ slint::slint! {
             Rectangle {
                 width: parent.width;
                 height: 2400px;
+            }
+        }
+    }
+
+    export component PassiveScrollHarness inherits Window {
+        width: 320px;
+        height: 180px;
+        out property <length> scroll-y <=> passive-scroll.content-y;
+        out property <bool> selection-begun: false;
+        out property <int> selection-moves: 0;
+        out property <length> selection-x: selection-drag.absolute-position.x;
+        out property <length> selection-y: selection-drag.absolute-position.y;
+        out property <length> selection-width: selection-drag.width;
+        out property <length> selection-height: selection-drag.height;
+
+        passive-scroll := GitHubPassiveScrollView {
+            width: parent.width;
+            height: parent.height;
+            content-width: self.visible-width;
+            content-height: 1200px;
+
+            selection-drag := TouchArea {
+                x: 0px;
+                y: 0px;
+                width: passive-scroll.visible-width;
+                height: 160px;
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down {
+                        root.selection-begun = true;
+                    }
+                }
+                moved => { root.selection-moves += 1; }
             }
         }
     }
@@ -143,6 +178,7 @@ fn artifact_preview_layout_harness(width: f32) -> ArtifactPreviewLayoutHarness {
 
 fn configure_pr_review_window(width: f32) -> MainWindow {
     let window = MainWindow::new().expect("main window");
+    slint::select_bundled_translation("en").expect("English test translations");
     window.window().dispatch_event(WindowEvent::Resized {
         size: LogicalSize::new(width, 860.0),
     });
@@ -331,8 +367,21 @@ fn narrow_cjk_quote_matches_the_production_styled_text_geometry() {
     )
     .next()
     .expect("production quote StyledText");
+    let quote_bar = ElementHandle::find_by_element_id(
+        &harness,
+        "GitHubArtifactPreviewMarkdownBlock::quote-bar",
+    )
+    .next()
+    .expect("production quote rule");
 
-    assert_close(block.size().width, 299.0);
+    assert_close(
+        block.absolute_position().x - quote_bar.absolute_position().x,
+        20.0,
+    );
+    assert_close(block.size().width, 283.0);
+    assert_close(quote_bar.absolute_position().y, block.absolute_position().y);
+    assert_close(quote_bar.size().width, 4.0);
+    assert_close(quote_bar.size().height, block.size().height - 4.0);
     assert!(
         (90.0..=92.0).contains(&block.size().height),
         "wrapped Preview prose must keep the Codex 22px line rhythm, got {}px",
@@ -597,6 +646,46 @@ fn list_marker_uses_a_stable_gutter_and_hanging_body_inset() {
 }
 
 #[test]
+fn response_quote_rule_aligns_with_the_text_line_box() {
+    i_slint_backend_testing::init_no_event_loop();
+    let response = response_harness();
+    response.set_blocks(ModelRc::new(Rc::new(VecModel::from(vec![
+        AgentResponseBlock {
+            kind: AgentResponseBlockKind::Quote,
+            styled: slint::StyledText::from_plain_text(
+                "Full Markdown remains available through Preview.",
+            ),
+            plain_text: "Full Markdown remains available through Preview.".into(),
+            list_marker: "".into(),
+            list_depth: 0,
+            code_language: "".into(),
+            span_count: 1,
+            line_count: 1,
+        },
+    ]))));
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+
+    let quote_bar =
+        ElementHandle::find_by_element_id(&response, "GitHubAgentResponseBlock::quote-bar")
+            .next()
+            .expect("response quote rule");
+    let body = ElementHandle::find_by_element_id(&response, "GitHubAgentResponseBlock::body-text")
+        .next()
+        .expect("response quote text");
+
+    assert_close(
+        body.absolute_position().x - quote_bar.absolute_position().x,
+        20.0,
+    );
+    assert_close(quote_bar.absolute_position().y, body.absolute_position().y);
+    assert_close(quote_bar.size().width, 4.0);
+    assert_close(
+        quote_bar.size().height,
+        (body.size().height - 4.0).max(22.0),
+    );
+}
+
+#[test]
 fn response_blocks_match_codex_paragraph_and_list_rhythm() {
     i_slint_backend_testing::init_no_event_loop();
     let response = response_harness();
@@ -781,7 +870,7 @@ fn ai_review_content_click_dismisses_the_adjacent_diff_settings_popover() {
     });
     i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
 
-    let settings = ElementHandle::find_by_accessible_label(&window, "Open diff view settings")
+    let settings = ElementHandle::find_by_accessible_label(&window, "Open Diff view settings")
         .next()
         .expect("Files changed diff settings button");
     let settings_position = settings.absolute_position();
@@ -849,7 +938,6 @@ fn retained_response_list_mounts_every_source_block_for_ab_baseline() {
         .sum::<usize>();
     let traversable_blocks =
         ElementHandle::find_by_element_id(&window, "GitHubAgentResponseBlock::body-text").count();
-
     assert_eq!(conversation.row_count(), 12);
     assert_eq!(source_blocks, 576);
     assert_eq!(
@@ -868,7 +956,7 @@ fn retained_response_list_mounts_every_source_block_for_ab_baseline() {
 }
 
 #[test]
-fn virtualized_response_list_bounds_created_blocks_and_preserves_source() {
+fn virtualized_response_list_bounds_created_blocks_scrolls_and_preserves_source() {
     i_slint_backend_testing::init_no_event_loop();
     let window = configure_pr_review_window(1300.0);
     let conversation = formatted_assistant_conversation(12, 48);
@@ -879,6 +967,7 @@ fn virtualized_response_list_bounds_created_blocks_and_preserves_source() {
     window.set_ai_review_virtual_created_message_rows(0);
     window.set_ai_review_virtual_created_blocks(0);
     window.set_ai_review_response_rows(visual_rows.clone());
+    window.show().expect("show virtualized response fixture");
     i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
 
     let source_blocks = conversation
@@ -899,24 +988,41 @@ fn virtualized_response_list_bounds_created_blocks_and_preserves_source() {
     assert!(created_message_rows > 0 && created_message_rows < conversation.row_count());
     assert!(created_blocks > 0 && created_blocks < source_blocks);
     assert!(traversable_blocks > 0 && traversable_blocks < source_blocks);
+    assert!(created_blocks >= traversable_blocks);
 
     let movements = Rc::new(RefCell::new(Vec::new()));
     let observed = movements.clone();
     window.on_ai_review_response_wheel_consumed(move |movement| {
         observed.borrow_mut().push(movement);
     });
+    let response_list =
+        ElementHandle::find_by_element_id(&window, "GitHubAiReviewPanel::virtual-response-list")
+            .next()
+            .expect("production virtual response ListView");
     let initial_scroll_y = window.get_ai_review_response_scroll_y();
-    window
-        .window()
-        .dispatch_event(WindowEvent::PointerScrolled {
-            position: LogicalPosition::new(1100.0, 320.0),
-            delta_x: 0.0,
-            delta_y: -240.0,
-        });
-    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(120));
-    assert_ne!(window.get_ai_review_response_scroll_y(), initial_scroll_y);
-    assert!(!movements.borrow().is_empty());
+    for delta_y in [-240.0, 240.0] {
+        response_list.scroll(0.0, delta_y);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(120));
+        if (window.get_ai_review_response_scroll_y() - initial_scroll_y).abs() > 0.5 {
+            break;
+        }
+    }
+    let final_scroll_y = window.get_ai_review_response_scroll_y();
+    let movement = final_scroll_y - initial_scroll_y;
+    assert!(
+        movement.abs() > 0.5,
+        "virtual response ListView did not scroll"
+    );
+    assert!(
+        movements
+            .borrow()
+            .iter()
+            .any(|reported| reported.abs() > 0.25 && reported.signum() == movement.signum()),
+        "scroll callback did not report the viewport movement: {:?}",
+        movements.borrow()
+    );
     assert_eq!(window.get_ai_review_conversation(), conversation);
+    assert_eq!(window.get_ai_review_response_rows(), visual_rows);
 }
 
 #[test]
@@ -1192,6 +1298,80 @@ fn response_scroll_view_consumes_real_wheel_input() {
             "wheel movement direction changed: {observed:?}"
         );
     }
+}
+
+#[test]
+fn passive_scroll_view_preserves_pointer_drag_and_wheel_scrolling() {
+    i_slint_backend_testing::init_no_event_loop();
+    let window = PassiveScrollHarness::new().expect("passive scroll harness");
+    window.window().dispatch_event(WindowEvent::Resized {
+        size: LogicalSize::new(320.0, 180.0),
+    });
+    window.show().expect("show passive scroll harness");
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+
+    let origin = LogicalPosition::new(window.get_selection_x(), window.get_selection_y());
+    let width = window.get_selection_width();
+    let height = window.get_selection_height();
+    assert!(
+        width > 0.0 && height > 0.0,
+        "selection drag area must be laid out"
+    );
+    let start = LogicalPosition::new(origin.x + width / 2.0, origin.y + height * 0.25);
+    let target = LogicalPosition::new(origin.x + width / 2.0, origin.y + height * 0.8);
+    window
+        .window()
+        .dispatch_event(WindowEvent::PointerMoved { position: start });
+    window.window().dispatch_event(WindowEvent::PointerPressed {
+        position: start,
+        button: PointerEventButton::Left,
+    });
+    for step in 1..=12 {
+        let progress = step as f32 / 12.0;
+        let position = LogicalPosition::new(
+            start.x + (target.x - start.x) * progress,
+            start.y + (target.y - start.y) * progress,
+        );
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(16));
+        window
+            .window()
+            .dispatch_event(WindowEvent::PointerMoved { position });
+    }
+    window
+        .window()
+        .dispatch_event(WindowEvent::PointerReleased {
+            position: target,
+            button: PointerEventButton::Left,
+        });
+    assert!(
+        window.get_selection_begun(),
+        "selection must receive pointer down (origin={origin:?}, width={width}, height={height}, scroll={})",
+        window.get_scroll_y()
+    );
+    assert!(
+        window.get_selection_moves() > 0,
+        "passive viewport must not steal pointer drags from code selection"
+    );
+    assert_close(window.get_scroll_y(), 0.0);
+
+    let wheel_position = LogicalPosition::new(origin.x + width / 2.0, origin.y + height / 2.0);
+    for delta_y in [-240.0, 240.0] {
+        window
+            .window()
+            .dispatch_event(WindowEvent::PointerScrolled {
+                position: wheel_position,
+                delta_x: 0.0,
+                delta_y,
+            });
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(120));
+        if window.get_scroll_y().abs() > 0.5 {
+            break;
+        }
+    }
+    assert!(
+        window.get_scroll_y() < -0.5,
+        "wheel input must keep scrolling the passive viewport"
+    );
 }
 
 #[test]

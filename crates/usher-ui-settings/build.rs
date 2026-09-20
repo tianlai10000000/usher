@@ -133,7 +133,7 @@ fn main() {
         .with_library_paths(HashMap::from([
             (
                 "material".to_string(),
-                repository_root.join("material-1.7.1-fixed/material.slint"),
+                repository_root.join("material-1.18.0/material.slint"),
             ),
             ("ai-review-settings".to_string(), ai_review_settings_library),
             ("i18n".to_string(), i18n.library_path),

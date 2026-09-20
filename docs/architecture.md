@@ -260,22 +260,29 @@ bounds or replace manual input/paint validation.
 | `ui/components/messages/` | Reusable GitHub Inbox message rows with read/unread, semantic level, metadata, and mounted row actions; registered in UI Components. |
 | `ui/components/pr_review/` | PR Review public UI structs plus reusable shell, file-tree, and diff controls; cross-region state stays in the complete page implementation. |
 | `ui/theme/github_theme.slint` | Application-owned `GitHubTheme` semantic color roles and `GitHubMetrics` Primer geometry, control, typography, overlay, and breakpoint tokens. Raw functional UI colors are centralized here. |
-| `material-1.7.1-fixed/` | Vendored Material source aligned with Slint v1.17.1. |
-| `vendor/i-slint-live-preview/` | Temporary Slint 1.17.1 override selected only by the opt-in `live-preview` feature. Its documented `mtime` guard prevents spurious macOS watcher events from causing an endless recompile loop. |
+| `material-1.18.0/` | Byte-for-byte `ui-libraries/material/src` from Slint v1.18.0 commit `bd20dab8529add087b5cbc81aec70bf30861ae4c`; no application patches live in this tree. |
+| `vendor/i-slint-live-preview/` | Temporary Slint 1.18 override selected only by the opt-in `live-preview` feature. Its documented `mtime` guard prevents spurious macOS watcher events from causing an endless recompile loop. |
 
 Application UI must import Material through `@material`; direct imports from
 vendored implementation paths are forbidden. Never modify
-`material-1.7.1-fixed/` or other vendored Slint Material UI source for
+`material-1.18.0/` or other vendored Slint Material UI source for
 application behavior or appearance. Material palette, typography, and style
 metrics do not define the product UI. Application surfaces consume
 `GitHubTheme` and `GitHubMetrics`, and every visual adaptation stays in
 application-owned code so a dependency upgrade can replace the Material tree
 without carrying patches.
-The current allowlist is intentionally narrow: `MaterialWindowAdapter` in
-`ui/main.slint` and public `ListView`/`ScrollView` scrolling in the PR Review
-workspace. Artifact Preview uses an application-owned `Flickable` plus the
-shared exact-extent virtualization facade. `scripts/check-ui-policy.sh` enforces
-this boundary and the Octicon command-icon policy.
+Compatibility aliases and input-policy changes belong to application-owned
+wrappers such as `ui/components/github_scroll_view.slint`; upgrading Material
+is an upstream directory replacement, never a patch rebase.
+The current direct-import allowlist is intentionally narrow:
+`MaterialWindowAdapter` in `ui/main.slint`, ordinary `ScrollView` usage in the
+PR Review workspace, and the public `ScrollView` base of the application-owned
+exact-name `ListView` shim in `ui/components/github_scroll_view.slint`. PR
+Review, AI Review, Artifact Preview, and Jobs import that shim instead of the
+vendor library. Artifact Preview otherwise uses an application-owned
+`Flickable` plus the shared exact-extent virtualization facade.
+`scripts/check-ui-policy.sh` enforces this boundary and the Octicon command-icon
+policy.
 
 All product pages and reusable visual components follow the
 [GitHub/Primer UI design specification](specs/ui-design.md). Every
@@ -1477,6 +1484,7 @@ Interceptors execute in registration order. Request hooks may mutate headers; re
 - Keep hover-sensitive nodes mounted and vary opacity/state instead of conditionally creating hit targets.
 - Mount full-window modal overlays at the root layer.
 - Avoid layout/model rebuilds during scroll and window resize; defer precise work until interaction settles.
+- Multiline typography follows [the text-layout contract](specs/text-layout.md): native `Text` and direct `TextInput` use Slint's supported `line-height-factor`, while Slint 1.18 `StyledText`/`TextEdit` surfaces keep an explicit documented fallback. Artifact Preview and Agent Response rich prose currently retain their `StyledText` typography and matching worker measurements. Any factor or fallback change is a layout-key change and must update paint, preferred height and exact virtual extents together.
 
 ## Validation
 

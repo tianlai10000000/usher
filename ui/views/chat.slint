@@ -474,8 +474,8 @@ export component GitHubChatPage inherits Rectangle {
                     y: GitHubMetrics.size-8;
                     width: parent.width - GitHubMetrics.size-64;
                     height: parent.height - GitHubMetrics.size-16;
-                    viewport-width: self.width;
-                    viewport-height: max(self.height, text-input.preferred-height);
+                    content-width: self.width;
+                    content-height: max(self.height, text-input.preferred-height);
                     interactive: true;
 
                     text-input := TextInput {

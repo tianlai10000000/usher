@@ -45,7 +45,7 @@ impl Default for Measurer {
 #[cfg(not(test))]
 fn preview_font_context() -> FontContext {
     FontContext {
-        collection: slint::fontique_010::shared_collection(),
+        collection: slint::fontique_011::shared_collection(),
         source_cache: SourceCache::default(),
     }
 }
@@ -269,7 +269,8 @@ fn block_metrics(kind: ArtifactPreviewBlockKind) -> BlockMetrics {
 
 fn block_content_inset(block: &MeasurementBlock) -> f32 {
     match block.kind {
-        ArtifactPreviewBlockKind::CodeBlock | ArtifactPreviewBlockKind::Quote => 12.0,
+        ArtifactPreviewBlockKind::CodeBlock => 12.0,
+        ArtifactPreviewBlockKind::Quote => 20.0,
         ArtifactPreviewBlockKind::TableRow => 8.0,
         ArtifactPreviewBlockKind::ListItem => block.list_depth.clamp(0, 2) as f32 * 24.0 + 24.0,
         _ => 0.0,

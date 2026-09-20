@@ -61,7 +61,8 @@ component GitHubAgentResponseBlock inherits Rectangle {
     private property <length> list-level-inset: min(2, max(0, root.block.list-depth)) * 24px;
     private property <length> list-marker-width: 24px;
     private property <length> content-inset:
-        root.is-quote ? GitHubMetrics.size-24
+        // Primer blockquotes use a 4px rule and 16px space before content.
+        root.is-quote ? GitHubMetrics.size-20
             : root.is-list ? root.list-level-inset + root.list-marker-width
             : root.is-table ? GitHubMetrics.size-8
             : 0px;
@@ -102,6 +103,18 @@ component GitHubAgentResponseBlock inherits Rectangle {
         root.is-heading || root.is-code
             ? GitHubMarkdownMetrics.glyph-safety-height
             : 0px;
+    private property <length> heading-line-height:
+        root.block.kind == AgentResponseBlockKind.Heading1
+            ? GitHubMarkdownMetrics.conversation-heading-1-line-height
+        : root.block.kind == AgentResponseBlockKind.Heading2
+            ? GitHubMarkdownMetrics.conversation-heading-2-line-height
+        : root.block.kind == AgentResponseBlockKind.Heading3
+            ? GitHubMarkdownMetrics.conversation-heading-3-line-height
+        : GitHubMarkdownMetrics.conversation-heading-compact-line-height;
+    private property <float> heading-line-height-factor:
+        root.heading-line-height / max(1px, heading-line-probe.preferred-height);
+    private property <float> code-line-height-factor:
+        GitHubMarkdownMetrics.code-line-height / max(1px, code-line-probe.preferred-height);
 
     height: root.is-rule
         ? 57px
@@ -120,13 +133,17 @@ component GitHubAgentResponseBlock inherits Rectangle {
     border-radius: root.is-code ? GitHubMetrics.radius-medium : 0px;
     clip: root.is-code;
 
-    if root.is-quote: Rectangle {
+    if root.is-quote: quote-bar := Rectangle {
         x: 0px;
-        y: 8px;
+        y: root.block-padding-top;
         width: 4px;
-        height: max(0px, parent.height - 16px);
-        background: GitHubTheme.border-strong;
-        border-radius: 2px;
+        // StyledText reserves four safety pixels for descenders. The visual
+        // quote rule follows the real line box, not that clipping reserve.
+        height: max(
+            GitHubMarkdownMetrics.conversation-body-line-height,
+            body-text.height - GitHubMarkdownMetrics.glyph-safety-height
+        );
+        background: GitHubTheme.border-default;
     }
 
     if root.is-list: list-marker-text := Text {
@@ -161,16 +178,7 @@ component GitHubAgentResponseBlock inherits Rectangle {
         x: root.content-inset;
         y: root.block-padding-top;
         width: max(0px, parent.width - self.x);
-        height: max(
-            root.block.kind == AgentResponseBlockKind.Heading1
-                    ? GitHubMarkdownMetrics.conversation-heading-1-line-height
-                : root.block.kind == AgentResponseBlockKind.Heading2
-                    ? GitHubMarkdownMetrics.conversation-heading-2-line-height
-                : root.block.kind == AgentResponseBlockKind.Heading3
-                    ? GitHubMarkdownMetrics.conversation-heading-3-line-height
-                : GitHubMarkdownMetrics.conversation-heading-compact-line-height,
-            self.preferred-height
-        );
+        height: max(root.heading-line-height, self.preferred-height);
         text: root.block.plain-text;
         color: root.heading-preview-action && heading-action-touch.has-hover
             ? GitHubTheme.accent-fg
@@ -184,6 +192,15 @@ component GitHubAgentResponseBlock inherits Rectangle {
             : GitHubMarkdownMetrics.conversation-heading-compact-font-size;
         font-weight: 600;
         wrap: word-wrap;
+        line-height-factor: root.heading-line-height-factor;
+    }
+
+    heading-line-probe := Text {
+        visible: false;
+        text: "Ag";
+        font-size: heading-text.font-size;
+        font-weight: 600;
+        wrap: no-wrap;
     }
 
     heading-action := FocusScope {
@@ -224,6 +241,9 @@ component GitHubAgentResponseBlock inherits Rectangle {
     }
 
     body-text := StyledText {
+        // Slint 1.18 does not expose line-height-factor on StyledText. Keep
+        // styled paragraphs on their measured native geometry instead of
+        // applying a paint-only height that would disagree with layout.
         visible: !root.is-heading && !root.is-code && !root.is-rule;
         x: root.content-inset;
         y: root.block-padding-top;
@@ -258,6 +278,17 @@ component GitHubAgentResponseBlock inherits Rectangle {
         font-weight: 400;
         font-italic: false;
         wrap: word-wrap;
+        line-height-factor: root.code-line-height-factor;
+    }
+
+    code-line-probe := Text {
+        visible: false;
+        text: "Ag";
+        font-family: root.code-font-family;
+        font-size: GitHubMarkdownMetrics.code-font-size;
+        font-weight: 400;
+        font-italic: false;
+        wrap: no-wrap;
     }
 
     if root.is-code && root.block.code-language != "": Text {
@@ -295,10 +326,10 @@ export component GitHubAgentResponse inherits Rectangle {
                 || root.blocks[0].kind == AgentResponseBlockKind.Heading4
                 || root.blocks[0].kind == AgentResponseBlockKind.Heading5
                 || root.blocks[0].kind == AgentResponseBlockKind.Heading6);
-    // Slint 1.17 StyledText packs the private macOS system-font alias too
-    // tightly when a line contains PingFang fallback glyphs. Markdown Preview
-    // already uses this explicit family to obtain the native fallback metrics;
-    // keep conversation paragraphs on the same shaping path.
+    // StyledText packs the private macOS system-font alias too tightly when a
+    // line contains PingFang fallback glyphs. It also has no native line-height
+    // factor in Slint 1.18, so keep conversation paragraphs on Preview's
+    // explicit fallback shaping path.
     private property <string> resolved-body-font-family:
         root.body-font-family == ".AppleSystemUIFont"
             ? "Gujarati MT"
