@@ -196,6 +196,13 @@ offset overflow. Extents continue to come from measured visual lines.
 - Verify argv boundaries survive spaces in paths and values.
 - Verify multiple steps can remain expanded and multiline logs preserve one
   source line number per logical line.
+- Verify many large source switches return to both soft eviction targets after
+  leases are released; exact target stays cached and one byte over evicts the
+  oldest unmounted viewport.
+- Verify multiple simultaneously expanded large logs remain complete and pinned
+  even while their combined mounted working set exceeds the targets, then collapse
+  or leave the route and verify the oldest unmounted owners are reclaimed and the
+  retry timer stops after returning to target.
 - Verify the first expansion materializes existing output and subsequent output
   appears live without reconstructing unopened logs.
 - Verify workflow-command and conventional warning/error prefixes receive the
@@ -211,6 +218,10 @@ offset overflow. Extents continue to come from measured visual lines.
 - 验证外部无需读取 Step 行即可取得总耗时。
 - 验证路径和参数含空格时 argv 边界不变。
 - 验证多个 Step 可同时展开，多行日志按逻辑行保留一个源行号。
+- 验证切换多个大日志并释放 lease 后回到条目/字节软淘汰目标：恰好等于目标仍缓存，
+  超 1 byte 淘汰最旧未挂载视口。
+- 验证同时展开多个大日志时全部内容完整并保持 pin，即使组合挂载工作集超出目标；
+  折叠或离开路由后，最旧的未挂载 owner 会被回收，回到目标后重试 timer 停止。
 - 验证第一次展开才构造已有日志，之后的输出实时出现，未展开日志不被构造。
 - 验证 workflow command 与常见 warning/error 前缀采用正确的 Primer 语义行样式。
 - 验证动画启用时运行 Spinner 持续旋转，queued Step 没有 hover 或点击行为。
@@ -226,14 +237,40 @@ offset overflow. Extents continue to come from measured visual lines.
   Wrapped layout retains UTF-8 ranges into the semantic prefix/body plus exact
   extents. Only visible source rows create visual-line strings; empty rows,
   annotation newlines, raw text, source numbers and wrapping remain unchanged.
-  Revisions/layout keys still reject obsolete results. The 16-entry viewport
-  retention policy is unchanged and must not be described as a heap byte limit.
+  Revisions/layout keys still reject obsolete results. The viewport cache uses
+  16 entries and 16 MiB of accounted owners as soft eviction targets, not hard
+  heap or RSS limits. The current callback and every viewport whose
+  `JobLogWindow.rows` model is still mounted by Slint are pinned and may keep the
+  combined working set over either target for the full mount lifetime. Only while
+  over target, a 250 ms event-loop timer retries pruning; after a rows lease is
+  released, it evicts the oldest unmounted viewport and stops when no longer over.
+  Dropping a viewport issues non-blocking worker cancellation; it does not wait for
+  an already running task to drain.
+
+  Accounted owners include source snapshots, non-shared measurement text, a
+  generic fallback's concrete pending snapshot, wrap containers and extent
+  storage; shared snapshots are counted once. Snapshot text bytes are cached when
+  each snapshot is produced, so cache refresh is O(viewports) and never rescans
+  all source rows on the event loop. The opaque source allocation behind a generic
+  model cannot be estimated. Cancelled old in-flight work and other worker
+  transients, allocator overhead, fonts, GPU resources and total process RSS are
+  outside this accounting.
 - 应用自有 `LogModel` 必须通过 Slint 的 `Model::as_any` 暴露具体类型；测量请求
   和结果共享不可变解析快照，不得逐条物化全部 Slint 行或复制所有解析字符串。
   外部/静态 model 保留转换兜底。布局保存语义前缀/正文上的 UTF-8 区间和精确
   extent，仅可见源行构造视觉行字符串；空行、注解换行、原文、行号及换行结果
-  保持不变。revision/layout key 继续拒绝旧结果。16 项视口保留策略不变，不应
-  将其描述为堆内存字节上限。
+  保持不变。revision/layout key 继续拒绝旧结果。视口缓存把 16 项和 16 MiB
+  已记账 owner 作为软淘汰目标，而不是堆内存或 RSS 硬上限。当前 callback 与
+  `JobLogWindow.rows` 仍被 Slint 挂载的每个视口都会被 pin，其组合工作集可在整个
+  挂载期持续超出任一目标。仅在超限时，event loop 每 250 ms 重试淘汰；rows lease
+  释放后淘汰最旧的未挂载视口，回到目标后停止。视口析构只发出非阻塞 Worker
+  取消请求，不等待已经运行的任务排空。
+
+  记账范围包括源快照、未共享 measurement 文本、generic fallback 的具体 pending
+  snapshot、换行容器与 extent 存储；共享快照只记账一次。快照生成时缓存正文
+  retained bytes，因此 event loop 上的缓存刷新为 O(viewports)，不会重新扫描全部
+  源行。不透明 generic model 背后的源分配无法估算；已取消的旧 in-flight 工作及
+  其他 Worker 瞬时分配、allocator 开销、字体、GPU 资源和完整进程 RSS 均不在记账内。
 
 - Wrapped visual lines within one source row use a 20 px pitch at 12 px font
   size. Parley shapes rows on the shared cancellable blocking pool; Slint paints

@@ -17,15 +17,18 @@ Hooks also requires shared configuration snapshots, durable-only automatic
 writes and coalesced incremental Job projection; Jobs bounds shaping offsets.
 / Hooks 还要求共享配置快照、只随持久变化自动写盘及合并后的增量 Job 投影；Jobs 约束排版偏移范围。
 Jobs also requires shared immutable measurement snapshots and UTF-8 wrap ranges,
-with visual text materialized only for visible source rows. / Jobs 还要求共享
-不可变测量快照并保存 UTF-8 换行区间，仅对可见源行物化视觉文本。
+with visual text materialized only for visible source rows, mounted viewport
+leases pinned, and unmounted cache owners governed by soft entry/retained-byte
+eviction targets. / Jobs 还要求共享不可变测量快照并保存 UTF-8 换行区间，
+仅对可见源行物化视觉文本；挂载中的视口 lease 必须 pin，未挂载缓存 owner
+遵循条目数与 retained bytes 软淘汰目标。
 
 Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历史记录描述问题排查过程。三者不要混写。
 
 | Spec | Status | Code owners |
 | --- | --- | --- |
 | [Multiline text layout](text-layout.md) | Mandatory native line-height, documented fallback and measurement/extent synchronization / 强制原生行高、例外记录与测量/extent 同步契约 | `ui/`, feature text-layout adapters, worker measurement and exact virtual extents |
-| [Exact virtual scrolling](virtual-scrolling.md) | Shared contract for variable-height documents and stable thumb geometry / 可变行高文档与稳定滑块几何通用契约 | `crates/usher-virtual-list/`, `src/app_runtime/latest_compute.rs`, `ui/components/github_scroll_view.slint`, feature layout adapters |
+| [Exact virtual scrolling](virtual-scrolling.md) | Shared contract for variable-height documents, stable thumb geometry and soft retained-owner eviction targets / 可变行高文档、稳定滑块几何与 retained-owner 软淘汰目标通用契约 | `crates/usher-virtual-list/`, `src/app_runtime/latest_compute.rs`, `ui/components/github_scroll_view.slint`, feature layout adapters |
 | [HTTP pipeline](http.md) | Explicit response budgets and bounded error reads / 显式响应预算与有界错误读取 | `src/http/mod.rs`, all HTTP callers |
 | [Cross-page state store](state-store.md) | Current: bounded latest snapshots and revision barriers / 当前：有界最新快照与版本屏障 | `crates/usher-state-store/`, all cross-page state owners and UI bridges |
 | [Shared search navigation](search.md) | Current / 当前 | `crates/usher-search/`, feature Find adapters, PR `find_bridge.rs`, `controller/diff_bindings.rs`, `PrDiffBridge` |
@@ -37,7 +40,7 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | [Artifact preview framework](artifact-preview.md) | Current: split/floating/detached modes, placement persistence, full divider capture and stable detached first frames / 当前：三栏/浮动/独立窗口、模式持久化、完整分割线捕获与稳定的独立窗口首帧 | `crates/usher-preview/`, `src/artifact_preview/`, `src/platform/`, `ui/components/artifact_preview/`, Settings and all preview callers |
 | [Project repository metadata](project-repository.md) | Current: explicit Hook opt-in with disabled-row restoration, bounded Logo retries and projection / 当前：Hook 显式选择与禁用行恢复、Logo 有界重试与投影 | `src/project/mod.rs`, `src/git/`, `src/codereview/api/` |
 | [Pull request workflow](pr-review.md) | Current / 当前 | `src/workflow/pr_list.rs`, `src/workflow/pr_review.rs`, `src/workflow/pr_review/`, `src/git/`, `ui/features/pr_review/`, `ui/views/workflow/`, `ui/components/workflow/` |
-| [Reusable job runs](jobs.md) | Current: typed lifecycle/durations, bounded output, virtualized logs, safe blank rows and fixed run pages with output-only scrolling / 当前：类型化生命周期/耗时、有界输出与日志虚拟化、空行安全处理及固定运行页/仅输出区滚动 | `src/jobs/`, `ui/views/job_run.slint`, `ui/components/jobs/`, feature controllers |
+| [Reusable job runs](jobs.md) | Current: typed lifecycle/durations, bounded output, virtualized logs with a soft-budgeted unmounted cache, safe blank rows and fixed run pages with output-only scrolling / 当前：类型化生命周期/耗时、有界输出、带软预算未挂载缓存的日志虚拟化、空行安全处理及固定运行页/仅输出区滚动 | `src/jobs/`, `ui/views/job_run.slint`, `ui/components/jobs/`, feature controllers |
 | [Application Hooks](hooks.md) | Current: bounded syntax text and native cursor/selection; macOS cursor visual QA passed / 当前：有界语法文本与原生光标/选区，macOS 光标视觉验收通过 | `src/hooks/`, `src/project/`, Settings, PR/AI completion sources, notifications and shutdown drains |
 | [Tag workflow](tag.md) | Current / 当前 | `src/workflow/tag.rs`, `src/workflow/tag/`, `src/workflow/state.rs`, `ui/views/workflow/` |
 | [Terminal behavior](terminal.md) | Bounded I/O and asynchronous session shutdown barrier / 有界 IO 与异步会话退出屏障 | `src/terminal/`, `ui/components/drawer/terminal_drawer.slint`, `ui/main.slint` |

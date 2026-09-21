@@ -42,8 +42,12 @@ Hook 状态共享不可变配置/事件目录，持久摘要版本与输出 seq 
 避免上游 16 位字形簇偏移在超长连续输出时溢出。
 `jobs/log_model.rs` 显式暴露 Slint model 类型，排版请求共享不可变解析快照，
 不再通过 UI 行逐条转换全文。`jobs/log_viewport.rs` 保留精确 extent 和语义
-前缀/正文上的 UTF-8 换行区间，仅可见源行生成视觉行字符串。原有 16 项视口缓存
-仍是条目预算，不是字节上限。
+前缀/正文上的 UTF-8 换行区间，仅可见源行生成视觉行字符串。视口缓存把
+16 项和 16 MiB 已记账 owner 作为软淘汰目标，而不是堆内存硬上限。当前排版
+callback 以及 `JobLogWindow.rows` 仍被 Slint 挂载的所有视口都会被 pin，其组合
+工作集可以在整个挂载期持续超出任一目标。超限时 event loop 每 250 ms 重试；
+rows lease 释放后淘汰最旧的未挂载视口，回到目标后停止。视口析构只发出非阻塞
+Worker 取消请求。
 
 人工与 AI Review Hook 的 payload 共享 PR 标题、源/目标分支、作者标签及可空的
 作者姓名/邮箱。Git adapter 在 diff 详情中保留平台明确返回的 PR 作者身份，
@@ -841,6 +845,14 @@ Stage Snapshot 适配到共用 `GitHubActionsJob` 视觉展示；Branch 当前�
 安装精确 extent，并在 `GitHubScrollView` 内绘制有界、保留源行号的窗口。文档高度
 与滑块范围使用同一精确 extent，不依赖 ListView 的可见行估算；同数量修改也递增
 日志 revision。普通滚动不重新换行，仅源内容/字体/宽度变化请求布局。
+未挂载视口缓存以 16 项和 16 MiB 已记账源/布局 owner 为软淘汰目标。当前
+callback 和仍由 Slint 挂载 rows model 的所有视口都会被 pin，因此释放这些 lease
+前工作集可以持续超标；超限期间 event loop 每 250 ms 重试，随后淘汰最旧的未挂载
+视口，回到目标后停止。快照生成时缓存正文 retained bytes，淘汰检查只以
+O(viewports) 读取计数而不重新扫描源行。generic fallback 的具体 pending snapshot
+纳入记账，但其不透明的底层 model 无法估算；记账还不包括已取消的旧 in-flight
+工作及其他 Worker 瞬时分配、allocator 开销、字体、GPU 资源或完整进程 RSS。
+视口析构只发出非阻塞取消请求。
 跨 Feature 接入与验收遵循 [精确虚拟滚动](specs/virtual-scrolling.md)。
 JobRun 独立挂在通用页面 Flickable 之外，采用固定高度视口。页头和 Jobs 导航固定，
 日志面板按剩余高度收缩并保留虚拟列表滚动条。单步骤运行的日志填满剩余空间，大窗口

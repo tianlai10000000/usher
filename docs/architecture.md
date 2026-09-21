@@ -53,7 +53,13 @@ to avoid upstream 16-bit cluster-offset overflow on long uninterrupted output.
 share the immutable parsed snapshot instead of materializing all UI rows.
 `jobs/log_viewport.rs` retains exact extents and UTF-8 wrap ranges over semantic
 prefix/body text; only visible source rows allocate visual-line strings. The
-existing 16-entry viewport cache remains an entry budget, not a byte limit.
+viewport cache uses 16 entries and 16 MiB of accounted owners as soft eviction
+targets, not hard heap limits. The current layout callback and every viewport
+whose `JobLogWindow.rows` model remains mounted by Slint are pinned; their
+combined working set may stay above either target for the whole mount lifetime.
+While over target, a 250 ms event-loop timer retries pruning. Once a rows lease
+is released, pruning evicts the oldest unmounted viewport and stops when both
+targets are met. Viewport drop requests non-blocking worker cancellation.
 
 PR and AI review Hooks share PR title, source/target branch, author label, and
 nullable author name/email in their payloads. Git adapters retain explicitly
@@ -1086,6 +1092,17 @@ extents in `usher-virtual-list`. A bounded source-numbered window is painted ins
 `GitHubScrollView`; document height and thumb range use the same exact extent, not
 ListView's visible-row estimate. Same-count edits advance the log revision.
 Scrolling never rewraps the document; only source/font/width changes request layout.
+The unmounted viewport cache has soft eviction targets of 16 entries and 16 MiB
+of accounted source/layout owners. The current callback and all rows models still
+mounted by Slint are pinned, so the working set can remain over target until those
+leases are released; a 250 ms event-loop retry then evicts the oldest unmounted
+viewport and stops when no longer over target. Snapshot text bytes are cached when
+the snapshot is produced, so pruning reads counters in O(viewports) time without
+rescanning source rows. A generic fallback's concrete pending snapshot is counted,
+but its opaque backing model is not estimable. Accounting also excludes cancelled
+old in-flight work and other worker transients, allocator overhead, fonts, GPU
+resources and total process RSS. Viewport drop only issues a non-blocking
+cancellation request.
 The cross-feature integration and acceptance contract is
 [Exact virtual scrolling](specs/virtual-scrolling.md).
 JobRun is mounted outside the generic page Flickable in a fixed-height viewport.

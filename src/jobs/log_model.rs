@@ -4,6 +4,7 @@ use slint::{Model, ModelNotify, ModelTracker};
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,9 +42,51 @@ struct Line {
     raw: String,
     parsed: ParsedText,
 }
+
+impl Line {
+    fn retained_text_bytes(&self) -> usize {
+        self.raw
+            .capacity()
+            .saturating_add(self.parsed.kind.capacity())
+            .saturating_add(self.parsed.prefix.capacity())
+            .saturating_add(self.parsed.text.capacity())
+    }
+}
+
+#[derive(Debug, Default)]
+struct SnapshotData {
+    lines: Vec<Arc<Line>>,
+    retained_text_bytes: usize,
+}
+
+impl SnapshotData {
+    fn new(lines: Vec<Arc<Line>>) -> Self {
+        let retained_text_bytes = lines
+            .iter()
+            .map(|line| line.retained_text_bytes())
+            .fold(0usize, usize::saturating_add);
+        Self {
+            lines,
+            retained_text_bytes,
+        }
+    }
+}
+
+impl Deref for SnapshotData {
+    type Target = [Arc<Line>];
+
+    fn deref(&self) -> &Self::Target {
+        &self.lines
+    }
+}
+
 #[derive(Debug, Clone, Default)]
-pub(crate) struct LogSnapshot(Arc<Vec<Arc<Line>>>);
+pub(crate) struct LogSnapshot(Arc<SnapshotData>);
 impl LogSnapshot {
+    fn from_lines(lines: Vec<Arc<Line>>) -> Self {
+        Self(Arc::new(SnapshotData::new(lines)))
+    }
+
     pub(super) fn iter(&self) -> impl Iterator<Item = &ParsedText> {
         self.0.iter().map(|line| &line.parsed)
     }
@@ -57,7 +100,7 @@ impl LogSnapshot {
     }
 
     pub(super) fn from_parsed(lines: impl Iterator<Item = ParsedText>) -> Self {
-        Self(Arc::new(
+        Self::from_lines(
             lines
                 .map(|parsed| {
                     Arc::new(Line {
@@ -66,19 +109,11 @@ impl LogSnapshot {
                     })
                 })
                 .collect(),
-        ))
+        )
     }
 
     pub(super) fn retained_text_bytes(&self) -> usize {
-        self.0
-            .iter()
-            .map(|line| {
-                line.raw.capacity()
-                    + line.parsed.kind.capacity()
-                    + line.parsed.prefix.capacity()
-                    + line.parsed.text.capacity()
-            })
-            .sum()
+        self.0.retained_text_bytes
     }
 
     #[cfg(test)]
@@ -94,7 +129,7 @@ impl LogSnapshot {
             .iter()
             .map(|line| (line.raw.as_str(), line.clone()))
             .collect();
-        Self(Arc::new(
+        Self::from_lines(
             raw.lines()
                 .map(|raw| {
                     known
@@ -108,7 +143,7 @@ impl LogSnapshot {
                         .clone()
                 })
                 .collect(),
-        ))
+        )
     }
 }
 
@@ -161,9 +196,9 @@ impl LogModel {
             }
         } else {
             if removed != 0 {
-                let mut intermediate = old.0.as_ref().clone();
+                let mut intermediate = old.0.lines.clone();
                 intermediate.drain(prefix..prefix + removed);
-                self.snapshot.replace(LogSnapshot(Arc::new(intermediate)));
+                self.snapshot.replace(LogSnapshot::from_lines(intermediate));
                 self.notify.row_removed(prefix, removed);
             }
             self.snapshot.replace(next);
@@ -281,6 +316,28 @@ pub(super) fn parse_log_line(line: &str) -> ParsedText {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapshot_caches_retained_text_bytes_when_it_is_produced() {
+        let first = LogSnapshot::default().update("first\nwarning: retained\npartial");
+        let expected_first = first
+            .0
+            .lines
+            .iter()
+            .map(|line| line.retained_text_bytes())
+            .sum::<usize>();
+        assert_eq!(first.retained_text_bytes(), expected_first);
+
+        let next = first.update("warning: retained\npartial completed\nlast");
+        let expected_next = next
+            .0
+            .lines
+            .iter()
+            .map(|line| line.retained_text_bytes())
+            .sum::<usize>();
+        assert_eq!(next.retained_text_bytes(), expected_next);
+        assert!(next.retained_text_bytes() > 0);
+    }
 
     #[test]
     fn measurement_downcast_shares_snapshot_without_materializing_ui_rows() {

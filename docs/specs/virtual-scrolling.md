@@ -71,6 +71,13 @@ debounce 测量、按源行数估算、取已见高度最大值，都不能保�
    stale row projection. Do not install new wrapping at an old revision or
    continue rendering rows from another source. Independent nested output owns
    its gestures; do not put an arbitrating page Flickable above it.
+8. Treat entry count and accounted retained bytes as soft eviction targets for
+   unmounted source/layout caches, not as hard heap or RSS limits. Pin the current
+   callback and every rows model still mounted by the UI; their combined working
+   set may stay over target until those leases are released. Retry only while over
+   target, then evict the oldest unmounted entry and request non-blocking worker
+   cancellation. Cache snapshot byte counts when snapshots are produced so the
+   event loop reads O(entries) counters instead of rescanning document rows.
 
 1. Layout key 包含源身份/revision、最终文本宽度、字体、行高策略和绘制指标，不包含
    滚动位置、hover 或方向。同数量的行修改也要递增 revision，model 身份不能替代内容版本。
@@ -90,6 +97,11 @@ debounce 测量、按源行数估算、取已见高度最大值，都不能保�
 7. 明确重排/更新时的位置策略、非法 offset clamp 和初次 loading；不安装旧版本排版，
    等待测量时显示一个居中 loading 状态并隐藏旧行投影，不显示另一来源的行。独立输出区不得有
    抢占其手势的祖先页面 Flickable。
+8. 条目数与已记账 retained bytes 是未挂载源/布局缓存的软淘汰目标，不是堆内存或
+   RSS 硬上限。当前 callback 与 UI 仍挂载 rows model 的所有视口都必须 pin，其组合
+   工作集可持续超标直至 lease 释放。仅在超限时重试，随后淘汰最旧未挂载项并发出
+   非阻塞 Worker 取消请求。快照生成时缓存字节计数，使 event loop 只以 O(entries)
+   读取计数而不重新扫描文档行。
 
 ## Acceptance / 验收
 
@@ -101,7 +113,9 @@ debounce 测量、按源行数估算、取已见高度最大值，都不能保�
 | Resize narrow/wide and normal/tall / 窄宽、普通高窗口 resize | Reflow once per layout key; painting and installed extents agree / 按 key 重排，绘制与 extent 一致 |
 | Line-height factor or fallback pitch change / 行高 factor 或 fallback pitch 变化 | New layout key; worker measurement, painting and all extents change together / 生成新 layout key，Worker 测量、绘制与全部 extent 同步变化 |
 | Append, tail eviction, same-count edit / 追加、尾部截断、同数量修改 | Correct revision/rows/extent; no stale worker result / 版本、行和高度正确，无旧 Worker 结果 |
-| Collapse/reopen and source switch / 折叠重开、切换来源 | Bounded cache, no cross-source content or orphan compute / 有界缓存，无串源或遗留计算 |
+| Collapse/reopen, route leave and source switch / 折叠重开、离页与切换来源 | Mounted rows stay valid; released leases permit oldest-unmounted reclamation, with no cross-source content or orphan projection / 挂载 rows 保持有效；lease 释放后允许回收最旧未挂载项，无串源或遗留投影 |
+| Many large source switches / 多个大日志来源切换 | After leases release, entry and accounted-byte totals return to their soft targets; exact-target and one-byte-over boundaries behave deterministically / lease 释放后条目数与已记账字节回到软目标；恰好等于目标与超 1 byte 的边界行为确定 |
+| Multiple expanded large logs / 同时展开多个大日志 | All mounted rows remain complete with exact extents while pinned, even over target; collapsing or leaving the route later reclaims the oldest unmounted owners and stops retrying at target / 即使超标，所有已 pin 的挂载 rows 仍完整且 extent 精确；折叠或离页后回收最旧未挂载 owner，回到目标后停止重试 |
 | English + packaged non-source locale / 英文与内置非源语言 | Identical geometry rules, current semantic loading/error copy / 几何规则一致，loading/error 文案即时正确 |
 | Production worker path + UI route / 生产 Worker 与真实路由 | Not build-only or synchronous-test-only acceptance / 不得仅编译或仅同步测试交付 |
 
@@ -112,7 +126,9 @@ debounce 测量、按源行数估算、取已见高度最大值，都不能保�
 - PR Diff: `src/workflow/pr_review/virtual_list.rs` and
   `ui/features/pr_review/` (lightweight exact display-column metrics).
 - Job logs: `src/jobs/log_viewport.rs`, `src/jobs/log_layout.rs` and
-  `ui/components/jobs/job.slint` (background wrapping, source-numbered rows).
+  `ui/components/jobs/job.slint` (background wrapping, source-numbered rows,
+  pinned mounted rows, and 16-entry / 16 MiB soft eviction targets for the
+  accounted unmounted cache).
 
 Read the feature contract for its content-update/reflow policy before copying
 an adapter. Share the infrastructure and invariants, not feature-specific state.
