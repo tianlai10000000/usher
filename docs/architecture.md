@@ -746,6 +746,14 @@ and keep incremental compilation enabled. On macOS this overrides Cargo's
 full/unpacked debug default, retaining file-and-line backtraces without
 accumulating loose `.rcgu.o` files in `target/debug/deps`.
 
+The `dev` profile compiles non-workspace dependencies at optimization level 1.
+The generated `usher-ui`, `usher-ui-settings`, and `usher-messages` workspace
+crates use the same optimization level without debug metadata. Application-owned
+Rust crates remain opt0 with line tables, so ordinary `cargo run` keeps source
+breakpoints and application panic locations while avoiding the largest Debug
+code-residency cost. This policy changes development artifacts only; test and
+release profiles retain their independent settings.
+
 Full LLDB variable/type inspection is explicit through the `dev-full` profile.
 It inherits normal development behavior but emits full, packed debug
 information into its own profile directory. This keeps heavyweight symbols

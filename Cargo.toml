@@ -156,16 +156,24 @@ debug = "line-tables-only"
 split-debuginfo = "off"
 incremental = true
 
+# Optimize third-party dependencies without changing application-owned Rust's
+# opt0 source-debugging behavior.
+[profile.dev.package."*"]
+opt-level = 1
+
 # Generated Slint code is not a useful LLDB source surface. Keep line tables for
 # application-owned Rust while avoiding debug metadata for the very large UI crate.
 [profile.dev.package.usher-ui]
 debug = "none"
+opt-level = 1
 
 [profile.dev.package.usher-ui-settings]
 debug = "none"
+opt-level = 1
 
 [profile.dev.package.usher-messages]
 debug = "none"
+opt-level = 1
 
 [profile.test]
 debug = "line-tables-only"

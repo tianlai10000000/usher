@@ -73,10 +73,11 @@ UI/Settings bridge：
 cargo check --no-default-features --features renderer-femtovg --locked
 ```
 
-日常 `dev` 和 `test` 构建保留源码行号与增量编译，但不再使用 macOS 默认的
-unpacked 调试对象。这样既能让 panic backtrace 保留文件与行号，也能避免松散
-`.rcgu.o` 长期占据 `target/`。确实需要 LLDB 查看完整变量和类型时，使用隔离的
-重量级 profile：
+日常 `dev` 构建对第三方依赖和生成的 Slint UI crate 使用 opt-level 1，同时让应用
+自有 Rust 保持 opt0。`dev` 与 `test` 仍保留源码行号和增量编译，但不再使用 macOS
+默认的 unpacked 调试对象。这样既保留应用 panic backtrace 与源码断点，也降低普通
+`cargo run` 的代码常驻。确实需要 LLDB 查看完整变量和类型时，使用隔离的重量级
+profile：
 
 ```sh
 cargo build --profile dev-full

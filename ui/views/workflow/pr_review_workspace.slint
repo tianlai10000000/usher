@@ -31,6 +31,9 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             : "edit_file";
     private property <length> file-list-min-width: 220px;
     private property <length> file-list-max-width: max(root.file-list-min-width, min(520px, root.content-width * 0.45));
+    // SF system UI name glyphs sit slightly below the geometric center of the
+    // file-tree row. Keep icons, counts, stats, and the hit target unchanged.
+    private property <length> file-tree-text-offset-y: -1px;
     // Preserve the session preference while clamping the rendered width when
     // the window becomes narrower.
     private property <length> file-list-width: max(root.file-list-min-width, min(root.file-list-max-width, root.file-list-preferred-width));
@@ -2860,6 +2863,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                             }
                                         }
                                         if item.kind == "folder": Text {
+                                            y: root.file-tree-text-offset-y;
                                             horizontal-stretch: 1;
                                             height: parent.height;
                                             text: item.name;
@@ -2886,6 +2890,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                             height: parent.height;
                                             filename := Text {
                                                 x: 0px;
+                                                y: root.file-tree-text-offset-y;
                                                 width: min(self.preferred-width, max(0px, parent.width - 60px));
                                                 height: parent.height;
                                                 text: item.name;

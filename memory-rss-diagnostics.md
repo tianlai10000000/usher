@@ -835,7 +835,7 @@ A/B 使用固定的五张原始 Logo，记录解码峰值 RSS、最终 RGBA live
 
 ### 13.1 已观察事实与尚未复现的边界
 
-用户在普通 `cargo run` 下依次访问项目列表、Hook 设置、PR 详情、Workflow、Chat，小窗口 RSS 超过 400 MB；报告时进程已经关闭。因此无法对原进程事后进行 `vmmap`、`footprint` 或分配调用栈归因，**本轮没有完整复现原来的 400 MB，也没有证据把它定性为持续泄漏**。
+用户在普通 `cargo run` 下依次访问项目列表、Hook 设置、PR 详情、Workflow、Chat，小窗口 RSS 超过 400 MB；报告时进程已经关闭。因此无法对原进程事后进行 `vmmap`、`footprint` 或分配调用栈归因。后续第 13.3 节已经用冻结真实 PR/Chat/Hook fixture 完整执行同类路线：三个 Release 进程都低于 300 MiB，辅助 Debug 进程超过 300 MiB 但主要差异来自代码/链接文件映射。**仍未复现原来的 400 MB，也没有证据把它定性为持续泄漏。**
 
 2026-09-20 的隔离诊断使用 `97438f3` 源码、默认 features、Slint 1.18.0、FemtoVG/OpenGL、2 个 Tokio worker，固定 800×600 logical、scale=2（1600×1200 physical）。macOS 27.0（26A428）、Mac14,9、arm64。离线、独立配置及单实例 namespace 下，项目、PR、Chat 和 Hook 配置均为空。实际路线为 Home → Projects → Settings General → Hooks → Chat → Home，Release 再重复 Settings → Chat → Home。
 
@@ -855,7 +855,7 @@ A/B 使用固定的五张原始 Logo，记录解码峰值 RSS、最终 RGBA live
 - **Debug 基线成本已经实测。** Projects 阶段应用自身 `__TEXT` 与 `__LINKEDIT` 的实际 resident 合计差额约 66 MiB；不是把可执行文件磁盘大小等同 RSS，也不包含 cargo/rustc 的内存。产品验收以 Release 为主，Debug 成本另列。
 - **设置首次访问的图形台阶已经实测。** Release 的 IOAccelerator graphics 从 Projects 约 6416 KB 增至 General 约 42 MB、随后 Chat 约 47 MB；IOSurface 始终约 37 MB。`footprint` 分类使用工具原始 MB/KB 舍入值，且采样时刻不同于周期日志，不能逐项相加还原 RSS。
 - **Hook Tooltip 是初始诊断提出的具体归因假设。** Settings General 也挂载 Hook portal；5 个固定动作的透明度施加于全窗口 `GitHubFloatingOverlayHost`，内部才是小提示框。Slint 1.18/FemtoVG 对复杂 opacity 子树可能创建离屏 layer。800×600×2²×4 bytes×5≈36.6 MiB 仅是 RGBA 理论规模；同尺寸 stencil 另约 9.15 MiB。第 13.4 节后续 A/B 支持图层面积归因，但候选因交互门禁失败已回滚，当前源码仍使用全窗 host opacity。理论估算不替代实测，也不能把全部 graphics 增量都算给 Tooltip。
-- **PR 和历史数据仍缺现场量化。** 本次没有真实 PR/Workflow 和大 Chat 数据。PR 的 count-bounded 高亮/源码/range 缓存、不同离页路径，以及 Chat 主动加载的历史等是后续 owner 审计对象，不是已证明造成这次 400 MB 的主因。释放 owner 也不保证 allocator/renderer 立即等额归还 RSS。
+- **本次隔离诊断当时没有真实 PR/Workflow 和大 Chat 数据。** 第 13.3 节随后补入冻结的 `tianlai10000000/usher#1`、Chat 历史、Hook 与项目 fixture，并记录了 PR/Chat 离页 owner；它仍没有达到 300/400 MiB。PR 的 count-bounded 高亮/源码/range 缓存、不同离页路径及 Chat 历史不能据此认定为原 400 MB 的主因，释放 owner 也不保证 allocator/renderer 立即等额归还 RSS。
 - **重复访问是否线性增长必须单独判断。** 空数据 Release 第二轮已接近平台期，不能由“首次增加且离页后保留”推导出“每轮都会泄漏”。小窗口切页的 graphics 台阶也不能与旧版 resize/IOSurface 高水位混为同一问题。
 
 完整诊断与原始日志保留在本地忽略目录 [rss-diagnosis-20260920](memory-benchmark-results/rss-diagnosis-20260920/analysis.zh.md)。其中 `debug-clean-routes.log`、`release-routes.log`、`*-resident.vmmap`、`*.footprint` 为有效证据；并行编译期间受内存压缩干扰的首轮 Debug 和一次错误的 `footprint -f MB` 输出保留但不纳入比较。该目录不随 Git 分发，因此本节同时保留了关键条件、数值与结论边界。
@@ -872,13 +872,46 @@ A/B 使用固定的五张原始 Logo，记录解码峰值 RSS、最终 RGBA live
 6. **结论仅为采用、拒绝或证据不足。** 未达收益、噪声/混合结果、视觉/行为错误或关键验收缺失，不宣称优化完成；拒绝候选时回滚本批生产行为，只保留有用诊断、原始证据及拒绝记录。不得把失败候选作为下一批基线。文档/工具正确性改进可单独交付，但不能声称已减少运行内存。
 7. **每批结束即交接。** 填写本节的批次记录，运行 `cargo fmt --all`、`cargo check --locked`、`cargo test --lib --locked`、`git diff --check` 及专项检查。交付后先供用户试用；下一批需用户确认当前结果并明确要求继续，不自动扩展范围。
 
-### 13.3 2026-09 批次 0：补齐原现场基线（待执行）
+### 13.3 2026-09 批次 0：补齐原现场基线（已完成，Release 低于 300 MiB）
 
-**目标与范围：** 冻结一个有代表性的真实 PR 脱敏快照和 Chat 历史 fixture，记录文件/行/token/文本字节、选中文件及项目数量；按用户的项目列表 → Hook 设置 → PR 详情 → Workflow → Chat 路线复现。分别覆盖 PR 自有 Back、侧栏离页和通用导航；保留 800×600、2× 的固定小窗口主协议，resize 另开实验，不混入。
+**固定输入与路线：** 使用提交 `b123e2e` 的当前源码构建、默认 features、FemtoVG/OpenGL、2 个 Tokio worker 和原生 800×600@2 小窗口。隔离 fixture 包含 10 个项目、5 个 Hook、99 条 RAG + 24 条 AI Chat 记录、6 个 Logo，以及 `tianlai10000000/usher#1` 的只读冻结回放（213 个文件、26,963 行）。路线固定为 Home → Projects → Hooks → Closed PR list → PR #1 → Back → Chat → Home，再热重复 Hooks → PR #1 → Chat → Home。外部回放不读取用户 Token、不执行写请求；二进制、快照和每次规范化请求均校验 hash。
 
-**前置与验收：** 不使用凭据或真实外部写操作；至少三个独立 Release 进程，每个执行相同重复路线并记录 warm-up 后平台/斜率。Debug 可做辅助归因，但不作为产品基线。对 PR Arc 去重后解释持有量，区分 UI model 与 renderer/driver。若需要新诊断，先做开/关开销 A/B，不默认在 Release 开启。
+正式有效组只有 R1、R7、R8，三者使用相同 Release 二进制 SHA256 `23cda3dd7f1b727fdccbb8d1d9dc9369591100ba765c62cdec3e6e202d022ad9`。每进程 12 个阶段、每阶段静置后采 5 点，共 180 个样本；全部 route/尺寸正确、`compressed=0`、正常退出且二进制/快照未变化。下表口径为“三个进程各自阶段五点中位数的中位数”；方括号是三个进程中位数范围，斜线后是该阶段 15 个原始点的最大观测值，单位 MiB：
 
-**拒绝边界：** 任意扩大合成 PR 直到达到 400 MB，不算重现用户现场；协议/数据不同或采样失败不能补入有效组。未复现 400 MB 时如实保留“未复现”，不阻塞已有空数据、固定尺寸证据支持的批次 1，但批次 2/3 的生产策略不得跳过各自代表性基线。
+| 阶段 | RSS 中位数 [范围] / 采样峰值 | footprint 中位数 [范围] / 采样峰值 |
+| --- | ---: | ---: |
+| `home_start` | 126.000 [125.234–126.031] / 126.031 | 94.126 [94.017–94.751] / 94.751 |
+| `projects_cold` | 132.906 [129.469–133.141] / 133.141 | 100.845 [97.142–101.579] / 101.579 |
+| `hooks_cold` | 183.703 [182.719–185.141] / 185.141 | 161.954 [160.470–163.814] / 163.814 |
+| `workflow_closed` | 203.422 [198.969–204.031] / 204.031 | 179.767 [175.095–181.064] / 181.064 |
+| `pr_initial` | 210.094 [208.203–221.563] / 221.563 | 184.626 [182.157–196.017] / 196.017 |
+| `workflow_after_pr` | 211.719 [209.891–224.234] / 224.234 | 186.814 [184.439–198.486] / 198.486 |
+| `chat_cold` | 211.156 [207.734–213.000] / 213.000 | 183.533 [175.361–185.908] / 185.908 |
+| `home_after_cycle1` | 205.922 [205.594–207.766] / 207.766 | 165.657 [164.361–175.220] / 175.220 |
+| `hooks_warm2` | 207.750 [205.609–213.141] / 213.141 | 171.767 [165.704–175.157] / 175.157 |
+| `pr_warm2` | 227.859 [225.469–231.734] / 231.734 | 186.626 [185.579–199.329] / 199.329 |
+| `chat_warm2` | 217.516 [207.031–225.359] / 225.359 | 184.157 [165.329–185.486] / 185.486 |
+| `home_after_cycle2` | 206.969 [206.953–217.297] / 217.297 | 165.126 [165.126–174.501] / 174.501 |
+
+进程内诊断记录的 lifetime RSS HWM 分别为 R1 `238.73`、R7 `237.64`、R8 `243.05 MiB`，中位数 `238.73 MiB`；physical-footprint HWM 分别为 `222.11`、`221.55`、`228.45 MiB`。三次 Release 均严格通过 **lifetime RSS HWM <300 MiB** 门槛；最差 R8 仍有 `56.95 MiB` 余量，也没有复现原报告的 400 MB。
+
+两轮最终 Home 的配对结果如下。RSS 变化中位数为 `+1.047 MiB`、范围 `-0.813–+11.703 MiB`，方向混合；graphics 与 IOSurface 三次均无轮间增长，live malloc 也基本不变。R7 的波动对应 `Malloc Large` dirty/reserve 高水位，不能定性为页面 owner 持续存活或持续泄漏：
+
+| 运行 | Home RSS 轮 1→2 | RSS Δ | footprint Δ | graphics dirty Δ | live malloc Δ | Small+Large dirty Δ |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| R1 | 205.922→206.969 | +1.047 | +0.766 | 0.000 | +0.05 | +0.828 |
+| R7 | 205.594→217.297 | +11.703 | +8.844 | 0.000 | -0.07 | +8.859 |
+| R8 | 207.766→206.953 | -0.813 | -10.094 | 0.000 | -0.10 | -10.156 |
+
+**Debug 辅助归因：** D1 的第一轮最终 Home RSS 为 `306.063 MiB`，相对 Release 中位数高 `100.141 MiB`；footprint 只高 `11.938 MiB`。D1 的 clean `__TEXT + __LINKEDIT` 为 `102.313 MiB`，Release 中位为 `13.563 MiB`，差 `88.750 MiB`；live malloc 高 `9.44 MiB`、graphics 高 `4.484 MiB`。D1 lifetime RSS HWM 为 `342.94 MiB`，11 个已完成阶段中 7 个超过 300 MiB。因此普通 `cargo run` 的 >300 MiB 已复现，但主要是 Debug 代码/链接映射常驻，而不是业务堆等量增加。D1 使用旧回放并被一次连接错误标为 fatal，且缺第二轮最终 Home，只作为描述性归因，不能补入 Release 门禁或循环斜率统计。
+
+**回放合同修正：** `replay.mjs` 现将且仅将 `ERR_HTTP_REQUEST_TIMEOUT + raw_packet_bytes=0 + socket_bytes_read=0` 记为 transport probe，每进程最多允许一次，并单独写 `transport-probes.jsonl`。任何带输入的非法 HTTP、未录制接口、凭据、写请求、其他错误或第二次 probe 仍是 fatal；9 组正/负 fixture 自测通过。R8 有 1 个符合合同的零字节 idle probe，实际 32 个成功请求、2,829,856 bytes 与 R1/R7 的规范化请求集合一致，`fatal/misses/mutations=0`，因此有效。
+
+**无效与中断运行：** D1 为上述不完整 Debug 描述样本；R2 虽完成 12 阶段但旧回放为 fatal；R3/R4 在定位零字节 timeout 时分别只到 6/4 阶段；R5 锁屏后停止、只有首轮 8 阶段；R6 会话中断、只有 4 阶段且无正常 exit/summary，其 stale active marker 已改名保留。它们均未用于正式统计，也没有覆盖失败证据。
+
+末轮 Home 的 graphics dirty 三进程均为 `78.125 MiB`，其中 IOAccelerator graphics `50.047 MiB`、owned-unmapped graphics `28.078 MiB`；IOSurface 另为 `36.641 MiB`。相对 Home 起点，graphics 配对增量中位数 `+59.563 MiB`，IOSurface 不变；live malloc 仅从约 `14.35 MiB` 升至中位 `18.77 MiB`。末轮 `vmmap` 的 malloc allocated 中位约 `19.0 MiB`、resident `53.2 MiB`、fragmentation `24.1 MiB`。这些分类快照与 RSS 不同刻且相互口径不同，不能相加还原 RSS，也不能把 allocator resident/slack 当成等量业务 owner。
+
+原始证据保留在本地忽略目录 `memory-benchmark-results/route-baseline-20260921/`；冻结 API body、Chat/Hook 内容和本机路径不随 Git 分发。结论是 **Release 路线通过 <300 MiB 门槛，Debug 路线越线且主要由调试构建映射解释，原 400 MB 仍未复现**。这不是 renderer、`release-fast` 或 Debug profile 候选的 A/B，也不改变既有 WGPU、opaque window、整页销毁和 allocator purge 的拒绝结论。
 
 ### 13.4 2026-09 批次 1：Hook Tooltip 小范围透明层（已实验，拒绝并回滚）
 
@@ -1234,10 +1267,102 @@ Chat 与 Job 是两个独立子批，共享的只有 §13.2 的验收门禁。�
 
 最终验证：`cargo build --release --locked`、`cargo fmt --all`、`cargo check --locked` 和 `git diff --check` 通过；Jobs 定向测试为 **36 passed / 0 failed**，覆盖 Unicode/空行/超长行、resize 重排、精确 extent、滚动、稳定滑块、软预算边界、多个 mounted lease、折叠 live growth、generic pending snapshot 与 Timer 销毁；完整 `cargo test --lib --locked` 为 **661 passed / 0 failed / 2 ignored**。保留既有 `events_after` dead-code、测试 `ComponentHandle` unused-import 与 macOS compact-unwind 警告，没有新失败。本小批没有修改 UI 文案或 Slint 布局；未执行 compiled `GitHubActionsJob` 多 Step 同时展开→折叠/离页→Timer 自动停止的端到端矩阵，也未重跑完整 doctest（既知 logger 基线失败）、架构 quality budget、Windows 或长时 soak，不宣称这些项已通过。
 
-### 13.7 2026-09 批次 4：开发构建与渲染剩余项（最后独立评估）
+### 13.7 2026-09 批次 4：开发构建与渲染剩余项（已完成）
 
 **目标与范围：** 产品内存继续用正式 Release 验收；日常优化构建优先测现有 `release-fast`。仅当 Debug 常驻成本影响开发时，独立比较 generated UI/依赖的 `opt-level=1` 候选，不默认修改全局 dev profile。字体图集、driver/renderer 残留另开归因实验，不把构建 profile 与 renderer 更换合在同一 A/B。
 
 **前置与验收：** profile 比较固定源码/features，记录实际 resident 文件段、启动/RSS、首次及增量编译时间、产物体积、backtrace/调试能力；它是开发体验实验，不替代三个 Release 进程的产品性能门禁。renderer 候选仅在新版本或新的 ownership 证据成立后重开，使用相同小/大窗口、路由/resize 循环，覆盖字体、阴影、拖拽、全屏、主题、标题栏、打包和关闭。
 
 **拒绝与回滚：** 不因一次 footprint 较低就推广 WGPU、opaque window 或整页销毁；这些已有失败/混合结果。无法解释残留归属时保留默认 FemtoVG/OpenGL，不做强制 allocator trim/purge。开发编译显著变慢、调试能力下降或产品 RSS/视觉回退时拒绝对应候选。
+
+#### 13.7.1 `release-fast` 源码构建与路线 A/B（已完成，拒绝作为低内存运行建议）
+
+候选只把现有 Release profile 的 full LTO / 1 CGU / non-incremental 改为 Thin LTO / 8 CGU / incremental；生产源码、features、renderer、fixture、窗口、worker 和路线均不变。候选二进制由当前 `b123e2e` 源码执行 `cargo build --profile release-fast --locked` 构建，SHA256 为 `c5c82c302c42dc447802e9a079e7f3587178900e02e65e30d027427a9f58bc48`。正式 Release 对照仍为同一源码的 `23cda3dd7f1b727fdccbb8d1d9dc9369591100ba765c62cdec3e6e202d022ad9`。
+
+F2/F3/F4 三个新进程各完成与 R1/R7/R8 相同的 12 阶段、60 样本协议，全部 800×600@原生 2×、`compressed=0`、正常退出，二进制/快照未变化。共享的无状态只读回放共收到 96 个请求、8,489,568 bytes，恰为 3 组各 32 请求；`fatal/misses/mutations/transport_probes=0`。F1 因锁屏后等待约 34 分钟才开始采样，仅保留 5 个 Home 点并正常退出，不纳入正式组。
+
+| 指标 | Release R1/R7/R8 中位数 | `release-fast` F2/F3/F4 中位数 | 候选变化 |
+| --- | ---: | ---: | ---: |
+| Home 起点 RSS | 126.000 MiB | 132.609 MiB | +6.609 MiB / +5.25% |
+| Projects 首访 RSS | 132.906 MiB | 140.875 MiB | +7.969 MiB / +6.00% |
+| Hooks 首访 RSS | 183.703 MiB | 191.953 MiB | +8.250 MiB / +4.49% |
+| PR 首访 RSS | 210.094 MiB | 223.656 MiB | +13.563 MiB / +6.46% |
+| 第一轮最终 Home RSS | 205.922 MiB | 214.672 MiB | +8.750 MiB / +4.25% |
+| PR 热访 RSS | 227.859 MiB | 234.016 MiB | +6.156 MiB / +2.70% |
+| Chat 热访 RSS | 217.516 MiB | 234.422 MiB | +16.906 MiB / +7.77% |
+| 第二轮最终 Home RSS | 206.969 MiB | 234.406 MiB | **+27.438 MiB / +13.26%** |
+| 第二轮最终 Home footprint | 165.126 MiB | 188.876 MiB | **+23.750 MiB / +14.38%** |
+| 全阶段离散样本最大值的进程中位数 | 227.859 MiB | 234.422 MiB | +6.563 MiB / +2.88% |
+| lifetime RSS HWM | 238.73 MiB | 243.11 MiB | +4.38 MiB / +1.83% |
+| lifetime footprint HWM | 222.11 MiB | 225.66 MiB | +3.55 MiB / +1.60% |
+
+候选的所有原始 RSS 及 lifetime HWM 仍低于 300 MiB，最差 F4 HWM 为 `246.28 MiB`。但是 Home 第一轮→第二轮的 RSS 增量为 F2 `+20.547`、F3 `+18.422`、F4 `+21.703 MiB`，三次同向；Release 对照为 `+1.047`、`+11.703`、`-0.813 MiB`。候选末轮 Home 相对 Release 的 RSS/footprint 均超过 5% 回退门槛，因此不能仅凭绝对值低于 300 MiB 通过。
+
+末轮 Home 的 graphics dirty 与 IOSurface 基本不变：Release 中位 `78.125 / 36.641 MiB`，候选约 `78.125 / 36.641 MiB`。差异主要位于 allocator：Release 的 `Malloc Small + Large` dirty 中位约 `46.047 MiB`，候选约 `59.000 MiB`，且候选三次均保留 `15.75–19.11 MiB` 的 Large dirty；候选 `__TEXT` clean 中位也从 `13.438` 增至 `16.719 MiB`。候选 Mach-O 的 `__TEXT` segment 为 38,797,312 bytes、`__LINKEDIT` 为 10,895,360 bytes；Release 分别为 35,045,376 和 507,904 bytes。磁盘二进制为 52,191,456 对 37,678,464 bytes（+38.5%）。这些数值支持“更少的链接期优化增加代码/allocator 高水位”的方向，但没有分配调用栈，不能进一步归因到具体业务 owner。
+
+构建侧只记录本次实际结果，不把它包装成新的受控编译 A/B：首次 profile 构建 Cargo 报告 `3m37s`；随后一次 generated UI/root rebuild 报告 `1m20s`；最终无改动构建为 `0.96s`。`target/release-fast` 当时占 5.3 GiB，包含增量缓存，不能与单个二进制大小混算。已有 [构建性能文档](docs/build-performance.md) 仍负责历史受控编译对照。
+
+**决策：拒绝把 `cargo run --profile release-fast --locked` 增补为本轮的低内存运行建议。** 现有 `release-fast` profile 与 README 中的“日常优化构建”用途保持不变，也不影响正式发布继续使用 `--release`；本轮不新增运行命令、不修改 profile。下一步仅针对用户实际使用的裸 `cargo run`，独立测试依赖/generated UI 的 Debug `opt-level=1` 候选，根应用 crate 继续保留 opt0 与 line tables；失败则完整回滚。
+
+#### 13.7.2 普通 `cargo run` 的依赖/generated UI opt1 A/B（已完成，采用）
+
+候选只修改 `profile.dev` 的 package override：非 workspace 第三方依赖使用
+`opt-level=1`；生成的 `usher-ui`、`usher-ui-settings`、`usher-messages` workspace
+crate 使用 `opt-level=1` 且继续 `debug="none"`。根 `usher` 及其余应用业务 workspace
+crate 仍为 opt0、`line-tables-only`、incremental。没有改变默认 feature、renderer、
+窗口、fixture、运行时代码或 Material vendor；两个 A/B artifact 都早于并发出现的
+`pr_review_workspace.slint` 文件树 `y: -1px` 调整，因此该无关改动没有混入任一侧。
+
+固定对照为 D2/D3/D4，SHA256
+`66acd9852e772345544e54516247f7cd0a86beac58d144ff65e863586d9ad63c`；候选为
+C1/C2/C3，SHA256
+`fa68f0b16fa77fd7ccc0ba9eec1f70b017c993763969579563e79c38d19c33e6`。每个进程都
+按 13.3 的 12 阶段路线采 60 个 settled 点，使用相同 800x600@原生 2x、
+FemtoVG/OpenGL、2 个 Tokio worker、10 Projects、5 Hooks、99 RAG + 24 AI Chat
+records、6 Logos 和冻结 `tianlai10000000/usher#1`（213 files / 26,963 lines）。六个
+进程都正常退出、`compressed=0`、二进制/快照 hash 未变化，回放无 miss、mutation
+或 fatal。
+
+下表为三进程阶段中位数的中位数；方括号为三个进程中位数范围，单位 MiB：
+
+| 阶段 | 原 Debug RSS | 候选 RSS | 候选 footprint |
+| --- | ---: | ---: | ---: |
+| `home_start` | 198.313 [192.219-199.844] | 159.422 [159.000-161.641] | 99.611 |
+| `projects_cold` | 207.234 [203.438-209.391] | 169.000 [166.891-169.031] | 108.532 |
+| `hooks_cold` | 266.594 [263.141-268.828] | 223.953 [221.531-224.156] | 167.064 |
+| `workflow_closed` | 289.313 [287.938-289.734] | 246.281 [244.734-248.531] | 185.829 |
+| `pr_initial` | 302.969 [296.422-303.953] | 270.781 [259.406-272.172] | 203.611 |
+| `workflow_after_pr` | 304.922 [298.953-305.969] | 254.484 [254.078-261.781] | 187.236 |
+| `chat_cold` | 301.219 [300.906-302.313] | 253.109 [250.938-255.641] | 177.533 |
+| `home_after_cycle1` | 301.141 [300.813-302.156] | 253.000 [250.969-255.563] | 177.283 |
+| `hooks_warm2` | 301.078 [300.859-302.125] | 253.078 [250.969-255.500] | 177.314 |
+| `pr_warm2` | 321.234 [319.344-321.266] | 273.781 [269.953-276.594] | 194.314 |
+| `chat_warm2` | 319.500 [300.531-321.766] | 274.219 [270.266-277.156] | 194.533 |
+| `home_after_cycle2` | 303.219 [300.438-308.922] | 259.250 [256.906-270.188] | 182.845 |
+
+原 Debug lifetime RSS HWM 为 D2 `330.41`、D3 `330.30`、D4 `328.75 MiB`，三次
+全部越过 300 MiB；候选为 C1 `289.39`、C2 `279.78`、C3 `285.12 MiB`，三次全部
+严格低于 300 MiB，最差仍有 `10.61 MiB` 余量。候选 lifetime footprint HWM 为
+`230.85/227.00/224.17 MiB`。候选相对原 Debug 的中位数改善为：Home 起点
+`-19.61%`、首次 PR `-10.62%`、第二轮 PR `-14.77%`、最终 Home `-14.50%`、
+lifetime RSS HWM `-13.68%`。候选第二轮 Home 相对第一轮分别为
+`+1.344/+17.188/+8.281 MiB`，没有出现每轮重复完整冷启动台阶的证据；仅两轮协议
+仍不能证明无限长 soak 的斜率为零。
+
+候选磁盘二进制从 `390,915,112` 降到 `180,791,480 bytes`（-53.75%）。首次候选
+源码构建 Cargo 报告 `6m33s`；没有同条件独立 target 的原 Debug 构建时间，因此不
+宣称编译提速。验证后的共享 `target/debug` 为 60.80 GiB，其中 incremental 39.01
+GiB、deps 16.77 GiB；它混有并发检查和历史 identity，只记录清理压力，不能归为本
+候选增量。
+
+调试门禁通过：LLDB 对候选 `src/main.rs:12` 解析出 2 个 breakpoint location；临时
+dev-profile panic probe 的 backtrace 输出
+`examples/dev_profile_panic_probe.rs:2:5`，验证后已移除。代价是第三方依赖和生成 UI
+的调试体验不同：生成 UI 不保留源码级 debug metadata；第三方依赖仍继承 line
+tables，但 opt-level 1 可能影响逐步执行与局部变量查看。需要完整应用变量/类型调试时
+继续使用隔离的 `dev-full`。
+
+**决策：采用该 dev package override。** 它直接修复用户实际的普通 `cargo run`
+路线越过 300 MiB 问题，同时保留应用源码 opt0、行号断点和 panic 定位。产品 Release
+门禁和 `release-fast` 的既有用途不变；本批不重开已拒绝的 WGPU、opaque window、
+整页销毁、Tooltip 全页 opacity 或 allocator purge 候选，也不修改 Material vendor。

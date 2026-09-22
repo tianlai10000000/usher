@@ -575,6 +575,12 @@ workspace 根 `Cargo.toml` 中的 profile 统一负责构建产物策略。日�
 这会覆盖 macOS 上 Cargo 默认的 full/unpacked 调试策略：panic backtrace
 仍有文件名和行号，但 `target/debug/deps` 不再积累松散 `.rcgu.o`。
 
+`dev` profile 对非 workspace 依赖使用 opt-level 1；生成的 `usher-ui`、
+`usher-ui-settings` 与 `usher-messages` workspace crate 同样使用 opt-level 1，且不
+生成调试元数据。应用自有 Rust crate 保持 opt0 与行表，因此普通 `cargo run` 仍可
+使用源码断点并定位应用 panic，同时避开最大的 Debug 代码常驻成本。该策略只改变
+开发产物；test 与 Release profile 保持各自独立设置。
+
 需要 LLDB 查看完整变量和类型时，显式使用 `dev-full` profile。它继承日常开发
 设置，但把完整 packed 调试信息写入独立 profile 目录；因此可以通过
 `cargo clean --profile dev-full` 单独移除，而不丢弃日常开发产物。Release 和

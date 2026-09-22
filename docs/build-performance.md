@@ -10,6 +10,21 @@ debug = "line-tables-only"
 split-debuginfo = "off"
 incremental = true
 
+[profile.dev.package."*"]
+opt-level = 1
+
+[profile.dev.package.usher-ui]
+debug = "none"
+opt-level = 1
+
+[profile.dev.package.usher-ui-settings]
+debug = "none"
+opt-level = 1
+
+[profile.dev.package.usher-messages]
+debug = "none"
+opt-level = 1
+
 [profile.test]
 debug = "line-tables-only"
 split-debuginfo = "off"
@@ -28,8 +43,10 @@ incremental = true
 ```
 
 This preserves incremental compilation and source file/line information for
-backtraces. It intentionally does not preserve full local-variable and type
-information for LLDB. Use the isolated profile when that information is needed:
+application backtraces. Third-party dependencies and generated Slint UI crates
+use opt-level 1; application-owned Rust remains opt0 with line tables. The
+profile intentionally does not preserve full local-variable and type information
+for LLDB. Use the isolated profile when that information is needed:
 
 ```sh
 cargo build --profile dev-full
@@ -58,6 +75,50 @@ release runtime policy while using Thin LTO, eight codegen units, and incrementa
 compilation. Its output under `target/release-fast` is not a final distributable
 artifact. `cargo bundle --profile release-fast` provides the matching local
 application bundle when needed.
+
+### 2026-09-22 dev runtime residency A/B
+
+Ordinary `cargo run` exceeded the project's 300 MiB RSS ceiling on the fixed
+800x600@2 route workload even though the same source stayed below the ceiling in
+Release. A controlled three-process A/B compared the previous Debug artifact
+with a candidate that changed only dev package overrides: non-workspace
+dependencies and the three generated UI crates use opt-level 1; application
+workspace crates remain opt0 with line tables.
+
+Both sides used the same frozen PR, project, Hook and Chat fixtures, FemtoVG/OpenGL,
+two Tokio workers and twelve route stages. Each stage contains five settled
+samples. Values below are medians of the three process-level medians:
+
+| Metric | Previous Debug | Current dev policy | Change |
+| --- | ---: | ---: | ---: |
+| Home start RSS | 198.313 MiB | 159.422 MiB | -19.61% |
+| First PR RSS | 302.969 MiB | 270.781 MiB | -10.62% |
+| Second PR RSS | 321.234 MiB | 273.781 MiB | -14.77% |
+| Final Home RSS | 303.219 MiB | 259.250 MiB | -14.50% |
+| Lifetime RSS HWM | 330.30 MiB | 285.12 MiB | -13.68% |
+| Binary size | 390,915,112 bytes | 180,791,480 bytes | -53.75% |
+
+All three previous Debug processes crossed 300 MiB; all three candidate
+processes stayed below it for both settled samples and lifetime HWM. Candidate
+lifetime HWM values were 289.39, 279.78 and 285.12 MiB. The second Home grew
+from the first by +1.344, +17.188 and +8.281 MiB respectively, rather than
+repeating the complete cold-start-to-warm-route increase. This two-cycle result
+does not establish an unlimited-soak slope, but it does not show an unbounded
+per-cycle leak.
+
+The candidate source build reported 6m33s. That timing is not a controlled build
+speed A/B and must not be presented as a compile-time improvement. The shared
+post-validation `target/debug` tree was 60.80 GiB (39.01 GiB incremental and
+16.77 GiB deps), but it contained artifacts from concurrent checks and older
+identities, so it records cleanup pressure rather than candidate-owned size.
+
+Debugging acceptance remained intact for application code: LLDB resolved a
+`src/main.rs:12` line breakpoint to two locations, and a temporary dev-profile
+panic probe reported `examples/dev_profile_panic_probe.rs:2:5`. The probe source
+was removed after the check. Generated UI crates do not retain source-level debug
+metadata; third-party dependencies retain inherited line tables, but opt-level 1
+can make stepping and local-variable inspection less direct. Use `dev-full` when
+full application variable/type inspection is required.
 
 ## Controlled A/B result
 

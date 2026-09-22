@@ -75,11 +75,13 @@ build. For a constrained build without its core package or UI/settings bridge:
 cargo check --no-default-features --features renderer-femtovg --locked
 ```
 
-Everyday `dev` and `test` builds retain source line tables and incremental
-compilation, but avoid macOS's default unpacked debug objects. This keeps panic
-backtraces useful while preventing loose `.rcgu.o` files from dominating
-`target/`. When full LLDB variable and type inspection is required, use the
-isolated heavyweight profile:
+Everyday `dev` builds optimize third-party dependencies and generated Slint UI
+crates at level 1 while keeping application-owned Rust at opt0. `dev` and
+`test` retain source line tables and incremental compilation, but avoid macOS's
+default unpacked debug objects. This keeps application panic backtraces and
+source breakpoints useful while reducing ordinary `cargo run` code residency.
+When full LLDB variable and type inspection is required, use the isolated
+heavyweight profile:
 
 ```sh
 cargo build --profile dev-full
