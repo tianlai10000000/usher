@@ -383,6 +383,8 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
     private property <length> observed-response-scroll-y: root.active-response-viewport-y;
     private property <length> header-height: 64px;
     private property <length> composer-height: 136px;
+    private property <length> composer-max-height:
+        max(136px, min(360px, root.height / 2));
     private property <length> stable-response-content-width: root.active-response-visible-width;
     private property <length> response-content-width:
         root.layout-resizing
@@ -1026,6 +1028,47 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
         height: root.composer-height;
         background: GitHubTheme.canvas-default;
 
+        // Match Chat's bounded north-resize interaction, but keep the handle on
+        // the editor's top border instead of floating above the mode tabs. The
+        // composer remains bottom-pinned, so tabs and editor move together.
+        composer-resize-strip := Rectangle {
+            x: 0px;
+            y: 42px;
+            width: parent.width;
+            height: 8px;
+            z: 102;
+            background: transparent;
+
+            Rectangle {
+                x: (parent.width - self.width) / 2;
+                y: 2px;
+                width: 40px;
+                height: 4px;
+                border-radius: 2px;
+                background: composer-resize-handle.has-hover
+                        || composer-resize-handle.pressed
+                    ? GitHubTheme.fg-muted
+                    : GitHubTheme.border-strong;
+            }
+
+            composer-resize-handle := TouchArea {
+                x: (parent.width - 64px) / 2;
+                y: 0px;
+                width: 64px;
+                height: parent.height;
+                mouse-cursor: n-resize;
+                moved => {
+                    root.composer-height = max(
+                        136px,
+                        min(
+                            root.composer-max-height,
+                            root.composer-height - (self.mouse-y - self.pressed-y)
+                        )
+                    );
+                }
+            }
+        }
+
         GitHubSegmentedControl {
             x: 16px;
             y: 10px;
@@ -1041,8 +1084,8 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
         composer-box := Rectangle {
             x: 16px;
             y: 44px;
-                width: root.response-message-width;
-            height: 80px;
+            width: root.response-message-width;
+            height: parent.height - 56px;
             border-radius: GitHubMetrics.radius-medium;
             border-width: GitHubMetrics.border-thin;
             border-color: ask-input.has-focus || review-input.has-focus
@@ -1050,41 +1093,64 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
                 : GitHubTheme.border-default;
             background: GitHubTheme.control-input-bg;
 
-            ask-input := TextInput {
+            ask-scroll := Flickable {
                 visible: !root.review-again-mode;
                 x: 12px;
                 y: 8px;
                 width: parent.width - 52px;
                 height: parent.height - 16px;
-                text <=> root.message-input;
-                enabled: !root.chat-sending && root.task-id != "";
-                accessible-label: I18n.ai-review-ask-about-pr;
-                single-line: false;
-                wrap: word-wrap;
-                font-size: 13px;
-                color: GitHubTheme.fg-default;
-                accepted => {
-                    if root.message-input != "" && !root.chat-sending {
-                        root.send-message(root.message-input);
+                content-width: self.width;
+                content-height: max(self.height, ask-input.preferred-height);
+                interactive: true;
+
+                ask-input := TextInput {
+                    width: ask-scroll.width;
+                    min-height: ask-scroll.height;
+                    text <=> root.message-input;
+                    enabled: !root.chat-sending && root.task-id != "";
+                    accessible-label: I18n.ai-review-ask-about-pr;
+                    single-line: false;
+                    wrap: word-wrap;
+                    line-height-factor: 1;
+                    font-size: 13px;
+                    color: GitHubTheme.fg-default;
+                    selection-background-color: GitHubTheme.diff-selection-bg;
+                    selection-foreground-color: self.color;
+                    accepted => {
+                        if root.message-input != "" && !root.chat-sending {
+                            root.send-message(root.message-input);
+                        }
                     }
                 }
             }
 
-            review-input := TextInput {
+            review-scroll := Flickable {
                 visible: root.review-again-mode;
                 x: 12px;
                 y: 8px;
                 width: parent.width - 52px;
                 height: parent.height - 16px;
-                text <=> root.extra-requirements;
-                enabled: !root.running && root.task-id != "";
-                single-line: false;
-                wrap: word-wrap;
-                font-size: 13px;
-                color: GitHubTheme.fg-default;
-                accepted => {
-                    if !root.running && root.task-id != "" {
-                        root.re-review(root.extra-requirements);
+                content-width: self.width;
+                content-height: max(self.height, review-input.preferred-height);
+                interactive: true;
+
+                review-input := TextInput {
+                    width: review-scroll.width;
+                    min-height: review-scroll.height;
+                    text <=> root.extra-requirements;
+                    enabled: !root.running && root.task-id != "";
+                    accessible-label: I18n.ai-review-add-instructions;
+                    single-line: false;
+                    wrap: word-wrap;
+                    line-height-factor: 1;
+                    font-size: 13px;
+                    color: GitHubTheme.fg-default;
+                    selection-background-color: GitHubTheme.diff-selection-bg;
+                    selection-foreground-color: self.color;
+                    accepted => {
+                        if !root.running && root.task-id != "" {
+                            root.re-review(root.extra-requirements);
+                        }
                     }
                 }
             }

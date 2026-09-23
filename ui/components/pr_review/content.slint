@@ -972,6 +972,8 @@ export component GitHubDiffSettingsPopover inherits Rectangle {
     callback apply(string, bool);
     callback dismiss-requested();
     private property <int> dismiss-revision: TransientOverlayState.dismiss-revision;
+    private property <int> popover-dismiss-revision:
+        TransientOverlayState.popover-dismiss-revision;
     private property <int> exclusive-generation: TransientOverlayState.exclusive-generation;
     private property <int> exclusive-token: 0;
 
@@ -985,6 +987,13 @@ export component GitHubDiffSettingsPopover inherits Rectangle {
     }
 
     changed dismiss-revision => {
+        if root.open {
+            TransientOverlayState.note-closed-open-menu();
+            root.dismiss-requested();
+        }
+    }
+
+    changed popover-dismiss-revision => {
         if root.open {
             TransientOverlayState.note-closed-open-menu();
             root.dismiss-requested();

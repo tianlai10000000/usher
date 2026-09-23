@@ -1673,3 +1673,847 @@ check、库测试670通过/0失败/2忽略及diff检查通过，完整doctest未
 详细协议、准备期错误记录、原始结果和证据边界见本地
 `memory-benchmark-results/pr-cache-20260920/home-stay-validation-0923.md` 与
 `home-stay-summary-0923.json`；无关用户改动全部保留。
+
+#### 13.9.3 剩余 Home RSS：分配器驻留归因与 Rust 高亮候选
+
+在相同单次真实 PR→Home 协议下另开一进程，仅为归因增加 initial/return 的
+`vmmap -summary` 与 `heap --noContent -s -z`。该插桩组不混入性能对照。
+RSS 起点117.188MiB，返回后170.469MiB，约60秒后169.297MiB；最终footprint
+117.720MiB。正常退出、18次只读回放请求，独立守卫未记录测试进程成为前台。
+
+默认malloc zone的resident从22.5MiB增至70.6MiB，而实际live allocation仅
+21.6→25.6MiB。dirty从22.5→46.9MiB，dirty fragmentation从约0.85→21.3MiB；
+同时进程reusable增加约24MiB。IOSurface保持36.6MiB，IOAccelerator resident
+约4.5→6.9MiB。分类采样时刻和统计口径不同，不能简单相加还原RSS，更不能把
+vmmap包含共享映射的TOTAL当作应用RSS。**剩余差额主要是malloc驻留/碎片和可复用
+页，并不是等量未释放的PR对象。** 此结果不能排除其他场景或长期循环的泄漏。
+
+进一步用普通Release依赖编译无窗口探针，直接调用生产
+`workflow/syntax_highlight.rs`，输入冻结PR的`AGENTS.md`（168行）和
+`src/project/mod.rs`（1035行）patch。原高亮路径RSS约2.09→3.63（资源加载）→
+24.08（Markdown）→39.14MiB（Rust）；drop全部资源后live heap仅0.053MiB，RSS
+仍39.16MiB。没有Slint、窗口或网络也能复现约37MiB残留，确认高亮分配本身是
+主要来源之一；这不是对所有剩余页面逐调用栈的完整归因。
+
+本轮尝试的独立候选仅将`.rs`送入项目已有Preview按需Tree-sitter parser，按hunk/meta
+边界重置、跨行保留注释状态，再复用原token压缩/列宽/深色映射。其他语言逐token
+保持原路径，失败回退syntect。仅显式离线test-fixtures开关可用，生产默认不变，
+未改Material/上游依赖、未使用allocator trim或已拒绝的全局Oniguruma方案。
+
+状态：**归因成立，候选拒绝并撤回；完整原生协议因焦点保护中止。** 候选新增4项测试覆盖Unicode、
+Tab/CRLF/空行与列宽、跨行注释及hunk边界、其他语言token一致与按需加载、空输入。
+高亮专项11通过/0失败。首次测试因误用CancellationToken构造API编译失败，修正为
+已有Default后通过。独立探针初次链接使用了不匹配LTO的log产物，改用同Release
+依赖及fat LTO后通过；夹具索引键读取错误也在采样前修正，未据失败结果宣称收益。
+
+原始归因、探针与预声明协议保存在本地忽略目录
+`memory-benchmark-results/pr-cache-20260920/`：
+`runs/residency-attribution-0923/`、`syntax-residency-probe.rs`、
+`rust-candidate-protocol-0923.md`。新A/B双方共同启用尚未采用的派生展示释放，
+只比较Rust解析器；这是条件归因对照，**不能冒称当前生产默认与候选的完整采用门禁**。
+
+**结果与拒绝：** 无窗口探针完成三对，释放后RSS中位38.766→28.063MiB，Rust阶段
+live heap中位32.497→18.371MiB。但完整应用出现反向结果，不能把微基准收益外推：
+
+| 普通Release进程 | 初始Home RSS | 返回约60秒RSS | 相对自身起点残留 | 最终footprint | lifetime RSS HWM |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| A1 syntect | 117.547 | 169.078 | 51.531 | 117.845 | 187.41 |
+| B1 Rust Tree-sitter | 117.313 | 175.531 | 58.219 | 145.939 | 175.98 |
+| A2 syntect | 117.531 | 168.609 | 51.078 | 116.861 | 190.44 |
+| B2 Rust Tree-sitter | 117.531 | 171.875 | 54.344 | 142.595 | 172.31 |
+
+单位MiB；四进程均为800×600 logical、原生2×、两Worker、同一二进制61ed6b0…，
+每个阶段五点中位。双方共同启用release-derived-v1，只切换Rust parser。实际顺序
+A1→B1→B2→A2，原计划随后A3→B3。有效四进程各9动作、18次GET与正常析构，
+共80对RSS/footprint采样；无压缩、模型/帧错误、回放miss或mutation，未记录前台激活。
+
+两对归一化残留分别**恶化6.688和3.266MiB**，footprint分别恶化约28.094和
+25.734MiB；候选最终live heap约25.7MiB，与A的约25.9MiB接近。因此减少Rust语法
+对象和活动峰值并没有减少此整机分配布局下的驻留/dirty成本。**拒绝该方案作为本问题
+的修复。** 不更换主指标、不放宽门槛，也不把它放入下一轮基线。两对不足三对，
+汇总显式标记complete=false、target_pass=null，不伪造完成的正式采用门禁。
+
+**焦点失败：** A3在启动约0.596秒被独立守卫记录为前台；守卫随即记录违规并请求
+退出，应用正常析构、状态0退出，尚无回放请求/有效采样。无法仅由通知判断
+激活来源，不归因给用户。B3未启动、没有重试；该事件证明隔离包仍不能保证始终不
+激活。守卫限制异常持续时间，但不能撤销已经发生的激活。全部测试/守卫/回放已
+结束，记录PID均不再存在、active lock已清除。不重新启动原生测试，直到剩余激活
+入口得到解释和约束。
+
+**回退及验证：** 仅撤回本轮新增的Rust候选模块/开关及对应架构、规格说明；
+`src/workflow/syntax_highlight.rs`与HEAD逐字节一致，候选源码/测试和产物仍保存在
+隔离`rust-candidate-source-0923/`与`artifacts/`，可复查。前轮派生展示生命周期
+候选保持原有未默认启用状态。Material、生产依赖、安装包及主Release未改，主产物
+SHA仍为6a91277…；无关用户改动保留。最终工作区仅此诊断文档有变更。
+`cargo fmt --all`、`cargo check --locked --offline`、`cargo test --lib --locked --offline`
+（670通过/0失败/2忽略）、UI policy与diff检查通过；既有warning保留，完整doctest
+未重跑。隔离普通Release构建通过（7m13s），候选高亮11项通过；runner3正例/14反例、
+比较目标2正例/7反例通过。重入p95、长期循环、resize与前台视觉验收未完成。
+
+完整原始账本与输入哈希：`rust-candidate-partial-0923.json`、
+`syntax-residency-series-0923.json`、`rust-candidate-build-0923.json`、
+`runs/rust-rss-{A1,B1,B2,A2,A3}-0923/`。A3失败不混入数值汇总，不删除失败证据。
+
+**下一步边界：** 不能再把约51MiB全部解释为PR强引用，也不能靠继续清空页面或
+allocator purge处理。后续应从未改动的基线，单独评估完整高亮链路（Markdown的
+首次高亮已带来约20MiB RSS台阶）及短/长生命周期分配混合，而不是把此次失败的
+Rust替换继续叠加成默认。每项候选仍须同时降低离页RSS/footprint并通过交互、完整
+源码高亮与重入验收。当前结论是**定位更深入，但117MiB起点以上的残留尚未修复**。
+
+#### 13.9.4 后台测试入口约束与完整高亮生命周期归因
+
+本轮从未改动的syntect基线继续，不复用13.9.3已拒绝的Rust解析器候选。
+发现旧隔离包没有`LSUIElement`，winit窗口仍允许成为key/main，启动回调也保留了
+先选Regular policy再改Accessory的分支。这些是确定的遗漏，但不能据此确定上轮
+前台事件的唯一来源。新的隔离包在启动前声明agent身份，诊断winit副本只设置
+Accessory，窗口拒绝key/main并在可见之前开启鼠标事件穿透。既有orderBack及应用/
+托盘禁用激活入口保留；没有修改生产平台代码、Material或主依赖。
+
+新增日志读取AppKit实际属性，而不是仅检查补丁字符串。独立guardian仍在启动前
+订阅激活通知并每100ms检查前台PID，违规立即终止自己拥有的子进程，不点击窗口、
+移动鼠标、发送按键或强制恢复焦点。五个独立普通Release进程均完成初始Home首帧、
+800×600@2原生几何、约5秒静置和正常析构；实际key/main=false、ignores_mouse=true，
+未记录测试PID成为前台。**这是五次有限验证，不是永不激活的保证。** 不采集前台
+截图，也不据此声称完成交互或闪烁视觉验收。
+
+初次构建因新增AppKit诊断getter缺少unsafe失败，保留失败日志；修正getter、去掉
+安全setter的多余unsafe及未使用import后，普通Release构建通过（7m02s）。新产物
+SHA为717ff109…；主`target/release/usher`恢复为原6a91277…，未替换安装包。
+新旧窗口策略不同，因此后续配对双方必须使用同一新环境，不能混合旧数据。
+
+**完整高亮资源实验：** 独立探针直接编译未改动的生产`syntax_highlight.rs`，使用
+相同Release依赖/fat LTO和冻结PR #1两个patch。再次核验patch与SHA校验过的Provider
+响应逐字一致；不启动窗口、不访问网络、不修改依赖或主动回收分配器。
+资源跨次复用、每次会话释放、每个文件释放三种归属各运行三个全新进程，每进程
+10轮，顺序R/S/F/F/S/R/S/R/F。180次文件高亮全部通过原文重建、直立token和跨轮/
+跨方案token digest一致性检查。探针不覆盖全文/其他语言，不冒充原生性能门禁。
+
+| 三进程中位数 | 跨轮复用 | 每轮释放 | 每文件释放 |
+| --- | ---: | ---: | ---: |
+| 所有资源最终释放后RSS（MiB） | 39.297 | 43.344 | 36.328 |
+| 采样live heap峰值（MiB） | 32.517 | 32.572 | 18.065 |
+| 第10轮末减第1轮末RSS（MiB） | +0.109 | +4.188 | +3.375 |
+| 重复两文件加载/高亮平均耗时（ms） | 163.187 | 377.675 | 379.529 |
+| 最终live heap（MiB） | 0.255 | 0.379 | 0.270 |
+
+这里RSS是无窗口探针的总量，不是Usher返回Home的RSS；耗时是第2至10轮的平均值
+再取三进程中位，不是UI交互p95。采样峰值也不是未插桩时的瞬时峰值。
+首个保留进程中，Markdown的466个token只有9025字节文本，释放token后live heap
+仍17.962MiB；Rust的3019个token有35034字节文本，释放后仍32.075MiB。
+单次两份token释放仅减少约0.453MiB。结合syntect的`OnceCell`惰性正则编译实现，
+证据进一步把大头指向编译后语法资源，而非生成token文本本身。
+
+**决策：不将更频繁销毁语法资源作为本轮生产修复。** 每轮重建虽然使live对象
+释放，却使最终RSS更高；每文件重建仅在无窗口探针降低约2.969MiB最终RSS，重复
+高亮成本约为复用的2.33倍，不能据此外推整机收益。十轮live保持很小而RSS仍驻留/
+增长，支持分配器复用与碎片归因，但不证明长期上界，更不排除整个应用其他泄漏。
+前轮派生展示释放候选仍保持opt-in，尚未通过采用门禁。
+
+原始证据保存在本地忽略目录`memory-benchmark-results/pr-cache-20260920/`：
+`background-protocol-0923.md`、`background-build-0923.json`、
+`background-launch-validation-0923.json`、`runs/background-home-{1..5}-0923/`、
+`syntax-lifetime-probe.rs`及`syntax-lifetime-series-0923/`。失败的首次构建日志未覆盖。
+
+**同新环境的原生冒烟对照：** 五次启动通过之后，用同一717ff109…产物顺序执行
+retain A1与release-derived-v1 B1。两进程各9个正确callback/model/帧回执、18次本地
+GET、20对RSS/footprint外部采样，正常析构；没有回放miss、mutation、压缩或记录到
+的前台激活。Home静置期间不再导航，没有访问真实远端或用户配置。
+
+| 指标（MiB，阶段五点中位） | 保留A1 | 释放B1 |
+| --- | ---: | ---: |
+| 初始Home RSS | 116.891 | 116.719 |
+| 返回Home RSS | 190.781 | 169.797 |
+| 约30秒RSS | 190.406 | 169.422 |
+| 约60秒RSS | 175.250 | 169.422 |
+| 约60秒减自身初始RSS | 58.359 | 52.703 |
+| 初始physical footprint | 82.689 | 90.110 |
+| 约60秒physical footprint | 144.861 | 115.548 |
+| 约60秒malloc在用 | 61.83 | 23.37 |
+| 约60秒malloc已分配容量 | 108 | 108 |
+
+A1在30至60秒之间没有执行额外清理操作却回落15.156MiB；该次回落的具体分类
+未采集，不能直接归因给malloc或渲染器，也不能当成B1收益。最终RSS差只有
+5.828MiB（3.33%），扣除各自起点后的残留差5.656MiB；没有达到既有10MiB或
+总RSS的5%目标，且仅一对，不能通过三对一致性或交互p95门禁。初始footprint还
+存在7.422MiB差异，进一步限制了这一对的解释能力。**候选仍未采用，约52.7MiB
+的返回Home残留仍未解决。** 不用更早阶段约21MiB差值替换预定的最终阶段指标。
+
+原始账本、逐采样文件和输入哈希见`background-home-stay-summary-0923.json`与
+`runs/background-{retain-A1,release-B1}-0923/`。工具采用结论只覆盖这七次无前台
+激活记录的启动/运行，不覆盖真实交互。没有新增生产内存候选，拒绝的Rust-only、
+全局Oniguruma、allocator purge等方案均未恢复。
+
+下一项值得单独评估的是**将高亮编译的短生命周期分配与主UI长期对象隔离**，而非
+继续压低token缓存或频繁drop同一进程的语法资源。短生命周期高亮worker进程可以
+作为未实施的诊断候选：保持原引擎/输出，先验证请求与结果预算、取消/退出和完整
+进程树RSS/footprint、重入延迟，再决定是否值得产品化。必须计入worker与IPC峰值，
+不能仅把内存移出主PID便宣称总内存下降；也不保证消除窗口放大后的渲染驻留。
+本轮只建立该实验依据，不新增进程架构或改变生产行为。
+
+最终检查：`cargo fmt --all`、`cargo check --locked --offline`、
+`cargo test --lib --locked --offline --quiet`（670通过/0失败/2忽略）、UI policy与
+`git diff --check`通过；保留既有dead-code/unused-import警告，完整doctest未重跑。
+新启动runner自测3正例/11反例、原生runner3正例/14反例、采样工具8组、独立守卫
+4组自测通过。后台窗口手动交互、前台闪烁、完整源码/多语言视觉、resize、重入
+p95和长期循环仍未验收。所有本轮测试窗口/守卫/回放均退出，active lock清除，
+主Release哈希不变；工作区仅本诊断文档有改动，前轮未提交记录和无关用户改动保留。
+
+#### 13.9.5 高亮为何未释放：真实持有、析构与系统驻留分层验证
+
+本轮仅诊断，不启用生产优化、不引入高亮子进程架构，也未启动GUI或操作输入。
+复查当前源码后，应把“回到Home仍占内存”拆成两种不同情况，不能笼统说成已释放
+或泄漏。
+
+**生产默认确实仍有持有者。** `src/app_lifecycle.rs::hooks`把普通路由切换与Workflow
+scope不可达清理分开；`src/router/mod.rs::scope_reachable_from`检查当前路由和
+back/forward历史。侧栏离开PR后，只要历史中还能返回Workflow/PR，scope就仍可达。
+历史保存的是Route枚举，不直接保存组件；真正持有重状态的是根callback捕获的
+`WorkflowPrReviewController`。其语法资源链为：
+
+```text
+MainWindow callback -> WorkflowPrReviewController
+  -> Arc<HighlightSession<HighlightResources>>
+  -> current: Arc<OnceLock<Arc<HighlightResources>>>
+  -> SyntaxSet -> SyntaxReference.lazy_contexts -> Context -> Regex.OnceCell
+  -> fancy-regex / regex-automata compiled engine and per-regex scratch pool
+```
+
+实际检查了`syntect 5.3.0`的`parsing/{syntax_set,regex,scope}.rs`及
+`regex-automata 0.4.18`的`meta/regex.rs`、`util/pool.rs`。这里的主要正则缓存归属
+具体Regex，不是一个无论如何都无法清除的全局缓存；syntect确有全局scope词条仓库，
+但不能据此把数十MiB归因给它。UI的`LazyPrDiffLineModel.highlighted`和controller的
+`highlighted_files`另外持有token，Find bridge也能持有line model；它们不持有语法
+引擎。清token缓存不能解除`highlight_resources`这条独立引用链。
+
+`controller/lifecycle.rs::candidate_enabled`在生产关闭，因此侧栏PR→Home不执行
+实验性的`suspend_presentation`。这属于“生命周期保留过久”，不是已证实的引用环。
+相反，Shell Back从审核真正返回列表时会经`src/lib.rs::on_navigate_back`委托给
+审核控制器；`navigate_back`（非内部commit-tab返回）执行`clear_owned_state`，
+其`reset_request_scoped_state`会detach语法槽。切项目、重置审核、scope不可达也走
+清理。不能把侧栏Home与审核Back两条路径混作同一个清理行为。
+
+**detach也不等于所有worker已释放。** Diff/全文路径在入队前取得资源lease；
+`spawn_blocking`闭包结束才释放该lease。`detach`仅替换controller自己的槽，在途
+worker还可以合法地持有旧槽。当前高亮循环没有协作取消，generation guard负责
+拒绝过期UI回写，不会停止已运行的解析。`is_loaded=false`只证明新槽为空，不足以
+单独证明旧资源已析构；但不能据此认定此前已完成高亮并静置60秒的样本仍卡在worker。
+
+**实际析构证据。** 新无窗口普通Release探针直接编译生产`syntax_highlight.rs`及
+`controller/highlight_session.rs`，使用同一冻结PR的168/1035行patch。仅给原有Rust
+`System`分配器包一层不分配内存的原子计数器；不换分配器、不purge、不改依赖。
+记录Weak资源存活状态、真正`System::dealloc`调用与Layout请求字节，同时由外部
+`ps`、`footprint`、首进程`vmmap/heap --noContent`交叉验证。协议依次暂停在：
+输入已读→资源加载→高亮完成→token释放→detach但旧lease仍在→最后lease释放→输入
+释放→额外静置20秒。保留lease是确定性模拟在途worker，不冒充Tokio调度性能实测。
+
+三个独立进程结论完全一致：
+
+- 仅释放token执行4691次dealloc、释放请求字节0.417MiB；引擎仍存活。
+- detach后新槽为空，但旧lease仍使Weak可升级；语法资源没有被析构。
+- 最后lease释放后Weak不可升级，执行**91,110次真实dealloc，释放27,296,630字节
+  （26.032MiB）**。其中74,437块≤128B、10,906块129–1024B、5,618块1–16KiB、
+  149块16KiB–1MiB；没有超过1MiB的大块。小对象为主的分配形态与页内碎片一致。
+- Rust仍存活的请求字节从26.187MiB降至0.155MiB；输入也释放后仅约0.042MiB。
+  这里是整个探针的Rust请求字节，不宣称剩余全部来自scope词条，也不宣称零常驻。
+- RSS从37.703–38.250MiB仍停在37.719–38.266MiB；footprint却从36.188–36.750MiB
+  降至13.407–14.141MiB。静置20秒后保持。**这段不是26MiB高亮对象没有free。**
+
+Rust请求字节与malloc在用容量不是同一口径，后者还涉及实际分配取整及非Rust分配；
+不能把两者差额当成遗漏的泄漏。计数器、采样暂停和profiling均会改变时间/布局，
+本实验用于证明归属与释放，不作为运行时性能A/B或收益证据。
+
+**释放后驻留在哪里。** 首进程的DefaultMallocZone，在token释放但引擎还活着时为
+resident35.6MiB、dirty35.6MiB、allocated32.0MiB；所有资源/输入释放并静置后为
+resident35.6MiB、dirty13.0MiB、allocated58KiB、dirty fragmentation约13.0MiB。
+因此不仅存在可回收驻留，也存在仍有实际成本的dirty/分配器碎片，不能说RSS大就
+完全无害。`vmmap`含共享库的TOTAL不是进程RSS，不拿它代替`ps`结果。
+
+另开一个仅追加`TASK_VM_INFO`分类读取的进程（沿用应用的结构定义并校验返回长度），
+确认最后lease释放前后：RSS38.922→38.938MiB，internal37.094→14.109MiB，
+**reusable0→23.000MiB**，footprint37.375→14.391MiB，compressed始终0。
+静置20秒后仍相同。此额外插桩样本单列，不混入三进程结果。由此直接确认大量已
+free页被标为可复用/可回收，但尚未退出resident统计；并非压缩制造的footprint下降。
+这种对象释放与页级碎片的区别也见Apple的
+[Detect and diagnose memory issues](https://developer.apple.com/videos/play/wwdc2021/10180/)。
+
+**诊断结论与下一项修复边界：** 已确认生产侧栏离页的引擎保留策略，以及真正free
+后的malloc驻留/碎片两个原因；在本次高亮资源链上未发现阻止析构的引用环，不能
+扩大为整个应用无泄漏的结论。下一候选应先独立评估“语法引擎离页释放、导航与
+已高亮token仍保留”，减少无效长期持有又避免销毁/重建整棵展示树；在途解析取消
+另按实际任务状态验证。它仍需全新Release A/B、重入/交互和RSS/footprint同时验收，
+不能由本轮析构证据直接启用。13.9.4提出的独立进程仅保留为后备研究方向，当前
+没有证据要求立即扩大到新进程架构。
+
+证据：`memory-benchmark-results/pr-cache-20260920/syntax-owner-proof{.rs,.mjs}`、
+`syntax-owner-proof-0923/`，以及单列的`syntax-owner-vm-proof{.rs,.mjs}`与
+`syntax-owner-vm-proof-0923/`。manifest保存生产源码、probe、session、binary和
+fixture哈希；各阶段原始计数、系统输出和正常退出结果均保留。计数器3组自测及
+runner1正例/7反例通过；现有资源槽测试2项、生命周期测试2项通过。
+
+最终检查：`cargo fmt --all`、`cargo check --locked --offline`、
+`cargo test --lib --locked --offline --quiet`（670通过/0失败/2忽略）及
+`git diff --check`通过。既有warning保留，完整doctest和GUI/性能采用门禁未重跑。
+全部四个无窗口采样进程正常退出，未启动Usher窗口、访问网络或操作鼠标焦点。
+生产源码、vendor、依赖和正式Release未改；主二进制仍为6a91277…，本轮只追加
+本诊断记录和忽略目录内的证据，前轮未提交记录与无关用户改动保留。
+
+#### 13.9.6 语法引擎单独离页释放：Release 首对观察与采集器失败
+
+**结论：验收未完成，不采用到生产，也不判定候选性能失败。** 本轮实现并隔离构建
+`release-syntax-v1`：只在PR离页时detach语法资源槽，保留token缓存、Diff/metric
+model、Find、领域详情、源码、导航及所有请求代次。它与既有`release-derived-v1`
+互斥，仅允许显式离线、独立state的`test-fixtures`运行。最终主源码已移除本轮
+候选和三个专项测试；隔离源码与测试仍在证据目录，未将未验收行为留作生产基线。
+
+**冻结协议。** 同一普通Release产物`ac635da1…`切换retain/syntax，计划按
+A1/B1/B2/A2/A3/B3执行三对；使用冻结的真实Usher PR #1、无凭据GET回放、
+800×600逻辑尺寸/2×、两个Tokio worker和九个正常慢速callback，返回Home后
+静置约60秒。两臂都须保留1035行、213文件和255树节点；B须保留2个token条目、
+1203行和3485个token，同时资源槽为空。RSS按每进程自己的初始Home归一化，
+三对均改善且成对收益中位数≥10MiB或≥基线最终RSS中位数的5%，HWM<300MiB，
+footprint不退化。安全、数据或退出校验失败立即停止，不重跑凑通过。
+
+**停止原因是采集器错误，不是释放了两次。** A1正常完成；B1完成全部动作与四个
+采样阶段后，runner报`Wrong syntax release count`并停止，后四个进程没有启动。
+检查生产`log_memory_diagnostics`发现每次调用先写一条
+`[Workflow][PR Review][Memory]`归属记录，再调用`log_checkpoint`写一条
+`[Memory][Diag]`进程记录；两条共用相同reason。runner和汇总器原来只按reason
+计数，错误地得到2而不是1。B1日志实际只有一个owner事件，其资源槽为空而token
+保持不变。原始result仍为失败，series仍为未完成，没有修改样本或重启原生测试。
+
+采集器已改为按来源分别校验一条owner与一条process checkpoint，并精确解析token
+字段。新增4正例/11反例，覆盖双来源、ANSI、缺失/重复事件、错误owner、错误arm
+及reason前缀混淆；均通过。使用同一原始A1/B1日志作工具A/B：旧校验A通过/B失败，
+新校验A得到0/0、B得到1/1并通过。这仅是工具正确性验证，不替代三对性能门禁。
+原runner和summary保存为`*-original-0923.mjs`，修正后工具不覆盖失败运行记录。
+
+**仅一对观察值，不能作为正式收益或与其他产物混合汇总。** 事后只读校验器重新
+核对40对外部RSS/footprint样本、原始系统输出、动作/帧/model、尺寸、焦点、退出
+与回放结果，输出显式`complete=false`、`target_pass=null`的单独报告：
+
+| MiB，阶段内5点中位数 | A1 retain | B1 syntax |
+| --- | ---: | ---: |
+| 初始Home RSS | 117.281 | 117.953 |
+| 返回Home RSS | 190.813 | 170.406 |
+| 约60秒后Home RSS | 190.453 | 170.031 |
+| 最终减自身初始RSS | 73.172 | 52.078 |
+| 最终physical footprint | 161.564 | 115.798 |
+| 最终malloc in-use | 59.94 | 23.91 |
+| 最终malloc容量 | 112.00 | 112.00 |
+| 进程生命周期RSS HWM | 190.84 | 191.44 |
+
+这一对归一化残留减少21.094MiB，footprint减少45.766MiB，但候选仍高于自身
+初始Home约52.078MiB，且两臂峰值几乎相同。不能把malloc容量与in-use的差直接
+当作RSS，也不能将资源槽为空当成原生进程所有旧lease均析构的独立证明。
+既往基线出现过自发回落，本轮仅一对不能证明跨进程稳定收益。
+
+完整九项action-to-frame原始值保留在报告内。离页动作A/B为16.916/33.327ms，
+展开动作为371.122/404.491ms；这不是p95统计，不能直接判为性能回归，但要求后续
+专门检查UI线程集中析构与重入代价，不能只看内存下降。未执行重入、长期增长、
+全文/commit-range、resize、主题/语言视觉或闪烁验收。三个候选单测检查了en/zh-CN
+的model/代次保留、旧worker槽隔离和非离页行为；它们不是上述原生交互验收。
+
+**已知候选边界与后续顺序。** 在途worker持有旧lease时仍可完成；但离页后才完成
+的源码读取（`toggle_view_file`完成回调→`render_full_file`）可能启动新高亮并取得
+新槽。因请求代次未变，这个回调仍可能有效。因此该候选不保证所有隐藏页高亮
+资源都不再驻留。下一次应先以修正且自测过的采集器重新冻结独立三对协议，保留
+本次失败，不沿用这对数据补齐样本；只有内存门禁通过后，才治理晚到producer和
+验证析构/重入延迟，再进入完整交互与布局门禁。不得据此直接默认启用离页detach。
+
+证据均位于`memory-benchmark-results/pr-cache-20260920/`：
+`syntax-only-protocol-0923.md`、`syntax-only-build-0923.{json,log}`、
+`syntax-only-source-0923/`、`syntax-only-series-{1,2}-0923.json`、
+`runs/syntax-only-{A1,B1}-0923/`、对应`replay-runs/`、
+`syntax-only-log-gate.mjs`及`syntax-only-incomplete{.mjs,-0923.json}`。
+完整三对summary没有生成；不以事后报告覆盖原始失败。
+
+构建/自测：隔离普通Release构建通过（7m02s，保留既有warning），五项生命周期
+测试通过（三项新增、两项原有）；guard四组、runner3正例/14反例、比较目标
+2正例/7反例均通过。准备阶段发现脚本替换误将profile元数据写成syntax，已在
+首次原生启动前修正为release，没有产生该错误元数据的样本。
+移除候选后的`cargo fmt --all`、`cargo check --locked --offline`、
+`cargo test --lib --locked --offline --quiet`（670通过/0失败/2忽略）、
+UI policy和`git diff --check`通过；既有warning与doctest问题未处理，未跑完整doctest。
+
+两进程各18次只读回放、无miss/mutation、无压缩，正常析构；独立焦点守卫未记录
+测试进程变成前台。未移动鼠标、发送按键、激活/抬升窗口或恢复用户焦点；无
+截图，不宣称视觉通过。全部测试/守卫/回放已退出，active lock清除。Material、
+生产依赖、安装包未改；主Release仍为`6a91277d…`。主工作区最终仅本诊断文档
+有改动，先前未提交内容及无关用户改动均保留。
+
+#### 13.9.7 重新冻结三对对照：离页保留与页级驻留的因果边界
+
+**本轮任务是确认原因；三对内存门禁通过，不代表已经完成生产修复。** 使用
+13.9.6已从源码构建并冻结的普通Release产物`ac635da1…`，仅切换retain与
+`release-syntax-v1`。未重新把候选放回主源码，未混入既有`release-derived-v1`。
+新协议`syntax-v2-protocol-0923.md`沿用原阈值和工作负载，重新执行
+A1/B1/B2/A2/A3/B3全部六进程；与上轮中止的样本完全分开。
+使用修正且通过正反例的双来源日志校验，不修改旧失败记录，不筛选样本。
+
+**直接原因一：侧栏Home不是审核会话关闭。** 本轮重新核对了：
+
+- `src/lib.rs`的侧栏导航直接调用router；审核页Shell Back则转给
+  `workflow_pr_review_back`，后者在非内部commit-tab返回时调用`clear_owned_state`。
+- `src/app_lifecycle.rs`普通transition与workflow scope不可达是两种hook。
+  `src/router/mod.rs::scope_reachable_from`把当前路由和back/forward历史都算在内。
+  PR仍在历史中时，从侧栏回Home不会触发`release_workflow`。
+- 生产默认的`controller/lifecycle.rs::route_changed`直接返回；因此控制器的
+  `Arc<HighlightSession<HighlightResources>>`仍持有syntect语法与已编译正则资源。
+  控制器被MainWindow的PR callbacks持有，历史本身只保存Route，不保存PR组件。
+- `ui/main.slint`的PR页面为条件组件，离开路由会卸载；但根窗口的
+  `workflow-pr-review-lines`等property仍保留model。`LazyPrDiffLineModel`另持有
+  file、highlighted token与最多64条已转换row，controller也有token/source缓存。
+  这些model与语法引擎是不同owner，不能用页面不可见或清token来推断引擎已释放。
+
+因此“切到Home就应该自动释放所有PR内存”的前提在当前生产生命周期中不成立。
+这是可定位的过度保留策略，不是本轮发现了一个无法析构的Arc引用环。真正关闭、
+重置或切项目会走资源槽detach；不能把它与侧栏Home混成一个场景。
+
+**三对受控Release结果。** 所有数值为阶段内五个外部样本的中位数，单位MiB：
+
+| 运行 | 初始Home RSS | 约60秒后Home RSS | 相对自身起点残留 | 最终footprint | lifetime RSS HWM |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| A1 retain | 117.828 | 189.094 | 71.266 | 159.048 | 189.50 |
+| B1 syntax | 118.234 | 170.391 | 52.156 | 116.954 | 188.73 |
+| B2 syntax | 116.828 | 168.047 | 51.219 | 114.720 | 189.25 |
+| A2 retain | 118.578 | 192.672 | 74.094 | 161.720 | 193.09 |
+| A3 retain | 119.000 | 181.797 | 62.797 | 149.407 | 189.34 |
+| B3 syntax | 119.406 | 169.438 | 50.031 | 117.423 | 190.72 |
+
+三对归一化残留分别下降19.109、22.875、12.766MiB，中位19.109MiB；三对最终
+footprint分别下降42.094、47.000、31.984MiB。三对方向一致，中位收益超过10MiB，
+全部HWM<300MiB，故**首阶段内存目标通过，允许继续评估，但不授权生产采用**。
+A3在后段自行回落，保留这一结果，未剔除或归为候选收益。两臂均保留1035根行、
+213文件、255树节点；B均只出现一次引擎owner释放与一次对应进程checkpoint，
+token cache仍为2条目/1203行/3485 tokens。每进程18次GET，共120对外部样本，
+无回放miss/mutation、模型/几何错误或异常退出；六轮全部297条compressed诊断
+记录均为零。单独释放引擎即可稳定减少RSS/footprint，建立了这条保留链的实际影响。
+
+**直接原因二：对象free之后，RSS仍包含可复用驻留页。** 新增
+`syntax-v2-accounting.mjs`只读核对六进程原始日志和逐点快照，不增加运行时插桩。
+B1/B2/B3相对各自初始Home的进程分类增量分别为：
+
+| MiB，应用诊断五点中位数之差 | B1 | B2 | B3 |
+| --- | ---: | ---: | ---: |
+| RSS | 52.06 | 51.13 | 49.94 |
+| reusable | 23.25 | 23.12 | 23.03 |
+| internal | 25.27 | 24.30 | 23.36 |
+| external | 3.55 | 3.71 | 3.55 |
+| malloc in-use | 4.65 | 6.20 | 4.44 |
+
+应用诊断与外部样本并非同一瞬间，故与上一表有小差异。malloc in-use与任务页级
+分类重叠，不能再相加；internal也不等同于malloc碎片。基线malloc在用增量约
+42.17–42.84MiB，候选仅4.44–6.20MiB；成对净减少中位37.52MiB，RSS却仅改善
+约19MiB，且约23MiB仍标为reusable。这与13.9.5真实dealloc及Weak失效、已free
+页仍驻留的独立证据一致：剩下50MiB绝不是50MiB高亮对象仍活着。
+
+**碎片归因沿用已验证证据，明确没有伪装成新采集完成。** 本轮另开不计入A/B的
+`home-attrib-A-0923`，计划initial/final用`vmmap -summary`与
+`heap --noContent -s -z`细分zone。initial成功；final采样遇到系统压缩，
+compressed从0升至63.95MiB，RSS由约191MiB降至约126MiB而malloc在用仍约60MiB。
+这不是优化收益。采集器立即失败并正常退出，B归因进程未启动，没有重跑，
+final vmmap/heap未取得，`home-attribution-summary-0923.json`没有生成。
+该失败发生在六轮性能对照结束之后，不影响前面全部无压缩的原始证据。
+
+重新核对13.9.3保存的`runs/residency-attribution-0923/`原始vmmap：当时释放派生
+资源后的DefaultMallocZone resident为22.5→70.6MiB，allocated仅21.6→25.6MiB，
+dirty fragmentation约0.85→21.3MiB；IOSurface为36.6→36.6MiB，图形IOAccelerator
+resident约4.5→6.9MiB。该旧样本支持“主要为malloc驻留/碎片、而非等量活对象”，
+但使用不同的候选产物，不能当作本轮syntax-only的逐zone精确归因，更不能将
+vmmap共享映射TOTAL直接等同于ps RSS。本轮仍未把约23–25MiB新增internal逐块
+归属到allocator/渲染器；也没有证明所有PR、放大窗口或长期循环均无泄漏。
+
+**下一修复范围。** 已有足够证据优先处理“隐藏页的引擎owner”，而不是销毁整页、
+删导航历史或继续压缩小token cache。生产化前必须处理离页后源码回调再启动高亮
+而填入新槽的情况，保留远端mutation/导航和可见token语义。还要避免把大批析构
+集中在event loop：本轮侧栏action-to-frame A为19.952/20.013/16.998ms，
+B为34.680/15.945/30.117ms，候选中位高约51%。仅各三次不足以算p95或归因到纯
+析构，但已是必须验证的风险，不能凭内存通过直接采用同步detach实现。
+在不改可见model的前提下治理晚到producer、安排受控的后台回收，再验收重入、
+多轮增长、p95与布局；若要进一步接近初始RSS，需另测高亮分配生命周期/碎片，
+而不是反复free、依赖系统压缩或强行purge来制造低RSS。
+
+证据：`syntax-v2-protocol-0923.md`、`syntax-v2-series.mjs`、
+`syntax-v2-series-{1..6}-0923.json`、`syntax-v2-summary{.mjs,-0923.json}`、
+`syntax-v2-accounting{.mjs,-0923.json}`、`runs/syntax-v2-{A1,B1,B2,A2,A3,B3}-0923/`
+及对应replay记录；失败归因单独保存在`runs/home-attrib-A-0923/`。
+工具新增capture自测2正例/7反例、category parser 5正例/5反例通过；既有runner
+3正例/14反例、日志gate4正例/11反例、RSS目标2正例/7反例通过。只读accounting
+首次因遗漏ANSI标准化而拒绝日志匹配；修正并通过4项自测后复核成功，未改变
+任何原始数据或原生运行。
+
+最终`cargo fmt --all`、`cargo check --locked --offline`、
+`cargo test --lib --locked --offline --quiet`（670通过/0失败/2忽略）、UI policy与
+`git diff --check`通过。既有warning保留；完整doctest、原生视觉/resize、全文/
+范围重入、长期增长及交互p95未验收。没有生产优化落地，不更新稳定架构契约。
+所有原生测试正常退出、active lock清除，独立守卫未记录测试窗口成为前台；
+无鼠标移动、键盘注入、激活/抬升或焦点恢复。主Release仍为`6a91277d…`。
+工作期间另出现PR弹层关闭相关spec、UI和集成测试改动，非本任务修改且全部保留；
+本任务主树只追加此记录，旧未提交记录保留。内存实验使用已冻结源码，不将这些
+并行UI改动混入样本，也不宣称本轮完成了这些UI改动的专项验收。
+
+#### 13.9.8 后台回收语法引擎候选与跨 PR 有界保留验收
+
+**约束与采用状态。** 用户要求保留代价较小、能改善页面返回速度的可复用驻留页，
+但不同 PR 不能越开越积累。此轮不 purge allocator、不清小型 token/model 缓存，
+不销毁设置页或删除 Router 历史。新增 `release-syntax-async-v1` 仅在显式离线
+`test-fixtures`、隔离 state root 和对应环境变量同时成立时启用；生产默认仍关闭。
+未通过全部原生性能、跨 PR 增长与交互验收前，不得把候选当作已交付的生产修复。
+
+**候选代码。** `HighlightSession::take_for_reclaim` 在锁内只交换槽并清除临时弱引用，
+旧槽由共享 runtime 的 blocking worker drop。既有 Worker 入队前捕获自己的槽，
+其最后引用也在高亮 blocking worker 结束时释放。离页后才发起的高亮使用仅被
+Weak 保留的 transient 槽：并发隐藏任务可共用，最后一个任务结束后没有持久强
+owner；返回可见页另用 current 槽，reset 也隔离旧 transient 槽。Diff 与全文两个
+producer 都使用同一获取入口。离页不变更请求 generation、远端 mutation、Find、
+token、source、根 model、commit range 或导航上下文。
+
+**不同 PR 的对象边界。** 重新核对 `controller.rs::open`，不同请求号或强刷先
+invalidate、替换单个 `Option<ReviewCache>` 并重置请求级状态，不按访问过的 PR
+追加缓存；项目替换另有清理。Router 历史只保留 Route，不拥有每个 PR 的组件快照。
+当前审核的根行 model 可以在 Home 保留；下一份 model 就绪时替换。新增三种不同
+行数（16/64/256）的显式合成 PR，轮换 36 次验证旧 detail、file、token Weak 失效，
+source/token cache 每轮只有当前一项，Home 保留最新 model，最终 close 清掉最后一份。
+另有 48 次不同大小资源槽重置及晚到任务测试，覆盖后台回收后所有旧资源强引用归零。
+这些是所有权单测，不是原生 RSS/footprint 平台期证据，也不模拟系统 allocator。
+
+用户暂无其他真实 PR 链接；本地仅有 Usher #1 的已验证快照，匿名远端查询此前
+返回 403。本轮不索取 Token，不把改名的 #1 宣称成多个真实 PR。后续原生多 PR
+夹具必须明确标为合成、使用不同编号和工作负载，记录预热后增长，而非只看缓存
+条目。验收采用 P6 的前 25% 预热、RSS/footprint 斜率不超过 0.5 MiB/min、增长
+不超过 8 MiB，并用用户要求的 RSS 严格小于 300 MiB 替代通用 512 MiB 上限；
+还要检查重新进入页面的响应速度。合理预热后平台可接受，随 PR 持续累积不可接受。
+
+**构建与自测。** 首次冻结构建因 `resources_for_highlight` 的 Rust 可见性 E0624
+失败，保留 `async-syntax-source-0923/` 和构建日志，没有启动对应原生样本。修正为
+`pub(super)` 后使用独立 attempt2 源码/日志/产物重建，普通 Release 7m07s 通过，
+SHA-256 为 `04327e1f88f4e458fe44e68eee89f6f19853710b6b220845bda88a352f1436f2`。
+相对冻结 background 源码仅三个高亮生命周期 Rust 文件改变，不混入并行 UI 改动。
+主 `target/release/usher` 已恢复 `6a91277d…`。36 轮控制器单测在冻结后补充，
+未改变候选运行时代码，不声称该测试被编入本次原生产物。
+
+`cargo fmt --all`、`cargo check --locked --offline`、PR 控制器测试（40 通过/
+1 忽略）、完整库测试（681 通过/0 失败/2 忽略）、UI policy 与 `git diff --check`
+通过；保留既有 warning，未运行已知失败的完整 doctest。采集器 3 正例/14 反例、
+日志 owner/checkpoint 双来源 gate 4 正例/11 反例、内存目标 2 正例/7 反例和焦点
+守卫 4 组通过。中英文架构和 PR spec/index 同步标明候选与有界保留契约，并澄清
+显式审核 Back 与侧栏 Home 的清理差别；不再把任意离页都描述成整个审核会话关闭。
+
+**独立原生首阶段。** 协议 `async-syntax-protocol-0923.md` 在运行前冻结，采用
+A1/B1/B2/A2/A3/B3、同一二进制、800x600 logical @2、双 Worker、真实 #1 回放。
+独立焦点守卫与非 key/main、鼠标穿透窗口保持不变；无输入、激活、抬升或焦点恢复。
+每次采样保留原始 ps/footprint、进程分类及 owner 日志。与此前同步释放六轮完全
+分开，不补旧样本、不重跑失败、不在测量期间编译或执行测试。
+
+六轮全部成功，阶段内五个外部样本中位数（MiB）如下：
+
+| 运行 | 初始 Home RSS | 最终 Home RSS | 相对初始残留 | 最终 footprint | lifetime RSS HWM |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| A1 retain | 117.328 | 190.250 | 72.922 | 160.157 | 190.67 |
+| B1 async syntax | 117.891 | 169.813 | 51.922 | 115.689 | 190.97 |
+| B2 async syntax | 117.719 | 169.484 | 51.766 | 114.579 | 190.77 |
+| A2 retain | 117.625 | 193.500 | 75.875 | 164.454 | 193.91 |
+| A3 retain | 117.453 | 189.703 | 72.250 | 159.814 | 190.12 |
+| B3 async syntax | 117.500 | 169.703 | 52.203 | 115.798 | 191.00 |
+
+归一化残留成对减少 21.000、24.109、20.047 MiB，中位 21.000 MiB；最终 footprint
+成对减少 44.469、49.875、44.016 MiB。全部 HWM <300 MiB；297 条 compressed
+诊断全部为零。首阶段内存 gate 通过，候选可继续验收，但不能据此生产默认启用。
+六轮各 18 次本地 GET、合计 120 个外部内存样本，无 miss/mutation、模型或几何
+错误；B 的三个离页 owner 检查均保持 2 条高亮 cache、1203 行/3485 tokens，
+根行 model 1035 行、213 文件、255 树节点，与 A 一致。
+
+**剩余驻留与速度边界。** B1/B2/B3 相对自身初始 Home 的 reusable 增量分别为
+23.73/24.34/23.55 MiB，malloc in-use 增量为 4.68/4.53/4.64 MiB，internal 增量
+24.39/23.79/25.03 MiB，external 增量约 3.5–3.7 MiB。malloc 在用增量的成对
+改善中位 37.71 MiB；malloc allocated 中位成对差为 0。这继续支持对象已释放而
+页仍可驻留的结论，不把约 52 MiB 残留全说成活高亮对象，也不把重叠计量相加。
+没有新增 heap/vmmap profiling，internal 不等同于 malloc 碎片。
+
+离页 action-to-frame A1/A2/A3 为 7.618/19.065/15.062 ms，B1/B2/B3 为
+18.295/19.671/17.700 ms；中位 15.062→18.295 ms（+3.233 ms）。callback-ready
+A 为 0.341/0.853/0.475 ms，B 为 2.542/4.014/3.172 ms。独立单测证明资源析构
+位于共享 blocking worker，但这些各三次的帧样本不能证明 p95 不回归，不能把与
+前一轮同步方案的非成对差异声称为速度收益。重入及长循环仍须独立测量。
+
+**本轮结论与未完成项。** 保留小缓存、只后台释放重型引擎的候选获得三对一致的
+内存收益；生产采用暂不批准。跨 PR 36 轮对象测试通过，但没有执行不同 PR 的原生
+15 分钟长循环，不能宣称 RSS 不会随着 PR 变化继续累积。原生重入、全文/commit
+range、晚到源码时序、p95、resize/闪烁和语言/主题视觉矩阵尚未完成；en/zh-CN
+仅完成 model/context 单测，未作截图或人工视觉验收。下一个独立验收是本地合成
+不同 PR 的正常路由/高亮工作负载，先确认预热后增长和重入速度，不需用户提供 Token
+或更多真实 PR；该项未通过前不转入新优化批次、不默认启用候选。
+
+证据位于 `memory-benchmark-results/pr-cache-20260920/`：
+`async-syntax-protocol-0923.md`、`async-syntax-build-attempt2-0923.{json,log}`、
+`async-syntax-source-attempt2-0923/`、`async-syntax-series-{1..6}-0923.json`、
+`async-syntax-summary{.mjs,-0923.json}`、`async-syntax-accounting{.mjs,-0923.json}`、
+`runs/async-syntax-{A1,B1,B2,A2,A3,B3}-0923/` 和对应 `replay-runs/`。
+分类汇总沿用已验证 ANSI 归一化并再次通过 4 项自测，没有改写原始样本。全部测试
+应用、回放及焦点守卫正常退出，无抢焦点记录，active lock 清除。未移动鼠标、
+注入键盘、激活窗口或恢复焦点；Material、依赖、安装包未改。主 Release 保持
+`6a91277d…`；已有并行弹层/UI/spec/测试修改和此前诊断记录全部保留。
+
+收尾只读核对发现另外两个用户进程：`target/debug/usher` 于本地 15:02:18 启动，
+`/Applications/Usher.app/Contents/MacOS/usher` 于 15:03:57 启动；末轮采样结束于
+15:01:07.943、测试进程正常退出于 15:01:08.148，二者均未与本次 A/B 重叠。
+未关闭或操作这两个进程；它们运行期间不启动下一组受控内存基准。
+
+#### 13.9.9 三条本地 mock PR 的原生长循环准备
+
+用户明确要求直接造 mock PR 验证跨 PR 累积，不再等待额外真实链接。本轮已完成
+真实 Provider 入口可读取的本地 HTTP 夹具、正常路由驱动、原生 Release 构建与
+采集器准备；截至本条记录，正式长循环尚未启动，不能宣称增长门禁通过。
+
+**合成数据。** 独立 `multi-pr-snapshot-0923/` 保留原始 #1 快照不变，以其分页与
+文件布局生成 1001/1002/1003 三条显式 `[SYNTHETIC]` PR。六个 base/head SHA
+互不相同；所选 Rust 文件的 patch 与两侧固定源码都添加确定性的合成注释，源码
+分别为 114997/220621/502285 bytes，patch 为 84008/157448/353288 bytes。
+不是把相同 #1 换编号后宣称为不同真实 PR；差异内容、响应体哈希、来源索引哈希
+均在新索引里。原始 213 文件布局和 1035/1566 diff/展开行数不变，便于同时验证
+模型身份、源码体积差异和虚拟行模型。全程本地 GET-only，无 Token/Cookie。
+
+**正常路由长循环。** `multi-pr-source-0923/` 从已验证 async 候选源码冻结，
+相对其源码仅诊断 `lifecycle_benchmark.rs` 不同，不改变产品运行时策略。60 轮
+按 1001→1002→1003 重复，每轮走 Project→Workflow→Closed→PR→选择大文件→
+Load diff→展开→收起→Home→Router Back 重入→Home，共 660 个普通 callback。
+仅第一轮执行 open-project，其后不重新选择项目，确保测试的是同项目不同 PR
+的替换边界，而非用切项目清理掩盖累积。每轮验证实际 PR/SHA、源码标记、正确
+model/revision 及 AfterRendering；Recorder 仅保存标量，不捕获 model/PR Arc。
+
+协议 `multi-pr-protocol-0923.md` 固定 A retain、B async 各一个独立进程、60 轮
+且至少 900 秒，前 15 轮预热。分别检查整体与各 PR 的 RSS/footprint 斜率
+≤0.5 MiB/min、范围≤8 MiB、RSS/footprint <300 MiB，以及线程/端口/region、
+50ms UI 心跳、重入和切页 p95。采集请求 100ms RSS/CPU、每轮 Home 五次外部
+RSS/footprint、进程分类、全部模型和 owner 检查。时间戳保留实际采样间隔，
+不假装同步 footprint 采样期间也保证严格 100ms。此长循环是一对独立持续验证，
+不与先前三对单次访问混合成“三对长循环”。原生 resize/全文/范围/视觉矩阵仍分开。
+
+**构建和工具验证。** 源码驱动 7 项 Rust 测试全过；普通 Release 构建 7m04s
+成功，产物 SHA-256 为 `c3d0733c35d535d708d644ffcf76ba87c2c91991c0d5955a4c51b8f032508fb0`。
+主 Release 恢复 `6a91277d…`。mock 转换自测 24 项、实际合成 HTTP 95 项校验、
+回放安全 9 组、采集器 8 组、长循环 validator 9 正例/26 反例及 ACK 自测、汇总
+门槛 13 项、焦点守卫 4 组均通过。测试覆盖错 PR/SHA、缺轮次、旧 receipt、
+重复 owner、缓存增长、ACK、增长斜率/范围和性能阈值；不把工具自测当作运行时
+改善证据。Swift 首次编译因默认 ModuleCache 写权限失败，改用独立 `/private/tmp`
+module cache 后编译和自测通过，未为此访问用户缓存或启动原生窗口。
+
+`cargo fmt --all`、`cargo check --locked --offline`、完整库测试（681 通过/
+0 失败/2 忽略）、UI policy 和 `git diff --check` 通过，既有 warning/doctest
+问题不属于本轮修复。长循环专用守卫超时 1320 秒、runner 1300 秒，未修改旧守卫；
+非 key/main、鼠标穿透、禁止输入/抢焦点及失败不重跑的规则不变。工具和协议哈希
+已在 `multi-pr-tooling-0923.json` 冻结，运行前后都需核对。
+
+**当前阻塞。** 用户表示其他任务已停止后，只读复查仍发现 Debug Usher
+PID 51451（15:02:18 启动、`target/debug/usher`、状态 Ss）存活，不是僵尸。
+未擅自关闭它，已请求用户退出或批准向这个确切进程发送正常终止信号；正式测量
+不与该实例并行。所有本轮构建、单测、HTTP 自测与守卫自测都已结束，无原生样本
+或虚构的长循环收益。生产候选仍未默认启用，其他任务的改动保留。
+
+准备证据均位于 `memory-benchmark-results/pr-cache-20260920/`：
+`multi-pr-fixtures.mjs`、`multi-pr-snapshot-0923/`、`multi-pr-source-0923/`、
+`multi-pr-build-0923.{json,log}`、`multi-pr-driver-tests-0923.log`、
+`multi-pr-{run,series,validation,summary,probe,replay}.mjs`、
+`multi-pr-guard.swift`、`multi-pr-protocol-0923.md`、`multi-pr-tooling-0923.json`、
+`multi-pr-fixture-http-test.mjs` 和 `replay-runs/multi-pr-fixture-http-test-0923/`。
+
+**首次原生执行：失败保留，不计入验收。** 用户随后明确批准终止 Debug 实例。
+核对 PID 51451、15:02:18 启动时间及 `target/debug/usher` 路径后，先发送
+SIGTERM；进程未退出，只读采样确认仍存活。用户另行明确批准强制结束后，再次
+核对身份并仅向此实例发送 SIGKILL。没有关闭其他应用或操作输入设备。
+
+`multi-pr-A1-0923` 于本地 15:49:54 左右开始，约 16:11:35 因 runner 的
+1300 秒总预算耗尽而失败。完成 39/60 轮，即每条 mock PR 各 13 次；共记录
+430 个 callback-to-frame（39 个完整循环的 429 个，另有下一轮首个动作）、
+200 个 held Home 外部 RSS/footprint 样本、12706 个连续 RSS 样本。系列按
+预定失败规则停止，B1 未启动，没有重跑以求通过。冻结的工具、夹具、协议未改。
+
+这是本轮测试预算估算错误，不是 300 MiB 门禁失败：最大 mock PR 在保留真实行数
+的同时为每行增加较长注释，实际 `Load diff`、展开、收起的 action-to-frame
+中位数分别为 12.399 / 19.227 / 12.419 秒，合计约 44 秒；小/中 mock 的这三项
+合计约 1.897 / 6.777 秒。第 39 轮 Home receipt 为 1295.743 秒，60 轮明显
+无法在 1300 秒内结束。数据只定位到这些操作耗时，尚未区分语法处理与布局成本，
+不得据此声称已定位具体慢函数。原定时限在运行中没有放宽。
+
+独立 `multi-pr-partial-0923.mjs` 对失败 result、冻结工具哈希、原始 ps/footprint、
+PR/SHA/模型 phase、零压缩诊断、正常退出及回放记录逐项核验，输出明确标记为
+`acceptance_complete=false`、`candidate_started=false` 的 partial JSON；不调用
+要求完整 A/B 的正式 summary，不补造缺失的完成标记或心跳 ledger。
+
+| 基线 A 部分观测 | 结果 |
+| --- | ---: |
+| 初始 Home RSS / footprint | 117.547 / 83.110 MiB |
+| 第 39 轮 Home RSS / footprint | 192.875 / 118.657 MiB |
+| 全程 RSS / footprint 峰值 | 196.05 / 190.13 MiB |
+| 第 16–39 轮 RSS 斜率 / 范围 | +0.176 MiB/min / 1.984 MiB |
+| 第 16–39 轮 footprint 斜率 / 范围 | +0.252 MiB/min / 2.984 MiB |
+
+每条 PR 的后预热样本各 8 个：RSS 斜率分别为 +0.182 / +0.169 / +0.177
+MiB/min，footprint 为 +0.271 / +0.255 / +0.229 MiB/min。这段观测内未见
+按访问次数累积整份 PR 工作集，数值处于预设增长范围内，但缺少最后 21 轮和
+候选 B，不得称长循环通过，也不能排除更长时间或其他操作路径的泄漏。初始
+Home 与最终 Home 的约 75.3 MiB RSS 差仍存在；部分增长较缓不等于全部内存已释放。
+三条 PR 的重入 action-to-frame 中位数为 22.177 / 23.999 / 23.475 ms，
+只有基线描述，没有候选对照，不代替重入 p95/心跳验收。
+
+39 次 new-review cache reset 和各轮 PR/模型身份检查成立。1058 条 compressed
+读数全部为零；连续 RSS 的实际最大采样间隔 248ms。744 个本地 GET 无 miss、
+mutation 或 fatal；无测试窗口前台激活。测试应用收到正常停止请求后以 0 退出，
+最终连续样本到退出元数据约 162ms，包含 `MainWindow dropped`；回放、守卫已结束，
+active lock 清除。该测试应用没有被强杀，与此前获用户授权关闭的 Debug 实例区分。
+
+**结论：本次长循环验收未完成，生产采用仍不批准。** 下一次必须独立冻结修订协议，
+按实际工作量修正总时限（60 轮预计约 33 分钟，需留采样和正常退出余量），保持
+相同数据、二进制、60 轮、15 轮预热、增长/300 MiB/性能及焦点门槛；不能缩小
+最大 PR 或删除慢操作来制造通过。本次失败与原始证据永久保留，不混入下一次
+有效 A/B。原生 resize/全文/range/晚到源码及视觉验收仍独立待完成。
+
+新增证据：`multi-pr-series-1-0923.json`、`runs/multi-pr-A1-0923/`、
+`replay-runs/multi-pr-A1-0923/`、`multi-pr-partial-0923.{mjs,json}`。
+本次仅补充诊断证据及本文，不改生产代码、Material、依赖或候选默认状态。
+准备阶段的 681 个库测试通过记录保持不变；运行结束后再次检查 `git diff --check`。
+不在原生测量期间运行编译或测试，其他任务已有的 UI/spec/测试修改均保留。
+
+#### 13.9.10 用户认可 39 轮后的候选 B 执行与失败证据
+
+用户明确表示 39 轮足够，并要求继续。此后以 39 轮作为本次跨 PR 比较目标，
+不再要求补满 60 轮；上节的 60 轮原协议及其失败记录仍保留为历史事实。A 已有
+39 轮的模型、owner、原始 RSS/footprint 和 callback receipt 重新核验通过，
+可供该范围的描述性比较，但不把原来的失败结果改成成功。
+
+**独立冻结的 39 轮方案。** `multi-pr-39-protocol-0923.md` 复用同一个
+`c3d0733c…` Release 二进制、同一三条 synthetic PR、相同 800x600 @2 /
+FemtoVG / 双 Worker / 正常路由与回放。仅在 B 的第 39 轮 Home 完成五次采样后，
+不再发送该轮 ACK，并通过守卫正常退出。总预算改为 1800 秒，守卫 1820 秒；
+不重新编译产品，不缩小数据或跳过加载/展开/收起。保留原来的前 15 轮预热口径，
+两边正式范围均为 16–39。原二进制仅在 60 轮结束时输出 heartbeat buffer，
+所以这次明确不验收心跳，也不伪造 driver summary。A 多出的第 40 轮 Project
+动作不混入 1–39 轮的动作对比，原日志保持完整。
+
+采集器检查器 9 正例/26 反例、ACK 测试、汇总器 8 正例/14 反例及守卫 4 组
+通过，历史 A 的 39 次 reset、200 次 held sample、429 个已完成动作核验通过。
+新工具分别冻结，不改写旧脚本。B 元数据中继承的 `synthetic 60-cycle` 描述指
+二进制内置驱动；本次有效停止边界由独立 39 轮协议规定，未借此声称跑完 60 轮。
+
+**第一次 B：进度门槛失败。** `multi-pr-B39-0923` 完成三轮 / 33 个动作，
+但只完成初始 Home 及前两轮共 15 次外部采样。第 2、3 轮 driver receipt 的
+elapsed 分别为 43248 和 104578 ms，相隔 61.330 秒，超过 60 秒门槛；A 的
+对应间隔为 59.570 秒。因此在第 3 轮采样前停止，不能视为通过。该间隔包含约
+5 秒外部采样和 10 次约 1 秒驱动固定等待；B 第 3 轮 Load/Expand/Collapse
+的 action-to-frame 分别为 13.370 / 20.368 / 12.212 秒，A 对应为
+12.379 / 19.154 / 12.429 秒。只能证明该次整轮超限，尚未定位具体慢函数，
+不能仅凭三轮样本推导高亮或 UI 的总体 p95 回归。该运行 RSS 峰值 189.16 MiB、
+footprint 峰值 172.53 MiB，没有压缩内存或抢焦点。
+
+**随后单独的内存诊断：压缩导致中止。** 为继续回答用户关心的跨 PR 内存问题，
+冻结 `multi-pr-39-observe-protocol-0923.md`，仅将整轮进度超限改为保留失败记录
+后继续内存采集；无论后续是否出现超限，之前的性能失败仍有效，不以此重新取得
+性能通过结论，不授权生产采用。新旧实际检查代码的 5 个边界 fixture 对照通过：
+59999ms 以下正常，60000/61330/90000ms 原版本中止、诊断版本记录
+`performance_gate_pass=false`，绝不把超限转换为通过。所有内存、压缩、模型、
+owner、焦点和正常退出条件保持不变；没有与短 B 合并样本。
+
+`multi-pr-B39-observe-0923` 完成 17 轮 / 90 个外部 Home 样本；第 18 轮
+已经开始，共记录 194 个 action receipt、5711 个连续 RSS 样本。约 585.105
+秒时，原生日志记录 `compressed_mib=8.84`，RSS 同时降至 173.19 MiB，较上条
+下降 13.61 MiB。采集器立即停止，未继续放宽压缩条件或再次运行。压缩后 RSS
+下降不能计作内存优化，不能据此宣称 39 轮已完成或没有泄漏。读取 `vm_stat`
+可见系统存在压缩页，但只读快照不能归因到某个其他应用；没有擅自关闭其他应用。
+
+压缩出现前的最后完整 Home（第 17 轮、mock 1002）与 A 同轮的原始观测：
+
+| 指标 | A retain | B async syntax |
+| --- | ---: | ---: |
+| 初始 Home RSS | 117.547 MiB | 117.984 MiB |
+| 第 17 轮 Home RSS | 190.984 MiB | 186.875 MiB |
+| 第 17 轮 Home 外部 footprint | 115.767 MiB | 115.064 MiB |
+| 第 17 轮 malloc in-use（中间采样点） | 57.74 MiB | 27.90 MiB |
+| 第 17 轮 malloc allocated（同采样点） | 128.00 MiB | 132.00 MiB |
+| 第 17 轮 reusable（同采样点） | 44.91 MiB | 42.36 MiB |
+
+B 在这段诊断中的 RSS 峰值 192.094 MiB，footprint 峰值 174.49 MiB，未达到
+300 MiB。第 17 轮 RSS 原始差为 4.109 MiB，扣除初始 RSS 差后，残留差为
+4.547 MiB；仅是该轮描述，不是预热后 24 轮的收益结论。B 的初始 malloc in-use
+22.24 MiB，第 17 轮 27.90 MiB，增加约 5.66 MiB；RSS 同期增加约 68.89 MiB。
+活对象占用比 A 小约 29.84 MiB，但 allocator 的 allocated 并未同步降低，这与
+已释放对象后的驻留/保留页现象一致，不应把 RSS 残留全部解释为高亮对象仍存活。
+以上不同内存分类不可相加，仍不能用这些采样确定碎片、渲染缓存等各自的精确贡献。
+
+**跨 PR 所有权。** 长诊断内 18 次 new-review reset（含未完成的第 18 轮）
+均清空 detail/source/token/resource owner；17 个完整循环产生 34 次语法资源
+detach 和 34 条配套 checkpoint。三种 PR 反复出现时，分别只有 1 个详情 owner、
+2 条高亮 cache、2 条源码 cache；高亮共 1203 行 / 4500 tokens。每种 PR 的
+详情、高亮、源码 heap estimate 在每次出现时完全一致，没有按已访问 PR 数累加。
+这些计数和估算只证明被记录 owner 的有界性，不等于 allocator/Slint 所有引用均
+无泄漏；第 16–17 轮只有两个正式区间样本，不计算或宣称长期斜率通过。
+
+两次 B 都正常退出（status 0、`MainWindow dropped`），守卫未发现前台激活，
+没有强杀测试应用。60 / 345 个本地 GET 分别无 miss、mutation 或 fatal。
+原始样本、失败 result 和清理记录全部保留；正式的 39 轮比较 summary 未生成。
+`multi-pr-39-failure-evidence.mjs` 核对原始 ps/footprint、owner、phase、
+冻结哈希及退出证据，输出明确失败的报告。首版报告因把 sampler 启动说明行当作
+数值行，导致 peak 为 null；原报告保留，v2 明确排除该非数值说明并断言所有峰值
+字段有限，正确峰值如上。没有修改任何原始运行数据。
+
+**采用结论与下一步。** 候选 B 确实释放活语法资源，已观察的 PR owner 不随 PR
+访问数累加；但本轮没有完成 39 轮有效内存比较，且保留整轮进度失败，仍不默认启用。
+不继续以失败候选作为下一优化批次基线。后续需在测量期间该进程不发生压缩的条件
+下补完用户认可的 39 轮，并把采集等待与操作耗时分开报告；同时独立定位慢加载/
+展开路径。不能继续声称先前三对单次访问的约 21 MiB RSS 收益适用于长循环。
+心跳、resize/闪烁、全文、range、晚到源码与视觉验收仍未完成。
+
+证据位于同一根目录：`multi-pr-39-{prepare,run,validation,summary}.mjs`、
+`multi-pr-39-guard.swift`、`multi-pr-39-protocol-0923.md`、
+`multi-pr-39-tooling-0923.json`、`multi-pr-39-observe-*`、
+`multi-pr-39-progress-test.mjs`、`multi-pr-39-failure-evidence{.mjs,-0923.json,-v2-0923.json}`，
+以及 `runs/` 和 `replay-runs/` 中对应的两个 B 目录。本轮不改生产 Rust/UI、
+Material、依赖、安装包或主 Release 产物，保留已有其他任务修改。
+
+收尾 `cargo fmt --all`、`cargo check --locked --offline`、
+`cargo test --lib --locked --offline --quiet`（681 通过 / 0 失败 / 2 忽略）、
+`git diff --check` 均通过。保留既有 unused warning，未运行已知失败的完整 doctest。
+全部原生测试结束后才运行这些检查；无应用/守卫进程或 active lock 残留，主 Release
+SHA-256 仍为 `6a91277d9a8281521b8d2bf0f16a195c9ac91ee0b4beca58a62335fe122ba448`。
+
+#### 13.9.11 按用户要求归档并移除 B 专属运行时代码
+
+用户确认不保留未采用的 B 运行时分支，要求保留实验快照/证据和共有安全修复。
+本节是当前代码状态，前述 B 开关和待验收描述保留为历史，不再表示主源码可启用 B。
+清理前已把三个相关 Rust 文件、四份架构/spec 文档及本文完整复制到
+`memory-benchmark-results/pr-cache-20260920/retired-syntax-candidate-0923/`，
+并记录 SHA-256 manifest。该本地归档和已有完整冻结源码、Release 测量产物、
+mock 数据、失败运行、采集器及原始日志均保留；没有覆盖原实验数据。
+
+**移除范围。** 删除 `release-syntax-async-v1` 的识别分支、离页后台析构任务、
+隐藏页临时弱引用槽和 B 专用诊断事件。Diff/全文两个高亮入口恢复直接取得当前会话
+lease，不再按可见路由选择 B 资源策略。`HighlightSession` 只保留一个当前槽。
+移除或改写 B 专属单测，不保留无法再触发的实验实现。较早的 `release-derived-v1`
+是另一个实验，不属于本次授权的 B 清理，相关代码和验收状态未改变。
+
+**保留范围。** 普通启动仍是 A：侧栏隐藏审核时保留当前审核的语法资源、token、
+源码和行 model；切换 PR/关闭时按既有边界清理。保留 Worker 入队前捕获 lease、
+重置时替换资源槽、旧 Worker 只能完成旧槽、完成回写检查请求代次/文件，以及
+锁外析构旧 owner。36 次不同大小 mock PR 替换测试改为调用实际 route_changed，
+继续检查旧详情/文件/token Weak 失效；48 次资源槽替换继续验证旧资源释放。
+新增明确的锁外析构断言，离页保留测试覆盖 en/zh-CN、Diff/全文状态、行 model、
+范围和请求代次。未改 Slint、Material、布局或用户可见文案。
+
+**前后验证。** 清理前先用真实 route_changed 测默认保留策略，生命周期组 8 项
+通过；清理后同一保留/替换用例继续通过，完整 PR 控制器组 34 通过 / 1 忽略。
+另启用 `test-fixtures`，同时提供离线模式、隔离目录及原 B 环境值，再跑生命周期
+组 4 项全部通过，确认已移除的 B 选项不能再改变 A 的资源保留行为。旧 B 专属
+实现/用例只存在于历史快照，不为了维持原测试数量留下死代码。
+
+`syntax-retirement-check-0923.{mjs,json}` 校验归档哈希、主控制器仅两处 lease
+调用变化、其他实验实现未变、共用生命周期测试仍在、历史工具/测量二进制不变。
+14 个无关已修改文件与清理前的哈希完全相同；主 Release 文件也未被重建或替换。
+源码、测试、UI 与当前规格中已无 B 专属运行时标识；中英文架构及 PR spec/index
+同步改为“默认保留当前审核、实验仅存历史”。
+
+`cargo fmt --all`、`cargo check --locked --offline`、
+`cargo test --lib --locked --offline --quiet`（675 通过 / 0 失败 / 2 忽略）、
+`git diff --check` 全部通过。较前次减少的 6 项为移除的 B 专属测试，原稿可从
+归档恢复；共有安全回归并未删去。既有 unused warning 保留，已知失败的完整
+doctest 未运行。本次是用户授权的实验代码清理，不是新性能优化批次，默认产品
+策略未变；没有启动原生应用、做新的 Release RSS A/B 或手工视觉验收，也不声称
+有新的内存收益。现有安装包/主 Release 仍是之前产物，主源码清理在后续构建生效。

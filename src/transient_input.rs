@@ -49,6 +49,35 @@ pub(crate) fn clear_text_input_focus_outside(
     window.set_focus_item(&focused, false, FocusReason::PointerClick);
 }
 
+/// Return whether the pointer press landed inside the currently focused native
+/// text field. This is evaluated after Slint dispatch so a newly focused input
+/// is included without every reusable field wiring its own popover callbacks.
+pub(crate) fn focused_text_input_contains_pointer(
+    window: &slint::Window,
+    position: slint::LogicalPosition,
+) -> bool {
+    let window = WindowInner::from_pub(window);
+    let Some(focused) = window.focus_item.borrow().upgrade() else {
+        return false;
+    };
+    if focused.downcast::<TextInput>().is_none() {
+        return false;
+    }
+
+    let field = focused
+        .parent_item(ParentItemTraversalMode::StopAtPopups)
+        .filter(|parent| parent.borrow().as_ref().clips_children())
+        .unwrap_or_else(|| focused.clone());
+    let position = LogicalPoint::new(position.x, position.y);
+    field_contains_pointer(&window.component(), &field, position)
+        || window.active_popups().iter().any(|popup| {
+            let PopupWindowLocation::ChildWindow(origin) = popup.location else {
+                return false;
+            };
+            field_contains_pointer(&popup.component, &field, position - origin.to_vector())
+        })
+}
+
 fn field_contains_pointer(tree: &ItemTreeRc, field: &ItemRc, position: LogicalPoint) -> bool {
     let mut contains = false;
     // Walk the mounted tree: factory products can have no parent link, so
@@ -121,6 +150,9 @@ pub fn install_for_window(app: &MainWindow) -> Result<(), slint::PlatformError> 
         }
         if !released {
             clear_text_input_focus_outside(app.window(), *position);
+            if focused_text_input_contains_pointer(app.window(), *position) {
+                app.invoke_dismiss_transient_popovers();
+            }
         }
         if released {
             app.invoke_post_dispatch_pointer_released(position.x, position.y);
@@ -239,6 +271,22 @@ mod tests {
 
         clear_text_input_focus_outside(app.window(), slint::LogicalPosition::new(21.0, 21.0));
         assert!(app.get_first_focused());
+    }
+
+    #[test]
+    fn focused_input_hit_is_distinguished_from_outside_content() {
+        i_slint_backend_testing::init_no_event_loop();
+        let app = TextFocusTestWindow::new().expect("test window");
+
+        input(&app, "TextFocusTestWindow::first").mock_single_click(PointerEventButton::Left);
+        assert!(focused_text_input_contains_pointer(
+            app.window(),
+            slint::LogicalPosition::new(40.0, 36.0),
+        ));
+        assert!(!focused_text_input_contains_pointer(
+            app.window(),
+            slint::LogicalPosition::new(300.0, 180.0),
+        ));
     }
 
     #[test]

@@ -243,6 +243,13 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
         : (root.wide-title-line-count == 2 ? 36px : 64px);
 
     function begin-diff-selection(line: int, col: int, side: string) {
+        // Selectable code owns the pointer press, so the workspace's blank-area
+        // dismiss layer cannot observe it. Close both workspace-local and
+        // root-mounted transient popovers before preserving the code-selection
+        // gesture below.
+        root.active-popover = "";
+        TransientOverlayState.dismiss-popovers();
+
         let now = animation-tick();
         let same-target =
             line == root.diff-click-last-line

@@ -327,6 +327,7 @@ export component MainWindow inherits Window {
     pure callback advance-sidebar-motion(float, float, float, float) -> SidebarMotionStep;
     callback modal-overlay-visibility-changed(bool);
     callback dismiss-transient-overlays();
+    callback dismiss-transient-popovers();
     // Backend bridges report a post-target window click without knowing which
     // reusable surface is mounted. The composition root owns region routing.
     callback post-dispatch-pointer-pressed(length, length);
@@ -1092,6 +1093,12 @@ export component MainWindow inherits Window {
         GitHubSelectState.close(false);
         root.settings-select-dismiss();
         TransientOverlayState.dismiss-all();
+    }
+
+    dismiss-transient-popovers => {
+        GitHubSelectState.close(false);
+        root.settings-select-dismiss();
+        TransientOverlayState.dismiss-popovers();
     }
 
     post-dispatch-pointer-pressed(x, y) => {

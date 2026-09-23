@@ -170,6 +170,12 @@ segmented mode instead of stacking separate text fields or mounting a second
 conversation header. A mode changes on the first pointer click even when the
 text input previously held focus. The pinned canvas has no full-width rule
 crossing behind the rounded input; the input border alone frames the composer.
+The composer is bottom-pinned and grows upward from the resize handle centered
+on the editor's top border below the mode tabs,
+clamped between its 136 px default/minimum and the smaller of 360 px or half
+the panel height. The segmented mode control stays attached above the editor
+throughout the drag. Ask and Review again use internally scrollable multiline
+native inputs, so content beyond the current bounded height remains reachable.
 Like GitHub Copilot Chat on a pull request, `Ask` remains available for queued,
 running, completed, failed, and cancelled tasks. The current PR metadata and a
 bounded diff excerpt are its primary context; a completed AI Review result is
@@ -248,6 +254,9 @@ High/Medium/Low finding 与 Review 专属对话的滚动流，以及一个固定
 `Ask` 与 `Review again` 通过 Primer 分段模式复用同一个 composer，不再堆叠两个输入框
 或挂载第二个对话标题栏；即使输入框此前持有焦点，第一次指针点击也必须完成模式切换。
 固定 composer 的画布不绘制贯穿圆角输入框背后的横线，只由输入框自身边框界定区域。
+composer 固定在面板底部，通过模式 Tab 下方、输入框顶边居中的拖拽条向上增长；高度从默认/最小 136 px 到
+360 px 与面板高度一半两者中的较小值。拖动期间分段模式控件始终吸附在编辑器上方。
+Ask 与 Review again 使用内部可滚动的多行原生输入框，超过当前有界高度的内容仍须可达。
 与 GitHub Pull Request 中的 Copilot Chat 一致，`Ask` 在任务排队、运行、完成、失败和取消
 状态下均可使用。当前 PR 元数据与有界 diff 摘要是主要上下文；已完成的 AI Review 结果
 只是可选附加上下文。对话历史仅保存在本地，并发送给 Settings 中配置的
@@ -617,6 +626,10 @@ Prompt 诊断另外只记录 catalog id/version、实际回复 locale、消息�
 - Focus each composer input, then switch between `Ask` and `Review again` with
   one click. Verify the mode changes on that click and no horizontal rule is
   visible behind the rounded input.
+- Drag the handle centered on the composer editor's top border upward and
+  downward. Verify its bounds, bottom
+  pin, attached mode tabs, and internal scrolling for long Ask and Review again
+  content.
 - Start a review in `Review again` mode; verify the composer action changes to
   an enabled circular Stop button and cancels the task on the first click.
 - Start a review from the PR list; verify the same Stop button appears to the
@@ -669,6 +682,8 @@ Prompt 诊断另外只记录 catalog id/version、实际回复 locale、消息�
   使用 PR 上下文回答，且不会发出任何代码托管平台写请求。
 - 分别聚焦两个 composer 输入框，再用一次点击切换 `Ask` / `Review again`；确认该次
   点击立即切换模式，且圆角输入框背后没有横向规则线。
+- 向上、向下拖动 composer 顶部把手，确认高度边界、底部固定、模式 Tab 吸附，以及
+  Ask 与 Review again 长文本均可在输入框内部滚动到达。
 - 在 `Review again` 模式启动 Review，确认 composer 主操作切换为可点击的圆形 Stop
   按钮，并在第一次点击时取消任务。
 - 从 PR 列表启动 Review，确认相同的 Stop 按钮显示在 Copilot 右侧，并且无需打开 PR

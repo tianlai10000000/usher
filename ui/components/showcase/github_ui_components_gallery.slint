@@ -852,7 +852,7 @@ export component GitHubUiComponentsGallery inherits Rectangle {
             description: I18n.ui-components-demo-borderless-action-rows-anchoredoverlay-placement-alignment-side-selection;
             // The overlay is anchored to this fixed trigger row and must not
             // participate in the section's layout geometry.
-            content-height: 48px;
+            content-height: 88px;
 
             HorizontalLayout {
                 x: 0px;
@@ -919,6 +919,17 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                     disabled: !root.action-menu-open;
                     clicked => { root.action-menu-open = false; }
                 }
+            }
+
+            // Exercise the application-wide input/outside-dismiss bridge with
+            // a real shared field while the root-mounted ActionMenu is open.
+            menu-dismiss-field := GitHubCompactTextField {
+                x: 0px;
+                y: 48px;
+                width: min(320px, parent.width);
+                z: 2;
+                placeholder: I18n.ui-components-demo-compact-field;
+                text <=> root.compact-field-text;
             }
 
             // Demonstrate the caller-owned outside-click layer ActionMenu

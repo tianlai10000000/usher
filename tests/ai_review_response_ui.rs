@@ -11,7 +11,7 @@ use usher_lib::{
     AgentResponseBlock as MainAgentResponseBlock,
     AgentResponseBlockKind as MainAgentResponseBlockKind, AiReviewConversationItem,
     AiReviewFindingItem, AiReviewResponseVisualRow, AppState,
-    ArtifactPreviewKind as AppArtifactPreviewKind, MainWindow, Route,
+    ArtifactPreviewKind as AppArtifactPreviewKind, MainWindow, Route, WorkflowPrConversationItem,
     install_transient_input_bridge,
 };
 
@@ -920,6 +920,192 @@ fn ai_review_content_click_dismisses_the_adjacent_diff_settings_popover() {
         .next()
         .is_none(),
         "AI Review interaction must dismiss a popover owned by the adjacent PR workspace"
+    );
+
+    click(
+        window.window(),
+        LogicalPosition::new(
+            settings_position.x + settings_size.width / 2.0,
+            settings_position.y + settings_size.height / 2.0,
+        ),
+    );
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+    let ask_input = ElementHandle::find_by_element_id(&window, "GitHubAiReviewPanel::ask-input")
+        .next()
+        .expect("AI Review Ask input");
+    let input_position = ask_input.absolute_position();
+    let input_size = ask_input.size();
+    click(
+        window.window(),
+        LogicalPosition::new(
+            input_position.x + input_size.width / 2.0,
+            input_position.y + input_size.height / 2.0,
+        ),
+    );
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+    assert!(
+        ElementHandle::find_by_element_id(
+            &window,
+            "GitHubDiffSettingsPopover::popover-pointer-shield",
+        )
+        .next()
+        .is_none(),
+        "focusing a native input must dismiss an adjacent transient popover"
+    );
+
+    window.set_ai_review_panel_visible(false);
+    window.set_workflow_pr_review_tab(0);
+    window.set_workflow_pr_can_comment(true);
+    window.set_workflow_pr_review_conversation_content_height(48);
+    window.set_workflow_pr_review_conversation_items(ModelRc::new(Rc::new(VecModel::from(vec![
+        WorkflowPrConversationItem {
+            id: "review-summary".into(),
+            kind: "review_summary".into(),
+            author: "Reviewer".into(),
+            avatar: slint::Image::default(),
+            avatar_label: "R".into(),
+            author_association: "MEMBER".into(),
+            body: "requested changes".into(),
+            message_body: "".into(),
+            message_body_height: 0,
+            message_expanded: false,
+            created_at: "now".into(),
+            created_at_tooltip: "now".into(),
+            state: "".into(),
+            review_id: "review-1".into(),
+            can_dismiss: true,
+            connect_before: false,
+            connect_after: false,
+            row_height: 48,
+        },
+    ]))));
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+
+    ElementHandle::find_by_accessible_label(&window, "Review actions")
+        .next()
+        .expect("review action trigger")
+        .mock_single_click(PointerEventButton::Left);
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+    assert!(
+        ElementHandle::find_by_element_id(&window, "GitHubActionMenu::menu-surface")
+            .next()
+            .is_some(),
+        "review action menu should be open before focusing the comment input"
+    );
+
+    let comment_input = ElementHandle::find_by_element_id(
+        &window,
+        "GitHubPullRequestReviewPage::conversation-comment-editor",
+    )
+    .next()
+    .expect("Conversation comment input");
+    comment_input.mock_single_click(PointerEventButton::Left);
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+    assert!(
+        ElementHandle::find_by_element_id(&window, "GitHubActionMenu::menu-surface")
+            .next()
+            .is_none(),
+        "focusing the Conversation comment input must dismiss the review action menu"
+    );
+}
+
+#[test]
+fn ai_review_composer_resizes_upward_with_tabs_and_scrolls_long_input() {
+    i_slint_backend_testing::init_no_event_loop();
+    let window = configure_pr_review_window(1300.0);
+    window.set_ai_review_message_input(
+        (0..80)
+            .map(|index| format!("Ask line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .into(),
+    );
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+
+    let composer = ElementHandle::find_by_element_id(&window, "GitHubAiReviewPanel::composer")
+        .next()
+        .expect("AI Review composer");
+    let resize_handle =
+        ElementHandle::find_by_element_id(&window, "GitHubAiReviewPanel::composer-resize-handle")
+            .next()
+            .expect("AI Review composer resize handle");
+    let composer_box =
+        ElementHandle::find_by_element_id(&window, "GitHubAiReviewPanel::composer-box")
+            .next()
+            .expect("AI Review composer editor");
+    let ask_tab = ElementHandle::find_by_accessible_label(&window, "Ask")
+        .next()
+        .expect("Ask composer mode");
+    let initial_height = composer.size().height;
+    let initial_bottom = composer.absolute_position().y + initial_height;
+    let initial_tab_y = ask_tab.absolute_position().y;
+    let handle_position = resize_handle.absolute_position();
+    let handle_size = resize_handle.size();
+    let editor_top = composer_box.absolute_position().y;
+    assert!(
+        handle_position.y <= editor_top
+            && handle_position.y + handle_size.height >= editor_top + 4.0,
+        "resize handle must straddle the editor top border: handle_y={}, handle_height={}, editor_top={editor_top}",
+        handle_position.y,
+        handle_size.height,
+    );
+    assert!(
+        handle_position.y > composer.absolute_position().y + 30.0,
+        "resize handle must not float above the composer tabs"
+    );
+    let start = LogicalPosition::new(
+        handle_position.x + handle_size.width / 2.0,
+        handle_position.y + handle_size.height / 2.0,
+    );
+    let target = LogicalPosition::new(start.x, start.y - 1000.0);
+    window
+        .window()
+        .dispatch_event(WindowEvent::PointerMoved { position: start });
+    window.window().dispatch_event(WindowEvent::PointerPressed {
+        position: start,
+        button: PointerEventButton::Left,
+    });
+    window
+        .window()
+        .dispatch_event(WindowEvent::PointerMoved { position: target });
+    window
+        .window()
+        .dispatch_event(WindowEvent::PointerReleased {
+            position: target,
+            button: PointerEventButton::Left,
+        });
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+
+    let resized_height = composer.size().height;
+    assert!(
+        resized_height > initial_height + 100.0,
+        "upward drag must grow the composer: initial={initial_height}, resized={resized_height}"
+    );
+    assert!(
+        resized_height <= 360.0,
+        "composer height must remain bounded: {resized_height}"
+    );
+    assert_close(
+        composer.absolute_position().y + resized_height,
+        initial_bottom,
+    );
+    assert!(
+        ask_tab.absolute_position().y < initial_tab_y - 100.0,
+        "composer mode tabs must stay attached to the editor while it grows"
+    );
+
+    let ask_scroll = ElementHandle::find_by_element_id(&window, "GitHubAiReviewPanel::ask-scroll")
+        .next()
+        .expect("Ask input scroll viewport");
+    let ask_input = ElementHandle::find_by_element_id(&window, "GitHubAiReviewPanel::ask-input")
+        .next()
+        .expect("Ask input");
+    let initial_input_y = ask_input.absolute_position().y;
+    ask_scroll.scroll(0.0, -1000.0);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
+    assert!(
+        ask_input.absolute_position().y < initial_input_y - 20.0,
+        "long Ask content must scroll inside the bounded composer"
     );
 }
 

@@ -17,6 +17,13 @@ PR Review additionally requires detached syntax-resource leases and guarded
 source/expand loading writes; derived-presentation release remains an offline
 candidate pending native Release A/B. / PR Review 另要求分离的语法资源 lease 和
 源码/展开 loading 回写校验；派生展示释放仍为等待原生 Release A/B 的离线候选。
+The unadopted syntax-only background-release experiment has been removed from
+application code. Normal hiding retains the current review; PR replacement
+must keep owners bounded and isolate old worker leases. Memory-policy changes
+still require native repeated-growth and reentry checks, not just drop tests.
+/ 未采用的仅后台释放语法资源实验已从应用代码移除。正常隐藏保留当前审核；
+PR 替换须保持 owner 有界并隔离旧 Worker lease。内存策略变更仍须原生重复增长
+与重入验收，不得以对象析构单测代替。
 Hooks also requires shared configuration snapshots, durable-only automatic
 writes and coalesced incremental Job projection; Jobs bounds shaping offsets.
 / Hooks 还要求共享配置快照、只随持久变化自动写盘及合并后的增量 Job 投影；Jobs 约束排版偏移范围。

@@ -5,12 +5,13 @@ use std::time::Duration;
 use i_slint_backend_testing::ElementHandle;
 use slint::platform::{PointerEventButton, WindowEvent};
 use slint::{ComponentHandle, LogicalSize};
-use usher_lib::{MainWindow, Route};
+use usher_lib::{MainWindow, Route, install_transient_input_bridge};
 
 #[test]
 fn showcase_action_menu_anchors_floats_and_toggles() {
     i_slint_backend_testing::init_no_event_loop();
     let window = MainWindow::new().unwrap();
+    install_transient_input_bridge(&window).expect("transient input bridge");
     usher_lib::install_floating_overlay_positioning(&window);
     window.set_show_navigation_drawer(false);
     window.set_platform_is_macos(false);
@@ -197,6 +198,19 @@ fn showcase_action_menu_anchors_floats_and_toggles() {
     );
     assert_eq!(section.absolute_position(), section_position);
     assert_eq!(section.size(), section_size);
+
+    find("GitHubUiComponentsGallery::menu-dismiss-field")
+        .mock_single_click(PointerEventButton::Left);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+    assert!(
+        ElementHandle::find_by_element_id(&window, "GitHubUiComponentsGallery::action-menu")
+            .next()
+            .is_none(),
+        "focusing a shared input must dismiss the root-mounted ActionMenu"
+    );
+
+    start.mock_single_click(PointerEventButton::Left);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
 
     start.mock_single_click(PointerEventButton::Left);
     assert!(

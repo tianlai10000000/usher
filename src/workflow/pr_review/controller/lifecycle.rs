@@ -112,6 +112,171 @@ mod tests {
     }
 
     #[test]
+    fn replacing_synthetic_reviews_retains_only_the_latest_models_and_cache() {
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().unwrap();
+        let (controller, initial_file) = fixture(&ui);
+        drop(initial_file);
+        let template = controller.active_request.lock().unwrap().clone().unwrap();
+        let mut old_files = Vec::new();
+        let mut old_tokens = Vec::new();
+        let mut old_details = Vec::new();
+        for cycle in 0..36 {
+            // Exercise the same reset boundary as opening a different PR,
+            // without network I/O or claiming this is a native RSS benchmark.
+            controller.invalidate_pending_requests();
+            *controller.cache.lock().unwrap() = None;
+            controller.reset_request_scoped_state(&ui, true);
+            assert!(controller.source_files.lock().unwrap().entries.is_empty());
+            assert!(
+                controller
+                    .highlighted_files
+                    .lock()
+                    .unwrap()
+                    .entries
+                    .is_empty()
+            );
+            let number = format!("synthetic-{}", cycle % 3);
+            let mut request = template.clone();
+            request.number = number.clone();
+            let mut detail = ai_review_fixture_diff_detail(&number);
+            detail.files.truncate(1);
+            let line = detail.files[0].lines[0].clone();
+            let count = [16, 64, 256][cycle % 3];
+            detail.files[0].path = format!("synthetic/{number}.rs");
+            detail.files[0].lines = vec![line; count];
+            let detail = Arc::new(SharedDiffDetail::from(detail));
+            let file = detail.files[0].clone();
+            let highlighted = Arc::new(vec![tokens()[0].clone(); count]);
+            let cache = ReviewCache {
+                project_alias: "fixture".into(),
+                request: request.clone(),
+                metadata: ProjectRepositoryMetadata {
+                    repo_project_id: "fixture".into(),
+                    repo_type: "github".into(),
+                    remote_repo: "https://example.invalid/fixture".into(),
+                },
+                all_detail: detail.clone(),
+                base_detail: detail.clone(),
+                range_diffs: BoundedCache::new(RANGE_DIFF_CACHE_CAPACITY),
+                expanded_files: HashMap::new(),
+                loaded_large_diffs: HashSet::new(),
+            };
+            *controller.active_request.lock().unwrap() = Some(request);
+            *controller.cache.lock().unwrap() = Some(cache);
+            controller.source_files.lock().unwrap().insert(
+                format!("{number}:head:{}", file.path),
+                "// synthetic source\n".repeat(count),
+            );
+            controller
+                .highlighted_files
+                .lock()
+                .unwrap()
+                .insert(file.path.clone(), highlighted.clone());
+            old_files.push(Arc::downgrade(&file));
+            old_tokens.push(Arc::downgrade(&highlighted));
+            old_details.push(Arc::downgrade(&detail));
+            apply_highlighted_file(&ui, file, highlighted, true);
+            drop(detail);
+            let lines = ui.get_workflow_pr_review_lines();
+            controller.route_changed(&ui, Route::PrReview, Route::Home);
+            assert!(lines == ui.get_workflow_pr_review_lines());
+            assert_eq!(lines.row_count(), count);
+            assert_eq!(controller.source_files.lock().unwrap().entries.len(), 1);
+            assert_eq!(
+                controller.highlighted_files.lock().unwrap().entries.len(),
+                1
+            );
+            assert!(
+                old_files[..cycle]
+                    .iter()
+                    .all(|weak| weak.strong_count() == 0)
+            );
+            assert!(
+                old_tokens[..cycle]
+                    .iter()
+                    .all(|weak| weak.strong_count() == 0)
+            );
+            assert!(
+                old_details[..cycle]
+                    .iter()
+                    .all(|weak| weak.strong_count() == 0)
+            );
+        }
+        controller.clear_owned_state(&ui);
+        assert!(old_files.iter().all(|weak| weak.strong_count() == 0));
+        assert!(old_tokens.iter().all(|weak| weak.strong_count() == 0));
+        assert!(old_details.iter().all(|weak| weak.strong_count() == 0));
+    }
+
+    #[test]
+    fn sidebar_navigation_retains_resources_presentation_and_request_generations() {
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        for (locale, full_file) in [("en", false), ("zh-CN", true)] {
+            let ui = MainWindow::new().unwrap();
+            crate::i18n::apply_preference(locale).unwrap();
+            let (controller, file) = fixture(&ui);
+            let highlighted = tokens();
+            let token_weak = Arc::downgrade(&highlighted);
+            controller
+                .highlighted_files
+                .lock()
+                .unwrap()
+                .insert(file.path.clone(), highlighted.clone());
+            apply_highlighted_file(&ui, file.clone(), highlighted, false);
+            ui.set_workflow_pr_review_viewing_file(full_file);
+            ui.set_workflow_pr_review_commit_range_start(2);
+            ui.set_workflow_pr_review_commit_range_end(4);
+            let lines = ui.get_workflow_pr_review_lines();
+            let metrics = ui.get_workflow_pr_review_line_metrics();
+            let revision = ui.get_workflow_pr_review_line_content_revision();
+            let kinds = [
+                ReviewRequestKind::Highlight,
+                ReviewRequestKind::Expand,
+                ReviewRequestKind::RemoteMutation,
+            ];
+            let generations = kinds.map(|kind| controller.state.begin(kind));
+            let lease = controller.highlight_resources.lease();
+            let weak = Arc::downgrade(lease.get_or_init(|| Arc::new(HighlightResources::load())));
+            drop(lease);
+
+            controller.route_changed(&ui, Route::PrReview, Route::Home);
+            assert!(weak.upgrade().is_some());
+            assert!(controller.highlight_resources.is_loaded());
+            assert!(token_weak.upgrade().is_some());
+            assert!(lines == ui.get_workflow_pr_review_lines());
+            assert!(metrics == ui.get_workflow_pr_review_line_metrics());
+            assert_eq!(revision, ui.get_workflow_pr_review_line_content_revision());
+            assert_eq!(full_file, ui.get_workflow_pr_review_viewing_file());
+            assert_eq!(ui.get_workflow_pr_review_commit_range_start(), 2);
+            assert_eq!(ui.get_workflow_pr_review_commit_range_end(), 4);
+            assert!(!controller.state.presentation_suspended());
+            for (kind, generation) in kinds.into_iter().zip(generations) {
+                assert!(controller.state.is_current(kind, generation));
+            }
+            controller.route_changed(&ui, Route::Home, Route::PrReview);
+            assert!(lines == ui.get_workflow_pr_review_lines());
+            assert!(controller.highlight_resources.is_loaded());
+            assert!(Arc::ptr_eq(
+                &controller
+                    .cache
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .base_detail
+                    .files[0],
+                &file
+            ));
+            controller.clear_owned_state(&ui);
+            assert!(weak.upgrade().is_none());
+        }
+        crate::i18n::apply_preference(usher_i18n::source_locale().id).unwrap();
+    }
+
+    #[test]
     fn leave_releases_derived_owners_and_reentry_preserves_review_context() {
         let _locale = crate::i18n::test_locale_guard();
         i_slint_backend_testing::init_no_event_loop();

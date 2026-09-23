@@ -1202,6 +1202,12 @@ fn install_app_event_monitor(window: *mut Object) -> bool {
                         ui.window(),
                         slint::LogicalPosition::new(click_x, click_y),
                     );
+                    if crate::transient_input::focused_text_input_contains_pointer(
+                        ui.window(),
+                        slint::LogicalPosition::new(click_x, click_y),
+                    ) {
+                        ui.invoke_dismiss_transient_popovers();
+                    }
                 }
                 if event_type == 2 {
                     ui.invoke_post_dispatch_pointer_released(click_x, click_y);

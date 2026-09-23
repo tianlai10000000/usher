@@ -71,6 +71,8 @@ export component GitHubActionMenu inherits FocusScope {
                 : root.anchor-x);
     private property <length> scroll-offset-y: 0px;
     private property <int> dismiss-revision: TransientOverlayState.dismiss-revision;
+    private property <int> popover-dismiss-revision:
+        TransientOverlayState.popover-dismiss-revision;
     private property <int> exclusive-generation: TransientOverlayState.exclusive-generation;
     private property <int> exclusive-token: 0;
 
@@ -100,6 +102,13 @@ export component GitHubActionMenu inherits FocusScope {
     }
 
     changed dismiss-revision => {
+        if root.open {
+            TransientOverlayState.note-closed-open-menu();
+            root.dismiss-requested();
+        }
+    }
+
+    changed popover-dismiss-revision => {
         if root.open {
             TransientOverlayState.note-closed-open-menu();
             root.dismiss-requested();

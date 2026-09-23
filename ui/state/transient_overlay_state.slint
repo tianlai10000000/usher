@@ -1,9 +1,11 @@
 // Shared dismissal bridge for transient UI surfaces.
 //
-// Two channels stay separate on purpose:
+// Three channels stay separate on purpose:
 // 1. dismiss-all / dismiss-revision — native title-bar, docked-shell, and host
 //    blank-area clicks. Dialog/Toast/ActionMenu/Diff-settings all listen.
-// 2. claim-exclusive / exclusive-generation — peer popover mutual exclusivity.
+// 2. dismiss-popovers / popover-dismiss-revision — input interactions that
+//    close Select/ActionMenu/Diff-settings without dismissing their Dialog.
+// 3. claim-exclusive / exclusive-generation — peer popover mutual exclusivity.
 //    Only ActionMenu and Diff-settings claim/listen, so opening one closes the
 //    others on the same click without each page wiring dismiss-all, and without
 //    tearing down Dialogs or Toasts.
@@ -13,15 +15,21 @@
 // toggle it back open (native title-bar dismiss + trigger race).
 export global TransientOverlayState {
     out property <int> dismiss-revision: 0;
+    out property <int> popover-dismiss-revision: 0;
     out property <int> exclusive-generation: 0;
     out property <bool> closed-open-menu: false;
     callback dismiss-all();
+    callback dismiss-popovers();
     callback claim-exclusive();
     callback note-closed-open-menu();
     callback consume-closed-open-menu();
 
     dismiss-all => {
         root.dismiss-revision += 1;
+    }
+
+    dismiss-popovers => {
+        root.popover-dismiss-revision += 1;
     }
 
     claim-exclusive => {

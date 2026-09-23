@@ -31,6 +31,17 @@ PR 语法 Worker 入队前通过 `controller/highlight_session.rs` 取得会话�
 Release 性能验收。挂起状态通过现有 PR State Store 的强类型 Action 更新，
 不使远端 mutation 失效。
 
+正常隐藏路由时保留当前审核的语法资源、token/源码缓存和根 model。未采用的
+仅后台释放语法资源实验已从应用代码移除；源码快照和测量证据保存在内存诊断历史中，
+不再是可启用的运行时模式。控制器仅拥有当前 PR 的缓存，不为每个访问过的 PR
+保存一份；更换 PR 会使请求代次失效、分离资源槽、清空请求级缓存，新结果就绪时
+替换根 model。已有 Worker 可在旧 lease 上完成，但不能重新填入替换后的资源槽。
+对象生命周期单测不等于 allocator 驻留页或 RSS 已达到稳定平台的证据。
+
+侧栏切到 Home 不等于显式关闭审核：Router 历史可使 Workflow 域继续可达，控制器和
+根 model 因而保留。Shell Back 先消费 commit-tab 返回点，真正关闭时才清审核会话；
+生命周期域不可达和切项目另有重置边界。不能因条件 Slint 页面卸载就推断整个会话已清空。
+
 P6 验证由 `scripts/benchmark-p6-regression.py` 及各功能显式启用的夹具负责，
 `src/p6_benchmark.rs` 共享持续时长控制。历史迁移门禁和当前版本回归分开；
 手动性能 Workflow 检查真实重复负载的逐轮正确性、内存斜率及资源增长，
@@ -903,7 +914,7 @@ PR 列表评审结论在 adapter 边界统一为“需要评审”“已批准�
 
 Gitee 企业版 Conversation 只使用 PAT 鉴权的 v8 API。detail/current-state URL 已在路径中携带 PR IID 时，不再把同一个 IID 重复作为 `pr_id`。只有 MR detail 的评审人字段明确返回 `approved` 或 `rejected` 才生成评审行。应用不调用依赖浏览器会话的 `/pull_requests/{iid}/activities`，也不保存、不转发、不记录浏览器 Cookie。Provider 原生话术不得进入 Slint。合并人从 `merged_by` 等专用详情字段取得；若这些字段只有邮箱/账号标签，则静默调用文档定义的项目成员接口做账号精确匹配，以成员资料的 `name` 与头像补全展示，用户目录作为静默 fallback。Merge commit 的 `committer_name` 只是更低优先级的 Git 身份。模糊目录结果必须拒绝，完整邮箱地址不得作为操作人标签，且绝不以 PR 作者作为合并人回退。GitLab 同样只使用 `merged_by` 并禁止 PR 作者回退；GitHub 保持原生 `actor.login` 展示。
 
-提交活动在 Provider API 可用时保留原生分支更新批次。GitHub 使用 issue timeline `committed` 批次；GitLab 使用 `added N commits` system note，并把其 SHA 引用与当前 MR commits 匹配；Gitee 公有版 v5 使用 operation-log push 记录；Gitee 企业版 v8 加载项目 push event，按 MR 源分支过滤，并把 `commit_from`/`commit_to` 映射到归一化 commit 顺序。push event actor 与每个 commit 的 Git author 是两个独立身份。活动数据缺失或无法使用时，退化为单个 Provider-neutral commit 批次，不虚构更新者。PR 详情停留期间不轮询；离开路由时清除其自有 Conversation、Commits、diff 和 commit-range 状态，因此从保留的列表重新打开 PR 会执行全新 Provider 请求。
+提交活动在 Provider API 可用时保留原生分支更新批次。GitHub 使用 issue timeline `committed` 批次；GitLab 使用 `added N commits` system note，并把其 SHA 引用与当前 MR commits 匹配；Gitee 公有版 v5 使用 operation-log push 记录；Gitee 企业版 v8 加载项目 push event，按 MR 源分支过滤，并把 `commit_from`/`commit_to` 映射到归一化 commit 顺序。push event actor 与每个 commit 的 Git author 是两个独立身份。活动数据缺失或无法使用时，退化为单个 Provider-neutral commit 批次，不虚构更新者。PR 详情停留期间不轮询；显式审核 Back 清除其自有 Conversation、Commits、diff 和 commit-range 状态，因此从保留的列表重新打开 PR 会执行全新 Provider 请求。侧栏 Home 不是此关闭操作，可经由 Router 历史保留当前审核会话。
 
 审核页头采用 GitHub 的两步命令模型。标题旁的 GitHub 风格就绪徽标使用 Primer 语义色渲染归一化类型/详情，但合并语义由各 adapter 独立负责：GitHub 映射 REST mergeability，Gitee 企业版映射 v8 `current_state` 条件，Gitee 公有版只映射 v5 字段，GitLab 映射 `detailed_merge_status` 并请求异步重算。共享 enum 只是展示边界，绝不能把一个 Provider 的判定条件套到另一个 Provider。`Review changes` 提交显式的 Provider-neutral Comment、Approve 或 Request changes；不受支持的选项保持可见但禁用。Conversation Tab 底部另有 GitHub 风格纯文本评论框（`Write` + 绿色 `Comment`），提交同一 Comment 动作。符合条件的 `review_summary` 行使用 GitHub 的逐条评审 kebab 与必填原因的 `Dismiss review` 弹窗；页头聚合状态只作展示。Provider-neutral 撤回门面在仓库权限允许时把选中的 review id 交给 GitHub dismissal endpoint；GitLab 先写入原因 note，再撤销当前 Token 用户的 approval；Gitee 企业版通过实际可用的 Web API 路由 `/api/code/api/{full_path}/-/pull_requests/{iid}/reviews` 撤回当前 Token 用户的评审，请求体严格为 `{"state":"initialized"}`。没有该 Web 路由的企业版部署会静默回退到文档规定的 v8 reviews 路由，成功后再以 best-effort MR note 记录必填原因；Gitee 公有版 v5 不具备撤回能力。Provider 成功后刷新远端状态，绝不自动开始合并。`Merge pull request` 只由最新的归一化 `PullRequestActionState` 启用，并且只展示 adapter 返回的策略。GitHub 支持仓库启用的 merge、squash、rebase；Gitee 企业 v8 映射评审状态，Approve 未填写 summary 时省略可选的 `comment` 字段，并按 `restrict_merge_type` 支持 merge、squash、rebase、fast-forward；Gitee 公有 v5 支持评论和 merge/squash，但没有 approve/request-changes endpoint。GitLab 支持评论、批准，以及携带 SHA 防护的 merge/squash 和显式删除来源分支；项目 `squash_option` 限制可选策略，稳定版 REST API 没有对应写命令，因此 Request changes 保持禁用。
 

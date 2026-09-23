@@ -651,7 +651,10 @@ expanded/collapsed, and success confirmation.
   Triggers that live in that chrome dismiss zone must use
   `GitHubActionMenuTriggerArea` (press-state open/close) so the same click
   cannot dismiss then toggle-reopen; `dismiss-requested` must close, never
-  toggle.
+  toggle. Pointer presses inside a currently focused or newly focused native
+  text input use the application input bridge's popover-only dismissal channel:
+  Select, ActionMenu, and Diff-settings close after the input receives the
+  press, while Dialog and Toast lifecycles remain unchanged.
   The UI Components playground's borderless ActionMenu demonstrates the same
   contract with a fixed 48 px trigger row: the overlay is mounted at the
   playground root and positioned from the selected trigger's measured edge
@@ -661,7 +664,9 @@ expanded/collapsed, and success confirmation.
   button retargets the open menu in the same interaction. The anchor remains a
   live binding to the selected trigger's geometry so window resizing and
   responsive reflow cannot detach the open menu; the Close control is only
-  enabled while the menu is open.
+  enabled while the menu is open. A shared input in the same sample verifies
+  that focusing text closes the root-mounted menu without losing the input
+  press.
 - `GitHubFilterMenuButton`, `GitHubFilterMenuFrame`, and
   `GitHubFilterMenuItem` are the generic single-select filter/sort ActionMenu
   composition. They own trigger, header/close, checked-row, keyboard, and
@@ -1005,12 +1010,16 @@ ActionMenu 和其他本来可通过页面空白关闭的临时弹层都应关闭
 首击散落调用 dismiss-all。页面内容区的空白点击关闭由各宿主自行挂载在菜单之
 下的 TouchArea 承担，不能依赖 ActionMenu 在 overlay z 上铺满视口。Dialog 仅在
 普通遮罩点击本就允许关闭时响应，硬模态表单仍保持不可消隐语义。
+指针按下当前或新获得焦点的原生文本输入框时，应用级输入 bridge 必须在输入框收到
+事件后触发仅关闭 popover 的通道：Select、ActionMenu 与 Diff settings 关闭，Dialog
+与 Toast 的生命周期保持不变。
 
 UI Components 演练场中的无边框 ActionMenu 使用固定 48px 触发器行验证同一
 契约：浮层挂载在演练场根层，并按选中触发器的实际边界定位，支持 start/end 与上下展开；再次点击
 当前触发器立即收起，展开不会改变 section 高度或挤压后续内容。点击其他定位
 按钮时在同一次交互中切换已打开菜单的位置；锚点持续绑定选中触发器的实时几何
 信息，窗口缩放与响应式重排不能让已打开菜单脱离触发器；Close 控件仅在菜单打开时可用。
+同一示例还提供共享输入框，验证聚焦输入框会关闭根层 ActionMenu 而不会丢失输入事件。
 
 ## 9. Material dependency boundary / Material 依赖边界
 
