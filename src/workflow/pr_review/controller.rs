@@ -62,6 +62,9 @@ use actions::{apply_action_state, readiness_label_key, reset_action_ui};
 mod diagnostics;
 mod highlight_benchmark;
 mod highlight_completion;
+mod highlight_session;
+mod lifecycle;
+use highlight_session::HighlightSession;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ReviewRequest {
@@ -96,7 +99,7 @@ pub(crate) struct WorkflowPrReviewController {
     only_manifest_files: Arc<Mutex<bool>>,
     show_viewed_files: Arc<Mutex<bool>>,
     collapsed_folders: Arc<Mutex<HashSet<String>>>,
-    highlight_resources: Arc<Mutex<Option<Arc<HighlightResources>>>>,
+    highlight_resources: Arc<HighlightSession<HighlightResources>>,
     highlighted_files: Arc<Mutex<BoundedCache<Arc<Vec<HighlightedLine>>>>>,
     source_files: Arc<Mutex<BoundedCache<String>>>,
     location_reveal: Arc<Mutex<Option<LocationReveal>>>,
@@ -108,17 +111,6 @@ pub(crate) struct WorkflowPrReviewController {
     pending_open_commit: Arc<Mutex<Option<String>>>,
     commit_detail_return_tab: Arc<Mutex<Option<i32>>>,
     pr_list_refresh_pending: Arc<AtomicBool>,
-}
-
-fn session_highlight_resources(
-    resources: &Mutex<Option<Arc<HighlightResources>>>,
-) -> Arc<HighlightResources> {
-    let mut resources = resources
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    resources
-        .get_or_insert_with(|| Arc::new(HighlightResources::load()))
-        .clone()
 }
 
 pub(crate) fn bind_pr_review(
@@ -137,7 +129,7 @@ pub(crate) fn bind_pr_review(
         only_manifest_files: Arc::new(Mutex::new(false)),
         show_viewed_files: Arc::new(Mutex::new(true)),
         collapsed_folders: Arc::new(Mutex::new(HashSet::new())),
-        highlight_resources: Arc::new(Mutex::new(None)),
+        highlight_resources: Arc::new(HighlightSession::default()),
         highlighted_files: Arc::new(Mutex::new(BoundedCache::new(HIGHLIGHT_CACHE_CAPACITY))),
         source_files: Arc::new(Mutex::new(BoundedCache::new(SOURCE_CACHE_CAPACITY))),
         location_reveal: Arc::new(Mutex::new(None)),
@@ -639,6 +631,7 @@ impl WorkflowPrReviewController {
     pub(crate) fn install_memory_benchmark_fixture(&self, _ui: &MainWindow) {}
 
     fn clear_owned_state(&self, ui: &MainWindow) {
+        self.state.set_presentation_suspended(false);
         self.invalidate_pending_requests();
         if let Ok(mut request) = self.active_request.lock() {
             *request = None;
@@ -678,9 +671,7 @@ impl WorkflowPrReviewController {
         if let Ok(mut folders) = self.collapsed_folders.lock() {
             folders.clear();
         }
-        if let Ok(mut resources) = self.highlight_resources.lock() {
-            *resources = None;
-        }
+        self.highlight_resources.detach();
         if let Ok(mut highlighted) = self.highlighted_files.lock() {
             highlighted.clear();
         }
@@ -2016,6 +2007,11 @@ impl WorkflowPrReviewController {
             ui.set_workflow_pr_review_hunk_scroll_restore_pending(false);
         }
         apply_file_header(ui, index, &file);
+        // A late provider read may finish while Home is visible. Retain its
+        // domain result, but never recreate hidden derived render ownership.
+        if self.state.presentation_suspended() {
+            return;
+        }
         if is_large_diff(&file) && !large_diff_loaded {
             self.state.invalidate(ReviewRequestKind::Highlight);
             set_empty_line_model(ui);
@@ -2054,12 +2050,13 @@ impl WorkflowPrReviewController {
         // expansion. The completed model is applied atomically on the UI loop.
         ui.set_workflow_pr_review_code_loading(true);
         let controller = self.clone();
-        let highlight_resources = self.highlight_resources.clone();
+        let highlight_resources = self.highlight_resources.lease();
         let ui_weak = ui.as_weak();
         crate::app_runtime::shared_runtime().spawn(async move {
             let file_for_highlight = file.clone();
             let highlighted = tokio::task::spawn_blocking(move || {
-                let resources = session_highlight_resources(&highlight_resources);
+                let resources =
+                    highlight_resources.get_or_init(|| Arc::new(HighlightResources::load()));
                 highlight_diff_lines(
                     &resources,
                     file_for_highlight.path.as_str(),
@@ -2405,14 +2402,12 @@ impl WorkflowPrReviewController {
                 let Some(ui) = ui_weak.upgrade() else {
                     return;
                 };
-                ui.set_workflow_pr_review_code_loading(false);
-                if !controller
-                    .state
-                    .is_current(ReviewRequestKind::Expand, generation)
-                {
-                    return;
-                }
-                if ui.get_workflow_pr_review_selected_file_index() != selected_index as i32 {
+                if !highlight_completion::finish_expand(
+                    &controller.state,
+                    &ui,
+                    generation,
+                    selected_index,
+                ) {
                     return;
                 }
                 match result {
@@ -2548,14 +2543,12 @@ impl WorkflowPrReviewController {
                 let Some(ui) = ui_weak.upgrade() else {
                     return;
                 };
-                ui.set_workflow_pr_review_code_loading(false);
-                if !controller
-                    .state
-                    .is_current(ReviewRequestKind::Expand, generation)
-                {
-                    return;
-                }
-                if ui.get_workflow_pr_review_selected_file_index() != selected_index as i32 {
+                if !highlight_completion::finish_expand(
+                    &controller.state,
+                    &ui,
+                    generation,
+                    selected_index,
+                ) {
                     return;
                 }
                 match result {
@@ -2584,6 +2577,9 @@ impl WorkflowPrReviewController {
         file: SharedDiffFile,
         source: String,
     ) {
+        if self.state.presentation_suspended() {
+            return;
+        }
         let full_file = Arc::new(full_source_file(&file, source.as_str()));
         ui.set_workflow_pr_review_viewing_file(true);
         ui.set_workflow_pr_review_has_expandable_hunks(false);
@@ -2591,12 +2587,13 @@ impl WorkflowPrReviewController {
         ui.set_workflow_pr_review_code_loading(true);
         let generation = self.state.begin(ReviewRequestKind::Highlight);
         let controller = self.clone();
-        let highlight_resources = self.highlight_resources.clone();
+        let highlight_resources = self.highlight_resources.lease();
         let ui_weak = ui.as_weak();
         crate::app_runtime::shared_runtime().spawn(async move {
             let highlight_file = full_file.clone();
             let highlighted = tokio::task::spawn_blocking(move || {
-                let resources = session_highlight_resources(&highlight_resources);
+                let resources =
+                    highlight_resources.get_or_init(|| Arc::new(HighlightResources::load()));
                 highlight_diff_lines(
                     &resources,
                     highlight_file.path.as_str(),
@@ -2807,11 +2804,7 @@ impl WorkflowPrReviewController {
             .lock()
             .map(|cache| (cache.entries.len(), source_cache_stats(&cache)))
             .unwrap_or_default();
-        let highlight_resources_loaded = self
-            .highlight_resources
-            .lock()
-            .map(|resources| resources.is_some())
-            .unwrap_or(false);
+        let highlight_resources_loaded = self.highlight_resources.is_loaded();
         log::info!(
             "[Workflow][PR Review][Memory] reason={} base_files={} base_lines={} base_text_bytes={} base_heap_estimate_bytes={} owned_detail_entries={} owned_detail_files={} owned_detail_lines={} owned_detail_text_bytes={} owned_detail_heap_estimate_bytes={} override_files={} override_lines={} override_text_bytes={} override_heap_estimate_bytes={} highlight_resources_loaded={} highlight_cache_entries={} highlight_lines={} highlight_tokens={} highlight_text_bytes={} highlight_heap_estimate_bytes={} source_cache_entries={} source_text_bytes={} source_heap_estimate_bytes={}",
             reason,

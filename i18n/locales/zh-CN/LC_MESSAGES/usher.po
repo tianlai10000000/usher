@@ -126,6 +126,30 @@ msgctxt "projects.trigger_hooks"
 msgid "Trigger Hooks"
 msgstr "触发 Hook"
 
+msgctxt "projects.do_not_trigger_hooks"
+msgid "Do not trigger Hooks"
+msgstr "不触发 Hook"
+
+msgctxt "projects.do_not_trigger_hooks_description"
+msgid "No Hooks will run for this project."
+msgstr "此项目不会运行任何 Hook。"
+
+msgctxt "projects.trigger_selected_hooks"
+msgid "Trigger selected Hooks"
+msgstr "触发指定 Hook"
+
+msgctxt "projects.trigger_selected_hooks_description"
+msgid "Run the Hooks selected below after matching project events."
+msgstr "匹配项目事件后运行下方选择的 Hook。"
+
+msgctxt "projects.select_at_least_one_hook"
+msgid "Select at least one Hook."
+msgstr "请至少选择一个 Hook。"
+
+msgctxt "projects.hooks_disabled_in_settings"
+msgid "Hooks are disabled in Settings"
+msgstr "Hook 已在设置中禁用"
+
 msgctxt "projects.no_hooks"
 msgid "No Hooks configured"
 msgstr "尚未配置 Hook"

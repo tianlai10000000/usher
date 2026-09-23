@@ -143,6 +143,30 @@ key = "projects.trigger_hooks"
 text = "Trigger Hooks"
 
 [[messages]]
+key = "projects.do_not_trigger_hooks"
+text = "Do not trigger Hooks"
+
+[[messages]]
+key = "projects.do_not_trigger_hooks_description"
+text = "No Hooks will run for this project."
+
+[[messages]]
+key = "projects.trigger_selected_hooks"
+text = "Trigger selected Hooks"
+
+[[messages]]
+key = "projects.trigger_selected_hooks_description"
+text = "Run the Hooks selected below after matching project events."
+
+[[messages]]
+key = "projects.select_at_least_one_hook"
+text = "Select at least one Hook."
+
+[[messages]]
+key = "projects.hooks_disabled_in_settings"
+text = "Hooks are disabled in Settings"
+
+[[messages]]
 key = "projects.no_hooks"
 text = "No Hooks configured"
 

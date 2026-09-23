@@ -32,6 +32,16 @@ PR highlight completion validation is shared by diff and full-file callbacks in
 `controller/highlight_completion.rs`: generation, index, path and display mode
 are checked before loading/model writes. Worker scheduling remains unchanged.
 
+PR syntax workers lease a session-local lazy resource slot before being queued
+(`controller/highlight_session.rs`). Reset detaches that slot instead of clearing
+a shared slot that an old worker could refill. Source/expand completions also
+validate generation and file index before clearing loading. An opt-in, offline
+`test-fixtures` candidate in `controller/lifecycle.rs` releases derived Diff/Find
+presentation on route exit and rebuilds it on return; it retains domain detail,
+range/expanded context, source cache and lazy-tab state. It is not the production
+default and has not passed native Release performance acceptance. Suspension is
+a typed action in the existing PR State Store; remote mutations remain valid.
+
 Hook journals budget serialized JSONL bytes (2 MiB output admission plus 64 KiB
 lifecycle reserve). `hooks/replay.rs` streams legacy/new logs with a 16 MiB read
 budget and 64 KiB record limit. The Hook bridge cancels superseded replay and
@@ -101,19 +111,22 @@ deep links and the reusable Job Run projection. Registered asynchronous shutdown
 drains finish processes before existing prioritized cleanup, with a shared barrier
 for explicit shutdown and event-loop exit. See [Hooks](specs/hooks.md).
 
-Project Add/Edit owns default-empty Hook opt-in (`hook_ids`) in its automatically
-persisted registry. `project/hook_selection.rs` projects the catalog into a
-transient form. Shared `GitHubCheckbox` supplies parent/child selection, mixed
-state and keyboard interaction, with examples in UI Components. Enabled rows own
-the visual selection count and parent state. Disabled rows render unchecked with
-disabled interaction while the form retains their prior selection intent for
-restoration after re-enabling. The parent selects enabled rows, clears all retained
-selections, and hides the list when empty. Hook admission and pre-spawn
-execution consult the Project facade by normalized Workflow ID. Registered
+Project Add/Edit owns a project-local Hook mode (`hooks_enabled`) and retained
+selection (`hook_ids`) in its automatically persisted registry. Legacy records
+derive the mode from whether `hook_ids` is empty. `project/hook_selection.rs`
+projects the global Hook catalog into a transient form initialized from the
+current project on every open. Shared `GitHubRadio` provides the explicit
+off/selected mode and progressively discloses the shared `GitHubCheckbox` list
+only for selected mode. Disabled rows keep their project-owned checked state but
+disable interaction and show the Settings-owned availability status; Settings
+changes never rewrite project selection. Hook admission and pre-spawn execution
+require both the project mode and selected Hook ID through the Project facade by
+normalized Workflow ID. Registered
 project-scoped events require an ID; unselected or unresolved projects never run
 scripts. Settings draft tests bypass project membership.
-The selector presents an inline parent/count header, divided list rows, localized
-event captions and shared status Labels; checkbox hover stays on the box outline.
+The selector presents localized mode captions, divided list rows, readable event
+captions, inline group validation and shared status Labels; checkbox hover stays
+on the box outline. Off mode does not mount the Hook list.
 
 At compact widths, Settings section navigation uses the shared root-mounted
 Select popup. Its trigger remains in the scrolling content, while opening the

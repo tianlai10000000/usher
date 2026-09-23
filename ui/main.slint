@@ -592,7 +592,7 @@ export component MainWindow inherits Window {
     in property <[ProjectHookChoice]> project-hook-choices: [];
     in property <int> project-selected-hook-count: 0;
     in property <int> project-selectable-hook-count: 0;
-    in property <bool> project-hook-list-expanded: false;
+    in-out property <bool> project-hooks-enabled: false;
     in property <bool> project-hooks-ready: false;
     in property <string> project-hooks-status: "";
     in-out property <bool> project-show-add-modal: false;
@@ -908,7 +908,6 @@ export component MainWindow inherits Window {
     callback project-update-project(string, string, string, string, string, string, string, bool);
     callback project-prepare-hooks(string);
     callback project-toggle-hook(string, bool);
-    callback project-toggle-all-hooks(bool);
     callback project-delete-project(string);
     callback project-search-projects(string);
     callback project-reload-projects();
@@ -2178,10 +2177,14 @@ export component MainWindow inherits Window {
         unread-message-count: root.message-unread-count;
         messages-route-active: root.current-route == Route.Messages;
         open-messages => { root.navigate(Route.Messages); }
-        // The bar occupies the route-reserved bottom strip, so it can sit just
-        // above PR Review and let its anchored menus paint over route content.
-        // Dialog/input shields remain substantially higher at z:2999/3000.
-        z: 810;
+        // Settings is mounted in a full-window factory host at z:1200 so its
+        // own dialogs can cover application chrome. Raise the shared status
+        // surface above that host while Settings is an ordinary page; otherwise
+        // the host hides every status popup and its outside-click layer. Any
+        // modal lowers the bar again so the factory/root dialog keeps ownership.
+        z: root.current-route == Route.Settings && !root.modal-overlay-visible
+            ? 1210
+            : 810;
     }
 
     if (root.current-route == Route.Workflow || root.current-route == Route.Project) && root.show-page-scroll-view: Rectangle {
@@ -2251,11 +2254,10 @@ export component MainWindow inherits Window {
         hook-choices: root.project-hook-choices;
         selected-hook-count: root.project-selected-hook-count;
         selectable-hook-count: root.project-selectable-hook-count;
-        hook-list-expanded: root.project-hook-list-expanded;
+        hooks-enabled <=> root.project-hooks-enabled;
         hooks-ready: root.project-hooks-ready;
         hooks-status: root.project-hooks-status;
         toggle-hook(id, value) => { root.project-toggle-hook(id, value); }
-        toggle-all-hooks(value) => { root.project-toggle-all-hooks(value); }
         logo-preview-image: root.project-logo-preview-image;
         logo-preview-status: root.project-logo-preview-status;
         error-text <=> root.project-add-error;
@@ -2286,6 +2288,7 @@ export component MainWindow inherits Window {
             root.project-new-logo = "";
             root.project-new-tags = "";
             root.project-new-pr-auto-update = false;
+            root.project-hooks-enabled = false;
             root.project-preview-logo("");
             root.project-add-error = "";
             root.project-show-add-modal = false;

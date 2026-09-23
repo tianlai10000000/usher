@@ -32,6 +32,23 @@ Closing/resetting the session invalidates those completions before any UI write.
 高亮完成回调必须先匹配请求代次、所选文件索引/路径及 Diff/全文模式，才能清除
 loading 或应用结果；关闭/重置会话必须先使旧回调失效。
 
+Queued syntax work must capture a session-local lazy resource lease before
+scheduling. Reset replaces the session slot; an old worker may finish on its
+old lease but must never populate the new session's resource owner. Source and
+expand completions validate their generation and selected file before any
+loading-state write. Memory-release experiments must distinguish navigation
+state from derived presentation and must not invalidate remote mutations merely
+because the review route is hidden. The offline `test-fixtures` option
+`USHER_PR_PRESENTATION_LIFECYCLE=release-derived-v1` is an unaccepted candidate,
+not default product behavior; its native A/B remains required.
+
+语法任务入队前必须捕获会话局部惰性资源 lease。重置时替换槽，旧 Worker 可在旧
+lease 上结束，但不得填充新会话资源。源码/展开回调在任何 loading 回写前必须先
+检查代次和所选文件。内存释放实验须区分导航状态与派生展示，不能仅因隐藏审核页
+就使远端 mutation 失效。离线 `test-fixtures` 选项
+`USHER_PR_PRESENTATION_LIFECYCLE=release-derived-v1` 仍为未验收候选，不是产品
+默认行为，原生 A/B 仍是必需验收。
+
 `src/workflow/pr_review/controller.rs` owns context, loading and navigation;
 `controller/actions.rs` owns remote actions and capability presentation.
 `controller/diff_bindings.rs` owns the event-loop Diff geometry, selection,

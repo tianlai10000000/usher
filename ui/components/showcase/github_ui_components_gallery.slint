@@ -1384,12 +1384,19 @@ export component GitHubUiComponentsGallery inherits Rectangle {
         GitHubShowcaseSection {
             title: "Radio";
             description: "";
-            content-height: 128px;
+            content-height: 180px;
             VerticalLayout {
                 width: parent.width; spacing: 0px;
-                GitHubRadio { text: "Shell"; checked: root.radio-choice == 0; chosen => { root.radio-choice = 0; } stepped(delta) => { root.radio-choice = mod(root.radio-choice + delta + 3, 3); } }
-                GitHubRadio { text: "JavaScript"; checked: root.radio-choice == 1; chosen => { root.radio-choice = 1; } stepped(delta) => { root.radio-choice = mod(root.radio-choice + delta + 3, 3); } }
-                GitHubRadio { text: "TypeScript"; checked: root.radio-choice == 2; chosen => { root.radio-choice = 2; } stepped(delta) => { root.radio-choice = mod(root.radio-choice + delta + 3, 3); } }
+                radio-single := GitHubRadio { text: "Shell"; checked: root.radio-choice == 0; chosen => { root.radio-choice = 0; } stepped(delta) => { root.radio-choice = mod(root.radio-choice + delta + 4, 4); } }
+                GitHubRadio { text: "JavaScript"; checked: root.radio-choice == 1; chosen => { root.radio-choice = 1; } stepped(delta) => { root.radio-choice = mod(root.radio-choice + delta + 4, 4); } }
+                GitHubRadio { text: "TypeScript"; checked: root.radio-choice == 2; chosen => { root.radio-choice = 2; } stepped(delta) => { root.radio-choice = mod(root.radio-choice + delta + 4, 4); } }
+                radio-description := GitHubRadio {
+                    text: I18n.projects-trigger-selected-hooks;
+                    description: I18n.projects-trigger-selected-hooks-description;
+                    checked: root.radio-choice == 3;
+                    chosen => { root.radio-choice = 3; }
+                    stepped(delta) => { root.radio-choice = mod(root.radio-choice + delta + 4, 4); }
+                }
                 GitHubRadio { text: I18n.ui-components-demo-disabled; checked: true; control-enabled: false; }
             }
         }

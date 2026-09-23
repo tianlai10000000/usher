@@ -7,6 +7,7 @@ import { GitHubScrollView } from "../github_scroll_view.slint";
 import { GitHubTheme } from "../../theme/github_theme.slint";
 import { I18n } from "@i18n";
 import { GitHubCheckbox } from "../input/github_checkbox.slint";
+import { GitHubRadio } from "../input/github_radio.slint";
 import { GitHubMetadataLabel, GitHubMetadataLabelVariant } from "../github_metadata_label.slint";
 
 export struct ProjectHookChoice {
@@ -33,11 +34,10 @@ export component GitHubProjectDialog {
     in property <[ProjectHookChoice]> hook-choices;
     in property <int> selected-hook-count: 0;
     in property <int> selectable-hook-count: 0;
-    in property <bool> hook-list-expanded: false;
+    in-out property <bool> hooks-enabled: false;
     in property <bool> hooks-ready: false;
     in property <string> hooks-status;
     callback toggle-hook(string, bool);
-    callback toggle-all-hooks(bool);
     in property <image> logo-preview-image: @image-url("../../../logo.png");
     in property <string> logo-preview-status: I18n.projects-using-default-logo;
     in-out property <string> error-text;
@@ -47,10 +47,17 @@ export component GitHubProjectDialog {
     callback cancel();
 
     private property <bool> deleting: root.mode == "delete";
+    private property <bool> hook-selection-error: false;
     private property <length> dialog-width: root.deleting ? 320px : 480px;
     private property <length> dialog-height: root.deleting
         ? 248px
         : min(680px, root.height - 32px);
+
+    changed modal-visible => {
+        if root.modal-visible {
+            root.hook-selection-error = false;
+        }
+    }
 
     dialog-frame := GitHubDialog {
         dialog-visible: root.modal-visible;
@@ -82,6 +89,10 @@ export component GitHubProjectDialog {
             }
             if root.name == "" || root.alias == "" || root.local-repo == "" || root.remote-repo == "" {
                 root.error-text = I18n.projects-required-fields;
+                return;
+            }
+            if root.hooks-enabled && root.selected-hook-count == 0 {
+                root.hook-selection-error = true;
                 return;
             }
             root.submit(root.name, root.alias, root.local-repo, root.remote-repo, root.logo, root.project-tags, root.is-pr-auto-update);
@@ -306,40 +317,85 @@ export component GitHubProjectDialog {
                             x: 16px;
                             y: 644px;
                             width: parent.width - 32px;
-                            height: hook-heading.height + (root.hook-list-expanded ? hook-list.height + 8px : 0px);
+                            private property <length> hook-list-height:
+                                root.hook-choices.length * 60px + 2px;
+                            height: 132px + (root.hooks-enabled
+                                ? self.hook-list-height + 12px
+                                    + (root.hook-selection-error ? 28px : 0px)
+                                : 0px);
                             background: transparent;
-                            hook-heading := GitHubCheckbox {
+
+                            Text {
                                 x: 0px;
                                 y: 0px;
-                                width: parent.width - (root.hook-choices.length > 0 ? 80px : 0px);
-                                text: I18n.projects-trigger-hooks;
-                                label-font-weight: 600;
-                                description: root.hooks-status != "" ? root.hooks-status
-                                    : root.hook-choices.length == 0 ? I18n.projects-no-hooks : "";
-                                checked: root.selectable-hook-count > 0
-                                    && root.selected-hook-count == root.selectable-hook-count;
-                                indeterminate: root.selected-hook-count > 0
-                                    && root.selected-hook-count < root.selectable-hook-count;
-                                control-enabled: root.hooks-ready && root.selectable-hook-count > 0;
-                                toggled(value) => { root.toggle-all-hooks(value); }
-                            }
-                            Text {
-                                x: parent.width - 80px; y: 0px; width: 72px; height: 32px;
-                                visible: root.hook-choices.length > 0;
-                                text: root.selected-hook-count + " / " + root.hook-choices.length;
-                                font-size: 12px; color: GitHubTheme.fg-muted;
-                                horizontal-alignment: right; vertical-alignment: center;
-                            }
-                            hook-list := Rectangle {
-                                x: 0px; y: hook-heading.height + 8px;
                                 width: parent.width;
-                                height: root.hook-choices.length * 60px + 2px;
-                                visible: root.hook-list-expanded;
+                                height: 20px;
+                                text: I18n.hooks-title;
+                                font-size: 14px;
+                                font-weight: 600;
+                                color: GitHubTheme.fg-default;
+                            }
+
+                            hook-mode := Rectangle {
+                                x: 0px;
+                                y: 24px;
+                                width: parent.width;
+                                height: 104px;
+                                accessible-role: radio-group;
+                                accessible-label: I18n.hooks-title;
+
+                                GitHubRadio {
+                                    x: 0px;
+                                    y: 0px;
+                                    width: parent.width;
+                                    text: I18n.projects-do-not-trigger-hooks;
+                                    description: I18n.projects-do-not-trigger-hooks-description;
+                                    checked: !root.hooks-enabled;
+                                    chosen => {
+                                        root.hooks-enabled = false;
+                                        root.hook-selection-error = false;
+                                    }
+                                    stepped(delta) => {
+                                        if delta != 0 {
+                                            root.hooks-enabled = true;
+                                            root.hook-selection-error = false;
+                                        }
+                                    }
+                                }
+                                GitHubRadio {
+                                    x: 0px;
+                                    y: 52px;
+                                    width: parent.width;
+                                    text: I18n.projects-trigger-selected-hooks;
+                                    description: root.hooks-status != "" ? root.hooks-status
+                                        : root.hook-choices.length == 0 ? I18n.projects-no-hooks
+                                        : I18n.projects-trigger-selected-hooks-description;
+                                    checked: root.hooks-enabled;
+                                    control-enabled: root.hooks-ready
+                                        && (root.selectable-hook-count > 0 || root.selected-hook-count > 0);
+                                    chosen => {
+                                        root.hooks-enabled = true;
+                                        root.hook-selection-error = false;
+                                    }
+                                    stepped(delta) => {
+                                        if delta != 0 {
+                                            root.hooks-enabled = false;
+                                            root.hook-selection-error = false;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if root.hooks-enabled: hook-list := Rectangle {
+                                x: 28px; y: 140px;
+                                width: parent.width - 28px;
+                                height: hook-section.hook-list-height;
+                                visible: root.hooks-enabled;
                                 border-radius: 6px;
                                 border-width: 1px;
                                 border-color: GitHubTheme.border-default;
                                 background: GitHubTheme.canvas-default;
-                                for choice[index] in (root.hook-list-expanded ? root.hook-choices : []): Rectangle {
+                                for choice[index] in root.hook-choices: Rectangle {
                                     x: 1px; y: 1px + index * 60px;
                                     width: parent.width - 2px; height: 60px;
                                     background: transparent;
@@ -351,7 +407,10 @@ export component GitHubProjectDialog {
                                         description: choice.description;
                                         checked: choice.selected;
                                         control-enabled: root.hooks-ready && choice.enabled;
-                                        toggled(value) => { root.toggle-hook(choice.id, value); }
+                                        toggled(value) => {
+                                            root.hook-selection-error = false;
+                                            root.toggle-hook(choice.id, value);
+                                        }
                                     }
                                     hook-status := GitHubMetadataLabel {
                                         variant: GitHubMetadataLabelVariant.Secondary;
@@ -366,6 +425,16 @@ export component GitHubProjectDialog {
                                         visible: index < root.hook-choices.length - 1;
                                     }
                                 }
+                            }
+
+                            if root.hooks-enabled && root.hook-selection-error: Text {
+                                x: 28px;
+                                y: 146px + hook-section.hook-list-height;
+                                width: parent.width;
+                                height: 20px;
+                                text: I18n.projects-select-at-least-one-hook;
+                                font-size: 12px;
+                                color: GitHubTheme.danger-fg;
                             }
                         }
 

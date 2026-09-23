@@ -136,9 +136,9 @@ impl ProjectStateFacade {
             ) == project_id
         });
         // Ambiguous legacy aliases must not grant another project's opt-in.
-        let selected = matches
-            .next()
-            .is_some_and(|project| project.hook_ids.iter().any(|id| id == hook_id));
+        let selected = matches.next().is_some_and(|project| {
+            project.hooks_enabled && project.hook_ids.iter().any(|id| id == hook_id)
+        });
         selected && matches.next().is_none()
     }
 
@@ -553,6 +553,7 @@ pub(super) fn registries_match_persisted(left: &[ProjectConfig], right: &[Projec
                 && left.logo == right.logo
                 && left.project_tags == right.project_tags
                 && left.is_pr_auto_update == right.is_pr_auto_update
+                && left.hooks_enabled == right.hooks_enabled
                 && left.hook_ids == right.hook_ids
         })
 }
@@ -572,6 +573,7 @@ mod tests {
             logo: String::new(),
             project_tags: Vec::new(),
             is_pr_auto_update: false,
+            hooks_enabled: false,
             hook_ids: Vec::new(),
             pr_overview: ProjectPrOverview::default(),
         }
@@ -582,12 +584,18 @@ mod tests {
         let state = ProjectStateFacade::memory(vec![project("Alpha"), project("beta")]);
         assert!(!state.hook_selected("alpha", "hook-one"));
         let mut enabled = project("Alpha");
+        enabled.hooks_enabled = true;
         enabled.hook_ids = vec!["hook-one".into()];
         state.update("Alpha".into(), enabled.clone()).unwrap();
         assert!(state.hook_selected("alpha", "hook-one"));
         assert!(!state.hook_selected("beta", "hook-one"));
         assert!(!state.hook_selected("missing", "hook-one"));
         assert!(!state.hook_selected("alpha", "hook-new"));
+        let mut paused = enabled.clone();
+        paused.hooks_enabled = false;
+        state.update("Alpha".into(), paused).unwrap();
+        assert!(!state.hook_selected("alpha", "hook-one"));
+        state.update("Alpha".into(), enabled.clone()).unwrap();
         assert!(!registries_match_persisted(
             &[enabled.clone()],
             &[project("Alpha")]

@@ -73,6 +73,7 @@ mod tests {
             logo: String::new(),
             project_tags: Vec::new(),
             is_pr_auto_update: false,
+            hooks_enabled: false,
             hook_ids: Vec::new(),
             pr_overview: ProjectPrOverview::default(),
         }
@@ -82,19 +83,37 @@ mod tests {
     fn legacy_projects_default_to_no_hooks_and_selection_survives_disk_round_trip() {
         let legacy = serde_json::json!({"project_name":"legacy", "project_alias":"legacy", "local_repo":"", "remote_repo":""});
         let mut project: ProjectConfig = serde_json::from_value(legacy).unwrap();
+        assert!(!project.hooks_enabled);
         assert!(project.hook_ids.is_empty());
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("projects.json");
         project.hook_ids = vec!["hook-one".into(), "hook-two".into()];
+        project.hooks_enabled = true;
         write_projects_to(&path, &[project.clone()]).unwrap();
         let restored: Vec<ProjectConfig> =
             serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert_eq!(restored[0].hook_ids, project.hook_ids);
+        assert!(restored[0].hooks_enabled);
         project.hook_ids.clear();
         write_projects_to(&path, &[project]).unwrap();
         let restored: Vec<ProjectConfig> =
             serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert!(restored[0].hook_ids.is_empty());
+        assert!(restored[0].hooks_enabled);
+    }
+
+    #[test]
+    fn legacy_hook_selections_migrate_to_project_enabled() {
+        let legacy = serde_json::json!({
+            "project_name": "legacy",
+            "project_alias": "legacy",
+            "local_repo": "",
+            "remote_repo": "",
+            "hook_ids": ["hook-one"]
+        });
+        let project: ProjectConfig = serde_json::from_value(legacy).unwrap();
+        assert!(project.hooks_enabled);
+        assert_eq!(project.hook_ids, ["hook-one"]);
     }
 
     #[test]

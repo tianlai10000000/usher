@@ -690,10 +690,12 @@ expanded/collapsed, and success confirmation.
 - `GitHubPageHeader`: the shared Primer PageHeader foundation for page title,
   description, leading visual, optional divider, and trailing actions.
 - `GitHubRadio`: controlled single-choice input with radio accessibility,
-  Space/Return selection and arrow-step callbacks. Hook runtimes share one mounted
+  optional Primer FormControl caption, Space/Return selection and arrow-step callbacks.
+  Captions preserve the existing 32 px single-line geometry when absent and extend
+  the labeled hit target when present. Hook runtimes share one mounted
   editor with separate temporary language drafts; only the selected draft is
   saved or tested. The radio states are mutually exclusive. UI Components demonstrates
-  selected/unselected/disabled states. Hook test feedback stays beside its action,
+  selected/unselected/disabled states plus the optional-caption geometry. Hook test feedback stays beside its action,
   with bounded inline error details below, following Primer Forms feedback.
   Hook actions use literal tooltip leaves and permanently mounted surfaces at the
   factory root (UI-103), with shared floating geometry. `GitHubDialog` supports
@@ -774,21 +776,20 @@ expanded/collapsed, and success confirmation.
   focus. It follows [Primer Checkbox](https://primer.style/product/components/checkbox/).
   Slint exposes a boolean accessibility check state; mixed state additionally uses
   a localized accessibility description. Owners derive parent state from children;
-  activating a marked/mixed parent clears its children. Project Hook selection
-  defaults empty/collapsed; checking the parent selects all enabled rows and expands.
-  Disabled Hook rows are unchecked and use disabled checkbox, label, pointer, and
-  keyboard interaction while retaining selection intent outside the visual checked
-  state. UI Components includes interactive parent/children and disabled state examples.
-  Project selection keeps the count on the parent row and uses one bordered,
-  divided list with readable event captions and separate status Labels. Hover
-  changes the checkbox outline instead of painting a full-row background.
+  activating a marked/mixed parent clears its children. Project Hook selection uses
+  a `GitHubRadio` mode group for progressive disclosure rather than a mixed parent
+  checkbox. Off mode does not mount the list. Disabled Hook rows keep the project's
+  visual checked state but disable checkbox, label, pointer and keyboard interaction.
+  The selected-mode list uses one bordered, divided list with readable event captions,
+  group validation and separate status Labels. Hover changes the checkbox outline
+  instead of painting a full-row background.
   / 共享复选框固定 16 px 方框，整行命中，支持未选、全选、半选、禁用与键盘焦点。
   Slint 无障碍勾选值为布尔，半选额外使用本地化描述。父项从子项推导状态；取消
-  全选或半选父项清空子项。项目 Hook 默认空选并收起，勾选时只全选可用行并展开；
-  禁用 Hook 行显示为未选中，复选框、文字、鼠标及键盘交互均使用 disabled 状态，
-  选择意图保留在视觉勾选状态之外。UI Components 展示父子联动和禁用矩阵。
-  项目选择将数量与父项同行显示，子项采用单一边框分隔列表、可读事件说明和独立
-  状态 Label；悬浮只改变复选框描边，不使用整行灰色底色。
+  全选或半选父项清空子项。项目 Hook 改用 `GitHubRadio` 模式组做渐进展示，不再
+  使用半选父项；关闭模式不挂载列表。禁用 Hook 行保留项目自己的视觉勾选状态，
+  但复选框、文字、鼠标及键盘交互均使用 disabled 状态。触发模式采用单一边框
+  分隔列表、可读事件说明、组级校验和独立状态 Label；悬浮只改变复选框描边，
+  不使用整行灰色底色。
 - `GitHubSegment`: one of 2–5 mutually exclusive, instantly applied choices;
   labels do not wrap and the group has a visible or contextual label.
 - `GitHubDialog`: root-layer modal/non-modal overlay with owned backdrop input,

@@ -23,6 +23,14 @@ PR Review 通过稳定的 Slint `@pr-review` feature package 入口暴露，与�
 PR Diff/全文高亮完成回调共用 `controller/highlight_completion.rs`，先检查
 请求代次、索引、路径和显示模式，再回写 loading/model；Worker 调度保持不变。
 
+PR 语法 Worker 入队前通过 `controller/highlight_session.rs` 取得会话局部的
+惰性资源槽；重置时分离整个槽，避免旧 Worker 再填入新会话。源码/展开回调也必须
+先检查代次与文件索引，再清 loading。`controller/lifecycle.rs` 中显式离线
+`test-fixtures` 候选在离页时释放 Diff/Find 派生展示，返回时重建；保留领域详情、
+范围/展开上下文、源码缓存与懒加载 Tab 状态。候选不是生产默认，尚未通过原生
+Release 性能验收。挂起状态通过现有 PR State Store 的强类型 Action 更新，
+不使远端 mutation 失效。
+
 P6 验证由 `scripts/benchmark-p6-regression.py` 及各功能显式启用的夹具负责，
 `src/p6_benchmark.rs` 共享持续时长控制。历史迁移门禁和当前版本回归分开；
 手动性能 Workflow 检查真实重复负载的逐轮正确性、内存斜率及资源增长，
@@ -77,16 +85,16 @@ UI bridge 统一负责开始/结束通知、
 流程链接及可复用 Job Run 投影。注册的异步退出排空阶段在原有优先级清理之前完成
 进程收尾，显式退出和 event-loop 返回使用同一等待屏障。详见 [Hooks](specs/hooks.md)。
 
-项目新增/编辑通过现有注册表自动持久化默认空选的 `hook_ids`。
-`project/hook_selection.rs` 将 Hook 目录投影到临时表单；共享 `GitHubCheckbox`
-负责父子选择、半选和键盘操作，并在 UI Components 展示。可用行决定界面选择数量
-和总项状态；禁用行显示为未选中且不可交互，但表单保留其原选择意图，重新启用后
-恢复。总项只全选可用行，清空时移除全部保留选择，空选时收起列表。Hook 准入和
-启动前均通过 Project 门面按归一化 Workflow ID 检查选择；
+项目新增/编辑通过现有注册表自动持久化项目独立的 `hooks_enabled` 和 `hook_ids`；
+旧记录根据 `hook_ids` 是否为空迁移开关。`project/hook_selection.rs` 每次打开表单都
+从当前项目初始化临时投影；共享 `GitHubRadio` 提供“不触发/触发指定 Hook”模式，
+仅在后者下渐进展示共享 `GitHubCheckbox` 列表。设置页禁用的 Hook 保留项目自己的
+勾选状态，但禁用交互并显示设置级可用性；设置变化不得改写项目选择。Hook 准入和
+启动前均通过 Project 门面同时检查项目开关及 Hook ID；
 项目级注册事件必传 ID，未勾选或无法解析的项目不运行脚本。设置页草稿测试不受
 项目勾选限制。
-选择器采用父项与数量同行、分隔列表、可读事件说明及共享状态 Label；复选框
-悬浮反馈仅作用于方框描边。
+选择器采用本地化模式说明、分隔列表、可读事件说明、组级校验及共享状态 Label；
+复选框悬浮反馈仅作用于方框描边。关闭模式不挂载 Hook 列表。
 
 窄屏设置分区导航复用挂在页面根层的 Select 浮层。触发器随滚动内容移动，但展开
 选项不会改变表单高度，也不会移动当前设置内容。

@@ -2,16 +2,18 @@ import { GitHubTheme } from "../../theme/github_theme.slint";
 
 export component GitHubRadio inherits FocusScope {
     in property <string> text;
+    in property <string> description: "";
     in property <bool> checked: false;
     in property <bool> control-enabled: true;
     callback chosen();
     callback stepped(int);
     private property <bool> keyboard-focus: false;
-    width: label.preferred-width + 32px;
-    height: 32px;
+    width: max(label.preferred-width, description-label.preferred-width) + 32px;
+    height: root.description == "" ? 32px : 52px;
     enabled: root.control-enabled;
     accessible-role: radio-button;
     accessible-label: root.text;
+    accessible-description: root.description;
     accessible-enabled: root.control-enabled;
     accessible-checkable: true;
     accessible-checked: root.checked;
@@ -42,9 +44,16 @@ export component GitHubRadio inherits FocusScope {
         }
     }
     label := Text {
-        x: 28px; height: parent.height; width: parent.width - 28px;
+        x: 28px; y: 0px; height: 32px; width: parent.width - 28px;
         text: root.text; font-size: 14px; vertical-alignment: center;
         color: root.control-enabled ? GitHubTheme.fg-default : GitHubTheme.control-disabled-fg;
+        overflow: elide;
+    }
+    description-label := Text {
+        x: 28px; y: 32px; width: parent.width - 28px; height: 20px;
+        visible: root.description != "";
+        text: root.description; font-size: 12px;
+        color: GitHubTheme.fg-muted; overflow: elide;
     }
     touch := TouchArea {
         width: parent.width; height: parent.height; enabled: root.control-enabled;

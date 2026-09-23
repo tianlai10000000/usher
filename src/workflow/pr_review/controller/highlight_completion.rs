@@ -1,5 +1,20 @@
 use super::{MainWindow, ReviewRequestKind, ReviewStateFacade};
 
+pub(super) fn finish_expand(
+    state: &ReviewStateFacade,
+    ui: &MainWindow,
+    generation: u64,
+    index: usize,
+) -> bool {
+    if !state.is_current(ReviewRequestKind::Expand, generation)
+        || ui.get_workflow_pr_review_selected_file_index() != index as i32
+    {
+        return false;
+    }
+    ui.set_workflow_pr_review_code_loading(false);
+    true
+}
+
 pub(super) fn finish(
     state: &ReviewStateFacade,
     ui: &MainWindow,
@@ -25,6 +40,25 @@ pub(super) fn finish(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn suspended_or_old_source_read_cannot_clear_new_loading() {
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().unwrap();
+        let state = ReviewStateFacade::new();
+        ui.set_workflow_pr_review_selected_file_index(0);
+        let old = state.begin(ReviewRequestKind::Expand);
+        state.set_presentation_suspended(true);
+        state.set_presentation_suspended(false);
+        let current = state.begin(ReviewRequestKind::Expand);
+        ui.set_workflow_pr_review_code_loading(true);
+        assert!(!finish_expand(&state, &ui, old, 0));
+        assert!(!finish_expand(&state, &ui, current, 1));
+        assert!(ui.get_workflow_pr_review_code_loading());
+        assert!(finish_expand(&state, &ui, current, 0));
+        assert!(!ui.get_workflow_pr_review_code_loading());
+    }
 
     #[test]
     fn stale_highlight_completion_preserves_current_loading() {

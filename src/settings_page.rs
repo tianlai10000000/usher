@@ -1463,6 +1463,93 @@ mod tests {
     }
 
     #[test]
+    fn settings_keeps_every_status_bar_popup_above_its_factory_page() {
+        let _locale_guard = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let window = MainWindow::new().expect("main window");
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::Resized {
+                size: slint::LogicalSize::new(800.0, 600.0),
+            });
+        window.set_platform_is_macos(false);
+        window.set_show_navigation_drawer(false);
+        window.set_shortcut_initialization_visible(true);
+        window.set_shortcut_initialization_progress(1.0);
+        window.set_shortcut_initialization_detail("Shortcut detail".into());
+        AppState::get(&window).set_network_online(true);
+        AppState::get(&window).set_version("test".into());
+
+        crate::i18n::apply_preference("en-US").expect("select English");
+        crate::i18n::sync_main_window(&window, "en-US");
+        let bridge = SettingsPageBridge::default();
+        bridge.install(&window);
+        window.set_current_route(Route::Settings);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        let page = mounted_page(&bridge);
+
+        for label in ["Shortcuts ready", "Network connected", "Version: test"] {
+            let trigger = ElementHandle::find_by_accessible_label(&window, label)
+                .next()
+                .unwrap_or_else(|| panic!("status trigger {label:?}"));
+            trigger.mock_single_click(PointerEventButton::Left);
+            assert!(
+                ElementHandle::find_by_element_id(&window, "GitHubActionMenu::menu-surface")
+                    .next()
+                    .is_some(),
+                "{label} must open the shared status popup"
+            );
+
+            // Settings is mounted through a full-window ComponentFactory. The
+            // status bar's outside-click layer must stay above that ordinary
+            // page surface, otherwise both the dismiss layer and popup are
+            // hidden behind the factory host.
+            let outside = slint::LogicalPosition::new(100.0, 100.0);
+            window
+                .window()
+                .dispatch_event(slint::platform::WindowEvent::PointerMoved { position: outside });
+            window
+                .window()
+                .dispatch_event(slint::platform::WindowEvent::PointerPressed {
+                    position: outside,
+                    button: PointerEventButton::Left,
+                });
+            window
+                .window()
+                .dispatch_event(slint::platform::WindowEvent::PointerReleased {
+                    position: outside,
+                    button: PointerEventButton::Left,
+                });
+            assert!(
+                ElementHandle::find_by_element_id(&window, "GitHubActionMenu::menu-surface")
+                    .next()
+                    .is_none(),
+                "{label} popup must own its layer above Settings and dismiss outside"
+            );
+        }
+
+        let navigations = Rc::new(Cell::new(0));
+        let observed_navigations = navigations.clone();
+        window.on_navigate(move |_| {
+            observed_navigations.set(observed_navigations.get() + 1);
+        });
+        let hook_state = page.global::<usher_ui_settings::HookSettingsState>();
+        hook_state.set_ready(true);
+        hook_state.set_dialog_mode("add".into());
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        assert!(window.get_modal_overlay_visible());
+        ElementHandle::find_by_accessible_label(&window, "No notifications")
+            .next()
+            .expect("notification status trigger")
+            .mock_single_click(PointerEventButton::Left);
+        assert_eq!(
+            navigations.get(),
+            0,
+            "a Settings dialog must lower and shield the complete status bar"
+        );
+    }
+
+    #[test]
     fn language_and_section_menus_stay_aligned_in_the_stable_factory() {
         let _locale_guard = crate::i18n::test_locale_guard();
         i_slint_backend_testing::init_no_event_loop();

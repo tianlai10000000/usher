@@ -13,6 +13,10 @@ Specifications describe stable behavior and invariants. Architecture documents e
 PR Review requires guarded highlight completion writes. Hooks defines serialized
 journal budgets and bounded, cancellable replay. / PR Review 要求校验高亮完成回写；
 Hooks 定义序列化日志预算和有界、可取消回放。
+PR Review additionally requires detached syntax-resource leases and guarded
+source/expand loading writes; derived-presentation release remains an offline
+candidate pending native Release A/B. / PR Review 另要求分离的语法资源 lease 和
+源码/展开 loading 回写校验；派生展示释放仍为等待原生 Release A/B 的离线候选。
 Hooks also requires shared configuration snapshots, durable-only automatic
 writes and coalesced incremental Job projection; Jobs bounds shaping offsets.
 / Hooks 还要求共享配置快照、只随持久变化自动写盘及合并后的增量 Job 投影；Jobs 约束排版偏移范围。

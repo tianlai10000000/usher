@@ -18,6 +18,7 @@ pub(super) enum ReviewRequestKind {
 
 #[derive(Clone, Default)]
 struct ReviewState {
+    presentation_suspended: bool,
     diff_generation: u64,
     highlight_generation: u64,
     expand_generation: u64,
@@ -61,6 +62,7 @@ impl ReviewState {
 enum ReviewAction {
     Advance(ReviewRequestKind),
     InvalidateAll,
+    SetPresentationSuspended(bool),
 }
 
 type ReviewStore = dyn StateStore<ReviewState, ReviewAction, u64>;
@@ -78,6 +80,22 @@ impl ReviewStateFacade {
                 |current: &ReviewState, action: ReviewAction| {
                     let mut next = current.clone();
                     let output = match action {
+                        ReviewAction::SetPresentationSuspended(suspended) => {
+                            if current.presentation_suspended == suspended {
+                                return Reduction::unchanged(current.clone(), 0);
+                            }
+                            next.presentation_suspended = suspended;
+                            if suspended {
+                                for kind in [
+                                    ReviewRequestKind::Highlight,
+                                    ReviewRequestKind::Expand,
+                                    ReviewRequestKind::Reveal,
+                                ] {
+                                    next.advance(kind);
+                                }
+                            }
+                            0
+                        }
                         ReviewAction::Advance(kind) => next.advance(kind),
                         ReviewAction::InvalidateAll => {
                             for kind in [
@@ -113,6 +131,17 @@ impl ReviewStateFacade {
         self.store.dispatch(ReviewAction::InvalidateAll);
     }
 
+    pub(super) fn set_presentation_suspended(&self, suspended: bool) {
+        self.store
+            .dispatch(ReviewAction::SetPresentationSuspended(suspended));
+    }
+
+    pub(super) fn presentation_suspended(&self) -> bool {
+        self.store
+            .snapshot()
+            .select(|state| state.presentation_suspended)
+    }
+
     pub(super) fn is_current(&self, kind: ReviewRequestKind, generation: u64) -> bool {
         self.store
             .snapshot()
@@ -123,6 +152,36 @@ impl ReviewStateFacade {
 #[cfg(test)]
 mod tests {
     use super::{ReviewRequestKind, ReviewStateFacade};
+
+    #[test]
+    fn suspension_invalidates_derived_work_but_preserves_remote_mutations_and_reads() {
+        let state = ReviewStateFacade::new();
+        let kinds = [
+            ReviewRequestKind::Diff,
+            ReviewRequestKind::Highlight,
+            ReviewRequestKind::Expand,
+            ReviewRequestKind::Reveal,
+            ReviewRequestKind::Conversation,
+            ReviewRequestKind::Commits,
+            ReviewRequestKind::RemoteActionState,
+            ReviewRequestKind::RemoteMutation,
+        ];
+        let generations = kinds.map(|kind| state.begin(kind));
+        state.set_presentation_suspended(true);
+        assert!(state.presentation_suspended());
+        for (kind, generation) in kinds.into_iter().zip(generations) {
+            let derived = matches!(
+                kind,
+                ReviewRequestKind::Highlight
+                    | ReviewRequestKind::Expand
+                    | ReviewRequestKind::Reveal
+            );
+            assert_eq!(state.is_current(kind, generation), !derived);
+        }
+        state.set_presentation_suspended(false);
+        assert!(!state.presentation_suspended());
+        assert!(!state.is_current(ReviewRequestKind::Highlight, generations[1]));
+    }
 
     #[test]
     fn request_generations_are_independent_and_invalidate_older_completions() {

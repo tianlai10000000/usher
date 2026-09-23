@@ -77,22 +77,21 @@ language switch, including an already-open editor and picker. / 事件/分类标
   Busy operations disable closing; a running test can be stopped. Delete requires
   a confirmation dialog and preserves execution history. The form stays mounted
   across dialog opens to preserve the Settings factory binding contract.
-- Project Add/Edit persists explicit `hook_ids` in the Project Store. New and
-  legacy projects default to empty; newly created Hooks never opt in existing
-  projects. **Trigger Hooks** starts unchecked with the list collapsed. Checking
-  selects all enabled rows and expands; partial enabled selection shows a mixed
-  mark; clearing the parent (including mixed) clears enabled and retained disabled
-  selections, then collapses. Edit restores saved IDs. Disabled Hooks and removed
-  IDs are presented unchecked with disabled row/checkbox interaction and never
-  execute. Their prior selection intent remains in the transient form and durable
-  `hook_ids`, so enabling the same Hook restores its prior selected or unselected
-  state; a newly created project has no retained selection. The shared
-  `GitHubCheckbox` also appears in UI Components with interactive and disabled
-  state examples.
-- The project selector uses an inline parent/count header and a single bordered
-  list with separated rows. Names, localized event captions and status Labels
-  have distinct positions; known events do not expose internal versioned IDs.
-  Checkbox hover changes the box outline, without a row-sized background pill.
+- Project Add/Edit persists project-local `hooks_enabled` and explicit `hook_ids`
+  in the Project Store. Legacy records derive the missing mode from existing IDs;
+  new projects default off and newly created Hooks never opt in existing projects.
+  A shared two-option `GitHubRadio` group controls off/selected mode. Selected mode
+  progressively mounts one bordered checkbox list and requires at least one saved
+  ID; off mode unmounts the list and blocks execution without deleting IDs.
+  Disabled Hooks and removed IDs retain their visible checked state when selected,
+  but row/checkbox interaction is disabled and they never execute. Settings-owned
+  enablement never rewrites project state, so re-enabling restores each project's
+  exact selection. Every open reinitializes from the target project and Cancel
+  discards that draft.
+- The project selector uses localized Radio captions, separated rows, inline group
+  validation, readable event captions and status Labels. Known events do not expose
+  internal versioned IDs. Checkbox hover changes the box outline, without a
+  row-sized background pill.
 - Project/outcome filter inputs are removed from the editor. New definitions use
   no additional filters; saved legacy values still round-trip and constrain
   dispatch, so editing a Hook does not silently widen its trigger scope.
@@ -189,16 +188,15 @@ language switch, including an already-open editor and picker. / 事件/分类标
   在持久化成功后关闭；校验和测试错误保留在弹窗内。忙碌时禁用关闭，运行中的测试
   可停止。删除需确认并保留执行历史。表单跨开关保持挂载，遵循 Settings factory
   绑定约束。
-- 项目新增/编辑通过 Project Store 保存 `hook_ids`。新项目及旧数据默认空选，
-  新建 Hook 不自动加入项目。“触发 Hook”默认未选且收起；勾选时只全选可用项并
-  展开，可用子项部分选择时显示半选；取消总项（含半选）同时清除可用项与禁用项
-  保留的选择并收起。编辑恢复保存的 ID。禁用 Hook 和已删除 ID 在界面中强制显示
-  为未选中，整行及复选框均为 disabled，且不执行；临时表单与持久化 `hook_ids`
-  仍保留其原选择意图，因此同一 Hook 恢复启用后会恢复禁用前的选中/未选中状态，
-  新建项目则没有保留选择。共享 `GitHubCheckbox` 在 UI Components 展示交互和禁用状态。
-- 项目选择器将父项和数量放在同一行，子项采用单一边框和分隔行，名称、可读事件
-  说明、状态 Label 分开排布。已知事件不显示内部版本 ID；悬浮仅反馈方框描边，
-  不绘制整行灰色圆角底色。
+- 项目新增/编辑通过 Project Store 保存项目独立的 `hooks_enabled` 与 `hook_ids`。
+  旧记录缺少模式时根据已有 ID 迁移；新项目默认关闭，新建 Hook 不自动加入项目。
+  共享双选项 `GitHubRadio` 控制“不触发/触发指定 Hook”，后者才渐进挂载单一边框
+  复选框列表并要求至少一个保存 ID；关闭模式卸载列表并阻止执行，但不删除 ID。
+  设置页禁用或已删除的 Hook 若已被项目选择，仍显示勾选，但整行及复选框均为
+  disabled 且不执行；设置级启停不得改写项目状态，恢复启用后按各项目原选择运行。
+  每次打开都从目标项目初始化，取消丢弃该项目草稿。
+- 项目选择器使用本地化 Radio 说明、分隔行、组级校验、可读事件说明和状态 Label。
+  已知事件不显示内部版本 ID；悬浮仅反馈方框描边，不绘制整行灰色圆角底色。
 - 编辑器移除项目/结果筛选项；新增定义不附加限制，已有配置的旧过滤值继续保留
   并生效，避免编辑时意外扩大触发范围。草稿通过保存产生新
   revision。测试使用当前未保存的脚本和样例上下文，不受开关或项目勾选控制；这是以当前

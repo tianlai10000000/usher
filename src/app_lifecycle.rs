@@ -9,6 +9,7 @@ pub(crate) fn hooks(initial_route: Route) -> RouteLifecycleHooks {
     let hooks = RouteLifecycleHooks::default();
     hooks.on_transition(Rc::new(|window, event| {
         window.invoke_chat_route_visible_changed(event.current == Route::Chat);
+        crate::workflow::pr_review_route_changed(window, event.previous, event.current);
         if event.previous == Route::JobRun && event.current != Route::JobRun {
             crate::hooks::cancel_replay();
         }

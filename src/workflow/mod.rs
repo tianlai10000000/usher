@@ -79,3 +79,14 @@ pub(crate) fn release_unreachable_state(ui: &MainWindow) {
         controller.pr_list.release_unreachable(ui);
     });
 }
+
+pub(crate) fn pr_review_route_changed(
+    ui: &MainWindow,
+    previous: crate::Route,
+    current: crate::Route,
+) {
+    let controller = LIFECYCLE_CONTROLLER.with(|registered| registered.borrow().clone());
+    if let Some(controller) = controller {
+        controller.pr_review.route_changed(ui, previous, current);
+    }
+}

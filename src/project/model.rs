@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(super) struct ProjectConfig {
     pub(super) project_name: String,
     pub(super) project_alias: String,
@@ -22,9 +22,58 @@ pub(super) struct ProjectConfig {
     #[serde(default)]
     pub(super) is_pr_auto_update: bool,
     #[serde(default)]
+    pub(super) hooks_enabled: bool,
+    #[serde(default)]
     pub(super) hook_ids: Vec<String>,
     #[serde(skip, default)]
     pub(super) pr_overview: ProjectPrOverview,
+}
+
+#[derive(Deserialize)]
+struct ProjectConfigData {
+    project_name: String,
+    project_alias: String,
+    local_repo: String,
+    remote_repo: String,
+    #[serde(default)]
+    repo_project_id: String,
+    #[serde(default)]
+    repo_type: String,
+    #[serde(default)]
+    logo: String,
+    #[serde(default)]
+    project_tags: Vec<String>,
+    #[serde(default)]
+    is_pr_auto_update: bool,
+    hooks_enabled: Option<bool>,
+    #[serde(default)]
+    hook_ids: Vec<String>,
+}
+
+impl<'de> Deserialize<'de> for ProjectConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let data = ProjectConfigData::deserialize(deserializer)?;
+        let hooks_enabled = data
+            .hooks_enabled
+            .unwrap_or_else(|| !data.hook_ids.is_empty());
+        Ok(Self {
+            project_name: data.project_name,
+            project_alias: data.project_alias,
+            local_repo: data.local_repo,
+            remote_repo: data.remote_repo,
+            repo_project_id: data.repo_project_id,
+            repo_type: data.repo_type,
+            logo: data.logo,
+            project_tags: data.project_tags,
+            is_pr_auto_update: data.is_pr_auto_update,
+            hooks_enabled,
+            hook_ids: data.hook_ids,
+            pr_overview: ProjectPrOverview::default(),
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +100,7 @@ pub(super) struct ProjectDraft {
     pub(super) logo: String,
     pub(super) project_tags: Vec<String>,
     pub(super) is_pr_auto_update: bool,
+    pub(super) hooks_enabled: bool,
     pub(super) hook_ids: Vec<String>,
 }
 

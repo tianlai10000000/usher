@@ -172,22 +172,27 @@ GitLab 原文字节 8 MiB，GitHub/Gitee Base64 JSON 包装 12 MiB，`src/git/so
 
 ## Hook selection / Hook 选择
 
-Project Add/Edit persists `hook_ids` through typed registry actions and automatic
-worker persistence. Absent fields migrate to empty. The shared three-state
-**Trigger Hooks** checkbox starts unchecked/collapsed, selects all and expands on
-check, shows mixed for a subset, and clears all/collapses on uncheck. Parent state
-is derived only from enabled rows. Disabled or removed rows are visibly unchecked
-and non-interactive, while their prior selection intent remains in `hook_ids` and
-the open form so re-enabling restores the prior state. Edit restores saved IDs;
-later Hooks never automatically opt a project in. Execution reads the Project
-facade before admission and after queueing. See [Hooks](hooks.md).
+Project Add/Edit persists project-local `hooks_enabled` and `hook_ids` through
+typed registry actions and automatic worker persistence. Legacy records with
+missing mode migrate to enabled only when they already contain IDs. A two-option
+shared `GitHubRadio` group defaults new projects to **Do not trigger Hooks**.
+**Trigger selected Hooks** progressively mounts a checkbox list and requires at
+least one retained selection. Turning project mode off unmounts the list and
+stops execution without deleting IDs. Settings-owned global/per-Hook disablement
+keeps a project's checked state visible but inert, so later re-enabling restores
+the exact project selection. Every form open initializes from that project;
+cancelled drafts never leak into another project. Later Hooks never automatically
+opt a project in. Execution reads both project mode and selection from the
+Project facade before admission and after queueing. See [Hooks](hooks.md).
 
-项目新增/编辑通过注册表 Action 和 Worker 自动持久化 `hook_ids`，缺失字段为空选。
-“触发 Hook”复用三态复选框，默认未选且收起；勾选全选并展开，子项部分选择
-显示半选，取消清空并收起；父项状态只从可用行推导。禁用或已删除行在界面中显示
-为未选中且不可交互，但 `hook_ids` 与已打开表单保留原选择意图，重新启用后恢复
-原状态。编辑恢复 ID，新建 Hook 不自动加入项目。执行通过 Project 门面读取选择，
-排队后再次检查。详见 [Hooks](hooks.md)。
+项目新增/编辑通过注册表 Action 和 Worker 自动持久化项目独立的 `hooks_enabled` 与
+`hook_ids`。旧记录缺少模式时，仅已有 ID 的项目迁移为开启。共享 `GitHubRadio`
+提供“不触发 Hook”和“触发指定 Hook”两个模式；新项目默认关闭，选择后者才渐进
+挂载复选框列表，且至少保留一个选择。关闭项目模式会停止执行并卸载列表，但不删除
+ID。设置页的全局/单项禁用保留项目勾选的可见状态并禁止交互，恢复启用后仍使用该
+项目原选择。每次打开表单都从目标项目初始化，取消的草稿不得泄漏到其他项目；
+后续新增 Hook 不自动加入项目。执行在准入及排队后均通过 Project 门面检查项目模式
+与选择。详见 [Hooks](hooks.md)。
 
 ## Deferred enhancement / 后续优化
 
