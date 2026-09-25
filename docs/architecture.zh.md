@@ -444,7 +444,9 @@ placeholder、值或选中态。路由级选择索引必须从哨兵值开始，
 字面占位文字的 Shell/Node 字段；bridge 隔离各语言临时草稿，保存/测试只读取选中
 语言和解释器，持久化仍为单一语言及内容。编辑后废弃旧测试反馈。Hook Tooltip
 通过固定文案叶子和设置页根层常驻 Surface 避免串用（UI-103）。Tooltip 框内文字居中，
-Hook 提示默认对准按钮中心，仅碰撞视口边界时偏移。清空历史在 Worker
+Hook 提示默认对准按钮中心，仅碰撞视口边界时偏移。Hook portal 保留一个全窗口定位宿主
+和五个分别常驻的文案/测量 Surface；仅显示当前动作的 Surface，无提示时隐藏宿主，
+避免全窗口透明离屏层，同时保持 Settings factory 稳定。清空历史在 Worker
 删除已结束摘要及日志，并保留活动 Runner。新增/编辑启用共享 Dialog 的
 Cmd/Ctrl+Enter 保存，普通 Enter 换行、Esc 取消。主窗口快捷键边界通过
 `SettingsPageBridge` 转发焦点位于 factory 外时的弹窗按键；macOS 在现有输入

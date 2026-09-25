@@ -188,65 +188,50 @@ export component GitHubHookTooltipOverlay inherits Rectangle {
     width: 100%; height: 100%; background: transparent; clip: false;
     private property <int> observed-lease: 0;
 
-    edit-host := GitHubFloatingOverlayHost {
-        opacity: HookTooltipState.kind == HookTooltipKind.Edit ? 1 : 0;
+    // One full-window locator serves five separately mounted literal surfaces.
+    floating-host := GitHubFloatingOverlayHost {
+        visible: HookTooltipState.kind != HookTooltipKind.None;
         anchor-x: HookTooltipState.anchor-x; anchor-y: HookTooltipState.anchor-y;
         anchor-width: HookTooltipState.anchor-width; anchor-height: HookTooltipState.anchor-height;
-        floating-width: edit-surface.width; floating-height: edit-surface.height;
+        floating-width: HookTooltipState.kind == HookTooltipKind.Edit ? edit-surface.width
+            : HookTooltipState.kind == HookTooltipKind.Delete ? delete-surface.width
+            : HookTooltipState.kind == HookTooltipKind.Stop ? stop-surface.width
+            : HookTooltipState.kind == HookTooltipKind.ViewRun ? viewrun-surface.width
+            : HookTooltipState.kind == HookTooltipKind.ClearHistory ? clearhistory-surface.width
+            : 0px;
+        floating-height: HookTooltipState.kind == HookTooltipKind.Edit ? edit-surface.height
+            : HookTooltipState.kind == HookTooltipKind.Delete ? delete-surface.height
+            : HookTooltipState.kind == HookTooltipKind.Stop ? stop-surface.height
+            : HookTooltipState.kind == HookTooltipKind.ViewRun ? viewrun-surface.height
+            : HookTooltipState.kind == HookTooltipKind.ClearHistory ? clearhistory-surface.height
+            : 0px;
         alignment: GitHubTooltipAlignment.Center;
         edit-surface := GitHubTooltipSurface {
+            visible: HookTooltipState.kind == HookTooltipKind.Edit;
             text: I18n.hooks-edit;
             viewport-max-width: max(0px, root.width - 16px);
             viewport-max-height: max(0px, root.height - 16px);
         }
-    }
-
-    delete-host := GitHubFloatingOverlayHost {
-        opacity: HookTooltipState.kind == HookTooltipKind.Delete ? 1 : 0;
-        anchor-x: HookTooltipState.anchor-x; anchor-y: HookTooltipState.anchor-y;
-        anchor-width: HookTooltipState.anchor-width; anchor-height: HookTooltipState.anchor-height;
-        floating-width: delete-surface.width; floating-height: delete-surface.height;
-        alignment: GitHubTooltipAlignment.Center;
         delete-surface := GitHubTooltipSurface {
+            visible: HookTooltipState.kind == HookTooltipKind.Delete;
             text: I18n.common-delete;
             viewport-max-width: max(0px, root.width - 16px);
             viewport-max-height: max(0px, root.height - 16px);
         }
-    }
-
-    stop-host := GitHubFloatingOverlayHost {
-        opacity: HookTooltipState.kind == HookTooltipKind.Stop ? 1 : 0;
-        anchor-x: HookTooltipState.anchor-x; anchor-y: HookTooltipState.anchor-y;
-        anchor-width: HookTooltipState.anchor-width; anchor-height: HookTooltipState.anchor-height;
-        floating-width: stop-surface.width; floating-height: stop-surface.height;
-        alignment: GitHubTooltipAlignment.Center;
         stop-surface := GitHubTooltipSurface {
+            visible: HookTooltipState.kind == HookTooltipKind.Stop;
             text: I18n.hooks-stop;
             viewport-max-width: max(0px, root.width - 16px);
             viewport-max-height: max(0px, root.height - 16px);
         }
-    }
-
-    viewrun-host := GitHubFloatingOverlayHost {
-        opacity: HookTooltipState.kind == HookTooltipKind.ViewRun ? 1 : 0;
-        anchor-x: HookTooltipState.anchor-x; anchor-y: HookTooltipState.anchor-y;
-        anchor-width: HookTooltipState.anchor-width; anchor-height: HookTooltipState.anchor-height;
-        floating-width: viewrun-surface.width; floating-height: viewrun-surface.height;
-        alignment: GitHubTooltipAlignment.Center;
         viewrun-surface := GitHubTooltipSurface {
+            visible: HookTooltipState.kind == HookTooltipKind.ViewRun;
             text: I18n.hooks-view-run;
             viewport-max-width: max(0px, root.width - 16px);
             viewport-max-height: max(0px, root.height - 16px);
         }
-    }
-
-    clearhistory-host := GitHubFloatingOverlayHost {
-        opacity: HookTooltipState.kind == HookTooltipKind.ClearHistory ? 1 : 0;
-        anchor-x: HookTooltipState.anchor-x; anchor-y: HookTooltipState.anchor-y;
-        anchor-width: HookTooltipState.anchor-width; anchor-height: HookTooltipState.anchor-height;
-        floating-width: clearhistory-surface.width; floating-height: clearhistory-surface.height;
-        alignment: GitHubTooltipAlignment.Center;
         clearhistory-surface := GitHubTooltipSurface {
+            visible: HookTooltipState.kind == HookTooltipKind.ClearHistory;
             text: I18n.hooks-clear-history;
             viewport-max-width: max(0px, root.width - 16px);
             viewport-max-height: max(0px, root.height - 16px);

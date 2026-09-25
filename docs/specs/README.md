@@ -59,7 +59,7 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | [Application status bar](status-bar.md) | Current / 当前 | `ui/components/status_bar.slint`, `ui/main.slint`, shortcut/notification/network/update state owners |
 | [Application message center](messages.md) | Current: 20-record pages, filter scroll preservation and row-bounded corner clipping / 当前：每页 20 条、筛选保留滚动位置与行级圆角裁剪 | `crates/usher-messages/`, `src/message_center.rs`, `src/notification.rs`, message/status UI |
 | [GitHub/Primer UI design](ui-design.md) | Current / 当前 | `ui/theme/github_theme.slint`, `ui/`, `ui/assets/icons/`, all UI contributors |
-| [Tooltip implementation contract](tooltips.md) | Mandatory: factory isolation, centered text/anchor and viewport avoidance / 强制阅读：工厂隔离、文字与锚点居中、视口避让 | Shared Tooltip/Float/IconButton, factory-owned actions and root portals |
+| [Tooltip implementation contract](tooltips.md) | Mandatory: factory isolation, centered text/anchor, viewport avoidance and bounded Hook host painting / 强制阅读：工厂隔离、文字与锚点居中、视口避让及 Hook 宿主绘制范围 | Shared Tooltip/Float/IconButton, factory-owned actions and root portals |
 
 The UI design specification includes the shared small Primer Label geometry,
 transparent neutral variants and Hook status usage. / UI 设计规范包含共享 small
@@ -133,6 +133,7 @@ Documents that are not specs:
 - `docs/architecture.md`, `docs/architecture.zh.md`: canonical architecture.
 - `docs/architecture-structure-audit.md`: dated structure audit and refactoring roadmap.
 - `docs/ARCHITECTURE_FOR_AI.md`: compatibility entry point for older agent prompts.
+- `docs/settings-tooltip-memory-20260924.md`: dated Settings Tooltip Release A/B results and pending native visual checks.
 - `docs/memory_optimization_backlog.md`, `docs/memory_optimization_backlog.zh.md`: measured memory baseline and phased optimization backlog.
 - `docs/artifact-preview-performance.md`: dated Release measurements for Chat resize and artifact-preview hosts.
 - `docs/ui-github-migration-plan.md`: staged UI implementation checklist and

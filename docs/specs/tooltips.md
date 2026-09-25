@@ -18,9 +18,11 @@ compiled ComponentFactory pages. `AGENTS.md` makes this a repository-wide gate.
 | 靠窗口边缘或滚动区被裁切 | Tooltip 在带 clip 的按钮、行、ScrollView 内绘制 | 根窗口或所属 factory 的全窗口 Portal，复用 flip/shift/size |
 | 点击、关闭弹窗或离开页面后残留 | Anchor 消失，未释放所有权或失去续租 | 点击/关闭主动 dismiss，保留 lease 过期兜底 |
 | 层级提高仍然被裁切 | z 只改变当前合成层，不能越过祖先 clip | 修复 Portal 挂载和视口坐标，不堆叠更大的 z |
+| 首访 Settings 后返回 Home 仍保留大块图形内存 | 五个全窗口 Hook 定位宿主以 opacity 隐藏，仍可能各自形成离屏层 | 一个常驻全窗口定位宿主，按动作显示独立固定文案 Surface；无提示时隐藏宿主 |
 
 History: UI-033 (ancestor clipping), UI-103 (factory label/measurement aliasing),
-UI-111 (literal leaf binding isolation), UI-124 (Hook recurrence), in
+UI-111 (literal leaf binding isolation), UI-124 (Hook recurrence), and UI-140
+(full-window opacity layers) in
 [`bug-history.md`](../../bug-history.md). These are observed application/runtime
 failures, not proof that every Slint string binding is broken. Fixed factory
 actions must use the isolated path below; do not assume the generic portal's
@@ -51,7 +53,8 @@ Checked implementation references:
   literal action/enum-only portal pattern.
 - [`Hook actions and portal`](../../ui/components/settings/github_hook_tooltip.slint),
   [`Settings root`](../../ui/views/settings.slint): fixed action types, literal
-  surfaces and a full-window portal inside the independent Settings factory.
+  surfaces and one full-window positioning host inside the independent Settings
+  factory. The five surfaces remain instantiated; the host is hidden when idle.
 
 ## Factory recipe / 工厂内正确做法
 
@@ -65,8 +68,11 @@ Checked implementation references:
    with `show-tooltip: false`; do not leave two tooltip publishers active.
 4. Publish only action identity and the complete anchor rectangle. Text remains
    an I18n binding at a fixed root Surface. Each action owns separate, permanently
-   mounted measure and paint nodes. Select their opacity; do not remount the
-   text with `if kind` or share a `kind ? label-a : label-b` measured Surface.
+   mounted measure and paint nodes. For Settings Hooks, select each fixed Surface
+   with `visible`, and hide the single full-window positioning host when no
+   action is active. In that Hook portal, do not apply opacity to the host,
+   remount text with `if kind`, or share a `kind ? label-a : label-b` measured Surface.
+   Other factory portals require their own measurement before changing hosts.
 5. Use `GitHubFloatingOverlayHost` for viewport positioning. Pass the actual
    window bounds, root-relative anchor geometry, and matching measured surface
    dimensions. Labels must wrap within the viewport, including longer locales.
@@ -82,6 +88,8 @@ Checked implementation references:
 中文执行要点：先确认 factory 根及 clip；不同动作使用不同固定叶子；复用按钮外观
 但关闭通用 Tooltip；跨 delegate 只传动作身份与锚点几何；文案和测量在根层每动作
 独立常驻；使用共享浮层定位；离开、点击、关闭和卸载均检查失效与续租。
+Settings Hook 只保留一个全窗口定位宿主；五种固定文案 Surface 分别常驻，按动作切换
+可见性；无提示时隐藏宿主，不对全窗口宿主施加 opacity。其他 factory portal 须单独实测。
 
 ## Prohibited fixes / 禁止的修法
 

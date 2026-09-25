@@ -573,8 +573,12 @@ interpreter for Save/Test; durable definitions still own one language/source.
 Edits invalidate test feedback. Hook action tooltips use literal leaves and fixed
 surfaces at the Settings factory root (UI-103). Tooltip text is centered, and
 Hook tips center over their anchor unless viewport collision handling shifts them.
-The history clear operation removes
-completed summaries/journals on workers while retaining active runners. Add/Edit
+The Hook portal keeps one full-window positioning host and five distinct,
+permanently instantiated text and measurement surfaces. It shows only the
+active surface and hides the host when no Hook tip is claimed, avoiding
+full-window opacity layers while preserving the stable Settings factory.
+The history clear operation removes completed summaries/journals on workers
+while retaining active runners. Add/Edit
 opts into shared Dialog primary-modifier+Enter saving, with plain Enter reserved
 for source newlines and Escape for cancellation. The root shortcut boundary
 forwards modal keys through `SettingsPageBridge` when focus is outside the
