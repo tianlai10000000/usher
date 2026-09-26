@@ -207,10 +207,21 @@ component GitHubHookEventPickerPopup inherits GitHubSelectPopup {
 }
 
 export component GitHubHookSettingsOverlay inherits Rectangle {
+    in property <length> page-viewport-x: 0px;
+    in property <length> page-viewport-y: 0px;
+    in property <length> page-viewport-width: root.width;
+    in property <length> page-viewport-height: root.height;
     background: transparent;
     GitHubHookPickerPopup { kind: "hook"; items: HookSettingsState.hooks; }
     GitHubHookEventPickerPopup { items: HookSettingsState.events; }
-    GitHubHookPickerPopup { kind: "history"; items: HookSettingsState.history; }
+    GitHubHookPickerPopup {
+        kind: "history";
+        items: HookSettingsState.history;
+        viewport-x: root.page-viewport-x;
+        viewport-y: root.page-viewport-y;
+        viewport-width: root.page-viewport-width;
+        viewport-height: root.page-viewport-height;
+    }
 }
 
 // The standard ScrollView/Flickable owns touchpad and wheel gestures. Native

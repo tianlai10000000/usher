@@ -253,6 +253,97 @@ fn hook_tooltips_keep_literal_labels_and_fit_after_action_changes() {
 }
 
 #[test]
+fn hook_history_select_flips_above_the_settings_viewport_bottom() {
+    use i_slint_backend_testing::ElementHandle;
+    use slint::{ComponentHandle, ModelRc, VecModel, platform::PointerEventButton};
+    use usher_ui_settings::{GitHubSettingsPage, HookChoice, HookSettingsState, HookSummary};
+
+    let _locale = crate::i18n::test_locale_guard();
+    i_slint_backend_testing::init_no_event_loop();
+    let page = GitHubSettingsPage::new().unwrap();
+    crate::i18n::apply_preference("en").unwrap();
+    page.set_window_width(799.0);
+    page.set_window_height(592.0);
+    page.set_content_origin_x(240.0);
+    page.set_content_origin_y(38.0);
+    page.set_viewport_width(559.0);
+    page.set_viewport_height(505.0);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(2));
+
+    let section_trigger = ElementHandle::find_by_accessible_label(&page, "General")
+        .find(|element| element.accessible_expandable().is_some())
+        .expect("compact Settings section trigger");
+    section_trigger.mock_single_click(PointerEventButton::Left);
+    ElementHandle::find_by_accessible_label(&page, "Hooks")
+        .find(|element| element.accessible_checked().is_some())
+        .expect("Hooks section option")
+        .mock_single_click(PointerEventButton::Left);
+
+    let state = page.global::<HookSettingsState>();
+    state.set_ready(true);
+    state.set_summaries(ModelRc::new(VecModel::from(vec![HookSummary {
+        id: "hook-one".into(),
+        name: "Hook One".into(),
+        description: "Pull request approved · Shell".into(),
+        enabled: true,
+        category: "Pull request review".into(),
+        category_index: 0,
+        category_start: true,
+        category_end: true,
+        category_size: 1,
+    }])));
+    state.set_history(ModelRc::new(VecModel::from(vec![
+        HookChoice {
+            value: "run-one".into(),
+            label: "Run one".into(),
+        },
+        HookChoice {
+            value: "run-two".into(),
+            label: "Run two".into(),
+        },
+        HookChoice {
+            value: "run-three".into(),
+            label: "Run three".into(),
+        },
+        HookChoice {
+            value: "run-four".into(),
+            label: "Run four".into(),
+        },
+    ])));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(2));
+
+    let scroll = ElementHandle::find_by_element_id(&page, "GitHubSettingsPage::settings-scroll")
+        .next()
+        .expect("Settings scroll view");
+    scroll.scroll(0.0, -10_000.0);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
+    let trigger = ElementHandle::find_by_accessible_label(&page, "Execution history")
+        .find(|element| element.accessible_expandable().is_some())
+        .expect("Hook history trigger");
+    trigger.mock_single_click(PointerEventButton::Left);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+
+    let menu = ElementHandle::find_by_element_id(&page, "GitHubSelectPopup::menu")
+        .next()
+        .expect("Hook history menu");
+    let viewport_bottom = page.get_content_origin_y() + page.get_viewport_height();
+    assert!(
+        menu.absolute_position().y + menu.size().height <= viewport_bottom - 7.5,
+        "history menu must remain above the Settings viewport bottom: trigger={:?}, menu={:?}",
+        trigger.absolute_position(),
+        menu.absolute_position(),
+    );
+    assert!(
+        menu.absolute_position().y + menu.size().height <= trigger.absolute_position().y - 3.5,
+        "history menu near the bottom must flip above its trigger: trigger={:?} size={:?}, menu={:?} size={:?}",
+        trigger.absolute_position(),
+        trigger.size(),
+        menu.absolute_position(),
+        menu.size(),
+    );
+}
+
+#[test]
 fn hook_dialog_shortcuts_submit_once_preserve_newlines_and_gate_busy_state() {
     use slint::{ComponentHandle, platform::WindowEvent};
     use usher_ui_settings::{GitHubSettingsPage, HookSettingsState};

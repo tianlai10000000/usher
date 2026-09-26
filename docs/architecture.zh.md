@@ -493,7 +493,9 @@ Select 触发器切换自身展开状态：再次激活时收起、不提交选�
 Hook 事件及历史触发器通过 `GitHubSelectState.toggle()` 遵循同一契约。
 只有 40px 触发器参与表单布局；Settings factory 根层在滚动表单外挂载浮层，复用
 Tooltip 同样使用的 `GitHubTransientFloatingOverlayHost` 负责活动生命周期、翻转、
-边缘位移与像素对齐；Select 把 `active` 绑定到展开状态，并限制宽度及可用垂直高度，
+边缘位移与像素对齐；Select 把 `active` 绑定到展开状态，并限制宽度及可用垂直高度。
+Settings 页面级 Select 以独立页面视口作为碰撞边界，固定状态栏覆盖区域不得计入锚点
+下方可用空间；Hook Dialog 内的 Select 则继续使用完整窗口边界。
 `GitHubActionMenu` 提供表面、滚动与焦点生命周期。
 选项叶子使用明确的菜单内容宽度和零水平起点，不能继承外层 factory 的宽度。
 独立 factory 的窗口上下文与可见 host

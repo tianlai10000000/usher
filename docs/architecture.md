@@ -641,8 +641,11 @@ committing a value and restores trigger focus. Hook event/history triggers use
 `GitHubSelectState.toggle()` for the same contract.
 `GitHubTransientFloatingOverlayHost`, also used by Tooltips, owns active
 lifecycle plus flip/shift and pixel-aligned placement; Select binds `active` to
-its open state and bounds the width and available vertical height,
-while `GitHubActionMenu` provides the surface, scrolling, and focus lifecycle.
+its open state and bounds the width and available vertical height. Page-level
+Settings Selects use the isolated page viewport as their collision boundary, so
+the persistent status bar is never counted as space below an anchor; Selects
+inside the Hook Dialog retain the complete window boundary. `GitHubActionMenu`
+provides the surface, scrolling, and focus lifecycle.
 Option leaves use the explicit menu-content width and a zero horizontal origin,
 not the outer factory width. Native
 `PopupWindow` must not be used from the isolated factory product because its

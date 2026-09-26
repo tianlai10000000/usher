@@ -64,6 +64,13 @@ export global GitHubSelectState {
 export component GitHubSelectPopup inherits FocusScope {
     in property <string> owner;
     in property <int> option-count;
+    // Page factories can occupy the whole window while their usable viewport
+    // stops above persistent chrome such as the status bar. Keep collision
+    // bounds explicit so page Selects do not treat covered space as available.
+    in property <length> viewport-x: 0px;
+    in property <length> viewport-y: 0px;
+    in property <length> viewport-width: root.width;
+    in property <length> viewport-height: root.height;
     // Group headings participate in layout but not option indexing.
     in property <length> list-content-height:
         root.option-count * GitHubMetrics.size-32;
@@ -72,11 +79,14 @@ export component GitHubSelectPopup inherits FocusScope {
     callback selected(int);
     private property <bool> open: GitHubSelectState.open && GitHubSelectState.owner == root.owner;
     private property <length> popup-width:
-        max(0px, min(GitHubSelectState.anchor-width, root.width - GitHubMetrics.size-16));
+        max(0px, min(GitHubSelectState.anchor-width,
+            root.viewport-width - GitHubMetrics.size-16));
     private property <length> anchor-top: GitHubSelectState.anchor-y - root.absolute-position.y;
-    private property <length> space-above: max(0px, root.anchor-top - GitHubMetrics.size-12);
+    private property <length> space-above: max(0px,
+        root.anchor-top - root.viewport-y - GitHubMetrics.size-12);
     private property <length> space-below: max(0px,
-        root.height - root.anchor-top - GitHubSelectState.anchor-height - GitHubMetrics.size-12);
+        root.viewport-y + root.viewport-height - root.anchor-top
+            - GitHubSelectState.anchor-height - GitHubMetrics.size-12);
     private property <length> available-height: max(root.space-above, root.space-below);
     private property <length> popup-height: min(264px, root.available-height,
         root.list-content-height + GitHubMetrics.size-8);
@@ -129,10 +139,10 @@ export component GitHubSelectPopup inherits FocusScope {
 
     GitHubTransientFloatingOverlayHost {
         active: root.open;
-        x: 0px;
-        y: 0px;
-        width: root.width;
-        height: root.height;
+        x: root.viewport-x;
+        y: root.viewport-y;
+        width: root.viewport-width;
+        height: root.viewport-height;
         anchor-x: GitHubSelectState.anchor-x;
         anchor-y: GitHubSelectState.anchor-y;
         anchor-width: GitHubSelectState.anchor-width;
@@ -151,10 +161,10 @@ export component GitHubSelectPopup inherits FocusScope {
         width: root.popup-width;
         height: root.popup-height;
         open: root.open;
-        viewport-width: root.width;
-        viewport-height: root.height;
-        anchor-x: GitHubSelectState.anchor-x - root.absolute-position.x;
-        anchor-y: GitHubSelectState.anchor-y - root.absolute-position.y;
+        viewport-width: root.viewport-width;
+        viewport-height: root.viewport-height;
+        anchor-x: GitHubSelectState.anchor-x - root.absolute-position.x - root.viewport-x;
+        anchor-y: GitHubSelectState.anchor-y - root.absolute-position.y - root.viewport-y;
         anchor-width: GitHubSelectState.anchor-width;
         anchor-height: GitHubSelectState.anchor-height;
         menu-width: GitHubSelectState.anchor-width;
