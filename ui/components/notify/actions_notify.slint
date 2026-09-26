@@ -1,4 +1,5 @@
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { GitHubCompactElevation } from "../github_elevation.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubButton } from "../settings/github_settings_controls.slint";
 import { GitHubActionListItem, GitHubActionMenu, GitHubActionMenuTriggerArea } from "../github_action_menu.slint";
@@ -143,6 +144,12 @@ export component GitHubNotificationBanner inherits Rectangle {
     // Page blank outside-click is owned under page chrome via
     // TransientOverlayState.dismiss-all (see GitHubPageView).
 
+    GitHubCompactElevation {
+        target-width: root.width;
+        target-height: root.height;
+        shadow-color: GitHubTheme.shadow-floating-medium;
+    }
+
     // Clip the card surface independently so the semantic rail reaches both
     // rounded edges while the overflow menu can paint outside the Banner.
     card-surface := Rectangle {
@@ -152,9 +159,6 @@ export component GitHubNotificationBanner inherits Rectangle {
         border-width: 1px;
         border-color: GitHubTheme.border-default;
         border-radius: 6px;
-        drop-shadow-blur: 12px;
-        drop-shadow-offset-y: 4px;
-        drop-shadow-color: GitHubTheme.shadow-floating-medium;
         clip: true;
 
         Rectangle {

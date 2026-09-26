@@ -1,7 +1,7 @@
 import {
     TooltipOverlayState,
 } from "../state/tooltip_overlay_state.slint";
-import { GitHubFloatingOverlayHost } from "./github_floating_overlay.slint";
+import { GitHubTransientFloatingOverlayHost } from "./github_floating_overlay.slint";
 import { GitHubTooltipSurface } from "./github_tooltip.slint";
 
 // Floating UI-style viewport positioning for the shared Tooltip portal:
@@ -21,7 +21,8 @@ export component GitHubTooltipOverlayHost inherits Rectangle {
     // graphs can retain the previous preferred-width when only a string binding
     // changes; alternating slots makes the current label the initial value.
     if TooltipOverlayState.open && TooltipOverlayState.text != ""
-            && root.even-claim: even-floating-host := GitHubFloatingOverlayHost {
+            && root.even-claim: even-floating-host := GitHubTransientFloatingOverlayHost {
+        active: true;
         anchor-x: TooltipOverlayState.anchor-x;
         anchor-y: TooltipOverlayState.anchor-y;
         anchor-width: TooltipOverlayState.anchor-width;
@@ -41,7 +42,8 @@ export component GitHubTooltipOverlayHost inherits Rectangle {
     }
 
     if TooltipOverlayState.open && TooltipOverlayState.text != ""
-            && !root.even-claim: odd-floating-host := GitHubFloatingOverlayHost {
+            && !root.even-claim: odd-floating-host := GitHubTransientFloatingOverlayHost {
+        active: true;
         anchor-x: TooltipOverlayState.anchor-x;
         anchor-y: TooltipOverlayState.anchor-y;
         anchor-width: TooltipOverlayState.anchor-width;

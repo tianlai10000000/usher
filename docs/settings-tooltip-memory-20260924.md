@@ -82,3 +82,70 @@ The local, Git-ignored raw evidence is in
 single-host result. Instrumented baseline and single-host binary SHA256 values
 were respectively `7825a6fe3b82fc72910fe714f56003f3220468a65f1d64ce6ff7ad9e23722f82`
 and `090900b54dc4cac9905a1838c4d520783a0471c30bd6b533dc19d466abe1a26f`.
+
+## Repository-wide follow-up (2026-09-25)
+
+The follow-up audit searched all application-owned Slint sources for full-window
+floating hosts, direct opacity/visibility control, factory page lifetime and
+route-exit reset behavior. Messages contained the same structural risk as the old
+Settings implementation: its stable factory page retained three full-window
+action-tooltip positioning hosts, one for each fixed action, and selected them
+with opacity. With no active action all three remained mounted at window size.
+This establishes a renderer-layer risk, not a measured Messages memory benefit.
+Other reviewed opacity uses were content-sized controls, scrollbars, resize
+handles or paint leaves; the audit did not identify another confirmed
+action-tooltip host with the same construction.
+
+The repository-level correction moves lifecycle ownership into
+`GitHubTransientFloatingOverlayHost` in
+`ui/components/github_floating_overlay.slint`. Its `active` input is the only
+public way to expose the private full-window geometry tree. A persistent
+fixed-action Portal owns exactly one transient host and keeps one independent,
+fixed text/measurement Surface per action; the action kind selects the Surface
+with `visible`. Feature code may provide anchor and surface geometry, but cannot
+instantiate the low-level geometry host, create one host per action, or hide a
+full-window host with opacity. Settings Hooks and Messages actions follow this
+same ownership model without destroying their stable factory pages.
+
+`scripts/check-ui-policy.sh` enforces this boundary statically. It rejects raw
+full-window host use outside shared infrastructure, opacity on a raw host, and
+direct opacity or visibility overrides on the transient facade. The isolated
+fixtures in `scripts/tests/test_quality_checks.py` include accepted shared-host
+and nested content-opacity cases plus rejected sibling-host, host-opacity and
+host-visibility cases. They also pin the facade to one private geometry instance
+with `visible: root.active` and limit the generic dynamic portal to two mutually
+exclusive claim slots. This gate prevents the known source shape from returning;
+it does not replace native paint, route re-entry or Release memory validation.
+
+The Messages migration passed its predeclared controlled Release comparison.
+The formal order was A1, B1, B2, A2, A3, B3: three fresh baseline and three
+fresh candidate processes, each completing 20 Messages-to-Home cycles. All six
+processes used the isolated source-built probe bundle, Winit/FemtoVG, offline
+empty state, 800x600 logical pixels at scale 2 and two Tokio workers. Every run
+produced 40 memory samples and 42 matched route actions, with PID, executable,
+route and zero compressed memory checked throughout. The temporary timing probe
+was identical in both artifacts and was removed from production source after the
+candidate build.
+
+| Measure | Baseline median | Shared-lifecycle median | Difference |
+| --- | ---: | ---: | ---: |
+| Final Home RSS | 138.422 MiB | 123.844 MiB | -14.578 MiB (-10.53%) |
+| Final Home physical footprint | 113.095 MiB | 91.939 MiB | -21.156 MiB |
+| Warm Messages navigation p95 | 12.442 ms | 12.084 ms | -2.88% |
+
+The paired final Home RSS differences were -13.078, -21.203 and -11.609 MiB,
+so every pair improved. The candidate passed all four adoption gates: at least
+10 MiB or 5% median RSS benefit, all three pairs improving, no physical-footprint
+regression and no more than 5% Messages navigation-p95 regression. The baseline
+and candidate binary SHA256 values were respectively
+`090900b54dc4cac9905a1838c4d520783a0471c30bd6b533dc19d466abe1a26f` and
+`40502d8b888841e3f64f7c6257659a38d4e7cfc1a7322cd6d89c17d12d5fc91f`.
+The ignored raw evidence, protocol and machine-checked comparison are in
+`memory-benchmark-results/message-tooltip-host-20260925/`.
+
+This accepts the lifecycle implementation and its measured Messages route
+benefit. Isolated source-built fixtures rendered Mark as read, Mark as unread
+and Delete correctly in English and zh-CN, with localized measured widths and
+no lingering tip after returning Home. Both processes exited normally. These
+checks do not prove general leak freedom or cover every viewport, input mode and
+packaged locale in the complete Tooltip acceptance matrix.

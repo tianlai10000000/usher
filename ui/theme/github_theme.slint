@@ -207,6 +207,9 @@ export global GitHubTheme {
         root.dark-mode ? #00000080 : #1f232826;
     out property <color> shadow-floating-subtle:
         root.dark-mode ? #0000002a : #1f232814;
+    // Large Dialogs use a fixed-size nine-slice alpha mask. Keep the semantic
+    // color separate from backdrop opacity so elevation can evolve independently.
+    out property <color> shadow-floating-dialog: #00000055;
     out property <color> code-canvas:
         root.dark-mode ? #0d1117 : #f6f8fa;
     out property <color> code-row-hover:

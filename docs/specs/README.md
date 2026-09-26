@@ -52,14 +52,14 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | [Project repository metadata](project-repository.md) | Current: explicit Hook opt-in with disabled-row restoration, bounded Logo retries and projection / 当前：Hook 显式选择与禁用行恢复、Logo 有界重试与投影 | `src/project/mod.rs`, `src/git/`, `src/codereview/api/` |
 | [Pull request workflow](pr-review.md) | Current / 当前 | `src/workflow/pr_list.rs`, `src/workflow/pr_review.rs`, `src/workflow/pr_review/`, `src/git/`, `ui/features/pr_review/`, `ui/views/workflow/`, `ui/components/workflow/` |
 | [Reusable job runs](jobs.md) | Current: typed lifecycle/durations, bounded output, virtualized logs with a soft-budgeted unmounted cache, safe blank rows and fixed run pages with output-only scrolling / 当前：类型化生命周期/耗时、有界输出、带软预算未挂载缓存的日志虚拟化、空行安全处理及固定运行页/仅输出区滚动 | `src/jobs/`, `ui/views/job_run.slint`, `ui/components/jobs/`, feature controllers |
-| [Application Hooks](hooks.md) | Current: bounded syntax text and native cursor/selection; macOS cursor visual QA passed / 当前：有界语法文本与原生光标/选区，macOS 光标视觉验收通过 | `src/hooks/`, `src/project/`, Settings, PR/AI completion sources, notifications and shutdown drains |
+| [Application Hooks](hooks.md) | Current: bounded syntax text, native cursor/selection, and route/session-owned editor rendering / 当前：有界语法文本、原生光标/选区及由路由/会话共同拥有的编辑器渲染树 | `src/hooks/`, `src/project/`, Settings, PR/AI completion sources, notifications and shutdown drains |
 | [Tag workflow](tag.md) | Current / 当前 | `src/workflow/tag.rs`, `src/workflow/tag/`, `src/workflow/state.rs`, `ui/views/workflow/` |
 | [Terminal behavior](terminal.md) | Bounded I/O and asynchronous session shutdown barrier / 有界 IO 与异步会话退出屏障 | `src/terminal/`, `ui/components/drawer/terminal_drawer.slint`, `ui/main.slint` |
 | [Application keyboard shortcuts](shortcuts.md) | Current / 当前 | `src/shortcuts/`, `ui/main.slint`, `src/platform/` |
 | [Application status bar](status-bar.md) | Current / 当前 | `ui/components/status_bar.slint`, `ui/main.slint`, shortcut/notification/network/update state owners |
-| [Application message center](messages.md) | Current: 20-record pages, filter scroll preservation and row-bounded corner clipping / 当前：每页 20 条、筛选保留滚动位置与行级圆角裁剪 | `crates/usher-messages/`, `src/message_center.rs`, `src/notification.rs`, message/status UI |
+| [Application message center](messages.md) | Current: 20-record pages, filter scroll preservation, row-bounded corner clipping and one lifecycle-owned action-tooltip host / 当前：每页 20 条、筛选保留滚动位置、行级圆角裁剪及单一生命周期托管的操作提示宿主 | `crates/usher-messages/`, `src/message_center.rs`, `src/notification.rs`, message/status UI |
 | [GitHub/Primer UI design](ui-design.md) | Current / 当前 | `ui/theme/github_theme.slint`, `ui/`, `ui/assets/icons/`, all UI contributors |
-| [Tooltip implementation contract](tooltips.md) | Mandatory: factory isolation, centered text/anchor, viewport avoidance and bounded Hook host painting / 强制阅读：工厂隔离、文字与锚点居中、视口避让及 Hook 宿主绘制范围 | Shared Tooltip/Float/IconButton, factory-owned actions and root portals |
+| [Tooltip implementation contract](tooltips.md) | Mandatory: factory isolation, centered text/anchor, viewport avoidance and lifecycle-owned single-host portals / 强制阅读：工厂隔离、文字与锚点居中、视口避让及生命周期托管的单宿主 Portal | Shared Tooltip/Float/IconButton, factory-owned actions and root portals |
 
 The UI design specification includes the shared small Primer Label geometry,
 transparent neutral variants and Hook status usage. / UI 设计规范包含共享 small
@@ -86,7 +86,7 @@ and repeat-trigger dismissal / 按内容定高、底部向上展开、选项焦�
 contracts, shared Button/IconButton/Link/Tooltip/CounterLabel/Copy/Spinner/form-control
 foundations, shared shell/title-bar breadcrumb/PageHeader/ScrollView/Progress foundations,
 UnderlineNav/animated SegmentedControl/Actions Job foundations,
-Dialog/borderless ActionMenu/bordered SelectMenu/form Select popup (shared Tooltip
+fixed-source Dialog ownership, borderless ActionMenu/bordered SelectMenu/form Select popup (shared Tooltip
 placement and non-blocking window-wide dismissal)/Banner overlay contracts,
 compact PR-list branch chips, the Material dependency boundary,
 the mandatory UI Components playground/property-matrix contract,
@@ -97,7 +97,7 @@ implementation sequence and current status live in
 live in [`bug-history.md`](../../bug-history.md). / UI 设计规范定义
 `GitHub*` 组件命名、`GitHubTheme`/`GitHubMetrics` 归属、Primer 布局与交互
 契约、CounterLabel、Shell/标题栏面包屑/PageHeader/ScrollView/Progress、
-UnderlineNav/带滑动选中态的 SegmentedControl/Actions Job 基础、Dialog/无边框 ActionMenu/带边框 SelectMenu/Banner
+UnderlineNav/带滑动选中态的 SegmentedControl/Actions Job 基础、固定源 Dialog 所有权/无边框 ActionMenu/带边框 SelectMenu/Banner
 浮层契约、通用 Filter ActionMenu、Project 可读卡片宽度、Chat 历史流内操作、
 PR 单一状态/窄屏 Tab、列表响应式标题/紧凑分支胶囊/行操作及 diff/文件树字体颜色保护约束、强制 UI Components 演练场/属性矩阵契约、
 Material 依赖边界、仓库级组件目录
@@ -133,7 +133,11 @@ Documents that are not specs:
 - `docs/architecture.md`, `docs/architecture.zh.md`: canonical architecture.
 - `docs/architecture-structure-audit.md`: dated structure audit and refactoring roadmap.
 - `docs/ARCHITECTURE_FOR_AI.md`: compatibility entry point for older agent prompts.
-- `docs/settings-tooltip-memory-20260924.md`: dated Settings Tooltip Release A/B results and pending native visual checks.
+- `docs/settings-tooltip-memory-20260924.md`: dated Settings Tooltip Release A/B,
+  repository-wide host audit, prevention gate, and pending Messages A/B.
+- `docs/hook-editor-memory-20260926.md`: Hook Dialog shadow attribution,
+  rejected lifecycle-only candidate, repository-wide renderer-surface audit,
+  source-built Release evidence, and prevention gate.
 - `docs/memory_optimization_backlog.md`, `docs/memory_optimization_backlog.zh.md`: measured memory baseline and phased optimization backlog.
 - `docs/artifact-preview-performance.md`: dated Release measurements for Chat resize and artifact-preview hosts.
 - `docs/ui-github-migration-plan.md`: staged UI implementation checklist and

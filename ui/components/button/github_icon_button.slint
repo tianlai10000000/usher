@@ -1,4 +1,5 @@
 import { GitHubSpinner } from "../github_spinner.slint";
+import { GitHubCompactElevation } from "../github_elevation.slint";
 import { GitHubTooltip } from "../github_tooltip.slint";
 import {
     GitHubTooltipAlignment,
@@ -124,6 +125,14 @@ export component GitHubIconButton inherits FocusScope {
         background: transparent;
     }
 
+    if root.floating: GitHubCompactElevation {
+        target-x: (root.width - root.visual-size) / 2;
+        target-y: (root.height - root.visual-size) / 2;
+        target-width: root.visual-size;
+        target-height: root.visual-size;
+        shadow-color: GitHubTheme.shadow-floating-small;
+    }
+
     surface := Rectangle {
         x: (parent.width - root.visual-size) / 2;
         y: (parent.height - root.visual-size) / 2;
@@ -171,12 +180,6 @@ export component GitHubIconButton inherits FocusScope {
                             : (root.invisible ? transparent : GitHubTheme.control-default-rest)));
         animate background { duration: 100ms; easing: ease-out; }
         opacity: root.button-enabled ? 1 : 0.5;
-        drop-shadow-blur: root.floating ? GitHubMetrics.size-12 : 0px;
-        drop-shadow-color: root.floating
-            ? GitHubTheme.shadow-floating-small
-            : transparent;
-        drop-shadow-offset-y: root.floating ? GitHubMetrics.size-6 : 0px;
-
         if root.loading: GitHubSpinner {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;

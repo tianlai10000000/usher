@@ -55,6 +55,16 @@ pub(crate) struct SettingsPageBridge {
     ai_review_validation_errors: Arc<Mutex<AiReviewValidationErrors>>,
 }
 
+pub(crate) fn register_route_lifecycle(
+    hooks: &crate::router::RouteLifecycleHooks,
+    bridge: &SettingsPageBridge,
+) {
+    let bridge = bridge.clone();
+    hooks.on_transition(std::rc::Rc::new(move |window, event| {
+        bridge.route_changed(window, event.current);
+    }));
+}
+
 impl SettingsPageBridge {
     pub(crate) fn apply_hooks(&self, state: &crate::hooks::HookState) {
         self.with_page(|page| crate::hooks::apply_settings(page, state));
@@ -94,6 +104,7 @@ impl SettingsPageBridge {
                 }
             };
 
+            page.set_route_active(window.get_current_route() == crate::Route::Settings);
             sync_state_from_window(&window, &page);
             let ai_agent_settings = ai_agent_settings
                 .lock()
@@ -179,6 +190,16 @@ impl SettingsPageBridge {
 
     pub(crate) fn set_update_checking(&self, checking: bool) {
         self.with_page(|page| page.set_update_checking(checking));
+    }
+
+    /// Synchronize the stable Settings factory after a completed route change.
+    /// Heavy transient descendants use route activity to release renderer-owned
+    /// resources without destroying the factory product itself.
+    pub(crate) fn route_changed(&self, window: &MainWindow, route: crate::Route) {
+        if route == crate::Route::Settings {
+            self.reset_drafts_from_committed(window);
+        }
+        self.with_page(|page| page.set_route_active(route == crate::Route::Settings));
     }
 
     pub(crate) fn sync_theme(&self, mode: i32, effective_dark_mode: bool) {
@@ -895,7 +916,11 @@ mod tests {
 
     #[cfg(feature = "ai-code-review")]
     use super::apply_ai_review_snapshot;
-    use super::{SettingsPageBridge, bind_callbacks, sync_language_state, sync_state_from_window};
+    use super::{
+        SettingsPageBridge, bind_callbacks, register_route_lifecycle, sync_language_state,
+        sync_state_from_window,
+    };
+    use crate::router::{RouteLifecycleHooks, Router};
     use crate::{AppState, MainWindow, Route};
 
     fn language_rows(page: &GitHubSettingsPage) -> Vec<(String, bool)> {
@@ -1459,6 +1484,107 @@ mod tests {
                 .global::<HookSettingsState>()
                 .get_dialog_mode(),
             ""
+        );
+    }
+
+    #[test]
+    fn programmatic_settings_route_exit_unmounts_the_hook_editor_session() {
+        use usher_ui_settings::{
+            GitHubSelectState, HookSettingsState, HookTooltipKind, HookTooltipState,
+            TooltipOverlayState,
+        };
+
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let window = MainWindow::new().unwrap();
+        let bridge = SettingsPageBridge::default();
+        bridge.install(&window);
+        let lifecycle_hooks = RouteLifecycleHooks::default();
+        register_route_lifecycle(&lifecycle_hooks, &bridge);
+        let router = Router::new(window.as_weak(), lifecycle_hooks);
+        router.navigate(Route::Settings).expect("Settings route");
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        let page = mounted_page(&bridge);
+        let hooks = page.global::<HookSettingsState>();
+        let saves = Rc::new(Cell::new(0));
+        let observed_saves = saves.clone();
+        hooks.on_save(move || observed_saves.set(observed_saves.get() + 1));
+        hooks.set_ready(true);
+        hooks.set_draft_script("console.log('route lifecycle')".into());
+        hooks.set_code_highlight(
+            slint::StyledText::from_markdown("console.log('route lifecycle')").unwrap(),
+        );
+        hooks.set_code_highlight_ready(true);
+        hooks.set_dialog_mode("edit".into());
+        hooks.set_busy(true);
+        hooks.set_test_run("running-hook-test".into());
+        page.global::<HookTooltipState>()
+            .set_kind(HookTooltipKind::Edit);
+        page.global::<TooltipOverlayState>().set_open(true);
+        page.global::<GitHubSelectState>().set_open(true);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        assert!(window.get_settings_hook_dialog_open());
+
+        let old_input = ElementHandle::find_by_element_id(&page, "HookCodeEditor::text-input")
+            .next()
+            .expect("active Hook source editor");
+        let old_highlight =
+            ElementHandle::find_by_element_id(&page, "HookCodeEditor::script-highlight")
+                .next()
+                .expect("active Hook syntax projection");
+
+        router.navigate(Route::Home).expect("Home route");
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+
+        assert!(!window.get_settings_hook_dialog_open());
+        assert_eq!(
+            page.global::<HookTooltipState>().get_kind(),
+            HookTooltipKind::None
+        );
+        assert!(!page.global::<TooltipOverlayState>().get_open());
+        assert!(!page.global::<GitHubSelectState>().get_open());
+        assert_eq!(
+            hooks.get_dialog_mode(),
+            "edit",
+            "route lifecycle must not mutate the Hook draft/session state"
+        );
+        assert!(
+            hooks.get_busy(),
+            "route exit must not stop a running Hook test"
+        );
+        assert_eq!(hooks.get_test_run(), "running-hook-test");
+        assert!(
+            !crate::shortcuts::handle_key_pressed(&window, "\n", true, false, false, false),
+            "Home must not handle the hidden Hook dialog shortcut"
+        );
+        assert_eq!(saves.get(), 0, "Home must not save a hidden Hook draft");
+        assert!(
+            ElementHandle::find_by_element_id(&page, "HookCodeEditor::text-input")
+                .next()
+                .is_none(),
+            "an inactive Settings factory must not retain the native editor"
+        );
+        assert!(
+            ElementHandle::find_by_element_id(&page, "HookCodeEditor::script-highlight")
+                .next()
+                .is_none(),
+            "an inactive Settings factory must not retain the syntax projection"
+        );
+        assert!(!old_input.is_valid());
+        assert!(!old_highlight.is_valid());
+
+        router
+            .navigate(Route::Settings)
+            .expect("Settings route re-entry");
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(61));
+        assert!(window.get_settings_hook_dialog_open());
+        assert!(hooks.get_busy());
+        assert_eq!(hooks.get_test_run(), "running-hook-test");
+        assert!(
+            ElementHandle::find_by_element_id(&page, "HookCodeEditor::text-input")
+                .next()
+                .is_some(),
+            "returning to the active dialog must create a fresh editor tree"
         );
     }
 

@@ -110,19 +110,39 @@ the same layout without UI name matching. The global switch disables row
 interaction without losing configured values. Cancel discards drafts, Save closes after persistence, and Delete opens
 a confirmation that retains history. Tests show concrete failure details.
 New/Edit paints the Dialog before hydrating a saved script after a short UI timer,
-then builds a bounded syntax projection after a reusable debounce. One permanently
-mounted native `StyledText` supplies Primer syntax colors below an editable
+then builds a bounded syntax projection after a reusable debounce. The stable
+Settings factory retains the Dialog shell and form bindings, while route visibility
+and the Add/Edit session jointly own the full source-editor item tree. One native
+`StyledText` in that active tree supplies Primer syntax colors below an editable
 `TextInput`; both use the same monospace font and standard `ScrollView` content
 geometry. No per-token UI subtree is created. The styled projection must preserve
 the source exactly, otherwise native plain text remains visible. Editing or
-changing runtime clears stale colors immediately; closing drops the rich-text
-projection. The native input stays on top for pointer/editing ownership. While
+changing runtime clears stale colors immediately; closing or leaving Settings
+destroys the editor tree and its renderer/layout owners. Route exit also makes
+the Dialog and its main-window visibility mirror inactive, dismisses the
+factory-local Tooltip/Select state, and blocks Settings-only shortcuts while a
+running Hook test remains feature-owned. The native input stays on top for
+pointer/editing ownership. While
 syntax colors are shown its text brush retains alpha 1/255, rather than zero,
 so FemtoVG still draws the built-in cursor and selection. macOS uses its separate
 selection-colored caret; text-colored-caret platforms use opaque native plain
 text while focused and restore syntax colors on blur. No highlighter engine or
 language cache remains resident.
-Its UI bridge owns start/end notification delivery,
+Every application-owned modal routes its chrome through `GitHubDialog`.
+`ui/components/github_elevation.slint` centrally owns generated Dialog,
+Floating, and Compact fixed-source PNG masks, nine-slice geometry, and semantic
+colorization. Dialog, ActionMenu, floating IconButton, Toast, Notification, PR
+code-rendering indicator, and compact navigation surfaces consume the matching
+profile; Breadcrumb uses a reviewed direct gradient edge. These surfaces never
+enter FemtoVG's target-sized `BoxShadowCache`, so target dimensions and Retina
+scale do not multiply elevation textures. Raw `drop-shadow-*` is forbidden
+throughout `ui/`. `scripts/check-ui-policy.sh` verifies generated-asset
+freshness, fixed-cost profile structure, expected consumers, the complete
+registered `GitHubDialog`/backdrop inventory, sole ownership of
+`GitHubDialogElevation`, and the absence of raw live shadows. Named Dialog/Modal
+wrappers must structurally own the shared shell. The Hook editor's rounded frame
+is paint-only, while its inner `ScrollView` owns rectangular viewport clipping.
+The Hooks UI bridge owns start/end notification delivery,
 deep links and the reusable Job Run projection. Registered asynchronous shutdown
 drains finish processes before existing prioritized cleanup, with a shared barrier
 for explicit shutdown and event-loop exit. See [Hooks](specs/hooks.md).
@@ -284,7 +304,9 @@ bounds or replace manual input/paint validation.
 | `ui/components/github_scroll_view.slint` | Application-owned mounted vertical viewport and semantic scrollbar foundation. |
 | `ui/components/navigation/github_underline_nav.slint` | Shared keyboard-accessible Primer UnderlineNav/UnderlinePanels shell and item used by Workflow and nested feature tabs; the shell owns the full-width baseline, safe-area inset, and item spacing. |
 | `ui/components/github_segmented_control.slint` | Shared compact Primer SegmentedControl shell, items, dividers, and focus/disabled interaction. |
+| `ui/components/github_elevation.slint` | Central fixed-source elevation owner. Generated Dialog, Floating, and Compact PNG masks use nine-slice scaling and semantic colorization; application UI must consume these profiles instead of declaring raw Slint `drop-shadow-*`. |
 | `ui/components/github_tooltip.slint` | Shared GitHub TooltipV2 contract: call sites mount a transparent anchor locator; `ui/state/tooltip_overlay_state.slint` plus the root `GitHubTooltipOverlayHost` apply shared offset/flip/shift/size placement above clipped scroll/page hosts. |
+| `ui/components/github_floating_overlay.slint` | Shared full-window floating-placement boundary. The raw geometry tree is private; persistent root portals consume `GitHubTransientFloatingOverlayHost`, whose `active` input alone controls internal visibility. Feature code may supply anchors and fixed content, but may not instantiate the geometry host directly, multiply it per action, or hide it with opacity. |
 | `ui/state/tooltip_overlay_state.slint` | Window-root tooltip portal state (text, anchor rectangle, preferred placement/alignment, claim token, lease heartbeat). |
 | `ui/components/github_action_menu.slint` | Shared Primer ActionMenu/AnchoredOverlay surface with focus ownership, Escape dismissal, peer exclusive-claim on open, viewport collision placement, bounded vertical scrolling, reusable ActionList rows, and `GitHubActionMenuTriggerArea` press-state open/close so title-bar chrome dismiss cannot dismiss-then-reopen on the same click. Page blank outside-click stays on each host's sibling TouchArea. `ui/state/transient_overlay_state.slint` owns chrome `dismiss-revision` and popover `exclusive-generation`. |
 | `ui/components/page/github_page_header.slint` | Shared Primer PageHeader foundation for title, description, leading visual, divider, and trailing actions. |
@@ -532,13 +554,15 @@ initial `AppState`, forward callbacks to `MainWindow`, and mirror later state
 changes rather than assuming globals are shared. Messages inbox rows report an
 action enum and anchor rectangle through the dedicated factory-local
 `MessageTooltipOverlayState`; one page-owned `GitHubMessageTooltipOverlayHost`
-maps those enum values to separate literal surfaces. No label string crosses a
-list delegate. Settings mounts a local generic `GitHubTooltipOverlayHost` for
-shared controls; that host remounts its text-measurement surface for each claim
-token. Settings and Messages each lazily create one stable factory product after
-their first visit. Slint 1.17.1 can reuse the wrong control text or placeholder
-when a cross-crate product is destroyed and remounted, so route exit only hides
-these hosts; feature bridges own the separate state-reset lifecycle.
+maps those enum values to three separate literal surfaces inside one
+`GitHubTransientFloatingOverlayHost`. No label string crosses a list delegate.
+Settings mounts a local generic `GitHubTooltipOverlayHost` for shared controls;
+that portal uses the same transient facade and remounts its text-measurement
+surface for each claim token. Settings and Messages each lazily create one stable
+factory product after their first visit. Slint 1.17.1 can reuse the wrong control
+text or placeholder when a cross-crate product is destroyed and remounted, so
+route exit only hides these hosts; feature bridges own the separate state-reset
+lifecycle and drive the transient host inactive.
 
 The Settings factory host occupies the root window above the status bar; its
 ordinary ScrollView retains the content pane's origin and viewport dimensions.
@@ -573,10 +597,11 @@ interpreter for Save/Test; durable definitions still own one language/source.
 Edits invalidate test feedback. Hook action tooltips use literal leaves and fixed
 surfaces at the Settings factory root (UI-103). Tooltip text is centered, and
 Hook tips center over their anchor unless viewport collision handling shifts them.
-The Hook portal keeps one full-window positioning host and five distinct,
-permanently instantiated text and measurement surfaces. It shows only the
-active surface and hides the host when no Hook tip is claimed, avoiding
-full-window opacity layers while preserving the stable Settings factory.
+The Hook portal keeps one `GitHubTransientFloatingOverlayHost` and five distinct,
+permanently instantiated text and measurement surfaces. It shows only the active
+surface and sets the host's `active` input false when no Hook tip is claimed.
+The shared facade alone controls visibility of its private full-window geometry,
+avoiding opacity-hidden layers while preserving the stable Settings factory.
 The history clear operation removes completed summaries/journals on workers
 while retaining active runners. Add/Edit
 opts into shared Dialog primary-modifier+Enter saving, with plain Enter reserved
@@ -589,7 +614,11 @@ project/outcome constraints remain compatible without editable filter inputs.
 
 Every Tooltip addition/change must first follow [the Tooltip implementation contract](specs/tooltips.md),
 including factory isolation and native paint verification. This is a mandatory
-repository entry gate in `AGENTS.md`.
+repository entry gate in `AGENTS.md`. `scripts/check-ui-policy.sh` enforces the
+floating-host boundary: feature code cannot instantiate the private/raw host,
+set opacity on a full-window host, override opacity/visibility on the transient
+facade, or create sibling hosts as fixed-action variants. Its isolated positive
+and negative fixtures live in `scripts/tests/test_quality_checks.py`.
 The compact section menu uses one fixed trigger leaf per section and snapshots
 the active section whenever it opens, so both its collapsed label and selected
 row survive factory reuse without retaining the previous route's section.
@@ -610,8 +639,9 @@ the Settings factory root mounts the overlay outside the scrolling form.
 Select triggers toggle their own menu: a second activation closes without
 committing a value and restores trigger focus. Hook event/history triggers use
 `GitHubSelectState.toggle()` for the same contract.
-`GitHubFloatingOverlayHost`, also used by Tooltips, owns flip/shift and
-pixel-aligned placement; Select bounds the width and available vertical height,
+`GitHubTransientFloatingOverlayHost`, also used by Tooltips, owns active
+lifecycle plus flip/shift and pixel-aligned placement; Select binds `active` to
+its open state and bounds the width and available vertical height,
 while `GitHubActionMenu` provides the surface, scrolling, and focus lifecycle.
 Option leaves use the explicit menu-content width and a zero horizontal origin,
 not the outer factory width. Native
@@ -675,9 +705,12 @@ have zero height and empty payloads. On exit the bridge clears every payload and
 queries the latest snapshot before reactivation, so an inactive Inbox retains no
 projected message data. Rebuilding the page shell per
 visit was rejected after a release A/B showed no material RSS saving and mixed
-physical-footprint regressions. Both factory pages reuse the
-same anchor-based offset/flip/shift/size implementation as `MainWindow` without
-attempting to share a global instance across the factory boundary.
+physical-footprint regressions. The Messages action portal therefore keeps three
+fixed literal surfaces inside one transient host and drives that host inactive
+for `None` and route exit. Both factory pages reuse the same anchor-based
+offset/flip/shift/size implementation as `MainWindow` through the shared
+lifecycle facade without attempting to share a global instance across the
+factory boundary.
 Changing `settings.slint` or
 `messages.slint` must not regenerate or compile `usher-ui`; changing the main shell
 still rebuilds the main generated crate. When `SLINT_LIVE_PREVIEW` is enabled,

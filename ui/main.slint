@@ -41,6 +41,7 @@ import { GitHubPageScrollActions } from "./components/fab/page_scroll_actions.sl
 import { GitHubTerminalDrawer, TerminalLine } from "./components/drawer/terminal_drawer.slint";
 import { GitHubScrollView } from "./components/github_scroll_view.slint";
 import { GitHubActionMenu } from "./components/github_action_menu.slint";
+import { GitHubCompactElevation } from "./components/github_elevation.slint";
 import { GitHubIconButton } from "./components/button/github_icon_button.slint";
 import { GitHubTheme, GitHubMetrics } from "./theme/github_theme.slint";
 import { ArtifactPreviewKind, ArtifactPreviewBlockKind, ArtifactPreviewInlineKind, ArtifactPreviewInlineSpan, ArtifactPreviewCodeToken, ArtifactPreviewCodeLine, ArtifactPreviewBlock, ArtifactPreviewVirtualRow, ArtifactPreviewVirtualWindow, GitHubArtifactPreviewPanel, GitHubArtifactPreviewResizeHandle, ArtifactPreviewWindow } from "./components/artifact_preview/github_artifact_preview.slint";
@@ -1203,11 +1204,21 @@ export component MainWindow inherits Window {
                 y: GitHubMetrics.size-8;
                 width: 112px;
                 height: GitHubMetrics.size-40;
-                border-radius: GitHubMetrics.radius-large;
-                background: GitHubTheme.canvas-overlay;
-                drop-shadow-blur: GitHubMetrics.size-12;
-                drop-shadow-color: GitHubTheme.shadow-floating-small;
+                background: transparent;
                 z: 30;
+
+                GitHubCompactElevation {
+                    target-width: parent.width;
+                    target-height: parent.height;
+                    shadow-color: GitHubTheme.shadow-floating-small;
+                }
+
+                Rectangle {
+                    width: parent.width;
+                    height: parent.height;
+                    border-radius: GitHubMetrics.radius-large;
+                    background: GitHubTheme.canvas-overlay;
+                }
 
                 HorizontalLayout {
                     width: parent.width;

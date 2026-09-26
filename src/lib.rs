@@ -467,12 +467,7 @@ fn ui(
 
     // ========= Router ========= //
     let lifecycle_hooks = app_lifecycle::hooks(app.get_current_route());
-    let settings_page_for_lifecycle = settings_page.clone();
-    lifecycle_hooks.on_transition(std::rc::Rc::new(move |window, event| {
-        if event.current == Route::Settings {
-            settings_page_for_lifecycle.reset_drafts_from_committed(window);
-        }
-    }));
+    settings_page::register_route_lifecycle(&lifecycle_hooks, &settings_page);
     let router = Router::new(app.as_weak(), lifecycle_hooks);
 
     let router_for_nav_index = router.clone();

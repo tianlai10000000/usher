@@ -231,9 +231,8 @@ export component GitHubTerminalDrawer inherits Rectangle {
         border-color: root.border-default;
         background: root.canvas-default;
         clip: true;
-        drop-shadow-blur: root.docked ? 0px : 20px;
-        drop-shadow-color: root.docked ? transparent : GitHubTheme.backdrop-subtle;
-        drop-shadow-offset-y: root.docked ? 0px : 6px;
+        // The production host is docked. A future floating presentation must
+        // use the fixed-cost elevation primitive instead of a live box shadow.
         opacity: root.docked ? 1 : (root.drawer-open ? 1 : 0);
         animate opacity { duration: 220ms; }
 

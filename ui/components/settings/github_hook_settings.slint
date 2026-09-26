@@ -220,6 +220,7 @@ component HookCodeEditor inherits Rectangle {
     in-out property <string> text;
     in property <bool> enabled: true;
     private property <bool> suppress-auto-scroll: false;
+    private property <bool> viewport-reset-pending: true;
     private property <length> content-padding-x: 12px;
     private property <length> content-padding-y: 10px;
     private property <bool> show-syntax: HookSettingsState.code-highlight-ready
@@ -229,6 +230,13 @@ component HookCodeEditor inherits Rectangle {
     in-out property <length> viewport-x <=> scroll-view.content-x;
     in-out property <length> viewport-y <=> scroll-view.content-y;
     callback edited(string);
+
+    init => {
+        // Each dialog open owns a fresh text/layout item tree. Keep the native
+        // cursor from revealing a stale/default offset while Rust hydrates the
+        // saved source on the following event-loop turns.
+        root.begin-viewport-reset();
+    }
 
     public function begin-viewport-reset() {
         root.suppress-auto-scroll = true;
@@ -240,6 +248,17 @@ component HookCodeEditor inherits Rectangle {
         root.viewport-x = 0px;
         root.viewport-y = 0px;
         root.suppress-auto-scroll = false;
+    }
+
+    code-viewport-reset := Timer {
+        // Saved source is injected after 24 ms. Finish after that binding and
+        // TextInput's cursor restoration have both run.
+        interval: 60ms;
+        running: root.viewport-reset-pending;
+        triggered => {
+            root.finish-viewport-reset();
+            root.viewport-reset-pending = false;
+        }
     }
 
     scroll-view := ScrollView {
@@ -315,8 +334,9 @@ component HookCodeEditor inherits Rectangle {
                 edited => { root.edited(self.text); }
             }
 
-            // Keep one native rich-text node mounted. Rebuilding dynamic token
-            // Text subtrees in the Settings factory can retain old glyph runs.
+            // Keep exactly one rich-text node for the active editor session.
+            // Token refreshes update this node; closing the dialog destroys the
+            // complete editor item tree and its renderer/layout caches.
             script-highlight := StyledText {
                 x: text-input.x;
                 y: text-input.y;
@@ -337,26 +357,19 @@ component HookCodeEditor inherits Rectangle {
 component GitHubHookEditorForm inherits Rectangle {
     in property <length> viewport-origin-x;
     in property <length> viewport-origin-y;
+    in property <bool> route-active: true;
     // The dialog keeps the test feedback strip fixed.  Reserve only the
     // remaining body height for the editor so the code viewport never extends
     // underneath that strip on compact windows.
     in property <length> available-height: 0px;
     private property <string> script-label: HookSettingsState.draft-language == 1 ? "JavaScript/TypeScript" : "Shell";
+    private property <bool> editor-active: root.route-active
+        && (HookSettingsState.dialog-mode == "add"
+            || HookSettingsState.dialog-mode == "edit");
     private property <length> form-section-gap: GitHubMetrics.stack-gap-normal;
     private property <length> code-section-offset: 236px + root.form-section-gap * 4;
     height: column.preferred-height;
     background: transparent;
-
-    // A TextEdit keeps its viewport while the surrounding dialog is hidden.
-    // Reset it whenever a different draft is opened so the native text and
-    // the bounded syntax projection always start from the same origin.
-    public function reset-code-viewport() {
-        script-input.begin-viewport-reset();
-    }
-
-    public function finish-code-viewport-reset() {
-        script-input.finish-viewport-reset();
-    }
 
     column := VerticalLayout {
         x: 0px;
@@ -422,13 +435,12 @@ component GitHubHookEditorForm inherits Rectangle {
                 ? max(26px, min(286px, root.available-height - root.code-section-offset))
                 : 286px;
             Text { x: 0px; y: 0px; width: parent.width; text: root.script-label; height: 20px; font-size: 14px; font-weight: 600; color: GitHubTheme.fg-default; }
-            Rectangle {
+            if root.editor-active: editor-frame := Rectangle {
                 x: 0px; y: 26px; width: parent.width; height: parent.height - 26px;
                 border-radius: GitHubMetrics.radius-medium;
                 border-width: 1px;
                 border-color: script-input.has-focus ? GitHubTheme.focus-outline : GitHubTheme.border-default;
                 background: GitHubTheme.control-input-bg;
-                clip: true;
                 script-input := HookCodeEditor {
                     x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px;
                     text <=> HookSettingsState.draft-script;
@@ -633,27 +645,12 @@ export component GitHubHookSettingsSection inherits Rectangle {
 
 export component GitHubHookDialog inherits Rectangle {
     background: transparent;
-    private property <string> editor-mode: HookSettingsState.dialog-mode;
-    changed editor-mode => {
-        form.reset-code-viewport();
-        code-viewport-reset.restart();
-    }
-    code-viewport-reset := Timer {
-        // TextInput applies its external `text` binding and restores the
-        // cursor on the following event-loop turn.  Reset after that
-        // synchronization so reopening a long script cannot inherit the
-        // previous editor's cursor/viewport position.
-        interval: 60ms;
-        running: false;
-        triggered => {
-            form.finish-code-viewport-reset();
-        }
-    }
+    in property <bool> route-active: true;
     private property <bool> deleting: HookSettingsState.dialog-mode == "delete";
     private property <bool> clearing: HookSettingsState.dialog-mode == "clear-history";
     private property <bool> confirming: root.deleting || root.clearing;
     frame := GitHubDialog {
-        dialog-visible: HookSettingsState.dialog-mode != "";
+        dialog-visible: root.route-active && HookSettingsState.dialog-mode != "";
         title: root.clearing ? I18n.hooks-clear-history : root.deleting ? I18n.hooks-delete-title
             : HookSettingsState.dialog-mode == "add" ? I18n.hooks-new : I18n.hooks-edit;
         dialog-width: root.confirming ? 480px : 680px;
@@ -690,6 +687,7 @@ export component GitHubHookDialog inherits Rectangle {
                 // nesting and steal macOS trackpad gestures from the editor.
                 form := GitHubHookEditorForm {
                     x: 16px; y: 16px; width: parent.width - 32px;
+                    route-active: root.route-active;
                     // The feedback row supplies the lower 16px safe area, so
                     // reserve body padding only above the form here.
                     available-height: parent.height - GitHubMetrics.stack-padding-normal;

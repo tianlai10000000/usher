@@ -5,6 +5,7 @@ import { GitHubTooltip } from "../github_tooltip.slint";
 import { GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint";
 import { GitHubActionListItem, GitHubActionMenu } from "../github_action_menu.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
+import { GitHubCompactElevation } from "../github_elevation.slint";
 import { GitHubSpinner } from "../github_spinner.slint";
 import { I18n } from "@i18n";
 
@@ -1346,13 +1347,22 @@ export component GitHubFileDiffStat inherits Rectangle {
 export component GitHubCodeRenderingIndicator inherits Rectangle {
     width: 166px;
     height: 36px;
-    border-radius: 8px;
-    border-width: 1px;
-    border-color: GitHubTheme.border-default;
-    background: GitHubTheme.canvas-overlay;
-    drop-shadow-blur: 14px;
-    drop-shadow-color: GitHubTheme.shadow-floating-medium;
-    drop-shadow-offset-y: 4px;
+    background: transparent;
+
+    GitHubCompactElevation {
+        target-width: root.width;
+        target-height: root.height;
+        shadow-color: GitHubTheme.shadow-floating-medium;
+    }
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: GitHubTheme.border-default;
+        background: GitHubTheme.canvas-overlay;
+    }
 
     HorizontalLayout {
         width: parent.width;

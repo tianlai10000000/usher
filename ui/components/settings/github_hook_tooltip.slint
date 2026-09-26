@@ -1,7 +1,7 @@
 import { I18n } from "@i18n";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubTooltipSurface } from "../github_tooltip.slint";
-import { GitHubFloatingOverlayHost } from "../github_floating_overlay.slint";
+import { GitHubTransientFloatingOverlayHost } from "../github_floating_overlay.slint";
 import { GitHubTooltipAlignment } from "../../state/tooltip_overlay_state.slint";
 
 export enum HookTooltipKind { None, Edit, Delete, Stop, ViewRun, ClearHistory }
@@ -189,8 +189,8 @@ export component GitHubHookTooltipOverlay inherits Rectangle {
     private property <int> observed-lease: 0;
 
     // One full-window locator serves five separately mounted literal surfaces.
-    floating-host := GitHubFloatingOverlayHost {
-        visible: HookTooltipState.kind != HookTooltipKind.None;
+    floating-host := GitHubTransientFloatingOverlayHost {
+        active: HookTooltipState.kind != HookTooltipKind.None;
         anchor-x: HookTooltipState.anchor-x; anchor-y: HookTooltipState.anchor-y;
         anchor-width: HookTooltipState.anchor-width; anchor-height: HookTooltipState.anchor-height;
         floating-width: HookTooltipState.kind == HookTooltipKind.Edit ? edit-surface.width

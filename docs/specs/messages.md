@@ -34,12 +34,16 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
   The independently compiled page owns a dedicated enum-only
   `MessageTooltipOverlayState` and root-layer
   `GitHubMessageTooltipOverlayHost`. Delegates publish only an action kind and
-  anchor rectangle; three separate factory-root surfaces own the literal
+  anchor rectangle; the page Portal owns one `GitHubTransientFloatingOverlayHost`
+  plus three permanently mounted factory-root surfaces for the literal
   **Mark as read**, **Mark as unread**, and **Delete** labels. This prevents
   both delegate string aliasing and stale preferred-width reuse while retaining
   the shared anchor-based flip/shift/size geometry without reaching into
-  `MainWindow` globals. Rows remain clipped list content while only the
-  page-owned surface escapes that clip. Filter tab badges bind to integer
+  `MainWindow` globals. The action kind selects one Surface with `visible`; the
+  transient host receives `active=false` for `None` and after route dismissal,
+  which hides its private full-window geometry tree. The Portal never creates a
+  host per action or hides a host with opacity. Rows remain clipped list content
+  while only the page-owned surface escapes that clip. Filter tab badges bind to integer
   `count` inputs on
   `GitHubSegmentedControlItem` (rendered as separate Text nodes, not one
   concatenated caption). The page header status sentence is a complete string
@@ -74,10 +78,14 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
   行动作使用写死 SVG 和 Tooltip 字面量文案，避免动态列表 delegate 串用图标或文案
   binding。独立编译页面拥有专用、只传枚举的
   `MessageTooltipOverlayState` 与根层 `GitHubMessageTooltipOverlayHost`。Delegate
-  只发布动作类型和锚点矩形；页面根部用三个独立 surface 分别持有 **Mark as read**、
+  只发布动作类型和锚点矩形；页面 Portal 只拥有一个
+  `GitHubTransientFloatingOverlayHost`，页面根部三个常驻独立 Surface 分别持有 **Mark as read**、
   **Mark as unread** 和 **Delete** 字面量，既避免 delegate 字符串串用，也避免复用旧的
   preferred-width。定位仍复用共享的锚点式 flip/shift/size 算法，但不读取
-  `MainWindow` global。列表行继续裁剪内容，只有页面根层 surface 逃逸该裁剪。筛选
+  `MainWindow` global。动作类型通过 `visible` 选择一个 Surface；类型为 `None` 或离开
+  路由时 transient host 收到 `active=false`，由它隐藏私有全窗口定位树。Portal 禁止为
+  每个动作创建独立宿主，也禁止用 opacity 隐藏宿主。列表行继续裁剪内容，只有页面根层
+  Surface 逃逸该裁剪。筛选
   Tab 徽标绑定
   `GitHubSegmentedControlItem` 的整型 `count`（控件内用独立 Text 节点渲染，
   禁止拼成单一字符串）。页头状态句由 Rust 在每次快照中下发完整字符串，原因
@@ -367,6 +375,11 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
   reports `active=false projected_rows=0`; repeat enter/leave and verify the
   slots retain no message payloads while inactive and rehydrate before the
   first visible frame after re-entry.
+- Alternate Mark read, Mark unread, and Delete tooltips across rows, then leave
+  Messages and repeat Messages-to-Home 20 times. Verify one fixed Surface at a
+  time, a false transient-host `active` state while idle, and no sustained
+  per-cycle RSS/physical-footprint growth. Run the static UI policy positive and
+  negative fixtures so raw or opacity-hidden full-window hosts remain blocked.
 - From a non-Messages route, publish a permanent Banner, delete or Clear all its
   Inbox row, leave Messages, and verify the Banner is gone from the queue.
 - Queue three-plus Banners off Messages, confirm only the head shows with a
@@ -407,6 +420,10 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
 - 启用内存诊断后离开 Messages，确认生命周期日志显示
   `active=false projected_rows=0`；重复进入/离开，确认非活动期间所有槽位消息数据
   为空，并在重新进入后的首个可见帧前完成 hydration。
+- 跨行交替悬浮已读、未读和删除动作，再离开 Messages 并执行 20 次 Messages→Home。
+  确认同一时刻仅一个固定 Surface 可见、闲置时 transient host 的 `active=false`，且
+  RSS/physical footprint 不随轮次持续增长。运行 UI policy 正反例，确保底层全窗口宿主
+  或 opacity 隐藏宿主无法重新进入 Feature。
 - 在非 Messages 路由发布一条常驻 Banner，删除或 Clear all 对应 Inbox 行后离开
   Messages，确认 Banner 已从队列消失。
 - 在非 Messages 路由连续排队 3 条以上 Banner，确认只显示队首且出现 Dismiss all，

@@ -75,8 +75,11 @@ language switch, including an already-open editor and picker. / 事件/分类标
   and scrollable form. Cancel/Close discard unsaved drafts; Save closes only
   after successful persistence. Validation and test errors remain in the dialog.
   Busy operations disable closing; a running test can be stopped. Delete requires
-  a confirmation dialog and preserves execution history. The form stays mounted
-  across dialog opens to preserve the Settings factory binding contract.
+  a confirmation dialog and preserves execution history. The Settings factory,
+  Dialog shell, form bindings, and fixed Shell/Node leaves stay mounted. The
+  full source-editor item tree is a separate active-session owner: it exists only
+  while the Settings route is active and an Add/Edit dialog is open, and is
+  destroyed on close or route exit.
 - Project Add/Edit persists project-local `hooks_enabled` and explicit `hook_ids`
   in the Project Store. Legacy records derive the missing mode from existing IDs;
   new projects default off and newly created Hooks never opt in existing projects.
@@ -138,14 +141,20 @@ language switch, including an already-open editor and picker. / 事件/分类标
   newline in the source editor. Busy states block save/close shortcuts;
   destructive confirmation dialogs do not use the save shortcut.
 - The multiline source editor owns its vertical viewport, so wheel input over
-  the code surface scrolls the source without moving the dialog form. A single
-  permanently mounted native `StyledText` supplies Primer syntax roles (red
+  the code surface scrolls the source without moving the dialog form. One native
+  `StyledText` per active editor session supplies Primer syntax roles (red
   keywords, blue strings/constants, purple entities and muted comments); no
   per-token UI nodes are created. Highlighting is bounded to at most 256 lines,
   32 KiB of source and 2,048 token runs. If a script exceeds any bound or parsed
   rich text differs from the source, native plain text remains fully readable.
   Native text and rich text share the same monospace font and standard
   ScrollView content geometry, including the full first/last lines and padding.
+  The rounded editor frame paints only its background, border and focus state;
+  it never clips the complete document subtree. The inner ScrollView owns the
+  rectangular viewport clip. The enclosing shared Dialog consumes the
+  repository-owned fixed-source `GitHubDialogElevation` nine-slice profile.
+  Repository policy rejects raw Slint `drop-shadow-*` for every application UI
+  surface, including this feature.
   Native input stays above rich text and owns pointer/editing interaction. Its
   text retains alpha 1/255 during highlighting, so FemtoVG does not skip the
   built-in 2 px cursor and selection. macOS uses an independent selection-colored
@@ -154,8 +163,15 @@ language switch, including an already-open editor and picker. / 事件/分类标
   interactive rich text above the input where it consumes code-surface clicks.
   Opening paints the Dialog before hydrating saved source after a 24 ms timer;
   a reusable 90 ms debounce prepares syntax colors. Editing and runtime changes
-  immediately clear stale rich text. Closing clears the projection and all
-  temporary source drafts; there is no resident highlighter engine/language cache.
+  immediately clear stale rich text. Closing or leaving Settings destroys the
+  complete editor-owned `ScrollView`/`TextInput`/`StyledText` tree, invalidating
+  its renderer and text-layout owners; reopening creates a fresh tree with its
+  viewport at the top. Closing also clears the projection and all temporary
+  source drafts. Route exit makes the Dialog and its main-window visibility
+  mirror inactive, dismisses both factory-local Tooltip states and Select, and
+  prevents Settings shortcuts from reaching the hidden factory. It does not
+  cancel a running Hook test. There is no resident highlighter engine/language
+  cache.
 - `HookStateFacade` hides `usher-state-store`. Typed actions execute on workers;
   automatic commit persistence atomically writes private `hooks.json` in the
   configuration directory. The file contains definitions and the latest 64 run
@@ -235,17 +251,27 @@ language switch, including an already-open editor and picker. / 事件/分类标
   选项只随目录变化刷新。仅缓存一个有界活动日志尾部并复用未变化的解析行，切换 run
   丢弃旧解析缓存。运行时切换语言更新原 Job 行文案，不替换日志 model。
 - 多行源码编辑器拥有独立垂直视口，代码区上的滚轮直接滚动源码而不移动弹窗表单。
-  单个常驻原生 `StyledText` 提供 Primer 语义色（红色关键词、蓝色字符串/常量、紫色
+  每个活跃编辑会话只有一个原生 `StyledText`，用于提供 Primer 语义色（红色关键词、
+  蓝色字符串/常量、紫色
   类型及灰色注释），不创建逐 token UI 节点。高亮限制为最多 256 行、32 KiB 源码和
   2,048 个 token run；超过任一上限或解析后的富文本与源码不一致时，由原生编辑器
   以纯文本完整显示。原生文本与富文本共用相同等宽字体和标准 ScrollView 内容几何，
-  包括完整首尾行及内边距。原生输入始终在富文本上方拥有指针与编辑交互，高亮时
-  保留 1/255 文字 alpha，避免 FemtoVG 跳过原生 2 px 光标与选区。macOS 使用独立
+  包括完整首尾行及内边距。
+  编辑器圆角外框只绘制背景、边框和焦点状态，不裁剪完整文档子树；内部 ScrollView
+  负责矩形视口裁剪。外层共享 Dialog 使用仓库统一维护的固定源
+  `GitHubDialogElevation` nine-slice profile；仓库策略禁止包括本功能在内的所有应用 UI
+  声明 raw Slint `drop-shadow-*`。
+  原生输入始终在富文本上方拥有指针与编辑交互，高亮时保留 1/255 文字 alpha，
+  避免 FemtoVG 跳过原生 2 px 光标与选区。macOS 使用独立
   选区色光标；光标跟随文字色的平台聚焦时使用不透明原生纯文本，失焦后恢复高亮。
   禁止使用零 alpha，或把会接收代码点击的富文本放在输入上方。打开时先绘制
   Dialog，24 ms Timer 后注入已保存源码，
-  复用 90 ms debounce 准备语法颜色。编辑或切换运行方式立即清除旧富文本；关闭时
-  清空投影和各运行方式临时草稿，不常驻高亮引擎或语言缓存。
+  复用 90 ms debounce 准备语法颜色。编辑或切换运行方式立即清除旧富文本；关闭弹窗
+  或离开 Settings 时销毁编辑器拥有的完整 `ScrollView`/`TextInput`/`StyledText` 子树，
+  使 renderer 与文本布局 owner 失效；再次打开时创建新子树并从顶部开始。关闭弹窗还会
+  清空投影和各运行方式临时草稿。离开路由时 Dialog 及其主窗口可见性镜像切为非活动，
+  同时关闭 factory 内两类 Tooltip 与 Select，并阻止 Settings 快捷键进入隐藏 factory；
+  仍在运行的 Hook 测试不会取消。不常驻高亮引擎或语言缓存。
 
 ## Events and lifecycle / 事件与生命周期
 

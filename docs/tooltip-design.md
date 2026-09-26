@@ -10,7 +10,7 @@
 > 当前实现复用 Floating UI 的 offset/flip(bestFit)/shift/size 思路，但保留
 > Slint ComponentFactory 的独立 global 边界。
 
-日期：2026-08-04，更新于 2026-08-07 · Slint 1.17.1
+日期：2026-08-04，更新于 2026-09-25 · Slint 1.18
 
 ## 0. 采用状态 / Adoption status
 
@@ -159,8 +159,10 @@ global 实例。`MainWindow` 与 Settings factory 各挂一个通用根层
 继续遵守此前实测约束：动作图标写死在叶子组件，行内锚点只发布
 `MessageTooltipKind` 和矩形，不把任何字符串属性穿过列表 delegate；页面根部唯一的
 `GitHubMessageTooltipOverlayHost` 为三个动作分别挂载独立的字面量 surface。所有 host
-复用同一个 `GitHubFloatingOverlayHost` 几何算法。这样不会重现属性串台，也不会被行
-`clip` 或下一行背景遮挡。
+通过 `GitHubTransientFloatingOverlayHost` 复用同一个几何算法和活动生命周期。底层
+全窗口几何树为私有实现；每个持久 Portal 只拥有一个 transient host，并通过 `active`
+控制内部可见性，禁止按动作复制宿主或用 opacity 隐藏宿主。这样不会重现属性串台，
+也不会被行 `clip` 或下一行背景遮挡，并避免稳定 factory 保留多个透明全窗口定位层。
 
 当前独立 factory 清单只有 Settings 与 Messages。以后新增独立生成 crate/page 时，
 必须在该 factory 的根组件挂载自己的 portal；普通功能分包继续使用 `MainWindow` 的

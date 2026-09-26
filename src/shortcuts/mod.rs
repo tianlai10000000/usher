@@ -351,7 +351,8 @@ pub(crate) fn handle_key_pressed(
     shift: bool,
     secondary: bool,
 ) -> bool {
-    if ui.get_settings_hook_dialog_open()
+    if ui.get_current_route() == Route::Settings
+        && ui.get_settings_hook_dialog_open()
         && ui.invoke_settings_hook_dialog_key_pressed(text.into(), primary, alt, shift, secondary)
     {
         return true;

@@ -18,13 +18,15 @@ compiled ComponentFactory pages. `AGENTS.md` makes this a repository-wide gate.
 | 靠窗口边缘或滚动区被裁切 | Tooltip 在带 clip 的按钮、行、ScrollView 内绘制 | 根窗口或所属 factory 的全窗口 Portal，复用 flip/shift/size |
 | 点击、关闭弹窗或离开页面后残留 | Anchor 消失，未释放所有权或失去续租 | 点击/关闭主动 dismiss，保留 lease 过期兜底 |
 | 层级提高仍然被裁切 | z 只改变当前合成层，不能越过祖先 clip | 修复 Portal 挂载和视口坐标，不堆叠更大的 z |
-| 首访 Settings 后返回 Home 仍保留大块图形内存 | 五个全窗口 Hook 定位宿主以 opacity 隐藏，仍可能各自形成离屏层 | 一个常驻全窗口定位宿主，按动作显示独立固定文案 Surface；无提示时隐藏宿主 |
+| 首访持久 factory 页面后返回 Home 仍保留大块图形内存 | 每个固定动作各有一个全窗口定位宿主，且以 opacity 隐藏，仍可能分别形成离屏层 | 每个 Portal 只用一个 `GitHubTransientFloatingOverlayHost`；用 `active` 控制其内部定位树，按动作显示独立固定文案 Surface |
 
 History: UI-033 (ancestor clipping), UI-103 (factory label/measurement aliasing),
-UI-111 (literal leaf binding isolation), UI-124 (Hook recurrence), and UI-140
-(full-window opacity layers) in
+UI-111 (literal leaf binding isolation), UI-124 (Hook recurrence), UI-140
+(Settings full-window opacity layers), and UI-147 (the same structural risk in
+Messages) in
 [`bug-history.md`](../../bug-history.md). These are observed application/runtime
-failures, not proof that every Slint string binding is broken. Fixed factory
+failures and confirmed source-level risks, not proof that every Slint string
+binding is broken. Fixed factory
 actions must use the isolated path below; do not assume the generic portal's
 alternating nodes solve the factory case.
 
@@ -34,7 +36,7 @@ alternating nodes solve the factory case.
 | --- | --- |
 | 普通主窗口树中的标准图标按钮 | `GitHubIconButton` 的 `tooltip-text`，宿主 `GitHubTooltipOverlayHost` |
 | 普通非按钮锚点 | `GitHubTooltip` 定位器 + 根层 `GitHubTooltipOverlayHost` |
-| 独立 factory 或复用列表中的固定操作 | 独立固定操作叶子 + action-kind 状态 + 根层常驻固定文案 Surface |
+| 独立 factory 或复用列表中的固定操作 | 独立固定操作叶子 + action-kind 状态 + 一个根层 `GitHubTransientFloatingOverlayHost` + 常驻固定文案 Surface |
 | 键位提示 | 从 `src/shortcuts/` 注册表取标签，执行与展示共用来源 |
 
 Checked implementation references:
@@ -43,18 +45,22 @@ Checked implementation references:
   mounted hit target, keyboard focus, click dismissal, `tooltip-active`.
 - [`GitHubTooltip`](../../ui/components/github_tooltip.slint): locator, lease,
   shared themed surface and matching text measurement.
-- [`GitHubFloatingOverlayHost`](../../ui/components/github_floating_overlay.slint):
-  content-neutral placement, offset/flip/shift and pixel snapping.
+- [`GitHubTransientFloatingOverlayHost`](../../ui/components/github_floating_overlay.slint):
+  the public lifecycle and placement boundary for persistent root portals. Its
+  `active` input alone controls the private full-window geometry tree's
+  visibility while retaining content-neutral offset/flip/shift and pixel snapping.
+  Feature code must not instantiate that private geometry tree directly.
 - [`GitHubTooltipOverlayHost`](../../ui/components/github_tooltip_overlay.slint):
   generic root portal; **not the fixed-action factory isolation recipe**.
 - [`Message actions`](../../ui/components/messages/github_message_actions.slint),
   [`Message Tooltip portal`](../../ui/components/messages/github_message_tooltip.slint),
-  [`Message state`](../../ui/state/message_tooltip_overlay_state.slint): existing
-  literal action/enum-only portal pattern.
+  [`Message state`](../../ui/state/message_tooltip_overlay_state.slint): literal
+  action/enum-only portal with one transient host and three fixed surfaces.
 - [`Hook actions and portal`](../../ui/components/settings/github_hook_tooltip.slint),
   [`Settings root`](../../ui/views/settings.slint): fixed action types, literal
-  surfaces and one full-window positioning host inside the independent Settings
-  factory. The five surfaces remain instantiated; the host is hidden when idle.
+  surfaces and one transient full-window positioning host inside the independent
+  Settings factory. The five surfaces remain instantiated; `active` is false
+  while idle.
 
 ## Factory recipe / 工厂内正确做法
 
@@ -68,12 +74,12 @@ Checked implementation references:
    with `show-tooltip: false`; do not leave two tooltip publishers active.
 4. Publish only action identity and the complete anchor rectangle. Text remains
    an I18n binding at a fixed root Surface. Each action owns separate, permanently
-   mounted measure and paint nodes. For Settings Hooks, select each fixed Surface
-   with `visible`, and hide the single full-window positioning host when no
-   action is active. In that Hook portal, do not apply opacity to the host,
-   remount text with `if kind`, or share a `kind ? label-a : label-b` measured Surface.
-   Other factory portals require their own measurement before changing hosts.
-5. Use `GitHubFloatingOverlayHost` for viewport positioning. Pass the actual
+   mounted measure and paint nodes. Every fixed-action Portal owns exactly one
+   `GitHubTransientFloatingOverlayHost`; set `active` from whether an action kind
+   is claimed and select the matching fixed Surface with `visible`. Do not apply
+   opacity or `visible` to the transient host, create one host per action, remount
+   text with `if kind`, or share a `kind ? label-a : label-b` measured Surface.
+5. Use the transient host for viewport positioning. Pass the actual
    window bounds, root-relative anchor geometry, and matching measured surface
    dimensions. Labels must wrap within the viewport, including longer locales.
    Default to centered placement over the anchor and center text inside the
@@ -88,8 +94,10 @@ Checked implementation references:
 中文执行要点：先确认 factory 根及 clip；不同动作使用不同固定叶子；复用按钮外观
 但关闭通用 Tooltip；跨 delegate 只传动作身份与锚点几何；文案和测量在根层每动作
 独立常驻；使用共享浮层定位；离开、点击、关闭和卸载均检查失效与续租。
-Settings Hook 只保留一个全窗口定位宿主；五种固定文案 Surface 分别常驻，按动作切换
-可见性；无提示时隐藏宿主，不对全窗口宿主施加 opacity。其他 factory portal 须单独实测。
+每个固定动作 Portal 只保留一个 `GitHubTransientFloatingOverlayHost`；固定文案 Surface
+分别常驻并按动作切换可见性，无提示时把 `active` 设为 false。Feature 禁止直接使用底层
+全窗口几何宿主，也不得给 transient host 设置 opacity 或 visible。Settings 与 Messages
+均遵守该结构，其他 factory Portal 仍须单独完成测量和验收。
 
 ## Prohibited fixes / 禁止的修法
 
@@ -98,6 +106,8 @@ Settings Hook 只保留一个全窗口定位宿主；五种固定文案 Surface 
 - Do not mount Tooltip surfaces inside scrolling/clipped rows or dialogs.
 - Do not change vendored Material sources.
 - Do not recreate hover hit targets conditionally.
+- Do not instantiate the private full-window geometry host from a feature, create
+  one transient host per action, or override a transient host's opacity/visibility.
 - Do not infer correctness from accessible labels alone: accessibility, painted
   text, measured width and action callback must agree.
 - Do not report resolution based only on `cargo check` or one stationary hover.
@@ -119,13 +129,23 @@ checks at handoff; do not label them passed.
 | 打开/关闭/再次打开 Dialog，测试后返回列表 | 查看流程、停止、编辑、删除文案不相互污染 |
 | Tab 聚焦、Enter/Space 点击、禁用/忙碌状态 | 状态与交互一致，点击后的提示正确撤销 |
 | 多语言重新切换后重复 hover | 不保留旧语言或旧宽度 |
+| 无提示、离开路由、重新进入并重复 20 次 | Portal 的 `active` 归零，内部全窗口定位树不可见；无逐轮持续增长 |
 
 Add focused regressions for action identity, source ownership and bounds where
 possible. Compile the full root UI, then inspect the **real compiled factory**
 on the native app, using isolated test configuration. Testing backend assertions
 cannot by themselves prove native ComponentFactory text painting is correct.
-Run the repository checks from `AGENTS.md`, and record recurring defects in the
-bug ledger with their regression coverage.
+Run the repository checks from `AGENTS.md`, including `scripts/check-ui-policy.sh`.
+That gate must reject feature-owned raw geometry hosts, per-host opacity, and
+direct opacity/visibility overrides on the transient facade while accepting
+opacity on a nested content-sized Surface. It must also pin the facade to exactly
+one private geometry instance whose visibility is `root.active`, and constrain
+the generic dynamic-tooltip exception to exactly two mutually exclusive claim
+slots. Keep positive and negative fixtures in
+`scripts/tests/test_quality_checks.py`, and record recurring defects in the bug
+ledger with their regression coverage.
 
 关键区别：单元测试负责身份、状态和几何，真实 native factory 截图负责最终绘制。
 两者都要检查；验收时记录实际执行范围，未验证的平台或场景明确列出。
+门禁还必须锁定 facade 内部只有一个私有几何实例且 `visible: root.active`，通用动态
+Tooltip 的例外只能是两个按 claim 奇偶互斥的条件槽。

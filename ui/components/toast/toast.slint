@@ -1,4 +1,5 @@
 import { GitHubIconButton } from "../button/github_icon_button.slint";
+import { GitHubCompactElevation } from "../github_elevation.slint";
 import { GitHubSpinner } from "../github_spinner.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { TransientOverlayState } from "../../state/transient_overlay_state.slint";
@@ -90,7 +91,7 @@ export component GitHubToast inherits Rectangle {
         wrap: no-wrap;
     }
 
-    if root.toast-visible: toast-card := Rectangle {
+    if root.toast-visible: toast-host := Rectangle {
         // Primer Banner is a three-column grid. The leading visual and the
         // dismiss control occupy their own cells; the content cell gets a
         // 20px text line box for every line. Slint's native line-height factor
@@ -123,88 +124,97 @@ export component GitHubToast inherits Rectangle {
             : root.position == "bottom"
                 ? parent.height - self.height - root.viewport-margin
                 : (parent.height - self.height) / 2;
-        background: root.semantic-background;
-        border-width: GitHubMetrics.border-thin;
-        border-color: root.semantic-border;
-        border-radius: GitHubMetrics.radius-medium;
-        drop-shadow-blur: GitHubMetrics.size-12;
-        drop-shadow-color: GitHubTheme.shadow-floating-medium;
-        drop-shadow-offset-y: GitHubMetrics.size-2;
+        background: transparent;
 
-        if root.type == "loading": GitHubSpinner {
-            x: GitHubMetrics.size-16;
-            y: parent.leading-visual-y;
-            spinner-size: GitHubMetrics.icon-medium;
-            foreground: root.semantic-foreground;
+        GitHubCompactElevation {
+            target-width: toast-host.width;
+            target-height: toast-host.height;
+            shadow-color: GitHubTheme.shadow-floating-medium;
         }
 
-        if root.type != "loading": Image {
-            x: GitHubMetrics.size-16;
-            y: parent.leading-visual-y;
-            width: GitHubMetrics.icon-medium;
-            height: GitHubMetrics.icon-medium;
-            source: root.type == "success"
-                ? @image-url("../../assets/icons/octicon-check-16.svg")
-                : root.type == "error"
-                    ? @image-url("../../assets/icons/octicon-alert-16.svg")
-                    : @image-url("../../assets/icons/octicon-info-16.svg");
-            colorize: root.semantic-foreground;
-        }
+        toast-card := Rectangle {
+            width: parent.width;
+            height: parent.height;
+            background: root.semantic-background;
+            border-width: GitHubMetrics.border-thin;
+            border-color: root.semantic-border;
+            border-radius: GitHubMetrics.radius-medium;
 
-        message-label := Text {
-            x: GitHubMetrics.size-44;
-            y: parent.message-y;
-            width: parent.width - self.x
-                - (root.type == "loading"
-                    ? GitHubMetrics.size-16
-                    : GitHubMetrics.size-48);
-            height: parent.message-display-height;
-            text: root.message;
-            font-size: GitHubMetrics.text-medium;
-            color: GitHubTheme.fg-default;
-            wrap: word-wrap;
-            line-height-factor: parent.banner-text-line-height-factor;
-            vertical-alignment: parent.message-is-multiline ? top : center;
-        }
+            if root.type == "loading": GitHubSpinner {
+                x: GitHubMetrics.size-16;
+                y: toast-host.leading-visual-y;
+                spinner-size: GitHubMetrics.icon-medium;
+                foreground: root.semantic-foreground;
+            }
 
-        message-line-measure := Text {
-            visible: false;
-            text: "Ag";
-            font-size: GitHubMetrics.text-medium;
-            wrap: no-wrap;
-        }
+            if root.type != "loading": Image {
+                x: GitHubMetrics.size-16;
+                y: toast-host.leading-visual-y;
+                width: GitHubMetrics.icon-medium;
+                height: GitHubMetrics.icon-medium;
+                source: root.type == "success"
+                    ? @image-url("../../assets/icons/octicon-check-16.svg")
+                    : root.type == "error"
+                        ? @image-url("../../assets/icons/octicon-alert-16.svg")
+                        : @image-url("../../assets/icons/octicon-info-16.svg");
+                colorize: root.semantic-foreground;
+            }
 
-        message-content-measure := Text {
-            visible: false;
-            width: message-label.width;
-            text: root.message;
-            font-size: GitHubMetrics.text-medium;
-            wrap: word-wrap;
-            line-height-factor: parent.banner-text-line-height-factor;
-        }
+            message-label := Text {
+                x: GitHubMetrics.size-44;
+                y: toast-host.message-y;
+                width: parent.width - self.x
+                    - (root.type == "loading"
+                        ? GitHubMetrics.size-16
+                        : GitHubMetrics.size-48);
+                height: toast-host.message-display-height;
+                text: root.message;
+                font-size: GitHubMetrics.text-medium;
+                color: GitHubTheme.fg-default;
+                wrap: word-wrap;
+                line-height-factor: toast-host.banner-text-line-height-factor;
+                vertical-alignment: toast-host.message-is-multiline ? top : center;
+            }
 
-        if root.type != "loading": GitHubIconButton {
-            x: parent.width - GitHubMetrics.size-40;
-            y: GitHubMetrics.size-8;
-            icon: @image-url("../../assets/icons/octicon-x-16.svg");
-            tooltip-text: I18n.common-dismiss;
-            show-tooltip: false;
-            tooltip-align-right: true;
-            tooltip-above: root.position != "top";
-            foreground: GitHubTheme.fg-muted;
-            clicked => { root.dismiss(); }
-        }
+            message-line-measure := Text {
+                visible: false;
+                text: "Ag";
+                font-size: GitHubMetrics.text-medium;
+                wrap: no-wrap;
+            }
 
-        TouchArea {
-            width: parent.width - (root.type == "loading"
-                ? 0px
-                : GitHubMetrics.size-40);
-            height: 100%;
-            enabled: root.close-on-click;
-            mouse-cursor: self.enabled ? pointer : default;
-            clicked => {
-                if root.close-on-click {
-                    root.dismiss();
+            message-content-measure := Text {
+                visible: false;
+                width: message-label.width;
+                text: root.message;
+                font-size: GitHubMetrics.text-medium;
+                wrap: word-wrap;
+                line-height-factor: toast-host.banner-text-line-height-factor;
+            }
+
+            if root.type != "loading": GitHubIconButton {
+                x: parent.width - GitHubMetrics.size-40;
+                y: GitHubMetrics.size-8;
+                icon: @image-url("../../assets/icons/octicon-x-16.svg");
+                tooltip-text: I18n.common-dismiss;
+                show-tooltip: false;
+                tooltip-align-right: true;
+                tooltip-above: root.position != "top";
+                foreground: GitHubTheme.fg-muted;
+                clicked => { root.dismiss(); }
+            }
+
+            TouchArea {
+                width: parent.width - (root.type == "loading"
+                    ? 0px
+                    : GitHubMetrics.size-40);
+                height: 100%;
+                enabled: root.close-on-click;
+                mouse-cursor: self.enabled ? pointer : default;
+                clicked => {
+                    if root.close-on-click {
+                        root.dismiss();
+                    }
                 }
             }
         }

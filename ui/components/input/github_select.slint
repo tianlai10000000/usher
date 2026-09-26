@@ -1,6 +1,6 @@
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { GitHubActionMenu, GitHubActionListItem } from "../github_action_menu.slint";
-import { GitHubFloatingOverlayHost } from "../github_floating_overlay.slint";
+import { GitHubTransientFloatingOverlayHost } from "../github_floating_overlay.slint";
 import { GitHubTooltipPlacement, GitHubTooltipAlignment } from "../../state/tooltip_overlay_state.slint";
 
 export struct GitHubSelectGeometry { x: length, y: length, width: length, height: length }
@@ -127,7 +127,8 @@ export component GitHubSelectPopup inherits FocusScope {
         return reject;
     }
 
-    GitHubFloatingOverlayHost {
+    GitHubTransientFloatingOverlayHost {
+        active: root.open;
         x: 0px;
         y: 0px;
         width: root.width;

@@ -4,6 +4,8 @@ import { I18n } from "@i18n";
 import { GitHubScrollView } from "../components/github_scroll_view.slint";
 import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
 import { GitHubTooltipOverlayHost } from "../components/github_tooltip_overlay.slint";
+import { TooltipOverlayState } from "../state/tooltip_overlay_state.slint";
+export { TooltipOverlayState } from "../state/tooltip_overlay_state.slint";
 import { GitHubHookTooltipOverlay, HookTooltipState } from "../components/settings/github_hook_tooltip.slint";
 export { HookTooltipState, HookTooltipKind } from "../components/settings/github_hook_tooltip.slint";
 import {
@@ -13,6 +15,7 @@ import {
 import { GitHubSettingsPane } from "../components/settings/github_settings_layout.slint";
 import { ManifestInterfaceLanguagePickerOverlay, ManifestReplyLanguagePickerOverlay } from "@language-picker";
 import { GitHubSelectState, GitHubSelectPopup, GitHubSelectOption } from "../components/input/github_select.slint";
+export { GitHubSelectState } from "../components/input/github_select.slint";
 import { AiReviewRuleItem } from "@ai-review-settings";
 export { AiReviewRuleItem } from "@ai-review-settings";
 export { HookSettingsState, HookChoice, HookEventChoice, HookSummary, HookLanguageDraft, HookCodeToken, HookCodeLine } from "../components/settings/github_hook_settings.slint";
@@ -30,6 +33,17 @@ export component GitHubSettingsPage inherits Window {
     in-out property <length> window-height: root.viewport-height;
     in-out property <length> content-origin-x: 0px;
     in-out property <length> content-origin-y: 0px;
+    // The cross-crate factory remains mounted after its first visit. The host
+    // therefore publishes route activity explicitly so heavyweight transient
+    // descendants can release their item trees while Settings is hidden.
+    in property <bool> route-active: true;
+    changed route-active => {
+        if !root.route-active {
+            HookTooltipState.dismiss();
+            TooltipOverlayState.dismiss-all();
+            GitHubSelectState.close(false);
+        }
+    }
     width: root.window-width;
     height: root.window-height;
     background: transparent;
@@ -48,7 +62,8 @@ export component GitHubSettingsPage inherits Window {
         GitHubSelectState.close(false);
         HookSettingsState.dialog-mode = "";
     }
-    private property <bool> hook-dialog-open: HookSettingsState.dialog-mode != "";
+    private property <bool> hook-dialog-open:
+        root.route-active && HookSettingsState.dialog-mode != "";
     changed hook-dialog-open => { HookTooltipState.dismiss(); root.hook-dialog-visibility-changed(root.hook-dialog-open); }
     callback check-update();
     callback simulate-crash();
@@ -439,7 +454,10 @@ export component GitHubSettingsPage inherits Window {
         }
     }
 
-    GitHubHookDialog { x: 0px; y: 0px; width: root.width; height: root.height; z: 8000; }
+    GitHubHookDialog {
+        x: 0px; y: 0px; width: root.width; height: root.height; z: 8000;
+        route-active: root.route-active;
+    }
     ManifestInterfaceLanguagePickerOverlay { z: 9000; }
     ManifestReplyLanguagePickerOverlay { z: 9000; }
     GitHubHookSettingsOverlay { width: parent.width; height: parent.height; z: 9000; }

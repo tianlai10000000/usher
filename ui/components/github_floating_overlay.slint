@@ -3,9 +3,10 @@ import {
     GitHubTooltipPlacement,
 } from "../state/tooltip_overlay_state.slint";
 
-// Shared deterministic Floating UI geometry. Feature-specific portals provide
-// their own surface content while this component owns offset/flip/shift/size.
-export component GitHubFloatingOverlayHost inherits Rectangle {
+// Private deterministic Floating UI geometry. Public consumers use the
+// lifecycle-owning facade below so a full-window positioning tree cannot be
+// hidden with opacity or multiplied per action.
+component FloatingOverlayGeometryHost inherits Rectangle {
     in property <length> anchor-x;
     in property <length> anchor-y;
     in property <length> anchor-width;
@@ -151,6 +152,48 @@ export component GitHubFloatingOverlayHost inherits Rectangle {
         height: root.floating-height;
         background: transparent;
         clip: false;
+
+        @children
+    }
+}
+
+// Lifecycle-owning facade for persistent root portals. Feature code supplies
+// one set of anchor/surface geometry and keeps fixed content nodes mounted as
+// children. The facade alone translates `active` into visibility for the raw
+// full-window positioning host, so callers never hide that host with opacity or
+// create one host per action.
+export component GitHubTransientFloatingOverlayHost inherits Rectangle {
+    in property <bool> active: false;
+    in property <length> anchor-x;
+    in property <length> anchor-y;
+    in property <length> anchor-width;
+    in property <length> anchor-height;
+    in property <length> floating-width;
+    in property <length> floating-height;
+    in property <GitHubTooltipPlacement> preferred-placement:
+        GitHubTooltipPlacement.Top;
+    in property <GitHubTooltipAlignment> alignment:
+        GitHubTooltipAlignment.Center;
+    in property <length> boundary-padding: 8px;
+    in property <length> anchor-gap: 4px;
+
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    clip: false;
+
+    positioning-host := FloatingOverlayGeometryHost {
+        visible: root.active;
+        anchor-x: root.anchor-x;
+        anchor-y: root.anchor-y;
+        anchor-width: root.anchor-width;
+        anchor-height: root.anchor-height;
+        floating-width: root.floating-width;
+        floating-height: root.floating-height;
+        preferred-placement: root.preferred-placement;
+        alignment: root.alignment;
+        boundary-padding: root.boundary-padding;
+        anchor-gap: root.anchor-gap;
 
         @children
     }

@@ -1,4 +1,5 @@
 import { GitHubIconButton } from "../button/github_icon_button.slint";
+import { GitHubDialogElevation } from "../github_elevation.slint";
 import { GitHubButton } from "../settings/github_settings_controls.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { TransientOverlayState } from "../../state/transient_overlay_state.slint";
@@ -145,6 +146,13 @@ export component GitHubDialog inherits FocusScope {
         }
     }
 
+    if !root.narrow-fullscreen: GitHubDialogElevation {
+        target-x: dialog-surface.x;
+        target-y: dialog-surface.y;
+        target-width: dialog-surface.width;
+        target-height: dialog-surface.height;
+    }
+
     dialog-surface := Rectangle {
         x: root.narrow-fullscreen
             ? root.viewport-x
@@ -162,9 +170,6 @@ export component GitHubDialog inherits FocusScope {
         border-width: root.narrow-fullscreen ? 0px : GitHubMetrics.border-thin;
         border-color: GitHubTheme.border-default;
         background: GitHubTheme.canvas-default;
-        drop-shadow-blur: 24px;
-        drop-shadow-color: GitHubTheme.backdrop-medium;
-        drop-shadow-offset-y: 8px;
     }
 
     // Keep all chrome in the component root coordinate system. Feature body

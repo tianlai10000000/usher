@@ -310,28 +310,32 @@ fn hook_dialog_shortcuts_submit_once_preserve_newlines_and_gate_busy_state() {
 }
 
 #[test]
-fn hook_editor_code_view_scrolls_without_rebuilding_the_dialog() {
+fn hook_editor_code_view_scrolls_and_reopens_at_the_top() {
     use i_slint_backend_testing::ElementHandle;
     use slint::{ComponentHandle, platform::WindowEvent};
     use usher_ui_settings::{GitHubSettingsPage, HookSettingsState};
 
     let _locale = crate::i18n::test_locale_guard();
     i_slint_backend_testing::init_no_event_loop();
-    let page = GitHubSettingsPage::new().unwrap();
-    page.set_viewport_width(1200.0);
-    page.set_viewport_height(900.0);
-    let state = page.global::<HookSettingsState>();
-    state.set_ready(true);
-    state.set_draft_language(0);
     let script = (0..137)
         .map(|line| format!("echo line-{line}"))
         .collect::<Vec<_>>()
         .join("\n");
-    state.set_draft_script(script.clone().into());
-    bridge::update_hook_highlight(&page);
+    let (_dir, service) = service();
+    let saved = hook(&script);
+    service.save(saved.clone()).unwrap();
+    let window = crate::MainWindow::new().unwrap();
+    let page = GitHubSettingsPage::new().unwrap();
+    page.set_viewport_width(1200.0);
+    page.set_viewport_height(900.0);
+    bridge::bind_settings_with_service(&window, &page, service.clone());
+    let state = page.global::<HookSettingsState>();
+    state.invoke_choose("hook".into(), saved.id.clone().into());
+    assert!(state.get_draft_script_loading());
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(25));
+    assert_eq!(state.get_draft_script(), script);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
     assert!(state.get_code_highlight_ready());
-    state.set_dialog_mode("edit".into());
-    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
 
     let input = ElementHandle::find_by_element_id(&page, "GitHubHookEditorForm::script-input")
         .next()
@@ -407,6 +411,58 @@ fn hook_editor_code_view_scrolls_without_rebuilding_the_dialog() {
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(20));
     assert_eq!(inner_text.absolute_position().y, inner_before);
     assert_eq!(highlight.absolute_position().y, inner_before);
+
+    // Close the active session while it is still at the bottom. Reopening via
+    // the real delayed-hydration path must create fresh text/layout owners and
+    // must not restore this viewport.
+    page.window().dispatch_event(WindowEvent::PointerScrolled {
+        position: slint::LogicalPosition::new(
+            input_position.x + input_size.width / 2.0,
+            input_position.y + input_size.height / 2.0,
+        ),
+        delta_x: 0.0,
+        delta_y: -10000.0,
+    });
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(20));
+    assert!(inner_text.absolute_position().y < inner_before);
+    state.invoke_cancel();
+    assert!(
+        ElementHandle::find_by_element_id(&page, "HookCodeEditor::text-input")
+            .next()
+            .is_none(),
+        "closing the dialog must unmount the native editor item tree"
+    );
+    assert!(
+        ElementHandle::find_by_element_id(&page, "HookCodeEditor::script-highlight")
+            .next()
+            .is_none(),
+        "closing the dialog must unmount the rich-text projection"
+    );
+    assert!(
+        !highlight.is_valid(),
+        "the old renderer owner must be dropped"
+    );
+    assert!(
+        !inner_text.is_valid(),
+        "the old native editor must be dropped"
+    );
+
+    state.invoke_choose("hook".into(), saved.id.into());
+    assert!(state.get_draft_script_loading());
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(25));
+    assert_eq!(state.get_draft_script(), script);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
+    assert!(state.get_code_highlight_ready());
+    let reopened_text = ElementHandle::find_by_element_id(&page, "HookCodeEditor::text-input")
+        .next()
+        .expect("fresh native source editor");
+    let reopened_highlight =
+        ElementHandle::find_by_element_id(&page, "HookCodeEditor::script-highlight")
+            .next()
+            .expect("fresh syntax projection");
+    assert!((reopened_text.absolute_position().y - inner_before).abs() <= 0.5);
+    assert!((reopened_highlight.absolute_position().y - inner_before).abs() <= 0.5);
+    crate::app_runtime::shared_runtime().block_on(service.shutdown());
 }
 
 #[test]
@@ -1275,7 +1331,7 @@ fn dialog_cancel_discards_edits_and_validation_keeps_the_editor_open() {
 }
 
 #[test]
-fn dialog_switching_hooks_refreshes_highlight_projection() {
+fn dialog_switching_hooks_rebuilds_the_editor_session_and_refreshes_highlight() {
     use i_slint_backend_testing::ElementHandle;
     use slint::ComponentHandle;
     use usher_ui_settings::{GitHubSettingsPage, HookSettingsState};
@@ -1313,6 +1369,12 @@ fn dialog_switching_hooks_refreshes_highlight_projection() {
     g.invoke_cancel();
     assert_eq!(g.get_code_highlight(), slint::StyledText::default());
     assert!(!g.get_code_highlight_ready());
+    assert!(
+        ElementHandle::find_by_element_id(&page, "HookCodeEditor::script-highlight")
+            .next()
+            .is_none()
+    );
+    assert!(!highlight.is_valid());
 
     g.invoke_choose("hook".into(), second.id.clone().into());
     assert!(g.get_draft_script_loading());
@@ -1322,11 +1384,18 @@ fn dialog_switching_hooks_refreshes_highlight_projection() {
         i_slint_core::styled_text::get_raw_text(&g.get_code_highlight()),
         second.script
     );
-    assert!(
-        highlight.is_valid(),
-        "switching drafts must not recreate text nodes"
-    );
+    let second_highlight =
+        ElementHandle::find_by_element_id(&page, "HookCodeEditor::script-highlight")
+            .next()
+            .expect("second editor session rich-text node");
+    assert!(second_highlight.is_valid());
     g.invoke_cancel();
+    assert!(
+        ElementHandle::find_by_element_id(&page, "HookCodeEditor::script-highlight")
+            .next()
+            .is_none()
+    );
+    assert!(!second_highlight.is_valid());
 
     g.invoke_choose("hook".into(), first.id.into());
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(25));
@@ -1335,7 +1404,11 @@ fn dialog_switching_hooks_refreshes_highlight_projection() {
         i_slint_core::styled_text::get_raw_text(&g.get_code_highlight()),
         first.script
     );
-    assert!(highlight.is_valid());
+    let third_highlight =
+        ElementHandle::find_by_element_id(&page, "HookCodeEditor::script-highlight")
+            .next()
+            .expect("third editor session rich-text node");
+    assert!(third_highlight.is_valid());
 }
 
 #[test]

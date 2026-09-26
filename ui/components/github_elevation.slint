@@ -1,0 +1,54 @@
+import { GitHubTheme } from "../theme/github_theme.slint";
+
+// Fixed-source elevation primitives. Callers paint these siblings immediately
+// before their opaque surface so the mask interior is covered by that surface.
+// Target geometry and Retina scale never change the decoded texture size.
+export component GitHubDialogElevation inherits Image {
+    in property <length> target-x;
+    in property <length> target-y;
+    in property <length> target-width;
+    in property <length> target-height;
+
+    visible: root.target-width >= 96px && root.target-height >= 96px;
+    x: root.target-x - 24px;
+    y: root.target-y - 16px;
+    width: root.target-width + 48px;
+    height: root.target-height + 48px;
+    source: @image-url("../assets/elevation/dialog-shadow-mask.png", nine-slice(72 72 72 72));
+    image-fit: fill;
+    colorize: GitHubTheme.shadow-floating-dialog;
+}
+
+export component GitHubFloatingElevation inherits Image {
+    in property <length> target-x;
+    in property <length> target-y;
+    in property <length> target-width;
+    in property <length> target-height;
+    in property <color> shadow-color: GitHubTheme.shadow-floating-small;
+
+    visible: root.target-width >= 40px && root.target-height >= 40px;
+    x: root.target-x - 18px;
+    y: root.target-y - 12px;
+    width: root.target-width + 36px;
+    height: root.target-height + 36px;
+    source: @image-url("../assets/elevation/floating-shadow-mask.png", nine-slice(37 37 37 37));
+    image-fit: fill;
+    colorize: root.shadow-color;
+}
+
+export component GitHubCompactElevation inherits Image {
+    in property <length> target-x;
+    in property <length> target-y;
+    in property <length> target-width;
+    in property <length> target-height;
+    in property <color> shadow-color: GitHubTheme.shadow-floating-medium;
+
+    visible: root.target-width >= 32px && root.target-height >= 32px;
+    x: root.target-x - 12px;
+    y: root.target-y - 8px;
+    width: root.target-width + 24px;
+    height: root.target-height + 24px;
+    source: @image-url("../assets/elevation/compact-shadow-mask.png", nine-slice(27 27 27 27));
+    image-fit: fill;
+    colorize: root.shadow-color;
+}

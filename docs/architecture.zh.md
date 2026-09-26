@@ -85,14 +85,29 @@ Select，后续模块无需按 UI 名称匹配即可沿用同一布局。总开�
 保留各条目的配置值。新增和编辑复用共享 Dialog，支持未保存
 草稿测试和具体失败原因。取消丢弃草稿，保存成功后关闭，删除经确认且保留历史。
 新增/编辑先绘制 Dialog，再通过短 UI Timer 注入已保存脚本，并在复用 debounce
-之后生成有界语法投影。一个常驻的原生 `StyledText` 在可编辑 `TextInput` 下方提供
-Primer 语法颜色；二者使用相同等宽字体和标准 `ScrollView` 内容几何，不再创建
-逐 token UI 子树。富文本投影必须与源码逐字一致，否则保留原生纯文本显示。
-编辑或切换运行方式立即清除旧高亮；关闭弹窗释放富文本投影。原生输入始终在上层
+之后生成有界语法投影。稳定的 Settings factory 保留 Dialog 外壳和表单绑定，当前
+路由可见性与新增/编辑会话共同拥有完整源码编辑器 item tree。该活跃子树中的一个原生
+`StyledText` 在可编辑 `TextInput` 下方提供 Primer 语法颜色；二者使用相同等宽字体和
+标准 `ScrollView` 内容几何，不再创建逐 token UI 子树。富文本投影必须与源码逐字一致，
+否则保留原生纯文本显示。编辑或切换运行方式立即清除旧高亮；关闭弹窗或离开 Settings
+会销毁编辑器子树及其 renderer/布局 owner。离开路由还会把 Dialog 与主窗口可见性
+镜像切为非活动，关闭 factory 内的 Tooltip/Select 状态，并阻止 Settings 专用快捷键
+进入隐藏页面；运行中的 Hook 测试仍由 Feature 持有。原生输入始终在上层
 拥有指针与编辑交互，高亮时文字画刷保留 1/255 alpha，避免 FemtoVG 跳过自带光标
 和选区。macOS 使用独立选区色光标；光标跟随文字色的平台聚焦时使用不透明原生
 纯文本，失焦后恢复高亮。不常驻高亮引擎或语言缓存。
-UI bridge 统一负责开始/结束通知、
+所有应用自有 Modal 的框架统一经过 `GitHubDialog`。
+`ui/components/github_elevation.slint` 集中拥有生成的 Dialog、Floating、Compact 固定源
+PNG mask、nine-slice 几何与语义着色。Dialog、ActionMenu、浮动 IconButton、Toast、
+Notification、PR 代码渲染指示器及紧凑导航表面分别复用对应 profile；Breadcrumb 使用
+经过审查的直接渐变边缘。这些表面不会进入 FemtoVG 按目标尺寸生成的
+`BoxShadowCache`，因此目标尺寸与 Retina 倍率不会放大 Elevation 纹理。整个 `ui/`
+禁止 raw `drop-shadow-*`。`scripts/check-ui-policy.sh` 校验生成资产新鲜度、固定成本
+profile 结构、预期消费者、完整登记的 `GitHubDialog`/backdrop 清单、
+`GitHubDialogElevation` 唯一所有权以及 raw 实时阴影为零。名称含 Dialog/Modal 的
+wrapper 必须在结构上拥有共享 Shell。Hook 编辑器圆角外框只负责绘制，内部
+`ScrollView` 负责矩形视口裁剪。
+Hook UI bridge 统一负责开始/结束通知、
 流程链接及可复用 Job Run 投影。注册的异步退出排空阶段在原有优先级清理之前完成
 进程收尾，显式退出和 event-loop 返回使用同一等待屏障。详见 [Hooks](specs/hooks.md)。
 
@@ -239,7 +254,9 @@ callback 耗时和夹具效果预算避免相对比较掩盖回归。显式 `--b
 | `ui/components/github_scroll_view.slint` | 应用自有的常驻纵向视口和语义滚动条基础。 |
 | `ui/components/navigation/github_underline_nav.slint` | Workflow 及其功能子页签共用的、支持键盘的 Primer UnderlineNav/UnderlinePanels 容器与 Item；容器统一管理全宽底线、安全区内边距和页签间距。 |
 | `ui/components/github_segmented_control.slint` | 共用的紧凑 Primer SegmentedControl 外壳、Item、Divider 及焦点/禁用交互。 |
+| `ui/components/github_elevation.slint` | 固定源 Elevation 的中央所有者。生成的 Dialog、Floating、Compact PNG mask 通过 nine-slice 拉伸和语义着色复用；应用 UI 必须使用这些 profile，不得声明 raw Slint `drop-shadow-*`。 |
 | `ui/components/github_tooltip.slint` | 共用的 GitHub TooltipV2 契约：调用方挂载透明锚点定位器，由 `ui/state/tooltip_overlay_state.slint` 与根层 `GitHubTooltipOverlayHost` 统一执行 offset/flip/shift/size，在窗口根绘制并避开滚动/裁剪祖先与窗口边界。 |
+| `ui/components/github_floating_overlay.slint` | 共享的全窗口浮层定位边界。底层几何树为私有实现；持久根层 Portal 统一使用 `GitHubTransientFloatingOverlayHost`，且只能通过其 `active` 输入控制内部可见性。Feature 可提供锚点和固定内容，但不得直接实例化几何宿主、按动作复制宿主或用 opacity 隐藏宿主。 |
 | `ui/state/tooltip_overlay_state.slint` | 窗口根 Tooltip 门户状态（文案、锚点矩形、首选方向/对齐、claim token、lease 心跳）。 |
 | `ui/components/github_action_menu.slint` | 点击浮层共用的 Primer ActionMenu/AnchoredOverlay 表面，统一焦点归属、Esc 关闭、打开时 peer exclusive-claim、视口碰撞定位、限高纵向滚动、ActionList 行，以及 `GitHubActionMenuTriggerArea` 的 press 态开/关（避免标题栏 Chrome dismiss 与 toggle 同一次点击先关后开）。页面空白点击关闭仍由各宿主在菜单之下自行挂载 TouchArea。`ui/state/transient_overlay_state.slint` 提供 `dismiss-revision` 与 `exclusive-generation`。 |
 | `ui/components/page/github_page_header.slint` | 标题、说明、前导视觉、分隔线和尾部操作共用的 Primer PageHeader 基础。 |
@@ -415,12 +432,14 @@ API，并由 `src/settings_page.rs` 与 `src/message_center.rs` 显式桥接。
 跨 crate factory 创建的组件拥有独立 Slint global 图，因此桥接层必须复制初始
 `AppState`、把 callback 转发给 `MainWindow`，并同步后续状态变化，不能假定两边
 global 自动共享。Messages Inbox 行只把动作枚举与锚点矩形发布到专用的 factory 本地
-`MessageTooltipOverlayState`，由页面唯一的 `GitHubMessageTooltipOverlayHost` 把枚举
-映射到相互独立的字面量 surface，任何标签字符串都不穿过列表 delegate。Settings 为
-共享控件挂载本地通用 `GitHubTooltipOverlayHost`，并在每个新 claim token 到来时重建
-文本测量 surface。Settings 与 Messages 都在首次访问后惰性创建一个稳定的 factory
-产品。Slint 1.17.1 销毁并重挂载跨 crate 产品时可能复用错误的控件文案或 placeholder，
-因此离开路由只隐藏这些 host；各 Feature bridge 分别负责状态重置生命周期。
+`MessageTooltipOverlayState`，由页面唯一的 `GitHubMessageTooltipOverlayHost` 在一个
+`GitHubTransientFloatingOverlayHost` 中把枚举映射到三个相互独立的字面量 Surface，
+任何标签字符串都不穿过列表 delegate。Settings 为共享控件挂载本地通用
+`GitHubTooltipOverlayHost`；该 Portal 同样使用 transient facade，并在每个新 claim token
+到来时重建文本测量 Surface。Settings 与 Messages 都在首次访问后惰性创建一个稳定的
+factory 产品。Slint 1.17.1 销毁并重挂载跨 crate 产品时可能复用错误的控件文案或
+placeholder，因此离开路由只隐藏这些 host；各 Feature bridge 分别负责状态重置生命周期，
+并把 transient host 切为非活动。
 
 Settings factory host 位于窗口根层、状态栏上方；普通 ScrollView 保持内容面板的
 原点和视口尺寸。`src/settings_page.rs` 同步两组几何及 Hook 弹窗可见状态到主窗口，
@@ -444,9 +463,11 @@ placeholder、值或选中态。路由级选择索引必须从哨兵值开始，
 字面占位文字的 Shell/Node 字段；bridge 隔离各语言临时草稿，保存/测试只读取选中
 语言和解释器，持久化仍为单一语言及内容。编辑后废弃旧测试反馈。Hook Tooltip
 通过固定文案叶子和设置页根层常驻 Surface 避免串用（UI-103）。Tooltip 框内文字居中，
-Hook 提示默认对准按钮中心，仅碰撞视口边界时偏移。Hook portal 保留一个全窗口定位宿主
-和五个分别常驻的文案/测量 Surface；仅显示当前动作的 Surface，无提示时隐藏宿主，
-避免全窗口透明离屏层，同时保持 Settings factory 稳定。清空历史在 Worker
+Hook 提示默认对准按钮中心，仅碰撞视口边界时偏移。Hook Portal 保留一个
+`GitHubTransientFloatingOverlayHost` 和五个分别常驻的文案/测量 Surface；仅显示当前
+动作的 Surface，无提示时把宿主的 `active` 输入设为 false。只有共享 facade 能控制其
+私有全窗口几何树的可见性，从而避免 opacity 隐藏的离屏层，同时保持 Settings factory
+稳定。清空历史在 Worker
 删除已结束摘要及日志，并保留活动 Runner。新增/编辑启用共享 Dialog 的
 Cmd/Ctrl+Enter 保存，普通 Enter 换行、Esc 取消。主窗口快捷键边界通过
 `SettingsPageBridge` 转发焦点位于 factory 外时的弹窗按键；macOS 在现有输入
@@ -454,6 +475,9 @@ Monitor 归一化 Return/Escape。固定测试区显示紧凑状态及操作下�
 临时目录；旧项目/结果过滤值保留兼容，表单不再提供对应输入项。
 新增或修改任何 Tooltip 前必须先阅读 [Tooltip 实现规范](specs/tooltips.md)，
 遵守 factory 隔离与原生绘制验收；此规则已接入根 `AGENTS.md`。
+`scripts/check-ui-policy.sh` 强制保护浮层宿主边界：Feature 不得实例化私有/底层宿主，
+不得在全窗口宿主上设置 opacity，不得覆盖 transient facade 的 opacity/visible，也不得
+为固定动作复制多个兄弟宿主；隔离的正反例位于 `scripts/tests/test_quality_checks.py`。
 compact section 菜单为每个 section 使用独立的固定触发器叶子，并在每次展开时快照
 当前 section，因此折叠标签与选中行不会在 factory 复用后保留上一条路由的 section。
 界面语言与 AI 回复语言选择器同样遵守固定叶子规则，但不在应用 UI 中硬编码语言
@@ -468,8 +492,9 @@ global binding。
 Select 触发器切换自身展开状态：再次激活时收起、不提交选项，并恢复触发器焦点。
 Hook 事件及历史触发器通过 `GitHubSelectState.toggle()` 遵循同一契约。
 只有 40px 触发器参与表单布局；Settings factory 根层在滚动表单外挂载浮层，复用
-Tooltip 同样使用的 `GitHubFloatingOverlayHost` 负责翻转、边缘位移与像素对齐；
-Select 限制宽度及可用垂直高度，`GitHubActionMenu` 提供表面、滚动与焦点生命周期。
+Tooltip 同样使用的 `GitHubTransientFloatingOverlayHost` 负责活动生命周期、翻转、
+边缘位移与像素对齐；Select 把 `active` 绑定到展开状态，并限制宽度及可用垂直高度，
+`GitHubActionMenu` 提供表面、滚动与焦点生命周期。
 选项叶子使用明确的菜单内容宽度和零水平起点，不能继承外层 factory 的宽度。
 独立 factory 的窗口上下文与可见 host
 不同，禁止在其中使用原生 `PopupWindow` 承载选项。
@@ -515,9 +540,10 @@ Slint 行。总数/未读/已读计数仍描述完整 Store。切换筛选回到
 清空全部消息数据，重新进入时查询最新 Store 快照再激活，因此非活动 Inbox 不保留
 投影消息数据。逐次重建页面外壳的
 Release A/B 没有测得实质 RSS 节省，且 physical footprint 出现混合回退，因此该
-候选被拒绝。两个 factory
-页面都复用与 `MainWindow` 相同的锚点式 offset/flip/shift/size 实现，但不尝试跨
-factory 边界共享 global 实例。修改 `settings.slint` 或
+候选被拒绝。Messages 操作 Portal 因而把三个固定字面量 Surface 保留在单一 transient
+host 中，并在类型为 `None` 或离开路由时把该 host 切为非活动。两个 factory 页面都
+通过共享生命周期 facade 复用与 `MainWindow` 相同的锚点式 offset/flip/shift/size
+实现，但不尝试跨 factory 边界共享 global 实例。修改 `settings.slint` 或
 `messages.slint` 不得重新生成或编译
 `usher-ui`；修改主壳仍会重编主生成 crate。启用 `SLINT_LIVE_PREVIEW` 时，两套独立
 build script 都会刻意保持 factory 产品为静态生成，因为 Slint 1.17 的

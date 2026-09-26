@@ -1,4 +1,4 @@
-import { GitHubFloatingOverlayHost } from "../github_floating_overlay.slint";
+import { GitHubTransientFloatingOverlayHost } from "../github_floating_overlay.slint";
 import { GitHubTooltipSurface } from "../github_tooltip.slint";
 import {
     GitHubTooltipAlignment,
@@ -185,9 +185,9 @@ export component GitHubDeleteTooltipAnchor inherits Rectangle {
     }
 }
 
-// Factory-root portal. Keep all three literal surfaces mounted for the complete
-// page lifetime. Opacity selects the active one without allowing Slint to reuse
-// a conditional node's previous text or preferred width.
+// One lifecycle-aware full-window locator serves three separately mounted
+// literal surfaces. The surfaces stay mounted for the complete page lifetime so
+// Slint cannot reuse a conditional node's previous text or preferred width.
 export component GitHubMessageTooltipOverlayHost inherits Rectangle {
     in property <length> boundary-padding: 8px;
     in property <length> anchor-gap: 4px;
@@ -198,60 +198,49 @@ export component GitHubMessageTooltipOverlayHost inherits Rectangle {
     background: transparent;
     clip: false;
 
-    mark-read-host := GitHubFloatingOverlayHost {
-        opacity: MessageTooltipOverlayState.kind == MessageTooltipKind.MarkRead ? 1 : 0;
+    floating-host := GitHubTransientFloatingOverlayHost {
+        active: MessageTooltipOverlayState.kind != MessageTooltipKind.None;
         anchor-x: MessageTooltipOverlayState.anchor-x;
         anchor-y: MessageTooltipOverlayState.anchor-y;
         anchor-width: MessageTooltipOverlayState.anchor-width;
         anchor-height: MessageTooltipOverlayState.anchor-height;
-        floating-width: mark-read-surface.width;
-        floating-height: mark-read-surface.height;
+        floating-width:
+            MessageTooltipOverlayState.kind == MessageTooltipKind.MarkRead
+                ? mark-read-surface.width
+            : MessageTooltipOverlayState.kind == MessageTooltipKind.MarkUnread
+                ? mark-unread-surface.width
+            : MessageTooltipOverlayState.kind == MessageTooltipKind.Delete
+                ? delete-surface.width
+            : 0px;
+        floating-height:
+            MessageTooltipOverlayState.kind == MessageTooltipKind.MarkRead
+                ? mark-read-surface.height
+            : MessageTooltipOverlayState.kind == MessageTooltipKind.MarkUnread
+                ? mark-unread-surface.height
+            : MessageTooltipOverlayState.kind == MessageTooltipKind.Delete
+                ? delete-surface.height
+            : 0px;
         preferred-placement: GitHubTooltipPlacement.Bottom;
         alignment: GitHubTooltipAlignment.End;
         boundary-padding: root.boundary-padding;
         anchor-gap: root.anchor-gap;
 
         mark-read-surface := GitHubTooltipSurface {
+            visible: MessageTooltipOverlayState.kind == MessageTooltipKind.MarkRead;
             text: I18n.messages-mark-as-read;
             viewport-max-width: max(0px, root.width - root.boundary-padding * 2);
             viewport-max-height: max(0px, root.height - root.boundary-padding * 2);
         }
-    }
-
-    mark-unread-host := GitHubFloatingOverlayHost {
-        opacity: MessageTooltipOverlayState.kind == MessageTooltipKind.MarkUnread ? 1 : 0;
-        anchor-x: MessageTooltipOverlayState.anchor-x;
-        anchor-y: MessageTooltipOverlayState.anchor-y;
-        anchor-width: MessageTooltipOverlayState.anchor-width;
-        anchor-height: MessageTooltipOverlayState.anchor-height;
-        floating-width: mark-unread-surface.width;
-        floating-height: mark-unread-surface.height;
-        preferred-placement: GitHubTooltipPlacement.Bottom;
-        alignment: GitHubTooltipAlignment.End;
-        boundary-padding: root.boundary-padding;
-        anchor-gap: root.anchor-gap;
 
         mark-unread-surface := GitHubTooltipSurface {
+            visible: MessageTooltipOverlayState.kind == MessageTooltipKind.MarkUnread;
             text: I18n.messages-mark-as-unread;
             viewport-max-width: max(0px, root.width - root.boundary-padding * 2);
             viewport-max-height: max(0px, root.height - root.boundary-padding * 2);
         }
-    }
-
-    delete-host := GitHubFloatingOverlayHost {
-        opacity: MessageTooltipOverlayState.kind == MessageTooltipKind.Delete ? 1 : 0;
-        anchor-x: MessageTooltipOverlayState.anchor-x;
-        anchor-y: MessageTooltipOverlayState.anchor-y;
-        anchor-width: MessageTooltipOverlayState.anchor-width;
-        anchor-height: MessageTooltipOverlayState.anchor-height;
-        floating-width: delete-surface.width;
-        floating-height: delete-surface.height;
-        preferred-placement: GitHubTooltipPlacement.Bottom;
-        alignment: GitHubTooltipAlignment.End;
-        boundary-padding: root.boundary-padding;
-        anchor-gap: root.anchor-gap;
 
         delete-surface := GitHubTooltipSurface {
+            visible: MessageTooltipOverlayState.kind == MessageTooltipKind.Delete;
             text: I18n.common-delete;
             viewport-max-width: max(0px, root.width - root.boundary-padding * 2);
             viewport-max-height: max(0px, root.height - root.boundary-padding * 2);

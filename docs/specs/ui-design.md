@@ -193,6 +193,50 @@ to be a Primer primitive.
   views must not rebuild large models while scrolling or resizing.
 - Keep hover hit targets mounted. Change opacity/state instead of
   conditionally creating an interactive node.
+- A stable route `ComponentFactory` may retain lightweight bindings, controls,
+  and models between visits. A transient heavyweight subtree with no hidden-state
+  continuity requirement, such as a full-document editor with native/rich text
+  and a dedicated viewport, must have an explicit conditional owner tied to both
+  route activity and its local session. Setting `visible` or `opacity` alone is
+  not teardown: when either owner becomes inactive, destroy the subtree so its
+  text layout, graphics, and layer resources become unreachable. Reentry creates
+  a fresh viewport while domain state and running work remain feature-owned.
+  Route exit must also deactivate host-visible dialog mirrors, dismiss local
+  transient overlays, and prevent route-scoped keyboard dispatch into the hidden
+  factory. /
+  稳定路由的 `ComponentFactory` 可以在多次访问之间保留轻量绑定、控件和 model。
+  对隐藏状态没有连续性要求的临时重型子树，例如同时包含原生/富文本和独立视口的全文
+  编辑器，必须由“路由活跃 + 本地会话”共同控制条件挂载。仅设置 `visible` 或 `opacity`
+  不代表释放；任一 owner 失活时都要销毁子树，使文本布局、图形和 layer 资源不可达。
+  再次进入时创建新的视口，领域状态与运行中的任务仍归 feature 所有。离开路由还必须
+  停用宿主可见的 Dialog 镜像、关闭局部临时浮层，并阻止路由专属键盘事件进入隐藏
+  factory。
+- Application-owned UI must not declare Slint `drop-shadow-*`, regardless of
+  surface size or bounded geometry. FemtoVG rasterizes those shadows at the
+  target's physical size and may retain the texture after the item or route is
+  gone. Elevation must use the shared fixed-source `GitHubDialogElevation`,
+  `GitHubFloatingElevation`, or `GitHubCompactElevation` nine-slice profile. A
+  non-elevation edge effect may use an explicitly reviewed direct-paint contract
+  such as the Breadcrumb gradient. `scripts/check-ui-policy.sh` scans all of
+  `ui/`; there is no per-file live-shadow allowlist. Every component whose name
+  contains `Dialog` or `Modal` must structurally own exactly one `GitHubDialog`,
+  apart from the shared shell and its elevation primitive. Direct
+  `GitHubDialog` consumers and modal backdrop paint are registry checked, and
+  `GitHubDialogElevation` may be instantiated only by the shared shell. A
+  document or viewport subtree must not sit below a rounded `clip`; keep
+  radius/border/background on the visual frame and let the inner scroll viewport
+  perform rectangular clipping. /
+  所有应用自有 UI 无论 Surface 尺寸或几何上限，都禁止声明 Slint
+  `drop-shadow-*`。FemtoVG 会按目标物理尺寸栅格化阴影，并可能在 item 或路由销毁后
+  继续保留纹理。Elevation 必须复用固定源 nine-slice 的
+  `GitHubDialogElevation`、`GitHubFloatingElevation` 或
+  `GitHubCompactElevation`。非 Elevation 的浅边缘效果只能使用经过明确审查的直接绘制
+  契约，例如 Breadcrumb 渐变。`scripts/check-ui-policy.sh` 扫描整个 `ui/`，不存在
+  按文件登记的实时阴影例外。除共享 Shell 及其 Elevation primitive 外，名称含
+  `Dialog` 或 `Modal` 的组件必须在结构上恰好拥有一个 `GitHubDialog`；直接
+  `GitHubDialog` consumer 与 Modal backdrop paint 必须登记，且
+  `GitHubDialogElevation` 只能由共享 Shell 实例化。文档或视口子树不得置于圆角
+  `clip` 下；圆角、边框和背景归视觉外框，内部滚动视口只做矩形裁剪。
 - Mount full-window overlays at the root layer in `ui/main.slint`.
 
 ## 7. Controls and interaction states / 控件与交互状态
@@ -527,7 +571,7 @@ expanded/collapsed, and success confirmation.
   events for each built-in category and for default, always-native, and in-app-only
   delivery policies; it is not a static component preview.
 - Floating application notifications use a neutral `canvas-overlay` card with
-  neutral border/shadow; severity is limited to the leading icon and a 3 px
+  neutral border and fixed-source elevation; severity is limited to the leading icon and a 3 px
   accent. The overlay is not rendered on the Notifications route because the
   corresponding Inbox row already supplies durable feedback.
 - `GitHubMessageListItem`：GitHub Inbox 风格 84px 行（紧凑态 76px），包含稳定未读
@@ -536,7 +580,7 @@ expanded/collapsed, and success confirmation.
   不能只依赖颜色；其属性矩阵
   登记在 UI Components 的 `Notification inbox rows`。独立的 `Message center` 分类会
   发布各内置分类以及默认、强制原生、仅应用内投递策略的真实测试事件，并非静态预览。
-- 浮动应用通知使用中性的 `canvas-overlay` 卡片及中性边框/阴影，语义色仅用于前导图标
+- 浮动应用通知使用中性的 `canvas-overlay` 卡片、中性边框及固定源 Elevation，语义色仅用于前导图标
   和 3px 强调线；Notifications 路由已有对应 Inbox 行，因此不再渲染该浮层。
 - `GitHubStatusBar`：根 Shell 唯一的 28px 全窗口透明宿主；可见表面从实时主内容
   边缘开始，侧栏展开后其正下方不得出现状态栏表面。常驻键盘、铃铛、网络与版本
@@ -576,8 +620,9 @@ expanded/collapsed, and success confirmation.
   use the shared `GitHubSelectState.toggle()` to keep this behavior consistent.
   This follows [Primer SelectPanel nonmodal dismissal](https://primer.style/product/components/select-panel/guidelines/).
   Opening never pushes following fields. Mount the menu at the owning window/factory root
-  outside scrolling layouts, using the Tooltip's `GitHubFloatingOverlayHost`
-  for bounded flip/shift placement and `GitHubActionMenu` for its surface, with outside-click
+  outside scrolling layouts, using the Tooltip's
+  `GitHubTransientFloatingOverlayHost` for active lifecycle and bounded
+  flip/shift placement, and `GitHubActionMenu` for its surface, with outside-click
   dismissal, Escape cancellation, restored trigger focus, bounded internal
   scrolling, arrow/Home/End navigation, and Enter/Space selection. The selected
   option has a default-foreground Check with no navigation stripe or persistent
@@ -609,8 +654,8 @@ expanded/collapsed, and success confirmation.
   展示同一 Select、后续字段、禁用触发器和分组示例。分组 Select 使用
   `GitHubSelectGroupHeading`；标题计入内容与滚动定位，但不得计入可选项索引；每组
   首个选项通过无障碍说明提供分组标题。
-  定位复用 Tooltip 的 `GitHubFloatingOverlayHost`，支持上下翻转、边缘约束和有界
-  内部滚动。选项必须使用菜单内容宽度与明确坐标。
+  定位复用 Tooltip 的 `GitHubTransientFloatingOverlayHost`，把 `active` 绑定到展开
+  状态，并支持上下翻转、边缘约束和有界内部滚动。选项必须使用菜单内容宽度与明确坐标。
   活动选项焦点必须限定到当前展开的选择器，隐藏菜单不得抢焦点。带偏移的示例触发器从
   已验证的零偏移原点加局部偏移计算视口锚点，避免继承坐标重复计入组件偏移；验收普通
   与分组触发器在鼠标释放后跨多个布局帧保持展开。
@@ -630,8 +675,8 @@ expanded/collapsed, and success confirmation.
   and [Primer positioning source](https://github.com/primer/behaviors/blob/main/src/anchored-position.ts).
   The host supplies live complete trigger bounds and the visible clipping
   viewport. Other menu hosts retain their explicit side/alignment contract.
-  The shared surface retains semantic
-  border/shadow, 4 px anchor gap, viewport collision handling,
+  The shared surface retains its semantic border, shared fixed-source floating
+  elevation, 4 px anchor gap, viewport collision handling,
   bounded height, internal scrolling, focus ownership, Escape dismissal, and
   reusable `GitHubActionListItem` rows. Medium rows follow Primer's 32 px
   geometry (6 px block padding around a 20 px label); block descriptions use
@@ -820,9 +865,18 @@ expanded/collapsed, and success confirmation.
   participate in the shared outside-dismiss contract: a Dialog closes only if
   its ordinary backdrop click would close it; hard/modal forms keep their
   existing non-dismissible behavior.
+  Dialog elevation is a decoration-only `GitHubDialogElevation` sibling. It
+  stretches one generated 145x145 PNG alpha mask with `nine-slice(72 72 72 72)`
+  and semantic colorization, so texture size is independent of Dialog and Retina
+  target size. It owns no input, accessibility, layout, clipping, opacity layer,
+  or live box shadow, and it is absent for narrow fullscreen Dialogs.
   macOS 侧栏/前进/后退按钮在弹窗期间仍可透过遮罩看到；原生控件条图像按原位置
   合成在 Slint 遮罩下方，Dialog 正文覆盖到的部分正常遮挡。原生绘制临时交给
   Slint，输入屏蔽层继续拦截交互；关闭后释放图像并恢复原生绘制。
+  Dialog 阴影由纯装饰的 `GitHubDialogElevation` 同级节点绘制：单张生成的 145x145
+  PNG alpha mask 通过 `nine-slice(72 72 72 72)` 与语义颜色拉伸，纹理尺寸不随 Dialog
+  或 Retina 目标尺寸变化。它不拥有输入、无障碍、布局、裁剪、opacity layer 或实时
+  box shadow；窄屏全窗口 Dialog 不挂载该阴影。
 - `GitHubToast`: compact transient feedback using the current Primer Banner
   anatomy and semantic status icon/background/border, never the retired
   rail-style Toast pattern. A single-line message, leading icon/spinner, and

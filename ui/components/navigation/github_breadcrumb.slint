@@ -130,10 +130,17 @@ export component GitHubBreadcrumb inherits Rectangle {
     // Real translucency needs page content scrolling underneath this bar.
     background: root.titlebar-mode ? transparent : GitHubTheme.canvas-translucent;
     clip: false;
-    drop-shadow-blur: root.titlebar-mode ? 0px : 5px;
-    drop-shadow-offset-x: 0px;
-    drop-shadow-offset-y: 1px;
-    drop-shadow-color: root.titlebar-mode ? transparent : GitHubTheme.shadow-floating-subtle;
+
+    // A direct gradient paints the shallow page-header edge without entering
+    // FemtoVG's target-sized box-shadow cache for this viewport-width surface.
+    if !root.titlebar-mode: Rectangle {
+        y: parent.height;
+        width: parent.width;
+        height: 5px;
+        background: @linear-gradient(180deg,
+            GitHubTheme.shadow-floating-subtle 0%,
+            transparent 100%);
+    }
 
     // Slint rectangles do not capture pointer input. Without this shield,
     // clicks fall through the translucent bar onto scrolled page controls

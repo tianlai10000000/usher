@@ -1,4 +1,5 @@
 import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
+import { GitHubFloatingElevation } from "github_elevation.slint";
 import { TransientOverlayState } from "../state/transient_overlay_state.slint";
 import { FloatingOverlayBridge, FloatingOverlayRect } from "../state/floating_overlay_bridge.slint";
 
@@ -150,6 +151,12 @@ export component GitHubActionMenu inherits FocusScope {
         : min(root.desired-height, root.opens-above ? root.space-above : root.space-below);
     z: 10000;
 
+    GitHubFloatingElevation {
+        target-width: root.width;
+        target-height: root.height;
+        shadow-color: GitHubTheme.shadow-floating-small;
+    }
+
     menu-surface := Rectangle {
         width: parent.width;
         height: parent.height;
@@ -157,9 +164,6 @@ export component GitHubActionMenu inherits FocusScope {
         border-width: 1px;
         border-color: GitHubTheme.border-muted;
         background: GitHubTheme.canvas-overlay;
-        drop-shadow-blur: 18px;
-        drop-shadow-color: GitHubTheme.shadow-floating-small;
-        drop-shadow-offset-y: 6px;
         clip: true;
 
         // Own blank areas so the page-level outside-click scrim cannot receive
