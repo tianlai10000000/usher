@@ -35,7 +35,7 @@ ui-components = ["usher-ui/ui-components", "test-fixtures"]
 dev-shell = ["usher-ui/dev-shell"]
 # Opt-in local fixtures used for manual UI acceptance. Normal and production
 # builds do not compile the fixture bridge or embed its data.
-test-fixtures = []
+test-fixtures = ["slint/unstable-winit-030"]
 # Headless AI review engine plus its optional application UI/settings bridges.
 # `--no-default-features --features renderer-femtovg` keeps the complete feature
 # out of the compile graph for constrained or comparison builds.

@@ -1503,8 +1503,25 @@ mod tests {
         register_route_lifecycle(&lifecycle_hooks, &bridge);
         let router = Router::new(window.as_weak(), lifecycle_hooks);
         router.navigate(Route::Settings).expect("Settings route");
-        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(2));
         let page = mounted_page(&bridge);
+        page.set_viewport_width(1200.0);
+        page.set_viewport_height(600.0);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        select_settings_section(&page, "Hooks");
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        assert!(
+            ElementHandle::find_by_accessible_label(&page, "Hooks")
+                .any(|element| element.accessible_checked() == Some(true)),
+            "test setup must select the Hooks section before route exit"
+        );
+        page.window()
+            .dispatch_event(slint::platform::WindowEvent::PointerScrolled {
+                position: slint::LogicalPosition::new(600.0, 300.0),
+                delta_x: 0.0,
+                delta_y: -180.0,
+            });
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(20));
         let hooks = page.global::<HookSettingsState>();
         let saves = Rc::new(Cell::new(0));
         let observed_saves = saves.clone();
@@ -1532,6 +1549,15 @@ mod tests {
             ElementHandle::find_by_element_id(&page, "HookCodeEditor::script-highlight")
                 .next()
                 .expect("active Hook syntax projection");
+        let old_content =
+            ElementHandle::find_by_element_id(&page, "GitHubSettingsPage::content-host")
+                .next()
+                .expect("stable Settings scroll content");
+        let old_content_y = old_content.absolute_position().y;
+        let old_pane =
+            ElementHandle::find_by_element_id(&page, "GitHubSettingsPage::wide-settings-pane")
+                .next()
+                .expect("active Settings pane");
 
         router.navigate(Route::Home).expect("Home route");
         i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
@@ -1572,6 +1598,14 @@ mod tests {
         );
         assert!(!old_input.is_valid());
         assert!(!old_highlight.is_valid());
+        assert!(
+            old_content.is_valid(),
+            "the stable scroll geometry must survive route exit"
+        );
+        assert!(
+            old_pane.is_valid(),
+            "route exit must not remount the factory-local Settings leaves"
+        );
 
         router
             .navigate(Route::Settings)
@@ -1585,6 +1619,49 @@ mod tests {
                 .next()
                 .is_some(),
             "returning to the active dialog must create a fresh editor tree"
+        );
+        assert!(
+            ElementHandle::find_by_element_id(&page, "GitHubSettingsPage::content-host")
+                .next()
+                .is_some(),
+            "returning to Settings must retain the stable scroll geometry"
+        );
+        assert!(
+            ElementHandle::find_by_element_id(&page, "GitHubSettingsPage::wide-settings-pane")
+                .next()
+                .is_some(),
+            "returning to Settings must expose the stable route-local pane"
+        );
+        assert!(old_content.is_valid());
+        assert!(old_pane.is_valid());
+        let selected_sections = [
+            "General",
+            "Code hosting",
+            "AI Agent",
+            "AI Review",
+            "Hooks",
+            "Diagnostics",
+        ]
+        .into_iter()
+        .filter(|label| {
+            ElementHandle::find_by_accessible_label(&page, label)
+                .any(|element| element.accessible_checked() == Some(true))
+        })
+        .collect::<Vec<_>>();
+        assert_eq!(
+            selected_sections,
+            vec!["Hooks"],
+            "returning to Settings must preserve the selected section"
+        );
+        let restored_content_y =
+            ElementHandle::find_by_element_id(&page, "GitHubSettingsPage::content-host")
+                .next()
+                .expect("preserved Settings scroll content")
+                .absolute_position()
+                .y;
+        assert!(
+            (restored_content_y - old_content_y).abs() < 1.0,
+            "returning to Settings must preserve the scroll position: before={old_content_y}, after={restored_content_y}"
         );
     }
 

@@ -659,3 +659,15 @@ pilot 因归档路径被标为 `non-release-override` 且 metadata 没有标出 
 - `src/workflow/pr_review.rs`：有界 PR Review 缓存与内存诊断。
 - `docs/architecture.md`、`docs/architecture.zh.md`：当前渲染器与所有权决策。
 - `docs/specs/pr-review.md`：稳定 PR Review 内存边界。
+- `docs/pr-review-memory-batch-a-20260927.md`：已拒绝的 PR Review Home RSS
+  生命周期候选、源码 Release 证据、归因与回滚记录。
+- `docs/settings-memory-batch-b-20260928.md`：已拒绝的 Settings 渲染层候选、
+  六进程源码 Release 证据、归因与回滚记录。
+- `docs/settings-memory-batch-c-attribution-20260928.md`：Settings 单二进制 owner
+  拆分、无效运行控制、Slint 1.18.1 边界，以及不推进新产品候选的结论。
+- `docs/terminal-memory-batch-d-attribution-20260928.md`：不激活窗口的
+  Workflow-only 与真实 PTY owner 拆分、证据审计限制，以及不修改 Terminal
+  生命周期或抽屉渲染的结论。
+- `docs/project-list-memory-batch-e-20260928.md`：不激活窗口的 Grid/List owner
+  拆分、修正后的长窗口采样、已拒绝的 List 行级外框 A/B，以及 Home RSS 节省未过
+  pilot 门槛后的精确产品回滚。

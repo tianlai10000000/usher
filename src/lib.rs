@@ -64,6 +64,8 @@ mod ai_review;
 mod app_lifecycle;
 mod app_paths;
 mod app_runtime;
+#[cfg(feature = "test-fixtures")]
+mod memory_benchmark;
 mod memory_diagnostics;
 mod p6_benchmark;
 mod platform;
@@ -761,14 +763,20 @@ fn ui(
     // ========= System Tray ========= //
     // Setup system tray icon with context menu
     // Using native macOS API implementation to avoid Objective-C class registration conflicts
-    let app_weak_tray = app.as_weak();
-    // Delay tray icon creation to ensure window is fully initialized
-    // and to run on main thread (required on macOS)
-    Timer::single_shot(std::time::Duration::from_millis(500), move || {
-        if let Err(e) = setup_tray(app_weak_tray) {
-            log::error!("Failed to setup tray icon: {}", e);
-        }
-    });
+    #[cfg(feature = "test-fixtures")]
+    let install_tray = !memory_benchmark::nonactivating_window_requested();
+    #[cfg(not(feature = "test-fixtures"))]
+    let install_tray = true;
+    if install_tray {
+        let app_weak_tray = app.as_weak();
+        // Delay tray icon creation to ensure window is fully initialized
+        // and to run on main thread (required on macOS)
+        Timer::single_shot(std::time::Duration::from_millis(500), move || {
+            if let Err(e) = setup_tray(app_weak_tray) {
+                log::error!("Failed to setup tray icon: {}", e);
+            }
+        });
+    }
 
     // Example call - delay execution to ensure window is fully initialized
     // let app_weak = app.as_weak();
@@ -846,6 +854,11 @@ pub fn main() {
         return;
     };
 
+    #[cfg(feature = "test-fixtures")]
+    if let Err(error) = memory_benchmark::select_nonactivating_backend() {
+        startup::exit_failure("The memory benchmark backend could not be selected", &error);
+    }
+
     let sidebar_motion_mode = sidebar_motion::SidebarMotionMode::from_environment();
     let ui: MainWindow = ui(sidebar_motion_mode, &startup_timeline)
         .unwrap_or_else(|error| startup::exit_failure("Application initialization failed", &error));
@@ -878,6 +891,8 @@ pub fn main() {
                     timeline_for_render.checkpoint("first_frame_before_rendering");
                     set_startup_presentation_hidden(&win, true);
                     install_titlebar_settings_button(&win);
+                    #[cfg(feature = "test-fixtures")]
+                    memory_benchmark::configure_noninteractive_window(&win);
                 }
                 if sidebar_motion_trace_enabled {
                     sidebar_motion_trace_samples_for_render.borrow_mut().push(

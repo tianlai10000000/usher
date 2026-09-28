@@ -683,3 +683,16 @@ After completing an item, append the tested commit, command, environment, before
 - `src/workflow/pr_review.rs`: bounded PR review caches and memory diagnostics.
 - `docs/architecture.md`, `docs/architecture.zh.md`: current renderer and ownership decisions.
 - `docs/specs/pr-review.md`: stable PR review memory bounds.
+- `docs/pr-review-memory-batch-a-20260927.md`: rejected PR Review Home RSS
+  lifecycle candidate, source-built Release evidence, attribution, and rollback.
+- `docs/settings-memory-batch-b-20260928.md`: rejected Settings rendering-layer
+  candidate, six-process source-built Release evidence, attribution, and rollback.
+- `docs/settings-memory-batch-c-attribution-20260928.md`: single-binary Settings
+  owner splits, invalid-run controls, Slint 1.18.1 boundary, and the decision not
+  to promote another product candidate.
+- `docs/terminal-memory-batch-d-attribution-20260928.md`: non-activating
+  Workflow-only versus real-PTY owner split, audit limitations, and the decision
+  not to change Terminal lifecycle or drawer rendering.
+- `docs/project-list-memory-batch-e-20260928.md`: non-activating Grid/List owner
+  split, corrected long-window sampling, rejected row-owned List frame A/B, and
+  exact product rollback after returned-Home savings missed the pilot gate.

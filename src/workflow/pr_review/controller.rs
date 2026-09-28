@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "test-fixtures")]
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
@@ -560,10 +560,50 @@ pub(crate) fn bind_pr_review(
 impl WorkflowPrReviewController {
     #[cfg(feature = "test-fixtures")]
     pub(crate) fn install_memory_benchmark_fixture(&self, ui: &MainWindow) {
-        if std::env::var("USHER_MEMORY_PR_REVIEW_FIXTURE").as_deref() != Ok("large-ranges-v1") {
+        let fixture = std::env::var("USHER_MEMORY_PR_REVIEW_FIXTURE").unwrap_or_default();
+        if !matches!(
+            fixture.as_str(),
+            "large-ranges-v1" | "large-ranges-highlighted-v1"
+        ) {
             return;
         }
+        let exercise_derived_presentation = fixture == "large-ranges-highlighted-v1";
 
+        if exercise_derived_presentation {
+            let delay_ms = std::env::var("USHER_MEMORY_PR_REVIEW_FIXTURE_DELAY_MS")
+                .ok()
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or_default()
+                .min(120_000);
+            if delay_ms > 0 {
+                log::info!(
+                    "[Workflow][PR Review][Memory] reason=memory_fixture.registered delay_ms={delay_ms}"
+                );
+                let controller = self.clone();
+                let ui_weak = ui.as_weak();
+                crate::startup::run_after_first_frame(move || {
+                    log::info!(
+                        "[Workflow][PR Review][Memory] reason=memory_fixture.scheduled delay_ms={delay_ms}"
+                    );
+                    slint::Timer::single_shot(Duration::from_millis(delay_ms), move || {
+                        if let Some(ui) = ui_weak.upgrade() {
+                            controller.install_memory_benchmark_fixture_now(&ui, true);
+                        }
+                    });
+                });
+                return;
+            }
+        }
+
+        self.install_memory_benchmark_fixture_now(ui, exercise_derived_presentation);
+    }
+
+    #[cfg(feature = "test-fixtures")]
+    fn install_memory_benchmark_fixture_now(
+        &self,
+        ui: &MainWindow,
+        exercise_derived_presentation: bool,
+    ) {
         let request = ReviewRequest {
             number: "memory-fixture-1".to_string(),
             title: "Deterministic large PR memory fixture".to_string(),
@@ -600,7 +640,9 @@ impl WorkflowPrReviewController {
                 base_detail: base_detail.clone(),
                 range_diffs,
                 expanded_files: HashMap::new(),
-                loaded_large_diffs: HashSet::new(),
+                loaded_large_diffs: exercise_derived_presentation
+                    .then(|| HashSet::from([0]))
+                    .unwrap_or_default(),
             });
         }
 
@@ -611,19 +653,117 @@ impl WorkflowPrReviewController {
         ui.invoke_navigate(Route::PrReview);
         self.log_memory_diagnostics("memory_fixture.loaded");
 
-        let ui_weak = ui.as_weak();
-        slint::Timer::single_shot(Duration::from_millis(1_500), move || {
+        if exercise_derived_presentation {
+            self.await_memory_fixture_highlight(ui.as_weak(), Instant::now(), 1);
+        } else {
+            let ui_weak = ui.as_weak();
+            slint::Timer::single_shot(Duration::from_millis(1_500), move || {
+                let Some(ui) = ui_weak.upgrade() else {
+                    return;
+                };
+                for index in 0..=crate::router::MAX_ROUTE_HISTORY {
+                    ui.invoke_navigate(if index % 2 == 0 {
+                        Route::About
+                    } else {
+                        Route::Home
+                    });
+                }
+                crate::memory_diagnostics::log_checkpoint("memory_fixture.workflow_evicted");
+            });
+        }
+    }
+
+    #[cfg(feature = "test-fixtures")]
+    fn await_memory_fixture_highlight(
+        &self,
+        ui_weak: slint::Weak<MainWindow>,
+        started: Instant,
+        cycle: u8,
+    ) {
+        let controller = self.clone();
+        slint::Timer::single_shot(Duration::from_millis(100), move || {
             let Some(ui) = ui_weak.upgrade() else {
                 return;
             };
-            for index in 0..=crate::router::MAX_ROUTE_HISTORY {
-                ui.invoke_navigate(if index % 2 == 0 {
-                    Route::About
-                } else {
-                    Route::Home
+            let ready = !ui.get_workflow_pr_review_code_loading()
+                && ui.get_workflow_pr_review_lines().row_count() == 2_932
+                && (cycle > 1 || controller.highlight_resources.is_loaded());
+            if !ready {
+                if started.elapsed() >= Duration::from_secs(20) {
+                    log::error!(
+                        "[Workflow][PR Review][Memory] reason=memory_fixture.highlight_timeout cycle={} lines={} loading={} resources_loaded={}",
+                        cycle,
+                        ui.get_workflow_pr_review_lines().row_count(),
+                        ui.get_workflow_pr_review_code_loading(),
+                        controller.highlight_resources.is_loaded(),
+                    );
+                    return;
+                }
+                controller.await_memory_fixture_highlight(ui.as_weak(), started, cycle);
+                return;
+            }
+
+            if cycle == 1 {
+                controller.log_memory_diagnostics("memory_fixture.before_sidebar_home");
+                let navigation_started = Instant::now();
+                ui.invoke_navigate(Route::Home);
+                log::info!(
+                    "[Workflow][PR Review][Memory] reason=memory_fixture.sidebar_home_navigation cycle=1 callback_us={}",
+                    navigation_started.elapsed().as_micros()
+                );
+                controller.log_memory_diagnostics("memory_fixture.sidebar_home");
+                crate::memory_diagnostics::log_ui_models(&ui, Route::Home);
+                controller.schedule_memory_fixture_reentry(ui.as_weak());
+            } else {
+                log::info!(
+                    "[Workflow][PR Review][Memory] reason=memory_fixture.reentry_ready latency_ms={}",
+                    started.elapsed().as_millis()
+                );
+                controller.log_memory_diagnostics("memory_fixture.reentry_ready");
+                let controller = controller.clone();
+                let ui_weak = ui.as_weak();
+                slint::Timer::single_shot(Duration::from_secs(1), move || {
+                    let Some(ui) = ui_weak.upgrade() else {
+                        return;
+                    };
+                    controller.log_memory_diagnostics("memory_fixture.before_second_sidebar_home");
+                    let navigation_started = Instant::now();
+                    ui.invoke_navigate(Route::Home);
+                    log::info!(
+                        "[Workflow][PR Review][Memory] reason=memory_fixture.sidebar_home_navigation cycle=2 callback_us={}",
+                        navigation_started.elapsed().as_micros()
+                    );
+                    controller.log_memory_diagnostics("memory_fixture.second_sidebar_home");
+                    crate::memory_diagnostics::log_ui_models(&ui, Route::Home);
                 });
             }
-            crate::memory_diagnostics::log_checkpoint("memory_fixture.workflow_evicted");
+        });
+    }
+
+    #[cfg(feature = "test-fixtures")]
+    fn schedule_memory_fixture_reentry(&self, ui_weak: slint::Weak<MainWindow>) {
+        let delay_ms = std::env::var("USHER_MEMORY_PR_REVIEW_REENTRY_DELAY_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or_default()
+            .min(120_000);
+        if delay_ms == 0 {
+            return;
+        }
+        let controller = self.clone();
+        slint::Timer::single_shot(Duration::from_millis(delay_ms), move || {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            controller.log_memory_diagnostics("memory_fixture.before_reentry");
+            let started = Instant::now();
+            ui.invoke_navigate(Route::PrReview);
+            log::info!(
+                "[Workflow][PR Review][Memory] reason=memory_fixture.reentry_navigation callback_us={}",
+                started.elapsed().as_micros()
+            );
+            controller.log_memory_diagnostics("memory_fixture.reentry_requested");
+            controller.await_memory_fixture_highlight(ui.as_weak(), started, 2);
         });
     }
 
