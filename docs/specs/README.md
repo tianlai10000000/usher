@@ -51,6 +51,7 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | [Artifact preview framework](artifact-preview.md) | Current: split/floating/detached modes, placement persistence, full divider capture and stable detached first frames / 当前：三栏/浮动/独立窗口、模式持久化、完整分割线捕获与稳定的独立窗口首帧 | `crates/usher-preview/`, `src/artifact_preview/`, `src/platform/`, `ui/components/artifact_preview/`, Settings and all preview callers |
 | [Project repository metadata](project-repository.md) | Current: explicit Hook opt-in with disabled-row restoration, bounded Logo retries and projection / 当前：Hook 显式选择与禁用行恢复、Logo 有界重试与投影 | `src/project/mod.rs`, `src/git/`, `src/codereview/api/` |
 | [Pull request workflow](pr-review.md) | Current / 当前 | `src/workflow/pr_list.rs`, `src/workflow/pr_review.rs`, `src/workflow/pr_review/`, `src/git/`, `ui/features/pr_review/`, `ui/views/workflow/`, `ui/components/workflow/` |
+| [PR conflict browsing](pr-conflicts.md) | Read-only; animated checking status, background counts, resizable flat basename/path list with trailing conflict status / 只读；检查中动画、后台计数、可调宽的文件名/路径平铺列表与右侧冲突状态 | `src/git/conflicts/`, `src/workflow/pr_conflict_status.rs`, `src/workflow/pr_review/conflicts/`, `ui/views/workflow/pr_review_conflicts.slint` |
 | [Reusable job runs](jobs.md) | Current: typed lifecycle/durations, bounded output, virtualized logs with a soft-budgeted unmounted cache, safe blank rows and fixed run pages with output-only scrolling / 当前：类型化生命周期/耗时、有界输出、带软预算未挂载缓存的日志虚拟化、空行安全处理及固定运行页/仅输出区滚动 | `src/jobs/`, `ui/views/job_run.slint`, `ui/components/jobs/`, feature controllers |
 | [Application Hooks](hooks.md) | Current: bounded syntax text, native cursor/selection, and route/session-owned editor rendering / 当前：有界语法文本、原生光标/选区及由路由/会话共同拥有的编辑器渲染树 | `src/hooks/`, `src/project/`, Settings, PR/AI completion sources, notifications and shutdown drains |
 | [Tag workflow](tag.md) | Current / 当前 | `src/workflow/tag.rs`, `src/workflow/tag/`, `src/workflow/state.rs`, `ui/views/workflow/` |
@@ -64,6 +65,11 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 The UI design specification includes the shared small Primer Label geometry,
 transparent neutral variants and Hook status usage. / UI 设计规范包含共享 small
 Primer Label 的几何、透明中性变体及 Hook 状态用法。
+Shared UnderlineNav uses measured item widths, a root-owned More menu and
+99+ counters across PR/Workflow/Tag navigation. / 公共 Tab 按实测宽度收纳至根层
+“更多”菜单，PR/Workflow/Tag 复用同一组件，计数超过 99 显示 99+。
+Composite Tab rows own one full-width baseline and disable the nested nav border.
+/ 带尾部内容的 Tab 组合行只绘制一条通栏底线，并关闭内部导航底线。
 
 The UI design specification also covers window-wide text-input outside-click blur,
 embedded page coordinates, viewport clipping and selection-drag focus preservation.

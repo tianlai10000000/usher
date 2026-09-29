@@ -1,0 +1,221 @@
+import { PrConflictsBridge, PrConflictRow, PrConflictWindow } from "../../features/pr_review/conflicts_bridge.slint";
+import { PrDiffBridge } from "../../features/pr_review/diff_bridge.slint";
+import { GitHubTheme } from "../../theme/github_theme.slint";
+import { GitHubIconButton } from "../../components/button/github_icon_button.slint";
+import { GitHubCopyButton } from "../../components/button/github_copy_button.slint";
+import { GitHubSelectableDiffCode } from "../../components/pr_review/content.slint";
+import { GitHubConflictStatus } from "../../components/pr_review/conflict_status.slint";
+import { GitHubConflictHorizontalScrollbar } from "../../components/pr_review/conflict_scrollbar.slint";
+import { GitHubTooltip } from "../../components/github_tooltip.slint";
+import { TooltipOverlayState } from "../../state/tooltip_overlay_state.slint";
+import { GitHubPassiveScrollView, GitHubVirtualListScrollbar, ListView } from "../../components/github_scroll_view.slint";
+import { GitHubCenteredLoadingState } from "../../components/github_spinner.slint";
+import { I18n } from "@i18n";
+
+export component PrReviewConflicts inherits FocusScope {
+    in property <string> code-font-family;
+    private property <bool> files-open: root.width >= 700px;
+    private property <length> files-preferred-width: 260px;
+    private property <length> files-min-width: 220px;
+    private property <length> files-max-width: max(root.files-min-width, min(520px, root.width * 0.45));
+    private property <length> files-width: max(root.files-min-width, min(root.files-max-width, root.files-preferred-width));
+    private property <bool> files-resizing: false;
+    private property <length> files-drag-start-width;
+    private property <int> revision: PrConflictsBridge.revision;
+    private property <int> copy-completed: PrConflictsBridge.copy-completed;
+    private property <bool> loading: PrConflictsBridge.loading;
+    changed copy-completed => {
+        if root.copy-completed != 0 { copy-button.confirm-copy(); }
+        else { copy-button.reset-feedback(); }
+    }
+    changed loading => { if root.loading { copy-button.reset-feedback(); } }
+    private property <int> anchor-line: -1;
+    private property <int> anchor-col: 0;
+    private property <int> cursor-line: -1;
+    private property <int> cursor-col: 0;
+    private property <bool> forward: cursor-line > anchor-line || (cursor-line == anchor-line && cursor-col >= anchor-col);
+    private property <int> lo-line: forward ? anchor-line : cursor-line;
+    private property <int> hi-line: forward ? cursor-line : anchor-line;
+    private property <int> lo-col: forward ? anchor-col : cursor-col;
+    private property <int> hi-col: forward ? cursor-col : anchor-col;
+    private property <string> error-text: PrConflictsBridge.error-key == "conflicts.authentication" ? I18n.conflicts-authentication
+        : PrConflictsBridge.error-key == "conflicts.unsupported" ? I18n.conflicts-unsupported
+        : PrConflictsBridge.error-key == "conflicts.too_large" ? I18n.conflicts-too-large
+        : PrConflictsBridge.error-key == "conflicts.invalid_content" ? I18n.conflicts-invalid-content
+        : PrConflictsBridge.error-key == "conflicts.stale" ? I18n.conflicts-stale : I18n.conflicts-unavailable;
+    focus-on-click: false;
+    vertical-stretch: 1;
+    changed revision => {
+        root.anchor-line = -1;
+        root.cursor-line = -1;
+        code-scroll.content-y = -min(max(0px, PrConflictsBridge.rows.length * 28px - code-scroll.height), max(0px, PrConflictsBridge.reveal-line * 28px - 56px));
+    }
+    key-pressed(event) => {
+        if (event.modifiers.control || event.modifiers.meta) && (event.text == "c" || event.text == "C") && root.anchor-line >= 0 {
+            PrConflictsBridge.copy-selection(root.lo-line, root.lo-col, root.hi-line, root.hi-col);return accept;
+        }
+        if (event.modifiers.control || event.modifiers.meta) && (event.text == "a" || event.text == "A") && PrConflictsBridge.rows.length > 0 {
+            root.anchor-line = 0;root.anchor-col = 0;root.cursor-line = PrConflictsBridge.rows.length - 1;
+            root.cursor-col = PrConflictsBridge.rows[root.cursor-line].text.character-count;return accept;
+        }
+        if event.text == Key.Escape {root.anchor-line = -1;return accept;}
+        return reject;
+    }
+    Rectangle { background: GitHubTheme.canvas-default; }
+    VerticalLayout {
+        x: 0px;y: 0px;width: parent.width;height: parent.height;
+        spacing: 0px;
+        Rectangle {
+            height: 48px;
+            back-button := GitHubIconButton {x: 12px;y: 8px;width: 32px;height: 32px;icon: @image-url("../../assets/icons/octicon-arrow-left-16.svg");tooltip-text: I18n.conflicts-back;clicked => {PrConflictsBridge.back();}}
+            files-button := GitHubIconButton {x: 52px;y: 8px;width: 32px;height: 32px;icon: @image-url("../../assets/icons/octicon-sidebar-collapse-16.svg");tooltip-text: I18n.conflicts-toggle-files;selected: root.files-open;clicked => {root.files-open = !root.files-open;}}
+            title := Text {x: 92px;y: 0px;width: min(self.preferred-width, max(0px, status.x - self.x - 12px));height: 48px;text: I18n.conflicts-title;font-size: 16px;font-weight: 600;color: GitHubTheme.fg-default;vertical-alignment: center;overflow: elide;}
+            if PrConflictsBridge.local: Text {x: title.x + title.width + 12px;y: 0px;width: max(0px, status.x - self.x - 12px);height: 48px;text: I18n.conflicts-local;font-size: 12px;color: GitHubTheme.fg-muted;vertical-alignment: center;overflow: elide;}
+            status := GitHubConflictStatus {x: refresh-button.x - self.width - 12px;y: 12px;width: min(self.preferred-width, max(24px, parent.width - 220px));status: PrConflictsBridge.loading ? "checking" : PrConflictsBridge.status;interactive: false;}
+            refresh-button := GitHubIconButton {x: parent.width - 48px;y: 8px;width: 32px;height: 32px;icon: @image-url("../../assets/icons/octicon-sync-16.svg");tooltip-text: I18n.conflicts-refresh;clicked => {PrConflictsBridge.refresh();}}
+            Rectangle {x: 0px;y: parent.height - 1px;height: 1px;width: parent.width;background: GitHubTheme.border-default;}
+        }
+        conflict-body := Rectangle {
+            vertical-stretch: 1;
+        HorizontalLayout {
+            x: 0px;y: 0px;width: parent.width;height: parent.height;
+            spacing: 0px;
+            if root.files-open: files-pane := Rectangle {
+                width: root.files-width;
+                VerticalLayout {
+                    x: 0px;y: 0px;width: parent.width - 1px;height: parent.height;
+                    spacing: 0px;
+                    Rectangle {height: 44px;Text {x: 14px;y: 0px;width: parent.width - 28px;height: parent.height;text: I18n.conflicts-files + " (" + PrConflictsBridge.files.length + ")";font-size: 13px;font-weight: 600;color: GitHubTheme.fg-default;vertical-alignment: center;overflow: elide;}}
+                    ListView {
+                        for file[index] in PrConflictsBridge.files: file-row := FocusScope {
+                            height: 56px;
+                            private property <bool> tooltip-dismissed: false;
+                            private property <string> full-path: file.path == file.target-path ? file.path : file.target-path + " → " + file.path;
+                            focus-on-click: false;
+                            accessible-role: button;accessible-label: self.full-path + ", " + I18n.conflicts-title;
+                            function activate() {file-row.tooltip-dismissed = true;TooltipOverlayState.dismiss-all();file-row.focus();PrConflictsBridge.select-file(index);}
+                            key-pressed(event) => {if event.text == Key.Return || event.text == " " {file-row.activate();return accept;}return reject;}
+                            Rectangle {
+                                x: 0px;y: 0px;width: parent.width;height: parent.height;
+                                background: PrConflictsBridge.selected-file == index ? GitHubTheme.control-transparent-selected : file-touch.has-hover ? GitHubTheme.control-transparent-hover : transparent;
+                                border-width: file-row.has-focus ? 1px : 0px;border-color: GitHubTheme.accent-fg;
+                                Rectangle {x: 0px;y: 0px;width: 3px;height: parent.height;background: PrConflictsBridge.selected-file == index ? GitHubTheme.danger-fg : transparent;}
+                                file-name := Text {x: 14px;y: 8px;width: parent.width - 56px;height: 20px;text: file.name;font-size: 13px;font-weight: 600;color: GitHubTheme.fg-default;vertical-alignment: center;overflow: elide;}
+                                file-path := Text {x: 14px;y: 30px;width: parent.width - 56px;height: 16px;text: file-row.full-path;font-size: 11px;color: GitHubTheme.fg-muted;vertical-alignment: center;overflow: elide;}
+                                // Every snapshot entry is unresolved, including nontext files with no marker blocks.
+                                conflict-icon := Image {x: parent.width - 30px;y: (parent.height - 16px) / 2;width: 16px;height: 16px;source: @image-url("../../assets/icons/octicon-alert-16.svg");colorize: GitHubTheme.danger-fg;}
+                                file-touch := TouchArea {mouse-cursor: pointer;changed has-hover => {if !self.has-hover {file-row.tooltip-dismissed = false;}}clicked => {file-row.activate();}}
+                                GitHubTooltip {x: 0px;y: 0px;width: parent.width;height: parent.height;text: file-touch.has-hover && !file-row.tooltip-dismissed ? file-row.full-path : "";}
+                            }
+                        }
+                    }
+                }
+                Rectangle {x: parent.width - 1px;y: 0px;width: 1px;height: parent.height;background: GitHubTheme.border-default;}
+            }
+            Rectangle {
+                horizontal-stretch: 1;
+                VerticalLayout {
+                    x: 0px;y: 0px;width: parent.width;height: parent.height;
+                    spacing: 0px;
+                    Rectangle {
+                        height: 44px;background: GitHubTheme.canvas-subtle;
+                        Text {x: 12px;y: 0px;width: max(0px, block-count.x - self.x - 8px - read-only.width);height: 44px;text: PrConflictsBridge.selected-file >= 0 ? PrConflictsBridge.files[PrConflictsBridge.selected-file].path : "";font-size: 13px;font-weight: 600;color: GitHubTheme.fg-default;vertical-alignment: center;overflow: elide;}
+                        read-only := Text {x: block-count.x - self.width;y: 0px;width: parent.width >= 600px ? self.preferred-width + 12px : 0px;height: 44px;visible: parent.width >= 600px;text: I18n.conflicts-read-only;font-size: 12px;color: GitHubTheme.fg-muted;vertical-alignment: center;}
+                        block-count := Text {x: previous-button.x - 64px;y: 0px;width: 56px;height: 44px;text: (PrConflictsBridge.selected-block + 1) + " / " + PrConflictsBridge.block-count;font-size: 12px;color: GitHubTheme.fg-muted;vertical-alignment: center;horizontal-alignment: center;}
+                        previous-button := GitHubIconButton {x: next-button.x - 40px;y: 6px;width: 32px;height: 32px;icon: @image-url("../../assets/icons/octicon-chevron-up-16.svg");tooltip-text: I18n.conflicts-previous;button-enabled: !PrConflictsBridge.loading && PrConflictsBridge.selected-block > 0;clicked => {PrConflictsBridge.step-block(-1);}}
+                        next-button := GitHubIconButton {x: copy-button.x - 40px;y: 6px;width: 32px;height: 32px;icon: @image-url("../../assets/icons/octicon-chevron-down-16.svg");tooltip-text: I18n.conflicts-next;button-enabled: !PrConflictsBridge.loading && PrConflictsBridge.selected-block + 1 < PrConflictsBridge.block-count;clicked => {PrConflictsBridge.step-block(1);}}
+                        copy-button := GitHubCopyButton {
+                            x: parent.width - 44px; y: 6px;
+                            tooltip-text: I18n.conflicts-copy;
+                            button-enabled: !PrConflictsBridge.loading && PrConflictsBridge.text-available && !PrConflictsBridge.copy-busy;
+                            copy-requested => { PrConflictsBridge.copy(); return false; }
+                        }
+                        Rectangle {x: 0px;y: parent.height - 1px;height: 1px;width: parent.width;background: GitHubTheme.border-default;}
+                    }
+                    code-surface := Rectangle {
+                        vertical-stretch: 1;
+                        // Flickable's inertia reads the extent while evaluating its offset.
+                        // Keep document geometry independent of that animated offset.
+                        private property <PrConflictWindow> document: PrConflictsBridge.layout(PrConflictsBridge.rows.length, 0, 1);
+                        private property <PrConflictWindow> window: PrConflictsBridge.layout(PrConflictsBridge.rows.length, max(0px, -code-scroll.content-y) / 1px, code-scroll.height / 1px);
+                        code-scroll := GitHubPassiveScrollView {
+                            x: 0px;y: 0px;width: parent.width - 8px;height: parent.height - 10px;
+                            content-height: code-surface.document.total * 1px;
+                            content-width: max(self.width, PrConflictsBridge.max-columns * 9px + 96px);
+                            for offset in code-surface.window.count: row := Rectangle {
+                                private property <int> index: code-surface.window.start + offset;
+                                private property <PrConflictRow> data: PrConflictsBridge.rows[self.index];
+                                x: 0px;y: self.index * 28px;height: 28px;width: code-scroll.content-width;
+                                number-cell := Rectangle {
+                                    x: 0px;y: 0px;width: 54px;height: parent.height;
+                                    background: row.data.conflict && !row.data.start ? GitHubTheme.attention-muted : GitHubTheme.canvas-default;
+                                    Text {x: 4px;y: 0px;width: 42px;height: parent.height;text: row.data.number;font-family: root.code-font-family;font-size: 12px;color: GitHubTheme.fg-muted;horizontal-alignment: right;vertical-alignment: center;}
+                                }
+                                bracket-lane := Rectangle {
+                                    x: 54px;y: 0px;width: 20px;height: parent.height;
+                                    background: row.data.conflict ? GitHubTheme.attention-muted : GitHubTheme.canvas-default;
+                                    if row.data.conflict: Rectangle {x: 6px;y: row.data.start ? 14px : 0px;width: 1px;height: row.data.start || row.data.end ? 14px : 28px;background: GitHubTheme.danger-fg;}
+                                    if row.data.start || row.data.separator || row.data.end: Rectangle {x: 6px;y: 14px;width: 7px;height: 1px;background: GitHubTheme.danger-fg;}
+                                }
+                                GitHubSelectableDiffCode {
+                                    x: 82px;y: 0px;width: parent.width - 90px;height: 28px;
+                                    content: row.data.text;tokens: row.data.tokens;show-tokens: true;
+                                    code-font-family: root.code-font-family;code-font-size: 13px;nominal-row-height: 28px;
+                                    fg-default: GitHubTheme.fg-default;selection-background: GitHubTheme.diff-selection-bg;
+                                    line-index: row.index;side: "conflicts";
+                                    multi-sel-active: root.anchor-line >= 0;multi-sel-side: "conflicts";
+                                    multi-sel-lo-line: root.lo-line;multi-sel-hi-line: root.hi-line;multi-sel-lo-col: root.lo-col;multi-sel-hi-col: root.hi-col;
+                                    multi-sel-begin(line,col,side) => {root.focus();root.anchor-line = line;root.anchor-col = col;root.cursor-line = line;root.cursor-col = col;}
+                                    multi-sel-update(line,col,side) => {root.cursor-line = line;root.cursor-col = col;}
+                                    resolve-hit(line,x,y,h,w,c,p,f,s,side) => {return PrConflictsBridge.resolve-hit(line,x,y,f,s);}
+                                    resolve-token-hit(t,x,w,f,s,b,i) => {return PrDiffBridge.workflow-pr-review-resolve-diff-token-hit(t,x,w,f,s,b,i);}
+                                    resolve-token-range(t,a,b,w,f,s,bold,italic) => {return PrDiffBridge.workflow-pr-review-resolve-diff-token-range(t,a,b,w,f,s,bold,italic);}
+                                }
+                            }
+                        }
+                        GitHubVirtualListScrollbar {x: parent.width - 8px;y: 0px;width: 8px;height: parent.height;viewport-y <=> code-scroll.content-y;visible-height: code-scroll.height;content-height: code-scroll.content-height;}
+                        GitHubConflictHorizontalScrollbar {x: 0px;y: parent.height - 10px;width: parent.width - 8px;viewport-x <=> code-scroll.content-x;visible-width: code-scroll.width;content-width: code-scroll.content-width;}
+                        if PrConflictsBridge.loading: GitHubCenteredLoadingState {width: parent.width;height: parent.height;}
+                        if !PrConflictsBridge.loading && (PrConflictsBridge.error-key != "" || !PrConflictsBridge.text-available): Text {
+                            x: 24px;width: max(0px, parent.width - 48px);height: parent.height;
+                            text: PrConflictsBridge.error-key != "" ? root.error-text : PrConflictsBridge.files.length == 0 ? I18n.conflicts-empty : I18n.conflicts-nontext;
+                            font-size: 14px;color: GitHubTheme.fg-muted;wrap: word-wrap;line-height-factor: 1.3;horizontal-alignment: center;vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+            files-resize-handle := TouchArea {
+                x: root.files-open ? root.files-width - 4px : -10px;
+                y: 0px;
+                width: root.files-open ? 9px : 0px;
+                height: parent.height;
+                z: 100;
+                mouse-cursor: col-resize;
+                moved => {
+                    if root.files-resizing {
+                        // The divider follows the pointer, so apply its remaining local delta.
+                        root.files-preferred-width = max(root.files-min-width,
+                            min(root.files-max-width, root.files-width + self.mouse-x - self.pressed-x));
+                    }
+                }
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down {
+                        root.files-resizing = true;
+                        root.files-drag-start-width = root.files-width;
+                    } else if event.kind == PointerEventKind.up {
+                        root.files-resizing = false;
+                    } else if event.kind == PointerEventKind.cancel {
+                        root.files-preferred-width = root.files-drag-start-width;
+                        root.files-resizing = false;
+                    }
+                }
+            }
+            Rectangle {
+                x: root.files-width - 1px;y: 0px;width: 3px;height: parent.height;
+                z: 101;background: GitHubTheme.fg-muted;
+                opacity: root.files-open && (root.files-resizing || files-resize-handle.has-hover) ? 0.8 : 0;
+            }
+        }
+    }
+}

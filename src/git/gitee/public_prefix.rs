@@ -167,6 +167,7 @@ mod tests {
             source_branch: source_branch.to_string(),
             target_branch: target_branch.to_string(),
             review_status: PullRequestReviewStatus::None,
+            conflict_status: Default::default(),
             conversation_count: None,
             created_at: String::new(),
             updated_at: updated_at.to_string(),

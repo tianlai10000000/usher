@@ -14,6 +14,9 @@ import { GitHubPassiveScrollView, GitHubVirtualListScrollbar, ListView } from ".
 import { GitHubActionListItem, GitHubActionMenu, GitHubActionMenuTriggerArea } from "../../components/github_action_menu.slint";
 import { PullRequestReviewPageContract } from "../../features/pr_review/contract.slint";
 import { I18n } from "@i18n";
+import { GitHubUnderlineNav } from "../../components/navigation/github_underline_nav.slint";
+import { PrConflictsBridge } from "../../features/pr_review/conflicts_bridge.slint";
+import { PrReviewConflicts } from "pr_review_conflicts.slint";
 export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContract {
     // This route intentionally spans the full window so its Dialogs can cover
     // the docked AI Review panel. Do not let the root FocusScope consume a
@@ -59,6 +62,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
     private property <length> commit-tab-content-x: 16px;
     private property <length> commit-tab-content-y: 12px;
     private property <length> commit-tab-card-radius: 6px;
+    private property <float> commit-tab-title-line-height-factor: 1.15;
     // Expanded: title band + body + author footer (avatar). Collapsed is 72px.
     private property <length> commit-tab-title-band: 36px;
     private property <length> commit-tab-author-band: 28px;
@@ -705,7 +709,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
     compact-summary-metrics := GitHubPullRequestSummaryMetrics {
         state-kind: root.merge-readiness-kind;
         author: root.author;
-        commit-count: root.commit-count;
+        commit-count: PrConflictsBridge.active && root.commit-count == 0 ? -1 : root.commit-count;
         target-branch: root.target-branch;
         source-branch: root.source-branch;
         updated-at: root.updated-at;
@@ -818,7 +822,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                         width: parent.width;
                         state-kind: root.merge-readiness-kind;
                         author: root.author;
-                        commit-count: root.commit-count;
+                        commit-count: PrConflictsBridge.active && root.commit-count == 0 ? -1 : root.commit-count;
                         target-branch: root.target-branch;
                         source-branch: root.source-branch;
                         updated-at: root.updated-at;
@@ -863,7 +867,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                     width: parent.width - 32px;
                     state-kind: root.merge-readiness-kind;
                     author: root.author;
-                    commit-count: root.commit-count;
+                    commit-count: PrConflictsBridge.active && root.commit-count == 0 ? -1 : root.commit-count;
                     target-branch: root.target-branch;
                     source-branch: root.source-branch;
                     updated-at: root.updated-at;
@@ -888,74 +892,58 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             background: root.github-border-default;
         }
 
-        review-tabs := Rectangle {
+        if !PrConflictsBridge.active: review-tabs := Rectangle {
             width: parent.width;
             height: 48px;
             background: root.github-bg-default;
-            accessible-role: tab-list;
-            accessible-label: I18n.pr-review-sections;
-            private property <bool> show-aggregate-diffstat: root.content-width >= 840px;
-            HorizontalLayout {
-                x: 16px;
-                width: parent.width - 32px;
-                spacing: 4px;
-                alignment: start;
-                GitHubPullRequestTabButton {
-                    label: I18n.pr-review-conversation;
-                    // Badge summaries load with the PR detail. Keep them independent
-                    // from the lazily mounted Conversation payload.
-                    count: root.conversation-count;
-                    icon: @image-url("../../assets/icons/octicon-comment-discussion-16.svg");
-                    selected: root.selected-tab == 0;
-                    clicked => {
-                        root.active-popover = "";
-                        root.selected-tab = 0;
-                        root.select-tab(0);
+            // One baseline spans both navigation and the trailing PR totals.
+            Rectangle {
+                y: parent.height - GitHubMetrics.border-thin;
+                width: parent.width;
+                height: GitHubMetrics.border-thin;
+                background: GitHubTheme.border-muted;
+            }
+            review-nav := GitHubUnderlineNav {
+                x: 0px;
+                width: max(0px, aggregate-diffstat.x - 8px);
+                show-bottom-border: false;
+                owner: "pr-review";
+                group-label: I18n.pr-review-sections;
+                selected-index: root.selected-tab;
+                items: [
+                    { label: I18n.pr-review-conversation, icon: @image-url("../../assets/icons/octicon-comment-discussion-16.svg"), count: root.conversation-count, show-count: true },
+                    { label: I18n.pr-review-commits, icon: @image-url("../../assets/icons/octicon-git-commit-16.svg"), count: root.commit-count, show-count: true },
+                    { label: I18n.pr-review-files-changed, icon: @image-url("../../assets/icons/octicon-file-diff-16.svg"), count: root.files.length, show-count: true },
+                    { label: I18n.conflicts-title, icon: @image-url("../../assets/icons/octicon-alert-16.svg"), count: PrConflictsBridge.file-count, show-count: PrConflictsBridge.file-count >= 0,
+                        danger: root.merge-readiness-kind == "conflicts" || PrConflictsBridge.status == "conflicting" },
+                ];
+                selected(index) => {
+                    root.active-popover = "";
+                    if index == 3 { PrConflictsBridge.open(); } else {
+                        root.selected-tab = index;
+                        root.select-tab(index);
                     }
                 }
-                GitHubPullRequestTabButton {
-                    label: I18n.pr-review-commits;
-                    // Loading this tab must not be what makes its badge appear.
-                    count: root.commit-count;
-                    icon: @image-url("../../assets/icons/octicon-git-commit-16.svg");
-                    selected: root.selected-tab == 1;
-                    clicked => {
-                        root.active-popover = "";
-                        root.selected-tab = 1;
-                        root.select-tab(1);
-                    }
-                }
-                GitHubPullRequestTabButton {
-                    label: I18n.pr-review-files-changed;
-                    count: root.files.length;
-                    icon: @image-url("../../assets/icons/octicon-file-diff-16.svg");
-                    selected: root.selected-tab == 2;
-                    clicked => {
-                        root.active-popover = "";
-                        root.selected-tab = 2;
-                        root.select-tab(2);
-                    }
-                }
-                Rectangle { horizontal-stretch: 1; }
-                if review-tabs.show-aggregate-diffstat: GitHubFileDiffStat {
-                    height: parent.height;
-                    additions: root.added-lines;
-                    deletions: root.removed-lines;
-                    has-selection: true;
-                }
+            }
+            aggregate-diffstat := GitHubFileDiffStat {
+                x: parent.width - self.width - 16px;
+                height: parent.height;
+                additions: root.added-lines;
+                deletions: root.removed-lines;
+                has-selection: true;
             }
         }
 
-        Rectangle { width: parent.width; height: 1px; background: root.github-border-default; }
+        if PrConflictsBridge.active: PrReviewConflicts { code-font-family: root.code-font-family; }
 
-        if root.selected-tab == 2: files-changed-toolbar := Rectangle {
+        if !PrConflictsBridge.active && root.selected-tab == 2: files-changed-toolbar := Rectangle {
             width: parent.width;
             height: 46px;
             // The SHA tooltip opens below this row. Keep the row above the
             // following file toolbar so the GitHub-style bubble is not covered.
             z: 80;
             // GitHub Files changed commit toolbar: default surface + hairline
-            // top/bottom borders (top is the shared 1px rule above this row).
+            // top/bottom borders (top is the Tab row's shared 1px baseline).
             background: root.github-bg-default;
             clip: false;
 
@@ -1177,7 +1165,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
 
         }
 
-        if root.selected-tab == 2 && (root.too-many-commits || root.files-truncated): Rectangle {
+        if !PrConflictsBridge.active && root.selected-tab == 2 && (root.too-many-commits || root.files-truncated): Rectangle {
             width: parent.width;
             height: 32px;
             background: GitHubTheme.done-muted;
@@ -1194,7 +1182,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             }
         }
 
-        if root.selected-tab == 0: Rectangle {
+        if !PrConflictsBridge.active && root.selected-tab == 0: Rectangle {
             width: parent.width;
             vertical-stretch: 1;
             background: root.github-bg-default;
@@ -2051,7 +2039,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             }
         }
 
-        if root.selected-tab == 1: Rectangle {
+        if !PrConflictsBridge.active && root.selected-tab == 1: Rectangle {
             width: parent.width;
             vertical-stretch: 1;
             background: root.github-bg-default;
@@ -2112,6 +2100,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                         font-size: 14px;
                         font-weight: 600;
                         wrap: word-wrap;
+                        line-height-factor: root.commit-tab-title-line-height-factor;
                     }
                     Rectangle {
                         x: 20px;
@@ -2245,6 +2234,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                             text: commit.title;
                             font-size: 14px;
                             font-weight: 600;
+                            line-height-factor: root.commit-tab-title-line-height-factor;
                         }
                         // Layout probe for the exact end of the final wrapped
                         // title line. It stays mounted and transparent so a
@@ -2263,6 +2253,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                             text: commit.title;
                             font-size: 14px;
                             font-weight: 600;
+                            line-height-factor: root.commit-tab-title-line-height-factor;
                             text-cursor-width: 0px;
                             init => {
                                 self.set-selection-offsets(2147483647, 2147483647);
@@ -2277,7 +2268,10 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                 commit-row.title-end-x = position.x;
                             }
                         }
-                        if !tab-commit-title-touch.has-hover: Text {
+                        // StyledText in Slint 1.18 cannot share the native title's
+                        // line-height-factor. Keep wrapped titles on this one native
+                        // paint path during hover so glyphs and row geometry do not jump.
+                        if !tab-commit-title-touch.has-hover || commit-row.title-wrapped: commit-title-text := Text {
                             x: root.commit-tab-content-x;
                             y: root.commit-tab-content-y;
                             width: commit-item.title-max-width;
@@ -2289,12 +2283,13 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                             horizontal-alignment: left;
                             vertical-alignment: top;
                             wrap: word-wrap;
+                            line-height-factor: root.commit-tab-title-line-height-factor;
                             overflow: clip;
                         }
-                        // StyledText draws an underline per glyph run, including
-                        // each wrapped line, matching GitHub's inline link. The
-                        // old Rectangle produced one unrelated blue rule.
-                        if tab-commit-title-touch.has-hover: StyledText {
+                        // Keep the text-native underline for single-line titles.
+                        // Wrapped titles stay on the native Text above because
+                        // StyledText 1.18 cannot honor their line-height contract.
+                        if tab-commit-title-touch.has-hover && !commit-row.title-wrapped: StyledText {
                             x: root.commit-tab-content-x;
                             y: root.commit-tab-content-y;
                             width: commit-item.title-max-width;
@@ -2330,14 +2325,8 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                 committer-label: commit.committer-avatar-label;
                                 show-committer: commit.show-committer;
                             }
-                            Text {
-                                width: self.preferred-width;
-                                text: commit.identity-action;
-                                font-size: 12px;
-                                color: root.github-fg-muted;
-                                vertical-alignment: center;
-                            }
-                            if commit.short-date-label != "": GitHubRelativeTimestamp {
+                            collapsed-commit-timestamp := GitHubRelativeTimestamp {
+                                leading-text: commit.identity-action;
                                 text: commit.short-date-label;
                                 tooltip-text: commit.authored-at;
                                 tooltip-after: true;
@@ -2384,14 +2373,8 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                 committer-label: commit.committer-avatar-label;
                                 show-committer: commit.show-committer;
                             }
-                            Text {
-                                width: self.preferred-width;
-                                text: commit.identity-action;
-                                font-size: 12px;
-                                color: root.github-fg-muted;
-                                vertical-alignment: center;
-                            }
-                            if commit.short-date-label != "": GitHubRelativeTimestamp {
+                            expanded-commit-timestamp := GitHubRelativeTimestamp {
+                                leading-text: commit.identity-action;
                                 text: commit.short-date-label;
                                 tooltip-text: commit.authored-at;
                                 tooltip-after: true;
@@ -2504,7 +2487,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             }
         }
 
-        if root.selected-tab == 2: Rectangle {
+        if !PrConflictsBridge.active && root.selected-tab == 2: Rectangle {
             width: parent.width;
             vertical-stretch: 1;
             // File-filter ActionMenu may flip above into the tab row; the menu
@@ -3929,7 +3912,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
     // Host File extensions above VerticalLayout siblings (toolbar z:80, tabs)
     // so auto-flip on short/narrow windows is not covered. Anchor coords are
     // synced from filter-menu-anchor inside the files pane.
-    if root.selected-tab == 2 && root.file-list-visible && !root.loading && root.error-text == "": GitHubFilterMenu {
+    if !PrConflictsBridge.active && root.selected-tab == 2 && root.file-list-visible && !root.loading && root.error-text == "": GitHubFilterMenu {
         z: 1200;
         x: root.filter-menu-anchor-x;
         y: root.filter-menu-anchor-y;

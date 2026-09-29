@@ -80,26 +80,13 @@ export component GitHubTagFlow {
             width: parent.width;
             height: 48px;
             group-label: I18n.tag-operations;
-
-            GitHubUnderlineNavItem {
-                label: I18n.tag-add;
-                selected: root.selected-tab == 0;
-                clicked => {
-                    root.selected-tab = 0;
-                    root.open-add-tab();
-                }
+            owner: "tag-operations";
+            selected-index: root.selected-tab;
+            items: [{ label: I18n.tag-add }, { label: I18n.tag-remove }];
+            selected(index) => {
+                root.selected-tab = index;
+                if index == 0 { root.open-add-tab(); } else { root.open-remove-tab(); }
             }
-
-            GitHubUnderlineNavItem {
-                label: I18n.tag-remove;
-                selected: root.selected-tab == 1;
-                clicked => {
-                    root.selected-tab = 1;
-                    root.open-remove-tab();
-                }
-            }
-
-            Rectangle { horizontal-stretch: 1; }
         }
 
         Rectangle { width: parent.width; height: 12px; background: transparent; }

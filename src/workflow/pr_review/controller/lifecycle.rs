@@ -11,6 +11,20 @@ pub(crate) fn candidate_enabled() -> bool {
 
 impl WorkflowPrReviewController {
     pub(crate) fn route_changed(&self, ui: &MainWindow, previous: Route, current: Route) {
+        if previous == Route::PrReview && current != Route::PrReview {
+            self.conflicts.close(ui);
+        } else if current == Route::PrReview && previous != Route::PrReview {
+            let request = self.active_request.lock().unwrap().clone();
+            if let Some(request) = request {
+                self.conflicts.prefetch(
+                    ui,
+                    self.project_alias.lock().unwrap().clone(),
+                    request.number,
+                    request.source_branch,
+                    request.target_branch,
+                );
+            }
+        }
         if !candidate_enabled() {
             return;
         }
@@ -109,6 +123,54 @@ mod tests {
             tokens: Vec::new(),
             columns: 1,
         }])
+    }
+
+    #[test]
+    fn commit_range_keeps_whole_pr_totals_in_the_tab_row() {
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().unwrap();
+        let (controller, _) = fixture(&ui);
+        let mut detail = ai_review_fixture_diff_detail("1");
+        detail.files.clear();
+        detail.added_lines = 32842;
+        detail.removed_lines = 2277;
+        let all = Arc::new(SharedDiffDetail::from(detail.clone()));
+        controller
+            .cache
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .all_detail = all.clone();
+        detail.added_lines = 12;
+        detail.removed_lines = 3;
+        let range = Arc::new(SharedDiffDetail::from(detail));
+        controller.activate_commit_range(&ui, range);
+        assert_eq!(ui.get_workflow_pr_review_added_lines(), 32842);
+        assert_eq!(ui.get_workflow_pr_review_removed_lines(), 2277);
+        controller.activate_commit_range(&ui, all);
+        assert_eq!(ui.get_workflow_pr_review_added_lines(), 32842);
+        assert_eq!(ui.get_workflow_pr_review_removed_lines(), 2277);
+    }
+
+    #[test]
+    fn ordinary_review_entry_starts_conflict_count_without_opening_conflicts() {
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().unwrap();
+        let (controller, _) = fixture(&ui);
+        let request = controller.active_request.lock().unwrap().clone().unwrap();
+        controller.open(&ui, request, false);
+        let b = ui.global::<crate::PrConflictsBridge>();
+        assert!(b.get_loading());
+        assert!(!b.get_active());
+        assert_eq!(b.get_file_count(), -1);
+        controller.conflicts.close(&ui);
+        controller.route_changed(&ui, Route::Workflow, Route::PrReview);
+        assert!(b.get_loading());
+        assert!(!b.get_active());
+        controller.conflicts.close(&ui);
     }
 
     #[test]

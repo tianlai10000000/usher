@@ -71,6 +71,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
     in property <string> pr-repo-project-id: "";
     in property <string> pr-repo-type: "";
     in property <[WorkflowPullRequestItem]> pr-list-items: [];
+    in property <int> pr-list-compact-text-offset-y: 0;
     in property <int> pr-list-total: 0;
     in property <bool> pr-list-total-exact: false;
     in property <int> pr-list-open-total: -1;
@@ -176,31 +177,15 @@ export component GitHubWorkflowPage inherits GitHubPageView {
             width: parent.width;
             height: root.workflow-nav-height;
             group-label: I18n.workflow-sections;
-
-            GitHubUnderlineNavItem {
-                label: I18n.workflow-pull-requests;
-                icon: @image-url("../../assets/icons/octicon-git-pull-request-16.svg");
-                selected: root.selected-flow == 2;
-                clicked => { root.selected-flow = 2; }
-            }
-            GitHubUnderlineNavItem {
-                label: I18n.workflow-tags;
-                icon: @image-url("../../assets/icons/octicon-stack-16.svg");
-                selected: root.selected-flow == 3;
-                clicked => { root.selected-flow = 3; }
-            }
-            GitHubUnderlineNavItem {
-                label: I18n.workflow-branch;
-                icon: @image-url("../../assets/icons/octicon-git-commit-16.svg");
-                selected: root.selected-flow == 0;
-                clicked => { root.selected-flow = 0; }
-            }
-            GitHubUnderlineNavItem {
-                label: I18n.workflow-cd;
-                icon: @image-url("../../assets/icons/octicon-repo-push-16.svg");
-                selected: root.selected-flow == 1;
-                clicked => { root.selected-flow = 1; }
-            }
+            owner: "workflow";
+            selected-index: root.selected-flow == 2 ? 0 : root.selected-flow == 3 ? 1 : root.selected-flow == 0 ? 2 : 3;
+            items: [
+                { label: I18n.workflow-pull-requests, icon: @image-url("../../assets/icons/octicon-git-pull-request-16.svg") },
+                { label: I18n.workflow-tags, icon: @image-url("../../assets/icons/octicon-stack-16.svg") },
+                { label: I18n.workflow-branch, icon: @image-url("../../assets/icons/octicon-git-commit-16.svg") },
+                { label: I18n.workflow-cd, icon: @image-url("../../assets/icons/octicon-repo-push-16.svg") },
+            ];
+            selected(index) => { root.selected-flow = index == 0 ? 2 : index == 1 ? 3 : index == 2 ? 0 : 1; }
         }
 
         main-panel := Rectangle {
@@ -255,6 +240,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
                 viewport-width: root.overlay-viewport-width;
                 viewport-height: root.viewport-height;
                 code-font-family: root.code-font-family;
+                compact-text-offset-y: root.pr-list-compact-text-offset-y;
                 repo-project-id: root.pr-repo-project-id;
                 repo-type: root.pr-repo-type;
                 pr-items: root.pr-list-items;

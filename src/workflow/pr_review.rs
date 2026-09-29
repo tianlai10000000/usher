@@ -2,6 +2,7 @@
 
 mod avatar;
 mod cache;
+mod conflicts;
 mod controller;
 mod diff_model;
 mod diff_projection;

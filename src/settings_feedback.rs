@@ -65,6 +65,12 @@ pub(crate) fn save_settings_with_feedback<F>(
             };
             match result {
                 Ok(()) => {
+                    if matches!(
+                        target,
+                        SettingsSaveTarget::GitTokens | SettingsSaveTarget::GitHosting
+                    ) {
+                        crate::workflow::invalidate_conflict_status(&ui);
+                    }
                     set_settings_saved(&ui, &settings_page, target, true);
                     ToastManager::get(&ui)
                         .invoke_success(settings_toast(i18n::tr(success_message_key).as_ref()));

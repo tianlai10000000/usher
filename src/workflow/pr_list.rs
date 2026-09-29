@@ -30,6 +30,20 @@ pub(crate) fn bind_pr_list(ui: &MainWindow) -> WorkflowPrListController {
         fixture_enabled: review_status_fixture_enabled(),
     };
 
+    let conflict_controller = controller.clone();
+    let weak = ui.as_weak();
+    ui.global::<crate::PrConflictsBridge>()
+        .on_refresh_list(move || {
+            if let Some(ui) = weak.upgrade()
+                && let Some(metadata) = conflict_controller
+                    .context
+                    .lock()
+                    .ok()
+                    .and_then(|c| c.clone())
+            {
+                super::pr_conflict_status::enrich(&ui, metadata);
+            }
+        });
     let state_controller = controller.clone();
     let ui_weak = ui.as_weak();
     ui.on_workflow_pr_list_state_change(move |state| {
@@ -162,6 +176,9 @@ pub(crate) fn bind_pr_list(ui: &MainWindow) -> WorkflowPrListController {
         sort_controller.refresh_state_totals(&ui);
     });
 
+    #[cfg(feature = "test-fixtures")]
+    super::pr_list_fixture::setup(ui);
+
     controller
 }
 
@@ -192,6 +209,7 @@ impl WorkflowPrListController {
     }
 
     pub(crate) fn release_unreachable(&self, ui: &MainWindow) {
+        super::pr_conflict_status::invalidate(ui);
         self.generations.invalidate_all();
         if let Ok(mut context) = self.context.lock() {
             *context = None;
@@ -208,6 +226,7 @@ impl WorkflowPrListController {
     }
 
     pub(crate) fn select_project(&self, ui: &MainWindow, project_alias: String) {
+        super::pr_conflict_status::invalidate(ui);
         let request = self.generations.begin(PrListRequestKind::Page);
         self.generations.invalidate(PrListRequestKind::Totals);
         if let Ok(mut context) = self.context.lock() {
@@ -287,6 +306,7 @@ impl WorkflowPrListController {
     }
 
     fn clear_and_load_page(&self, ui: &MainWindow, state: PullRequestState, page: u32) {
+        super::pr_conflict_status::invalidate(ui);
         clear_pages(&self.visited_pages);
         ui.set_workflow_pr_list_items(ModelRc::new(VecModel::from(
             Vec::<WorkflowPullRequestItem>::new(),
@@ -399,6 +419,7 @@ impl WorkflowPrListController {
             .unwrap_or_default();
         let ui_weak = ui.as_weak();
         crate::app_runtime::shared_runtime().spawn(async move {
+            let conflict_identity = super::pr_conflict_status::Key::new(&context, "");
             let result = get_pull_requests(
                 context.repo_type.as_str(),
                 context.repo_project_id.as_str(),
@@ -409,6 +430,20 @@ impl WorkflowPrListController {
                 PAGE_SIZE,
             )
             .await;
+            if generations.is_current(PrListRequestKind::Page, request)
+                && conflict_identity == super::pr_conflict_status::Key::new(&context, "")
+            {
+                if let Ok(page) = &result {
+                    for item in &page.items {
+                        if item.conflict_status != crate::git::conflicts::ConflictStatus::Unknown {
+                            super::pr_conflict_status::shared().observe(
+                                super::pr_conflict_status::Key::new(&context, &item.number),
+                                item.conflict_status,
+                            );
+                        }
+                    }
+                }
+            }
             let _ = slint::invoke_from_event_loop(move || {
                 if !generations.is_current(PrListRequestKind::Page, request) {
                     return;
@@ -603,7 +638,7 @@ fn default_pull_request_filters() -> PullRequestFilters {
     }
 }
 
-fn review_status_fixture_enabled() -> bool {
+pub(super) fn review_status_fixture_enabled() -> bool {
     cfg!(feature = "test-fixtures")
         && std::env::var("USHER_PR_LIST_FIXTURE").as_deref() == Ok(REVIEW_STATUS_FIXTURE)
 }
@@ -704,6 +739,8 @@ fn apply_page_to_ui(
 ) {
     let items = items.iter().map(to_slint_item).collect::<Vec<_>>();
     ui.set_workflow_pr_list_items(ModelRc::new(VecModel::from(items)));
+    ui.global::<crate::PrConflictsBridge>()
+        .invoke_refresh_list();
     ui.invoke_ai_review_refresh_pr_rows();
     ui.set_workflow_pr_list_page(page as i32);
     ui.set_workflow_pr_list_page_count(page_count.max(1) as i32);
@@ -719,6 +756,12 @@ fn to_slint_item(item: &PullRequestItem) -> WorkflowPullRequestItem {
         source_branch: item.source_branch.clone().into(),
         target_branch: item.target_branch.clone().into(),
         review_status: item.review_status.as_str().into(),
+        conflict_status: if matches!(item.state.as_str(), "closed" | "merged") {
+            "not_applicable"
+        } else {
+            item.conflict_status.as_str()
+        }
+        .into(),
         conversation_count: item
             .conversation_count
             .and_then(|count| i32::try_from(count).ok())

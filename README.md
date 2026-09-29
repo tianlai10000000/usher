@@ -161,15 +161,20 @@ plain-text, JSON, and unsupported-binary samples through the production Preview
 registry and host. `ui-components` enables the fixture bridge automatically;
 normal and release builds do not compile the samples or expose their controls.
 
-To inspect the GitHub-style PR-list review statuses without depending on a
-provider response, start the app with the opt-in fixed fixture below and open
-any configured project. It includes approved, review-required,
-changes-requested, absent-status, long-title, and long-branch rows; normal runs
-never load these records.
+To inspect PR-list layout, review and conflict statuses, use the existing
+fixture command below. It opens the mock list automatically in offline mode
+with a fresh temporary state directory; no configured project is needed.
+The 36 records cover every review/conflict state, Chinese authors, long titles
+and branches, missing branches, and pagination. Normal runs never load them.
 
 ```sh
 ./tests/run-pr-list-review-status-fixture.sh
 ```
+
+Optional environment variables: `USHER_PR_LIST_WIDTH=800`,
+`USHER_PR_LIST_HEIGHT=600`, `USHER_PR_LIST_LOCALE=zh-CN` (or `en`), and
+`USHER_PR_LIST_PROVIDER=gitee` (or `github`/`gitlab`). These select fixture
+presentation only; they do not validate live provider APIs.
 
 The full `cargo test --locked` command currently exposes a pre-existing failing doctest in `src/logger/debug_logger.rs`; the library unit tests pass.
 

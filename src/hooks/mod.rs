@@ -6,7 +6,7 @@ mod errors;
 mod presentation;
 #[cfg(test)]
 mod presentation_tests;
-mod process_tree;
+use crate::app_runtime::process_tree;
 mod projection;
 mod replay;
 #[cfg(test)]

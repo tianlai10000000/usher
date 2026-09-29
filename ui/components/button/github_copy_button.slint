@@ -16,6 +16,10 @@ export component GitHubCopyButton inherits Rectangle {
     out property <bool> copied: false;
     callback copy-requested() -> bool;
 
+    // Async clipboard writers call this only after a successful write.
+    public function confirm-copy() { root.copied = true; }
+    public function reset-feedback() { root.copied = false; }
+
     width: 32px;
     height: 32px;
     // Keep the hover confirmation above sibling controls in dense toolbars.

@@ -1,0 +1,33 @@
+import { GitHubTheme } from "../../theme/github_theme.slint";
+
+export component GitHubConflictHorizontalScrollbar inherits Rectangle {
+    in-out property <length> viewport-x;
+    in property <length> content-width;
+    in property <length> visible-width;
+    private property <length> maximum: max(0px, root.content-width - root.visible-width);
+    private property <length> thumb-width: min(root.width, max(32px, root.width * root.visible-width / max(1px, root.content-width)));
+    private property <length> travel: max(1px, root.width - root.thumb-width);
+    private property <length> thumb-x: max(0px, -root.viewport-x) / max(1px, root.maximum) * root.travel;
+    private property <length> grab: 0px;
+    private property <length> drag-maximum: 0px;
+    private property <length> drag-travel: 1px;
+    private property <bool> dragging: false;
+    height: 10px;
+    visible: root.maximum > 0px;
+    function move-thumb(x:length) {
+        root.viewport-x = -max(0px, min(root.drag-travel, x - root.grab)) / root.drag-travel * root.drag-maximum;
+    }
+    Rectangle {x: 0px;y: 3px;width: parent.width;height: 4px;background: GitHubTheme.scrollbar-track;}
+    Rectangle {x: root.thumb-x;y: 3px;width: root.thumb-width;height: 4px;border-radius: 2px;background: GitHubTheme.scrollbar-thumb;}
+    TouchArea {
+        x: 0px;y: 0px;width: parent.width;height: parent.height;
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down {
+                root.dragging = true;root.drag-maximum = root.maximum;root.drag-travel = root.travel;
+                root.grab = self.mouse-x >= root.thumb-x && self.mouse-x <= root.thumb-x + root.thumb-width ? self.mouse-x - root.thumb-x : root.thumb-width / 2;
+                root.move-thumb(self.mouse-x);
+            } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {root.dragging = false;}
+        }
+        moved => {if self.pressed && root.dragging {root.move-thumb(self.mouse-x);}}
+    }
+}

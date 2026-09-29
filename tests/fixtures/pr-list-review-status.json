@@ -2,6 +2,7 @@
   "items": [
     {
       "number": "99001",
+      "conflict_status": "conflicting",
       "title": "Keep the approved review status aligned with compact metadata",
       "state": "open",
       "author": "octocat",
@@ -13,6 +14,7 @@
     },
     {
       "number": "99002",
+      "conflict_status": "clear",
       "title": "Exercise a very long pull request title that wraps across at least three compact lines without clipping the final line, colliding with metadata, branches, or the trailing Conversation and Copilot actions during responsive window resizing",
       "state": "open",
       "author": "frontend-platform-maintainer",
@@ -24,6 +26,7 @@
     },
     {
       "number": "99003",
+      "conflict_status": "conflicting",
       "title": "Prevent requested changes from being clipped on narrow windows",
       "state": "open",
       "author": "reviewer",
@@ -68,6 +71,7 @@
     },
     {
       "number": "99007",
+      "conflict_status": "checking",
       "title": "Keep query text synchronized after selecting Reviews",
       "state": "open",
       "author": "frontend-maintainer",
@@ -79,9 +83,10 @@
     },
     {
       "number": "99008",
-      "title": "Preserve search terms when switching to Closed",
+      "conflict_status": "unknown",
+      "title": "修复企业版合并请求状态刷新与多语言切换后的列表对齐",
       "state": "open",
-      "author": "workflow-owner",
+      "author": "企业平台维护者",
       "source_branch": "test/state-query-preservation",
       "target_branch": "develop",
       "review_status": "review_required",
@@ -90,6 +95,7 @@
     },
     {
       "number": "99009",
+      "conflict_status": "conflicting",
       "title": "Exercise pull request list pagination page two",
       "state": "open",
       "author": "pagination-bot",
@@ -101,17 +107,19 @@
     },
     {
       "number": "99010",
+      "conflict_status": "clear",
       "title": "Keep pagination stable after a query is cleared",
       "state": "open",
       "author": "pagination-bot",
-      "source_branch": "fixture/open-page-two-b",
-      "target_branch": "main",
+      "source_branch": "",
+      "target_branch": "",
       "review_status": "none",
       "conversation_count": 0,
       "updated_hours_ago": 18
     },
     {
       "number": "99011",
+      "conflict_status": "clear",
       "title": "Render an assignee filter together with search qualifiers",
       "state": "open",
       "author": "filter-owner",

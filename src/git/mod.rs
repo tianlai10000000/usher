@@ -1,5 +1,6 @@
 //! Provider-neutral Git repository operations and response models.
 
+pub(crate) mod conflicts;
 mod diff;
 mod error;
 pub(crate) mod gitee;

@@ -131,9 +131,18 @@ impl WorkflowPrReviewController {
     }
 
     pub(super) fn refresh_action_state(&self, ui: &MainWindow) {
-        let Some((metadata, pull_request_iid)) = self.action_context() else {
+        let context = self.action_context();
+        let alias = self.project_alias.lock().unwrap().clone();
+        let number = self
+            .active_request
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|r| r.number.clone())
+            .unwrap_or_default();
+        if context.is_none() && (alias.is_empty() || number.is_empty()) {
             return;
-        };
+        }
         if ui.get_workflow_pr_merge_readiness_label().trim().is_empty() {
             ui.set_workflow_pr_merge_readiness_kind("checking".into());
             ui.set_workflow_pr_merge_readiness_label(
@@ -151,13 +160,30 @@ impl WorkflowPrReviewController {
         let controller = self.clone();
         let ui_weak = ui.as_weak();
         crate::app_runtime::shared_runtime().spawn(async move {
-            let result = get_pull_request_action_state(
-                metadata.repo_type.as_str(),
-                metadata.repo_project_id.as_str(),
-                metadata.remote_repo.as_str(),
-                pull_request_iid.as_str(),
-            )
-            .await;
+            let context = match context {
+                Some(context) => Ok(context),
+                None => tokio::task::spawn_blocking(move || {
+                    crate::project::load_repository_metadata(&alias)
+                })
+                .await
+                .map_err(|_| {
+                    crate::git::GitError::configuration("Repository metadata worker stopped")
+                })
+                .and_then(|result| result.map_err(crate::git::GitError::configuration))
+                .map(|metadata| (metadata, number)),
+            };
+            let result = match context {
+                Ok((metadata, pull_request_iid)) => {
+                    get_pull_request_action_state(
+                        metadata.repo_type.as_str(),
+                        metadata.repo_project_id.as_str(),
+                        metadata.remote_repo.as_str(),
+                        pull_request_iid.as_str(),
+                    )
+                    .await
+                }
+                Err(error) => Err(error),
+            };
             let _ = slint::invoke_from_event_loop(move || {
                 if !controller
                     .state
@@ -174,6 +200,9 @@ impl WorkflowPrReviewController {
                             *cached = Some(state.clone());
                         }
                         apply_action_state(&ui, &state);
+                        if controller.action_context().is_none() {
+                            reset_action_capabilities(&ui);
+                        }
                     }
                     Err(error) => {
                         log::warn!(

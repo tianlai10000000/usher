@@ -35,6 +35,25 @@ struct GitLabProject {
 }
 
 const PREFIX_CACHE_CAPACITY: usize = 32;
+
+pub(super) async fn conflict_detail(
+    locator: &RepoLocator,
+    project: &str,
+    iid: &str,
+) -> Result<Value, super::conflicts::ConflictError> {
+    http::send_json(
+        gitlab_request(merge_request_endpoint(
+            endpoints::MERGE_REQUEST_URL,
+            locator,
+            project,
+            iid,
+        ))
+        .query(&[("with_merge_status_recheck", "true")]),
+        RequestOptions::new("Load GitLab conflict status").response_byte_limit(1024 * 1024),
+    )
+    .await
+    .map_err(super::conflicts::http_error)
+}
 const PREFIX_CACHE_TTL: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -208,6 +227,7 @@ async fn get_gitlab_pull_request_server_page(
             source_branch: string_field(value, "source_branch").unwrap_or_else(|| "—".to_string()),
             target_branch: string_field(value, "target_branch").unwrap_or_else(|| "—".to_string()),
             review_status: gitlab_list_review_status(value),
+            conflict_status: super::conflicts::status_from_payload("gitlab", value),
             conversation_count: conversation_count_from_detail(value),
             created_at: string_field(value, "created_at").unwrap_or_default(),
             updated_at: string_field(value, "updated_at").unwrap_or_default(),
@@ -1761,6 +1781,7 @@ mod tests {
             source_branch: String::new(),
             target_branch: String::new(),
             review_status: PullRequestReviewStatus::None,
+            conflict_status: Default::default(),
             conversation_count: None,
             created_at: created_at.to_string(),
             updated_at: updated_at.to_string(),

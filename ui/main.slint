@@ -1,6 +1,8 @@
 import { GitHubNavigationSidebar, GitHubSidebarRightEdge, NavItem } from "./components/navigation/custom_nav_drawer.slint";
 import { I18n } from "@i18n";
 import { PrDiffBridge } from "./features/pr_review/diff_bridge.slint";
+import { PrConflictsBridge } from "./features/pr_review/conflicts_bridge.slint";
+export { PrConflictsBridge, PrConflictFile, PrConflictRow, PrConflictWindow } from "./features/pr_review/conflicts_bridge.slint";
 export { PrDiffBridge } from "./features/pr_review/diff_bridge.slint";
 export { FloatingOverlayBridge, FloatingOverlayRect } from "./state/floating_overlay_bridge.slint";
 import { GitHubHomePage as HomePage } from "./views/home.slint";
@@ -26,6 +28,7 @@ import { TransientOverlayState } from "./state/transient_overlay_state.slint";
 import { TooltipOverlayState } from "./state/tooltip_overlay_state.slint";
 import { GitHubTooltipOverlayHost } from "./components/github_tooltip_overlay.slint";
 import { GitHubSelectState } from "./components/input/github_select.slint";
+import { GitHubTabOverflowPopup } from "./components/navigation/github_underline_nav.slint";
 import { GitHubBreadcrumb } from "./components/navigation/github_breadcrumb.slint";
 import { NotificationManager, Notification, NotificationType, NotificationDelivery } from "./components/notify/notification.slint";
 import { NotificationIcons } from "./components/notify/icons.slint";
@@ -699,6 +702,7 @@ export component MainWindow inherits Window {
     in property <string> workflow-pr-repo-project-id: "";
     in property <string> workflow-pr-repo-type: "";
     in property <[WorkflowPullRequestItem]> workflow-pr-list-items: [];
+    in property <int> workflow-pr-list-compact-text-offset-y: 0;
     in property <int> workflow-pr-list-total: 0;
     in property <bool> workflow-pr-list-total-exact: false;
     in property <int> workflow-pr-list-open-total: -1;
@@ -1400,6 +1404,7 @@ export component MainWindow inherits Window {
                             pr-repo-project-id: root.workflow-pr-repo-project-id;
                             pr-repo-type: root.workflow-pr-repo-type;
                             pr-list-items: root.workflow-pr-list-items;
+                            pr-list-compact-text-offset-y: root.workflow-pr-list-compact-text-offset-y;
                             pr-list-total: root.workflow-pr-list-total;
                             pr-list-total-exact: root.workflow-pr-list-total-exact;
                             pr-list-open-total: root.workflow-pr-list-open-total;
@@ -2723,7 +2728,12 @@ export component MainWindow inherits Window {
             toggle-readiness-popup => {
                 // Peer Diff/file menus close via ActionMenu exclusive-claim when
                 // this root-mounted menu opens; no page-local dismiss-all here.
-                root.workflow-pr-readiness-popup-open = !root.workflow-pr-readiness-popup-open;
+                if root.workflow-pr-merge-readiness-kind == "conflicts" {
+                    root.workflow-pr-readiness-popup-open = false;
+                    PrConflictsBridge.open();
+                } else {
+                    root.workflow-pr-readiness-popup-open = !root.workflow-pr-readiness-popup-open;
+                }
             }
             readiness-anchor-changed(x, y, width, height) => {
                 root.pr-readiness-anchor-x = x;
@@ -3060,6 +3070,8 @@ export component MainWindow inherits Window {
         viewport-width: page-scroll-view.visible-width;
         viewport-height: page-scroll-view.visible-height - root.page-content-height-offset;
     }
+
+    GitHubTabOverflowPopup { width: root.width; height: root.height; z: 20000; }
 
     GitHubTooltipOverlayHost {
         x: 0px;

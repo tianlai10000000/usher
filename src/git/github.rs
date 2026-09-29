@@ -23,6 +23,21 @@ use super::{
 };
 
 const GITHUB_API_VERSION: &str = "2022-11-28";
+
+pub(super) async fn conflict_detail(
+    locator: &RepoLocator,
+    iid: &str,
+) -> Result<Value, super::conflicts::ConflictError> {
+    http::send_json(
+        authenticated_request(
+            locator,
+            repository_endpoint(endpoints::PULL_REQUEST_URL, locator, Some(iid), None),
+        ),
+        RequestOptions::new("Load GitHub conflict status").response_byte_limit(1024 * 1024),
+    )
+    .await
+    .map_err(super::conflicts::http_error)
+}
 const GITHUB_SEARCH_RESULT_LIMIT: u32 = 1_000;
 const GITHUB_USER_AGENT: &str = concat!("usher/", env!("CARGO_PKG_VERSION"));
 
@@ -137,6 +152,7 @@ pub(super) async fn get_pull_requests(
             source_branch: "—".to_string(),
             target_branch: "—".to_string(),
             review_status: PullRequestReviewStatus::None,
+            conflict_status: super::conflicts::ConflictStatus::Unknown,
             conversation_count: conversation_count_from_detail(value),
             created_at: string_field(value, "created_at").unwrap_or_default(),
             updated_at: string_field(value, "updated_at").unwrap_or_default(),
@@ -220,10 +236,18 @@ async fn hydrate_pull_request_branches(
         .collect::<Vec<_>>()
         .await;
     for (index, summary) in summaries {
-        if let Some((source_branch, target_branch, review_status, conversation_count)) = summary {
+        if let Some((
+            source_branch,
+            target_branch,
+            review_status,
+            conversation_count,
+            conflict_status,
+        )) = summary
+        {
             items[index].source_branch = source_branch;
             items[index].target_branch = target_branch;
             items[index].review_status = review_status;
+            items[index].conflict_status = conflict_status;
             items[index].conversation_count =
                 conversation_count.or(items[index].conversation_count);
         }
@@ -234,7 +258,13 @@ async fn hydrate_pull_request_branches(
 async fn load_pull_request_summary(
     locator: &RepoLocator,
     pull_request_number: &str,
-) -> Option<(String, String, PullRequestReviewStatus, Option<u32>)> {
+) -> Option<(
+    String,
+    String,
+    PullRequestReviewStatus,
+    Option<u32>,
+    super::conflicts::ConflictStatus,
+)> {
     let detail_endpoint = repository_endpoint(
         endpoints::PULL_REQUEST_URL,
         locator,
@@ -264,6 +294,7 @@ async fn load_pull_request_summary(
             target_branch,
             github_list_review_status(&detail, reviews.as_slice()),
             conversation_count_from_detail(&detail),
+            super::conflicts::status_from_payload("github", &detail),
         )
     })
 }

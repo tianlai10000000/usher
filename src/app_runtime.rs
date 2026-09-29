@@ -1,5 +1,6 @@
 use std::sync::Arc;
 pub(crate) mod latest_compute;
+pub(crate) mod process_tree;
 
 use tokio::runtime::{Builder, Runtime};
 

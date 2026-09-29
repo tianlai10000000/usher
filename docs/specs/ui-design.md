@@ -184,11 +184,16 @@ to be a Primer primitive.
   mounted message.
 - PR review exposes one visible state source in the summary row. The header
   action strip must not repeat the same Open/Closed/Merged readiness label.
-  Its three counted tabs follow the shared Primer UnderlineNav geometry at every
+  Its three counted tabs and Conflicts entry follow the shared Primer UnderlineNav geometry at every
   width: content-sized items, left alignment, a 16 px inset on both sides, and
   explicit 4 px inter-item gaps. They never stretch to divide the row equally;
   the full-width baseline remains edge-to-edge, and nonessential trailing diff
   statistics yield before tabs need overflow.
+  Keep a single 48px row with normal item spacing. When items no longer fit,
+  the shared navigation moves whole trailing items into a localized More menu.
+  The menu preserves label, count, disabled state and selection; More receives
+  the underline when the current item is inside it. Counts display 0-99 exactly
+  and 99+ above that, while accessible labels retain the complete number.
 - Text must follow the reference wrapping/truncation rule. Lists and scroll
   views must not rebuild large models while scrolling or resizing.
 - Keep hover hit targets mounted. Change opacity/state instead of
@@ -757,8 +762,20 @@ expanded/collapsed, and success confirmation.
   keyboard-visible focus states; page owners retain selected-panel semantics.
   `GitHubUnderlineNav` owns the full-width baseline and accessible tab-list,
   keeps the first and last items inside a 16 px horizontal safe area, and uses
-  an explicit 4 px gap between items. Pages must not recreate that baseline or
-  pin shared tab items directly to a container edge.
+  an explicit 4 px gap between items. A composite row with trailing content may
+  set `show-bottom-border: false` and paint one full-row 1px baseline at the same
+  bottom inset using `border-muted`, behind the 2px selected underline. Never stack a second separator
+  below the navigation or pin shared tab items directly to a container edge. Its `items` model supports
+  arbitrary item counts; native text measurement reserves the selected label
+  width, optional icon and capped CounterLabel before choosing a visible prefix.
+  Overflow uses the root-owned `GitHubTabOverflowPopup` and the shared Select
+  overlay lifecycle, including outside click, Escape, focus return and collision
+  handling. Resize, model/locale changes and route exit dismiss stale menus.
+  PR Review, Workflow, Tag operations and the gallery share this implementation.
+  Reference: [Primer UnderlineNav guidelines](https://primer.style/product/components/underline-nav/guidelines/)
+  and [UnderlinePanels](https://primer.style/product/components/underline-panels/).
+  Baseline geometry follows the shared [Primer implementation](https://github.com/primer/react/blob/main/packages/react/src/internal/components/UnderlineTabbedInterface.module.css):
+  `inset 0 -1px` muted baseline and a 2px active decoration at the same bottom edge.
 - `GitHubSegmentedControl`, `GitHubSegmentedControlItem`, and
   `GitHubSegmentedControlDivider`: the shared compact, mutually exclusive
   choice group. The shell width hugs the segment row with no trailing empty
@@ -1054,8 +1071,10 @@ Project 网格
 历史分页入口必须位于 virtual top spacer 之前的真正历史顶部并占据真实高度，禁止覆盖
 消息或跟随虚拟窗口出现在会话中间；用户可见错误统一使用应用语言，HTTP 技术详情仅写有界日志。
 PR 审核摘要是 Open/Closed/Merged 的唯一可见状态来源，页头操作条不得重复状态；
-三个带计数 Tab 在所有宽度下都按共享 Primer UnderlineNav 规范左对齐并按内容定宽，
-保留 16px 容器内边距与 4px Tab 间距，禁止拉伸均分；尾部 diff 统计必须先让位。PR 页头、导航和交互
+三个带计数 Tab 与 Conflicts 入口在所有宽度下都按共享 Primer UnderlineNav 规范左对齐并按内容定宽，
+保留 16px 容器内边距与 4px Tab 间距，禁止拉伸均分；尾部 diff 统计必须先让位。
+空间不足时维持 48px 单行和标准间距，将完整的末尾选项收进“更多”菜单；
+计数在 0–99 时显示原值，超过 99 显示 99+，无障碍名称保留完整数值。PR 页头、导航和交互
 调整不得顺带修改 Files changed 代码区或文件树的字体与颜色；两者属于独立的审核
 内容契约，只有明确提出并带专门视觉回归的 diff/文件树设计变更才可调整。
 原生标题栏点击必须进入应用级 Chrome 关闭通道（`dismiss-revision`）：所有共享

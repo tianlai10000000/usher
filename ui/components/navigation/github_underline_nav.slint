@@ -1,36 +1,55 @@
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { I18n } from "@i18n";
+import { GitHubCounterLabel } from "../label/github_counter_label.slint";
+import { GitHubSelectState, GitHubSelectPopup, GitHubSelectOption } from "../input/github_select.slint";
 
-// Shared Primer UnderlineNav/UnderlinePanels tab-list shell. The baseline
-// belongs to the complete list rather than an individual item, so it always
-// spans the available container width. The content inset and explicit gap
-// match GitHub's compact tab rows without pinning edge items to the surface.
-export component GitHubUnderlineNav inherits Rectangle {
-    in property <string> group-label;
-    in property <length> content-inset: GitHubMetrics.size-16;
-    in property <length> item-spacing: GitHubMetrics.size-4;
+export struct GitHubTabItem {
+    label: string,
+    icon: image,
+    count: int,
+    show-count: bool,
+    disabled: bool,
+    danger: bool,
+}
 
-    width: 100%;
-    height: GitHubMetrics.size-48;
-    background: transparent;
-    clip: false;
-    accessible-role: tab-list;
-    accessible-label: root.group-label;
-
-    Rectangle {
-        y: parent.height - GitHubMetrics.border-thin;
-        width: parent.width;
-        height: GitHubMetrics.border-thin;
-        background: GitHubTheme.border-default;
+// Transient menu presentation only; each navigation owner retains selection.
+export global GitHubTabOverflowState {
+    in-out property <string> owner;
+    in-out property <[GitHubTabItem]> items;
+    in-out property <int> first;
+    in-out property <int> selected;
+    in-out property <int> activated;
+    in-out property <int> revision;
+    in-out property <int> count-limit: 99;
+    public function activate(index: int) {
+        if index >= 0 && index < root.items.length && !root.items[index].disabled {
+            root.activated = index;
+            root.revision += 1;
+            GitHubSelectState.close(true);
+        }
     }
+}
 
-    tabs := HorizontalLayout {
-        x: root.content-inset;
-        width: parent.width - root.content-inset * 2;
-        height: parent.height;
-        spacing: root.item-spacing;
-        alignment: start;
-        cross-axis-alignment: center;
-        @children
+// Mount once at the window root, above all clipped page content.
+export component GitHubTabOverflowPopup inherits GitHubSelectPopup {
+    owner: "underline-nav-overflow";
+    menu-width: 320px;
+    option-count: GitHubTabOverflowState.items.length - GitHubTabOverflowState.first;
+    selected(index) => { GitHubTabOverflowState.activate(index + GitHubTabOverflowState.first); }
+    for item[index] in GitHubTabOverflowState.items: GitHubSelectOption {
+        visible: index >= GitHubTabOverflowState.first;
+        y: (index - GitHubTabOverflowState.first) * 32px;
+        width: root.option-width;
+        text: item.label;
+        icon: item.icon;
+        selected: index == GitHubTabOverflowState.selected;
+        item-enabled: !item.disabled && self.visible;
+        active: GitHubSelectState.active-index == index - GitHubTabOverflowState.first;
+        trailing-text: item.show-count
+            ? (item.count > GitHubTabOverflowState.count-limit && GitHubTabOverflowState.count-limit > 0
+                ? GitHubTabOverflowState.count-limit + "+" : "" + max(0, item.count)) : "";
+        accessible-label: item.show-count ? item.label + ", " + item.count : item.label;
+        activated => { GitHubTabOverflowState.activate(index); }
     }
 }
 
@@ -40,9 +59,17 @@ export component GitHubUnderlineNav inherits Rectangle {
 export component GitHubUnderlineNavItem inherits FocusScope {
     in property <string> label;
     in property <image> icon;
+    in property <color> icon-color: GitHubTheme.fg-default;
+    in property <bool> trailing-icon: false;
+    in property <int> count: 0;
+    in property <bool> show-count: false;
+    in property <int> count-limit: 99;
     in property <bool> selected: false;
     in property <bool> item-enabled: true;
     callback clicked();
+    callback navigate(int);
+    out property <length> natural-width: root.label-width + root.leading-width
+        + GitHubMetrics.size-16 + (root.show-count ? counter.width + 8px : 0px);
 
     private property <bool> has-icon:
         root.icon.width > 0 && root.icon.height > 0;
@@ -52,16 +79,22 @@ export component GitHubUnderlineNavItem inherits FocusScope {
     private property <length> leading-width:
         root.has-icon ? GitHubMetrics.size-24 : 0px;
 
-    width: root.label-width + root.leading-width + GitHubMetrics.size-16;
+    width: root.natural-width;
     height: GitHubMetrics.size-48;
     accessible-role: tab;
     accessible-enabled: root.item-enabled;
-    accessible-label: root.label;
+    accessible-label: root.show-count ? root.label + ", " + root.count : root.label;
     accessible-checkable: true;
     accessible-checked: root.selected;
 
     key-pressed(event) => {
         root.keyboard-focus-visible = true;
+        if event.text == Key.LeftArrow || event.text == Key.RightArrow
+            || event.text == Key.Home || event.text == Key.End {
+            root.navigate(event.text == Key.Home ? -2 : event.text == Key.End ? 2
+                : event.text == Key.LeftArrow ? -1 : 1);
+            return accept;
+        }
         if (root.item-enabled
                 && (event.text == Key.Return || event.text == " ")) {
             root.clicked();
@@ -107,18 +140,18 @@ export component GitHubUnderlineNavItem inherits FocusScope {
     }
 
     if root.has-icon: Image {
-        x: GitHubMetrics.size-8;
+        x: root.trailing-icon ? root.width - 24px : GitHubMetrics.size-8;
         y: GitHubMetrics.size-16;
         width: GitHubMetrics.icon-medium;
         height: GitHubMetrics.icon-medium;
         source: root.icon;
         colorize: root.item-enabled
-            ? GitHubTheme.fg-muted
+            ? root.icon-color
             : GitHubTheme.fg-subtle;
     }
 
     Text {
-        x: GitHubMetrics.size-8 + root.leading-width;
+        x: GitHubMetrics.size-8 + (root.trailing-icon ? 0px : root.leading-width);
         y: GitHubMetrics.size-8;
         width: root.label-width;
         height: GitHubMetrics.control-medium-size;
@@ -130,6 +163,16 @@ export component GitHubUnderlineNavItem inherits FocusScope {
             : GitHubTheme.fg-subtle;
         vertical-alignment: center;
         overflow: elide;
+    }
+
+    counter := GitHubCounterLabel {
+        visible: root.show-count;
+        x: 8px + root.leading-width + root.label-width + 8px;
+        y: (root.height - self.height) / 2;
+        count: root.count;
+        limit: root.count-limit;
+        border-width: 0px;
+        background: GitHubTheme.overlay-handle;
     }
 
     if root.selected: Rectangle {
@@ -150,6 +193,126 @@ export component GitHubUnderlineNavItem inherits FocusScope {
             root.focus();
             root.keyboard-focus-visible = false;
             root.clicked();
+        }
+    }
+}
+
+// Shared Primer UnderlineNav/UnderlinePanels tab-list shell. The baseline
+// belongs to the complete list rather than an individual item, so it always
+// spans the available container width. The content inset and explicit gap
+// match GitHub's compact tab rows without pinning edge items to the surface.
+export component GitHubUnderlineNav inherits Rectangle {
+    in property <string> owner;
+    in property <[GitHubTabItem]> items;
+    in property <int> selected-index: 0;
+    in property <int> count-limit: 99;
+    in property <string> group-label;
+    in property <bool> show-bottom-border: true;
+    in property <length> content-inset: GitHubMetrics.size-16;
+    in property <length> item-spacing: GitHubMetrics.size-4;
+    callback selected(int);
+    out property <length> natural-width: tabs.preferred-width + 2 * root.content-inset;
+    out property <bool> overflowing: tabs.preferred-width > root.available-width;
+    out property <int> visible-count: root.overflowing ? root.first-overflow : root.items.length;
+    private property <int> first-overflow: 0;
+    private property <length> available-width: max(0px, root.width - 2 * root.content-inset);
+    private property <length> visible-width: max(0px, root.available-width
+        - (root.overflowing ? more.natural-width + root.item-spacing : 0px));
+    private property <int> menu-revision: GitHubTabOverflowState.revision;
+    private property <bool> menu-open: GitHubSelectState.open
+        && GitHubSelectState.owner == "underline-nav-overflow"
+        && GitHubTabOverflowState.owner == root.owner;
+    private property <int> focus-index: -1;
+    changed menu-revision => {
+        if GitHubTabOverflowState.owner == root.owner {
+            root.selected(GitHubTabOverflowState.activated);
+        }
+    }
+    changed width => { if root.menu-open { GitHubSelectState.close(false); } }
+    changed items => { if root.menu-open { GitHubSelectState.close(false); } }
+    changed menu-open => {
+        if !root.menu-open && GitHubTabOverflowState.owner == root.owner
+            && GitHubSelectState.restore-focus { more.focus(); }
+    }
+    function show-more() {
+        if root.menu-open { GitHubSelectState.close(true); return; }
+        GitHubTabOverflowState.owner = root.owner;
+        GitHubTabOverflowState.items = root.items;
+        GitHubTabOverflowState.first = root.visible-count;
+        GitHubTabOverflowState.selected = root.selected-index;
+        GitHubTabOverflowState.count-limit = root.count-limit;
+        GitHubSelectState.show("underline-nav-overflow", "",
+            max(0, root.selected-index - root.visible-count),
+            more.absolute-position.x, more.absolute-position.y,
+            more.width, more.height);
+    }
+
+    width: 100%;
+    height: GitHubMetrics.size-48;
+    background: transparent;
+    clip: false;
+    accessible-role: tab-list;
+    accessible-label: root.group-label;
+
+    if root.show-bottom-border: Rectangle {
+        y: parent.height - GitHubMetrics.border-thin;
+        width: parent.width;
+        height: GitHubMetrics.border-thin;
+        background: GitHubTheme.border-muted;
+    }
+
+    viewport := Rectangle {
+        x: root.content-inset;
+        width: root.visible-width;
+        height: root.height;
+        clip: true;
+        tabs := HorizontalLayout {
+            x: 0px;
+            width: self.preferred-width;
+            height: root.height;
+            spacing: root.item-spacing;
+            alignment: start;
+            for item[index] in root.items: slot := Rectangle {
+                width: tab.natural-width;
+                height: root.height;
+                private property <bool> first-hidden: root.overflowing
+                    && self.x <= root.visible-width + root.item-spacing
+                    && self.x + self.width > root.visible-width;
+                changed first-hidden => { if self.first-hidden { root.first-overflow = index; } }
+                init => { if self.first-hidden { root.first-overflow = index; } }
+                tab := GitHubUnderlineNavItem {
+                    visible: slot.x + slot.width <= root.visible-width;
+                    item-enabled: !item.disabled && self.visible;
+                    label: item.label;
+                    icon: item.icon;
+                    icon-color: item.danger ? GitHubTheme.danger-fg : GitHubTheme.fg-default;
+                    count: item.count;
+                    show-count: item.show-count;
+                    count-limit: root.count-limit;
+                    selected: root.selected-index == index;
+                    private property <bool> focus-requested: root.focus-index == index;
+                    changed focus-requested => { if self.focus-requested { self.focus(); } }
+                    clicked => { root.focus-index = -1; root.selected(index); }
+                    navigate(direction) => {
+                        root.focus-index = direction == -2 ? 0 : direction == 2 ? root.visible-count - 1
+                            : max(0, min(root.visible-count, index + direction));
+                        if root.focus-index == root.visible-count { more.focus(); }
+                    }
+                }
+            }
+        }
+    }
+    more := GitHubUnderlineNavItem {
+        x: root.width - root.content-inset - self.width;
+        visible: root.overflowing;
+        item-enabled: self.visible;
+        label: I18n.navigation-more-tabs;
+        icon: @image-url("../../assets/icons/octicon-chevron-down-16.svg");
+        trailing-icon: true;
+        selected: root.selected-index >= root.visible-count;
+        clicked => { root.focus-index = -1; root.show-more(); }
+        navigate(direction) => {
+            root.focus-index = direction == -2 ? 0 : root.visible-count - 1;
         }
     }
 }

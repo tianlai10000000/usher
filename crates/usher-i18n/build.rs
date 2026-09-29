@@ -24,6 +24,8 @@ struct LocaleSpec {
     minimum_coverage: f64,
     #[serde(default)]
     segmented_count_suffix_offset: i32,
+    #[serde(default)]
+    pr_list_compact_text_offset_y: i32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -108,6 +110,13 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), Box<dyn Error>> {
             return Err(format!(
                 "invalid segmented_count_suffix_offset for {}: {}",
                 locale.id, locale.segmented_count_suffix_offset
+            )
+            .into());
+        }
+        if !(-2..=2).contains(&locale.pr_list_compact_text_offset_y) {
+            return Err(format!(
+                "invalid pr_list_compact_text_offset_y for {}: {}",
+                locale.id, locale.pr_list_compact_text_offset_y
             )
             .into());
         }
@@ -346,8 +355,12 @@ fn generate_rust(
     for locale in &manifest.locales {
         writeln!(
             output,
-            "    LocaleMetadata {{ id: {:?}, native_name: {:?}, aliases: &{:?}, segmented_count_suffix_offset: {} }},",
-            locale.id, locale.native_name, locale.aliases, locale.segmented_count_suffix_offset
+            "    LocaleMetadata {{ id: {:?}, native_name: {:?}, aliases: &{:?}, segmented_count_suffix_offset: {}, pr_list_compact_text_offset_y: {} }},",
+            locale.id,
+            locale.native_name,
+            locale.aliases,
+            locale.segmented_count_suffix_offset,
+            locale.pr_list_compact_text_offset_y
         )?;
     }
     writeln!(output, "];\n")?;

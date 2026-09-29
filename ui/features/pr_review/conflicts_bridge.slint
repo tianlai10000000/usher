@@ -1,0 +1,54 @@
+import { WorkflowPrDiffToken, WorkflowPrDiffSelectionHit } from "../../components/pr_review/shell.slint";
+export struct PrConflictFile {
+    name: string,
+    path: string,
+    target-path: string,
+    count: int,
+}
+export struct PrConflictRow {
+    number: int,
+    text: string,
+    tokens: [WorkflowPrDiffToken],
+    conflict: bool,
+    start: bool,
+    separator: bool,
+    end: bool,
+}
+export struct PrConflictWindow { start: int, count: int, total: float }
+// UI projection and commands only. Session/domain state belongs to Rust.
+export global PrConflictsBridge {
+    in-out property <bool> active: false;
+    in-out property <bool> loading: false;
+    in-out property <string> error-key;
+    in-out property <string> status;
+    in-out property <bool> local: false;
+    in-out property <string> repository;
+    in-out property <string> list-repository;
+    in-out property <string> number;
+    in-out property <[PrConflictFile]> files;
+    // Review summary survives leaving the workspace; -1 means not yet known.
+    in-out property <int> file-count: -1;
+    in-out property <[PrConflictRow]> rows;
+    in-out property <int> selected-file: -1;
+    in-out property <int> selected-block: -1;
+    in-out property <int> block-count;
+    in-out property <int> reveal-line;
+    in-out property <int> revision;
+    in-out property <int> max-columns;
+    in-out property <bool> return-to-list;
+    in-out property <bool> text-available: false;
+    in-out property <bool> copy-busy: false;
+    in-out property <int> copy-completed;
+    in-out property <string> source-branch;
+    in-out property <string> target-branch;
+    callback open();
+    callback back();
+    callback refresh();
+    callback select-file(int);
+    callback step-block(int);
+    callback copy();
+    callback copy-selection(int, int, int, int);
+    callback refresh-list();
+    callback resolve-hit(int, float, float, string, float) -> WorkflowPrDiffSelectionHit;
+    pure callback layout(int, float, float) -> PrConflictWindow;
+}

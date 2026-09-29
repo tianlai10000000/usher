@@ -47,6 +47,7 @@ pub(crate) struct PullRequestItem {
     pub(crate) target_branch: String,
     /// Provider-neutral review decision shown on the pull-request list.
     pub(crate) review_status: PullRequestReviewStatus,
+    pub(crate) conflict_status: super::conflicts::ConflictStatus,
     pub(crate) conversation_count: Option<u32>,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,

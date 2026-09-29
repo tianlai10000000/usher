@@ -1341,19 +1341,16 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 width: parent.width;
                 height: 48px;
                 group-label: I18n.ui-components-demo-underline-navigation-examples;
-
-                GitHubUnderlineNavItem {
-                    label: I18n.ui-components-demo-overview;
-                    selected: root.selected-tab == 0;
-                    clicked => { root.selected-tab = 0; }
-                }
-                GitHubUnderlineNavItem {
-                    label: I18n.ui-components-demo-activity;
-                    icon: @image-url("../../assets/icons/octicon-comment-discussion-16.svg");
-                    selected: root.selected-tab == 1;
-                    clicked => { root.selected-tab = 1; }
-                }
-                GitHubUnderlineNavItem { label: I18n.ui-components-demo-disabled; item-enabled: false; }
+                owner: "showcase-tabs";
+                selected-index: root.selected-tab;
+                items: [
+                    { label: I18n.ui-components-demo-overview, count: 10, show-count: true },
+                    { label: I18n.ui-components-demo-activity, count: 99, show-count: true },
+                    { label: I18n.pr-review-files-changed, count: 100, show-count: true },
+                    { label: I18n.conflicts-title, count: 1000, show-count: true },
+                    { label: I18n.ui-components-demo-disabled, disabled: true },
+                ];
+                selected(index) => { root.selected-tab = index; }
             }
 
             GitHubSettingsNavItem {

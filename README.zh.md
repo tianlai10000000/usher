@@ -148,13 +148,17 @@ Host 打开 Markdown、PNG、纯文本、JSON 和不支持二进制样例。`ui-
 自动启用 fixture bridge；普通构建和 Release 构建不会编译这些样例，也不会显示
 相应入口。
 
-如需在不依赖 Provider 响应的情况下检查 GitHub 风格 PR 列表评审状态，可使用下面
-的显式固定 fixture 启动应用，再打开任意已配置项目。它覆盖已批准、需要评审、
-请求修改、无状态、长标题和长分支；普通启动绝不会加载这些记录。
+使用下面已有的 mock 命令检查 PR 列表布局、评审与冲突状态。启动后自动进入
+离线测试列表，并使用独立临时状态目录，无需配置项目。36 条数据覆盖各种评审
+与冲突状态、中文作者、长标题、长分支、缺失分支和分页；普通启动不会加载这些记录。
 
 ```sh
 ./tests/run-pr-list-review-status-fixture.sh
 ```
+
+可选环境变量：`USHER_PR_LIST_WIDTH=800`、`USHER_PR_LIST_HEIGHT=600`、
+`USHER_PR_LIST_LOCALE=zh-CN`（或 `en`）、`USHER_PR_LIST_PROVIDER=gitee`
+（或 `github`/`gitlab`）。Provider 选项只切换 mock 展示，不代表线上接口验收。
 
 完整的 `cargo test --locked` 当前会暴露 `src/logger/debug_logger.rs` 中已有的 doctest 问题；库单元测试本身可以通过。
 

@@ -2,6 +2,103 @@
 # keys; translators only edit locale PO files under i18n/locales/.
 
 [[messages]]
+key = "pr_review.wants_to_merge_into"
+text = "wants to merge into"
+
+[[messages]]
+key = "conflicts.title"
+text = "Conflicts"
+
+[[messages]]
+key = "conflicts.files"
+text = "Conflicting files"
+
+[[messages]]
+key = "conflicts.read_only"
+text = "Read only"
+
+[[messages]]
+key = "conflicts.view"
+text = "View conflicts"
+
+[[messages]]
+key = "conflicts.clear"
+text = "No conflicts"
+
+[[messages]]
+key = "conflicts.checking"
+text = "Checking conflicts"
+
+[[messages]]
+key = "conflicts.unknown"
+text = "Conflict status unknown"
+
+[[messages]]
+key = "conflicts.not_applicable"
+text = "Not applicable"
+
+[[messages]]
+key = "conflicts.back"
+text = "Back"
+
+[[messages]]
+key = "conflicts.refresh"
+text = "Refresh conflicts"
+
+[[messages]]
+key = "conflicts.toggle_files"
+text = "Toggle conflict files"
+
+[[messages]]
+key = "conflicts.previous"
+text = "Previous conflict"
+
+[[messages]]
+key = "conflicts.next"
+text = "Next conflict"
+
+[[messages]]
+key = "conflicts.copy"
+text = "Copy file contents"
+
+[[messages]]
+key = "conflicts.local"
+text = "Local analysis"
+
+[[messages]]
+key = "conflicts.nontext"
+text = "This conflict has no text preview. View its paths in the file list."
+
+[[messages]]
+key = "conflicts.unavailable"
+text = "Could not load conflicts. Try refreshing."
+
+[[messages]]
+key = "conflicts.authentication"
+text = "Could not read this repository. Check API access and Git credentials."
+
+[[messages]]
+key = "conflicts.unsupported"
+text = "Conflict preview is unavailable for this server or Git version."
+
+[[messages]]
+key = "conflicts.too_large"
+text = "This conflict snapshot exceeds the preview limit."
+
+[[messages]]
+key = "conflicts.invalid_content"
+text = "The server returned conflict data that could not be read."
+
+[[messages]]
+key = "conflicts.stale"
+text = "The branches changed during analysis. Refresh to load the current conflicts."
+
+[[messages]]
+key = "conflicts.empty"
+text = "There are no conflicting files in this snapshot."
+
+
+[[messages]]
 key = "hooks.conclusion.success"
 text = "Succeeded"
 slint = false
@@ -5375,3 +5472,12 @@ text = "Loading the latest local Tag for the default project."
 [[messages]]
 key = "tag.loading_remove_default"
 text = "Loading the latest remote Tag for the default project."
+
+[[messages]]
+key = "conflicts.copy_failed"
+text = "Failed to copy file contents. Try again."
+slint = false
+
+[[messages]]
+key = "navigation.more_tabs"
+text = "More"

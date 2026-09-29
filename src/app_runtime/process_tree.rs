@@ -1,6 +1,6 @@
 //! OS-owned cancellation boundary, kept alive until both output pipes drain.
 
-pub(super) struct ProcessTree {
+pub(crate) struct ProcessTree {
     #[cfg(unix)]
     pid: u32,
     #[cfg(windows)]
@@ -8,7 +8,7 @@ pub(super) struct ProcessTree {
 }
 
 impl ProcessTree {
-    pub(super) fn attach(child: &tokio::process::Child) -> std::io::Result<Self> {
+    pub(crate) fn attach(child: &tokio::process::Child) -> std::io::Result<Self> {
         #[cfg(unix)]
         {
             Ok(Self {
@@ -49,7 +49,7 @@ impl ProcessTree {
         }
     }
 
-    pub(super) fn terminate(&self) {
+    pub(crate) fn terminate(&self) {
         #[cfg(unix)]
         unsafe {
             libc::kill(-(self.pid as i32), libc::SIGKILL);

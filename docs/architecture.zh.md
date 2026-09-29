@@ -2,6 +2,39 @@
 
 [English](architecture.md) · [README](../README.zh.md) · [规格索引](specs/README.md)
 
+PR 冲突查看由 `src/git/conflicts/` 负责领域语义与隔离 Git 分析，复用仓库上下文
+校验，HTTP 归平台 adapter。`workflow/pr_conflict_status.rs` 通过临时 typed
+state-store 门面共享列表与详情观测；`workflow/pr_review/conflicts/` 独立拥有
+只读会话、LatestCompute 文件准备和取消。Slint 工作区不复用普通 Diff 选区。
+Git 只写临时 bare 对象。进程树 guard 已归入 `app_runtime/process_tree.rs`，
+由 Hooks 和冲突分析共同复用。详见 [冲突查看契约](specs/pr-conflicts.md)。
+冲突文档总高度独立于滚动动画位置。异步复制完成时校验会话和文件选择代际，
+并通过共享复制按钮提供本地化成功反馈。
+共享冲突状态组件仅在检查中挂载 `GitHubSpinner`，列表与工作区共用固定图标占位
+和本地化状态文案，检查完成后恢复静态状态图标。
+已打开的冲突会话重复进入不触发加载，重新加载由显式刷新操作负责。
+冲突工作区独立拥有可拖动文件栏的宽度；入口复用模型驱动的 UnderlineNav，保持标准间距和单行。
+不足时完整的末尾 Tab 收入根层“更多”菜单，Tab 与菜单计数统一超过 99 显示 99+。
+Workflow、Tag 操作和组件演练页复用相同的实测布局。
+PR 总增删行数来自 `ReviewCache.all_detail`，固定在 Tab 行右端，按共享统计组件
+的实测宽度预留空间后计算 Tab 溢出。PR Tab 行在选中强调线下统一绘制一条通栏
+1px 底线，内部 UnderlineNav 关闭自身底线，避免重复分隔线。
+冲突文件行显示文件名、路径及右侧未解决图标，
+非文本冲突也保留状态；文件选择与根层路径 Tooltip 仍归冲突工作区所有。
+入口的文件数量徽标来自成功读取的冲突快照，返回普通 Review 后保留，Review 重置或 Provider 失效时清除。
+进入普通 Review 或通过路由历史返回时，冲突控制器启动可取消的后台快照读取；
+完成后先投影数量/状态，打开 Conflicts 才挂载文件和源码模型。
+打开工作区复用进行中或已完成的读取；重置代际拒绝旧请求回写。
+PR 列表遵循 GitHub 紧凑的行内元信息排布：评审/冲突按本地化文案自然占宽，
+与作者/时间共用 24px 中线，空间不足时各段完整换行。分支整组跟随剩余空间
+排布或移到下一行，无评审时不预留空列。换行标题使用原生 Slint `Text`，
+绘制与 preferred-height 测量共享同一个行高因子。分支胶囊使用更小的 regular
+等宽字，并与元信息行共享视觉中线。已有 test-fixtures 列表命令使用隔离临时状态，
+离线自动打开正式列表组件。
+PR Review 的 Commit 身份文案与相对时间由同一个原生 `Text` shaping 节点绘制，
+使中英文混排的 fallback 字体指标共用一条基线，无需按 locale 做像素补偿。
+仅覆盖尾部时间的实测 overlay 保留 Tooltip 命中范围，并且不改变整行几何。
+
 ## 文档目标和范围
 
 本文描述当前代码的真实结构、模块边界、运行生命周期和安全扩展点，是中文架构主文档。需要明确行为不变量的内容统一放在 `docs/specs/`。

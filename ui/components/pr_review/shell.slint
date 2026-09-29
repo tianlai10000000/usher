@@ -5,6 +5,7 @@ import { GitHubActionMenu, GitHubActionMenuTriggerArea } from "../github_action_
 import { GitHubBlankslate } from "../github_blankslate.slint";
 import { GitHubCopyButton } from "../button/github_copy_button.slint";
 import { I18n } from "@i18n";
+import { GitHubUnderlineNavItem } from "../navigation/github_underline_nav.slint";
 
 export struct WorkflowPrDiffFile {
     path: string,
@@ -536,6 +537,11 @@ export component GitHubBranchLabel inherits Rectangle {
 
 // GitHub-style relative timestamp with an absolute datetime Tooltip.
 export component GitHubRelativeTimestamp inherits Rectangle {
+    // Same-style prose and its timestamp must be shaped as one Text. Splitting
+    // mixed CJK/Latin content into sibling Text nodes gives each node different
+    // fallback-font metrics, which center-aligns boxes but not visible baselines.
+    in property <string> leading-text: "";
+    in property <string> leading-separator: " ";
     in property <string> text;
     in property <string> tooltip-text;
     in property <color> foreground-color;
@@ -550,6 +556,18 @@ export component GitHubRelativeTimestamp inherits Rectangle {
     in property <bool> tooltip-after: false;
     out property <bool> has-hover: time-touch.has-hover;
 
+    private property <string> displayed-text: root.leading-text == ""
+        ? root.text
+        : (root.text == ""
+            ? root.leading-text
+            : root.leading-text + root.leading-separator + root.text);
+    private property <string> leading-run: root.leading-text == "" || root.text == ""
+        ? ""
+        : root.leading-text + root.leading-separator;
+    private property <length> time-x: root.text == ""
+        ? root.width
+        : min(root.width, leading-measure.preferred-width);
+
     width: max(1px, time-label.preferred-width);
     height: root.label-height;
     background: transparent;
@@ -558,29 +576,45 @@ export component GitHubRelativeTimestamp inherits Rectangle {
     time-label := Text {
         width: parent.width;
         height: parent.height;
-        text: root.text;
+        text: root.displayed-text;
         font-size: root.label-font-size;
         color: root.foreground-color;
         vertical-alignment: center;
+        wrap: no-wrap;
         overflow: elide;
+        accessible-label: root.displayed-text;
     }
-    time-touch := TouchArea {
-        width: parent.width;
+
+    leading-measure := Text {
+        visible: false;
+        text: root.leading-run;
+        font-size: root.label-font-size;
+        wrap: no-wrap;
+    }
+
+    time-anchor := Rectangle {
+        x: root.time-x;
+        width: max(0px, parent.width - self.x);
         height: parent.height;
-        mouse-cursor: default;
-    }
-    if root.tooltip-text != "": GitHubTooltip {
-        preferred-placement: root.tooltip-after
-            ? GitHubTooltipPlacement.Right
-            : (root.tooltip-beside
-                ? GitHubTooltipPlacement.Left
-                : (root.tooltip-above
-                    ? GitHubTooltipPlacement.Top
-                    : GitHubTooltipPlacement.Bottom));
-        alignment: root.tooltip-align-right
-            ? GitHubTooltipAlignment.End
-            : GitHubTooltipAlignment.Center;
-        text: time-touch.has-hover ? root.tooltip-text : "";
+        background: transparent;
+        time-touch := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: default;
+        }
+        if root.tooltip-text != "": GitHubTooltip {
+            preferred-placement: root.tooltip-after
+                ? GitHubTooltipPlacement.Right
+                : (root.tooltip-beside
+                    ? GitHubTooltipPlacement.Left
+                    : (root.tooltip-above
+                        ? GitHubTooltipPlacement.Top
+                        : GitHubTooltipPlacement.Bottom));
+            alignment: root.tooltip-align-right
+                ? GitHubTooltipAlignment.End
+                : GitHubTooltipAlignment.Center;
+            text: time-touch.has-hover ? root.tooltip-text : "";
+        }
     }
 }
 
@@ -620,7 +654,7 @@ export component GitHubPullRequestSummaryMetrics inherits Rectangle {
         font-weight: 600;
     }
     summary-measure := Text {
-        text: I18n.pr-review-wants-to-merge + " " + root.commit-count + " "
+        text: root.commit-count < 0 ? I18n.pr-review-wants-to-merge-into : I18n.pr-review-wants-to-merge + " " + root.commit-count + " "
             + (root.commit-count == 1 ? I18n.pr-review-commit-into : I18n.pr-review-commits-into);
         font-size: 13px;
     }
@@ -713,7 +747,7 @@ export component GitHubPullRequestSummaryRow inherits Rectangle {
         merge-summary-label := Text {
             width: self.preferred-width;
             height: 26px;
-            text: I18n.pr-review-wants-to-merge + " " + root.commit-count + " "
+            text: root.commit-count < 0 ? I18n.pr-review-wants-to-merge-into : I18n.pr-review-wants-to-merge + " " + root.commit-count + " "
                 + (root.commit-count == 1 ? I18n.pr-review-commit-into : I18n.pr-review-commits-into);
             font-size: 13px;
             color: root.muted-color;
@@ -792,7 +826,7 @@ export component GitHubPullRequestSummaryRow inherits Rectangle {
         compact-summary-label := Text {
             width: self.preferred-width;
             height: 26px;
-            text: I18n.pr-review-wants-to-merge + " " + root.commit-count + " "
+            text: root.commit-count < 0 ? I18n.pr-review-wants-to-merge-into : I18n.pr-review-wants-to-merge + " " + root.commit-count + " "
                 + (root.commit-count == 1 ? I18n.pr-review-commit-into : I18n.pr-review-commits-into);
             font-size: 13px;
             color: root.muted-color;
@@ -871,135 +905,8 @@ export component GitHubCenteredErrorState inherits Rectangle {
     }
 }
 
-export component GitHubPullRequestTabButton inherits Rectangle {
-    in property <string> label;
-    in property <int> count: 0;
-    in property <image> icon;
-    in property <bool> selected: false;
-    callback clicked();
-    private property <bool> keyboard-focus-visible: false;
-
-    // Primer UnderlineNav item inside a 48px row: 32px rounded hover control,
-    // coral underline on the shared baseline. Spec: docs/specs/ui-design.md
-    // “UnderlineNav tabs”.
-    width: root.content-width;
-    height: 48px;
-    background: transparent;
-    border-width: 0px;
-    clip: false;
-
-    tab-focus := FocusScope {
-        width: 100%;
-        height: 100%;
-        accessible-role: tab;
-        accessible-enabled: true;
-        accessible-label: root.label + ", " + root.count;
-        accessible-checkable: true;
-        accessible-checked: root.selected;
-        key-pressed(event) => {
-            root.keyboard-focus-visible = true;
-            if event.text == Key.Return || event.text == " " {
-                root.clicked();
-                return accept;
-            }
-            return reject;
-        }
-        focus-gained(reason) => {
-            root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
-        }
-        focus-lost => {
-            root.keyboard-focus-visible = false;
-        }
-    }
-
-    private property <length> count-badge-width: max(22px, count-label.preferred-width + 12px);
-    private property <length> label-width: label-measure.preferred-width;
-    // Primer UnderlineNav item: 8px outer padding and 8px between icon,
-    // label, and counter. Reserve the selected label width in every state so
-    // changing tabs never shifts neighboring items.
-    private property <length> content-width: 8px + 16px + 8px + root.label-width + 8px + root.count-badge-width + 8px;
-
-    label-measure := Text {
-        visible: false;
-        text: root.label;
-        font-size: 14px;
-        font-weight: 600;
-        wrap: no-wrap;
-    }
-
-    if tab-touch.has-hover: Rectangle {
-        x: 0px;
-        y: 8px;
-        width: parent.width;
-        height: 32px;
-        border-radius: 6px;
-        background: GitHubTheme.underline-nav-hover;
-    }
-
-    Image {
-        x: 8px;
-        y: 16px;
-        width: 16px;
-        height: 16px;
-        source: root.icon;
-        image-fit: contain;
-        colorize: GitHubTheme.fg-default;
-    }
-    tab-label := Text {
-        x: 32px;
-        y: 8px;
-        width: root.label-width;
-        height: 32px;
-        text: root.label;
-        font-size: 14px;
-        font-weight: root.selected ? 600 : 400;
-        color: GitHubTheme.fg-default;
-        vertical-alignment: center;
-    }
-    Rectangle {
-        x: tab-label.x + tab-label.width + 8px;
-        y: 14px;
-        width: root.count-badge-width;
-        height: 20px;
-        border-radius: 10px;
-        background: GitHubTheme.overlay-handle;
-        count-label := Text {
-            width: parent.width;
-            height: parent.height;
-            text: root.count;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            font-size: 11px;
-            font-weight: 600;
-            color: GitHubTheme.fg-default;
-        }
-    }
-    if root.selected: Rectangle {
-        x: 0px;
-        y: parent.height - 2px;
-        width: parent.width;
-        height: 2px;
-        border-radius: 1px;
-        background: GitHubTheme.underline-nav-selected;
-    }
-    tab-touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => {
-            root.keyboard-focus-visible = false;
-            tab-focus.focus();
-            root.clicked();
-        }
-    }
-    if tab-focus.has-focus && root.keyboard-focus-visible: Rectangle {
-        x: GitHubMetrics.size-4;
-        y: GitHubMetrics.size-6;
-        width: parent.width - GitHubMetrics.size-8;
-        height: parent.height - GitHubMetrics.size-12;
-        border-radius: GitHubMetrics.radius-medium;
-        border-width: GitHubMetrics.focus-outline-width;
-        border-color: GitHubTheme.focus-outline;
-        background: transparent;
-    }
+export component GitHubPullRequestTabButton inherits GitHubUnderlineNavItem {
+    show-count: true;
 }
 
 export component GitHubCommitRangeButton inherits Rectangle {

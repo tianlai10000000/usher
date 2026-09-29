@@ -1928,19 +1928,15 @@ pub(crate) fn install_titlebar_settings_button(window: &MainWindow) {
         // Tooltip and click handling without covering AppKit's traffic lights.
         let _: () = msg_send![modal_shield, setHidden: true];
         let _: () = msg_send![controls_container, addSubview: modal_shield];
+        // Keep the controls in the accessory's managed view hierarchy. A
+        // detached sibling can still paint above the title bar, but AppKit may
+        // route mouse events to its private title-bar view instead of the
+        // visible NSButtons.
+        let _: () = msg_send![container, addSubview: controls_container];
         let _: () = msg_send![accessory, setView: container];
         // NSTitlebarAccessoryLayoutAttributeLeft in the current target SDK.
         let _: () = msg_send![accessory, setLayoutAttribute: 1u64];
         let _: () = msg_send![window, addTitlebarAccessoryViewController: accessory];
-        let traffic: *mut Object = msg_send![window, standardWindowButton: 0u64];
-        if traffic.is_null() {
-            return;
-        }
-        let titlebar_view: *mut Object = msg_send![traffic, superview];
-        if titlebar_view.is_null() {
-            return;
-        }
-        let _: () = msg_send![titlebar_view, addSubview: controls_container];
         TITLEBAR_ACCESSORY_ANCHOR = container;
         TITLEBAR_CONTROLS_CONTAINER = controls_container;
         // AppKit performs another title-bar layout after accessories are

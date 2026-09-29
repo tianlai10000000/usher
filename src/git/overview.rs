@@ -83,6 +83,7 @@ mod tests {
             source_branch: String::new(),
             target_branch: target_branch.to_string(),
             review_status: Default::default(),
+            conflict_status: Default::default(),
             conversation_count: None,
             created_at: String::new(),
             updated_at: String::new(),

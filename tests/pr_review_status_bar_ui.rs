@@ -77,6 +77,7 @@ fn pr_review_keeps_the_status_bar_interactive_until_a_dialog_opens() {
 fn status_bar_popup_stays_above_pr_review_and_owns_its_surface() {
     i_slint_backend_testing::init_no_event_loop();
     let window = MainWindow::new().expect("main window");
+    slint::select_bundled_translation("en").expect("English test translations");
     window.window().dispatch_event(WindowEvent::Resized {
         size: LogicalSize::new(800.0, 600.0),
     });

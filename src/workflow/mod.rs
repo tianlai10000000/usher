@@ -1,6 +1,7 @@
 mod bindings;
 pub mod branch;
 pub mod cd;
+mod pr_conflict_status;
 mod pr_list;
 #[cfg(feature = "test-fixtures")]
 mod pr_list_fixture;
@@ -28,6 +29,7 @@ pub fn setup_workflow(ui: &MainWindow) {
     let shared_state = state::new_shared_state();
     state::register_shared_state(&shared_state);
     state::initialize_current_ui(ui, &shared_state);
+    pr_conflict_status::bind(ui);
     let pr_list_controller = pr_list::bind_pr_list(ui);
     let pr_review_controller = pr_review::bind_pr_review(ui, pr_list_controller.clone());
     LIFECYCLE_CONTROLLER.with(|registered| {
@@ -59,6 +61,10 @@ pub(crate) fn sync_language(ui: &MainWindow) {
             controller.pr_review.sync_language(ui);
         }
     });
+}
+
+pub(crate) fn invalidate_conflict_status(ui: &MainWindow) {
+    pr_conflict_status::invalidate(ui);
 }
 
 pub(crate) fn release_unreachable_state(ui: &MainWindow) {

@@ -1,0 +1,52 @@
+import { GitHubTheme } from "../../theme/github_theme.slint";
+import { GitHubSpinner } from "../github_spinner.slint";
+import { I18n } from "@i18n";
+
+export component GitHubConflictStatus inherits FocusScope {
+    in property <string> status;
+    in property <bool> interactive: true;
+    out property <string> label: status == "conflicting" ? I18n.conflicts-title
+        : status == "clear" ? I18n.conflicts-clear
+        : status == "checking" ? I18n.conflicts-checking
+        : status == "not_applicable" ? I18n.conflicts-not-applicable : I18n.conflicts-unknown;
+    callback clicked();
+    height: 24px;
+    horizontal-stretch: 0;
+    min-width: 24px;
+    preferred-width: label-text.preferred-width + 24px;
+    focus-on-click: false;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: root.interactive;
+    key-pressed(event) => {
+        if root.interactive && (event.text == Key.Return || event.text == " ") {root.clicked();return accept;}
+        return reject;
+    }
+    Rectangle {
+        x: 0px;y: 0px;width: parent.width;height: parent.height;
+        border-radius: 4px;
+        background: touch.has-hover && root.interactive ? GitHubTheme.control-transparent-hover : transparent;
+        border-width: root.has-focus ? 1px : 0px;
+        border-color: GitHubTheme.accent-fg;
+        if root.status == "checking": GitHubSpinner {
+            x: 2px; y: (parent.height - self.height) / 2 - 1px;
+            spinner-size: 14px;
+            foreground: GitHubTheme.fg-muted;
+        }
+        if root.status != "checking": status-icon := Image {
+            // Match the 12px label's visible glyph center, as in review approval.
+            x: 2px; y: (parent.height - self.height) / 2 - 1px;
+            width: 14px; height: 14px;
+            source: root.status == "clear" ? @image-url("../../assets/icons/octicon-check-16.svg")
+                : @image-url("../../assets/icons/octicon-alert-16.svg");
+            colorize: root.status == "conflicting" ? GitHubTheme.danger-fg
+                : root.status == "clear" ? GitHubTheme.success-fg : GitHubTheme.fg-muted;
+        }
+        label-text := Text {
+            x: 22px;y: 0px; width: max(0px, parent.width - 24px); height: parent.height;
+            text: root.label; font-size: 12px; color: GitHubTheme.fg-muted;
+            overflow: elide; vertical-alignment: center;
+        }
+        touch := TouchArea { enabled: root.interactive; mouse-cursor: pointer; clicked => {root.focus();root.clicked();} }
+    }
+}

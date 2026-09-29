@@ -131,6 +131,7 @@ pub(crate) fn apply_preference(preference: &str) -> Result<&'static str> {
 pub(crate) fn sync_main_window(app: &MainWindow, preference: &str) {
     let state = AppState::get(app);
     let reply_language = state.get_ai_agent_reply_language_selection().id.to_string();
+    let locale = usher_i18n::resolve_preference(preference);
     let canonical = usher_i18n::canonical_preference(preference);
     let choices = language_choices();
     let selected_label = choices
@@ -142,6 +143,7 @@ pub(crate) fn sync_main_window(app: &MainWindow, preference: &str) {
         id: canonical.into(),
         label: selected_label.into(),
     });
+    app.set_workflow_pr_list_compact_text_offset_y(locale.pr_list_compact_text_offset_y);
     sync_ai_reply_language(app, &reply_language);
 }
 
@@ -261,6 +263,11 @@ mod tests {
         let messages = usher_messages::GitHubMessagesPage::new().expect("messages page");
 
         apply_preference(usher_i18n::source_locale().id).expect("select source language");
+        sync_main_window(&window, usher_i18n::source_locale().id);
+        assert_eq!(
+            window.get_workflow_pr_list_compact_text_offset_y(),
+            usher_i18n::source_locale().pr_list_compact_text_offset_y
+        );
         window.set_current_route(crate::Route::Workflow);
         for label in ["Pull requests", "Tags", "Branch", "CD"] {
             assert!(
@@ -276,6 +283,12 @@ mod tests {
             .filter(|locale| locale.id != usher_i18n::source_locale().id)
         {
             apply_preference(locale.id).expect("select packaged locale");
+            sync_main_window(&window, locale.id);
+            assert_eq!(
+                window.get_workflow_pr_list_compact_text_offset_y(),
+                locale.pr_list_compact_text_offset_y,
+                "runtime locale switch must refresh PR-list typography metadata"
+            );
             let expected = usher_i18n::translate_for(locale.id, "language.title");
             assert_eq!(AppState::get(&window).get_i18n_catalog_sentinel(), expected);
             assert_eq!(
@@ -307,5 +320,6 @@ mod tests {
         }
 
         apply_preference(usher_i18n::source_locale().id).expect("restore source language");
+        sync_main_window(&window, usher_i18n::source_locale().id);
     }
 }

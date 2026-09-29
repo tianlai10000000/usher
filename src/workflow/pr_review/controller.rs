@@ -89,6 +89,7 @@ struct LocationReveal {
 
 #[derive(Clone)]
 pub(crate) struct WorkflowPrReviewController {
+    conflicts: super::conflicts::ConflictController,
     pr_list_controller: WorkflowPrListController,
     project_alias: Arc<Mutex<String>>,
     active_request: Arc<Mutex<Option<ReviewRequest>>>,
@@ -119,6 +120,7 @@ pub(crate) fn bind_pr_review(
 ) -> WorkflowPrReviewController {
     super::find_benchmark::setup(ui);
     let controller = WorkflowPrReviewController {
+        conflicts: super::conflicts::ConflictController::default(),
         pr_list_controller,
         project_alias: Arc::new(Mutex::new(String::new())),
         active_request: Arc::new(Mutex::new(None)),
@@ -144,6 +146,51 @@ pub(crate) fn bind_pr_review(
     };
 
     diff_bindings::bind(ui);
+    controller.conflicts.bind(ui);
+    let conflict_controller = controller.clone();
+    let weak = ui.as_weak();
+    ui.global::<crate::PrConflictsBridge>().on_open(move || {
+        let Some(ui) = weak.upgrade() else { return };
+        if ui.global::<crate::PrConflictsBridge>().get_active() {
+            return;
+        }
+        let request = conflict_controller
+            .active_request
+            .lock()
+            .ok()
+            .and_then(|r| r.clone());
+        if let Some(request) = request {
+            ui.global::<crate::PrConflictsBridge>()
+                .set_return_to_list(false);
+            let alias = conflict_controller.project_alias.lock().unwrap().clone();
+            conflict_controller.conflicts.open(
+                &ui,
+                alias,
+                request.number,
+                request.source_branch,
+                request.target_branch,
+            );
+        }
+    });
+    let conflict_controller = controller.clone();
+    let weak = ui.as_weak();
+    ui.global::<crate::PrConflictsBridge>().on_back(move || {
+        let Some(ui) = weak.upgrade() else { return };
+        let to_list = ui.global::<crate::PrConflictsBridge>().get_return_to_list();
+        conflict_controller.conflicts.leave_workspace(&ui);
+        if to_list {
+            conflict_controller.navigate_back(&ui);
+            return;
+        }
+        let request = conflict_controller
+            .active_request
+            .lock()
+            .ok()
+            .and_then(|r| r.clone());
+        if let Some(request) = request {
+            conflict_controller.open(&ui, request, false);
+        }
+    });
 
     let open_controller = controller.clone();
     let ui_weak = ui.as_weak();
@@ -152,7 +199,7 @@ pub(crate) fn bind_pr_review(
             let Some(ui) = ui_weak.upgrade() else {
                 return;
             };
-            open_controller.open(
+            open_controller.open_with_intent(
                 &ui,
                 ReviewRequest {
                     number: number.to_string(),
@@ -164,8 +211,9 @@ pub(crate) fn bind_pr_review(
                     ignore_whitespace: false,
                 },
                 false,
+                initial_tab == 3,
             );
-            if initial_tab != 2 {
+            if initial_tab != 2 && initial_tab != 3 {
                 ui.invoke_workflow_pr_review_select_tab(initial_tab);
             }
         },
@@ -791,6 +839,7 @@ impl WorkflowPrReviewController {
     }
 
     fn reset_request_scoped_state(&self, ui: &MainWindow, reset_tab: bool) {
+        self.conflicts.close(ui);
         super::find_bridge::cancel();
         if let Ok(mut location) = self.location_reveal.lock() {
             *location = None;
@@ -971,6 +1020,16 @@ impl WorkflowPrReviewController {
     }
 
     fn open(&self, ui: &MainWindow, request: ReviewRequest, force_refresh: bool) {
+        self.open_with_intent(ui, request, force_refresh, false);
+    }
+
+    fn open_with_intent(
+        &self,
+        ui: &MainWindow,
+        request: ReviewRequest,
+        force_refresh: bool,
+        conflicts: bool,
+    ) {
         let project_alias = self
             .project_alias
             .lock()
@@ -1008,11 +1067,32 @@ impl WorkflowPrReviewController {
 
         apply_review_header(ui, &request);
         ui.set_workflow_pr_review_visible(true);
-        ui.invoke_navigate(Route::PrReview);
-        ui.set_workflow_pr_review_error("".into());
         if let Ok(mut active_request) = self.active_request.lock() {
             *active_request = Some(request.clone());
         }
+        ui.invoke_navigate(Route::PrReview);
+        ui.set_workflow_pr_review_error("".into());
+        if conflicts {
+            self.refresh_action_state(ui);
+            ui.global::<crate::PrConflictsBridge>()
+                .set_return_to_list(true);
+            ui.set_workflow_pr_review_loading(false);
+            self.conflicts.open(
+                ui,
+                project_alias,
+                request.number,
+                request.source_branch,
+                request.target_branch,
+            );
+            return;
+        }
+        self.conflicts.prefetch(
+            ui,
+            project_alias.clone(),
+            request.number.clone(),
+            request.source_branch.clone(),
+            request.target_branch.clone(),
+        );
         let cached = if force_refresh {
             None
         } else {
@@ -2827,6 +2907,16 @@ impl WorkflowPrReviewController {
 
     fn apply_detail(&self, ui: &MainWindow, detail: &SharedDiffDetail) {
         apply_detail_summary(ui, detail);
+        // Tab-row statistics describe the entire PR even while comparing a commit range.
+        if let Some(all_detail) = self
+            .cache
+            .lock()
+            .ok()
+            .and_then(|cache| cache.as_ref().map(|cache| cache.all_detail.clone()))
+        {
+            ui.set_workflow_pr_review_added_lines(all_detail.added_lines as i32);
+            ui.set_workflow_pr_review_removed_lines(all_detail.removed_lines as i32);
+        }
         if let Ok(mut selected) = self.selected_extensions.lock() {
             *selected = extension_counts(detail.files.as_slice())
                 .into_keys()
@@ -3123,6 +3213,17 @@ fn memory_benchmark_diff_detail(seed: usize) -> PullRequestDiffDetail {
 }
 
 fn apply_review_header(ui: &MainWindow, request: &ReviewRequest) {
+    let bridge = ui.global::<crate::PrConflictsBridge>();
+    bridge.set_number(request.number.clone().into());
+    bridge.set_repository(bridge.get_list_repository());
+    let rows = ui.get_workflow_pr_list_items();
+    bridge.set_status(
+        (0..rows.row_count())
+            .filter_map(|i| rows.row_data(i))
+            .find(|row| row.number.as_str() == request.number)
+            .map(|row| row.conflict_status)
+            .unwrap_or_else(|| "unknown".into()),
+    );
     ui.set_workflow_pr_review_number(request.number.clone().into());
     let title = if request.title.trim().is_empty() {
         crate::i18n::tr("pr_list.untitled_pull_request").into_owned()

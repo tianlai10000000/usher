@@ -5341,3 +5341,107 @@ msgstr "1 天前"
 msgctxt "ui_components.two_days_ago"
 msgid "2 days ago"
 msgstr "2 天前"
+# PR conflict browsing
+msgctxt "pr_review.wants_to_merge_into"
+msgid "wants to merge into"
+msgstr "希望合并到"
+
+msgctxt "conflicts.title"
+msgid "Conflicts"
+msgstr "冲突"
+
+msgctxt "conflicts.files"
+msgid "Conflicting files"
+msgstr "冲突文件"
+
+msgctxt "conflicts.read_only"
+msgid "Read only"
+msgstr "只读"
+
+msgctxt "conflicts.view"
+msgid "View conflicts"
+msgstr "查看冲突"
+
+msgctxt "conflicts.clear"
+msgid "No conflicts"
+msgstr "无冲突"
+
+msgctxt "conflicts.checking"
+msgid "Checking conflicts"
+msgstr "检查冲突中"
+
+msgctxt "conflicts.unknown"
+msgid "Conflict status unknown"
+msgstr "冲突状态未知"
+
+msgctxt "conflicts.not_applicable"
+msgid "Not applicable"
+msgstr "不适用"
+
+msgctxt "conflicts.back"
+msgid "Back"
+msgstr "返回"
+
+msgctxt "conflicts.refresh"
+msgid "Refresh conflicts"
+msgstr "刷新冲突"
+
+msgctxt "conflicts.toggle_files"
+msgid "Toggle conflict files"
+msgstr "展开或收起冲突文件"
+
+msgctxt "conflicts.previous"
+msgid "Previous conflict"
+msgstr "上一个冲突"
+
+msgctxt "conflicts.next"
+msgid "Next conflict"
+msgstr "下一个冲突"
+
+msgctxt "conflicts.copy"
+msgid "Copy file contents"
+msgstr "复制文件内容"
+
+msgctxt "conflicts.local"
+msgid "Local analysis"
+msgstr "本地分析"
+
+msgctxt "conflicts.nontext"
+msgid "This conflict has no text preview. View its paths in the file list."
+msgstr "此冲突没有文本预览，可在文件列表中查看路径。"
+
+msgctxt "conflicts.unavailable"
+msgid "Could not load conflicts. Try refreshing."
+msgstr "无法加载冲突，请刷新重试。"
+
+msgctxt "conflicts.authentication"
+msgid "Could not read this repository. Check API access and Git credentials."
+msgstr "无法读取此仓库，请检查 API 访问权限和 Git 凭据。"
+
+msgctxt "conflicts.unsupported"
+msgid "Conflict preview is unavailable for this server or Git version."
+msgstr "当前服务器或 Git 版本暂不支持冲突预览。"
+
+msgctxt "conflicts.too_large"
+msgid "This conflict snapshot exceeds the preview limit."
+msgstr "此冲突快照超出预览大小限制。"
+
+msgctxt "conflicts.invalid_content"
+msgid "The server returned conflict data that could not be read."
+msgstr "服务器返回的冲突数据无法读取。"
+
+msgctxt "conflicts.stale"
+msgid "The branches changed during analysis. Refresh to load the current conflicts."
+msgstr "分析期间 Branch 已发生变化，请刷新以加载当前冲突。"
+
+msgctxt "conflicts.empty"
+msgid "There are no conflicting files in this snapshot."
+msgstr "此快照没有冲突文件。"
+
+msgctxt "conflicts.copy_failed"
+msgid "Failed to copy file contents. Try again."
+msgstr "复制文件内容失败，请重试。"
+
+msgctxt "navigation.more_tabs"
+msgid "More"
+msgstr "更多"

@@ -6,6 +6,51 @@ use crate::git::{PullRequestFilters, PullRequestItem, PullRequestReviewStatus, P
 const REVIEW_STATUS_FIXTURE_JSON: &str =
     include_str!("../../tests/fixtures/pr-list-review-status.json");
 
+pub(super) fn setup(ui: &crate::MainWindow) {
+    use slint::ComponentHandle;
+
+    if !super::pr_list::review_status_fixture_enabled()
+        || std::env::var("USHER_PR_LIST_AUTOSTART").as_deref() != Ok("1")
+        || !crate::app_paths::benchmark_offline_mode()
+        || std::env::var_os("USHER_BENCHMARK_STATE_ROOT").is_none()
+    {
+        return;
+    }
+    let weak = ui.as_weak();
+    crate::startup::run_after_first_frame(move || {
+        slint::Timer::single_shot(std::time::Duration::from_secs(2), move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let dimension = |key, default, min, max| {
+                std::env::var(key)
+                    .ok()
+                    .and_then(|value| value.parse::<f32>().ok())
+                    .filter(|value| value.is_finite())
+                    .unwrap_or(default)
+                    .clamp(min, max)
+            };
+            ui.window().set_size(slint::LogicalSize::new(
+                dimension("USHER_PR_LIST_WIDTH", 1200.0, 800.0, 1800.0),
+                dimension("USHER_PR_LIST_HEIGHT", 900.0, 600.0, 1200.0),
+            ));
+            if let Ok(locale) = std::env::var("USHER_PR_LIST_LOCALE") {
+                if let Ok(canonical) = crate::i18n::apply_preference(&locale) {
+                    crate::i18n::sync_main_window(&ui, canonical);
+                }
+            }
+            let provider = std::env::var("USHER_PR_LIST_PROVIDER")
+                .ok()
+                .filter(|value| matches!(value.as_str(), "github" | "gitlab" | "gitee"))
+                .unwrap_or_else(|| "github".into());
+            ui.set_workflow_project_name("PR layout fixtures".into());
+            ui.set_workflow_pr_repo_project_id("review-status-v1".into());
+            ui.set_workflow_pr_repo_type(provider.into());
+            ui.set_workflow_selected_flow(2);
+            ui.invoke_navigate(crate::Route::Workflow);
+            ui.invoke_workflow_pr_list_state_change("open".into());
+        });
+    });
+}
+
 #[derive(Deserialize)]
 struct PullRequestListFixture {
     items: Vec<FixturePullRequestItem>,
@@ -20,6 +65,8 @@ struct FixturePullRequestItem {
     source_branch: String,
     target_branch: String,
     review_status: String,
+    #[serde(default)]
+    conflict_status: String,
     conversation_count: Option<u32>,
     updated_hours_ago: i64,
 }
@@ -79,6 +126,16 @@ impl FixturePullRequestItem {
             "changes_requested" => PullRequestReviewStatus::ChangesRequested,
             value => return Err(format!("Unknown fixture review status: {value}")),
         };
+        let conflict_status = if self.state != "open" {
+            crate::git::conflicts::ConflictStatus::NotApplicable
+        } else {
+            match self.conflict_status.as_str() {
+                "conflicting" => crate::git::conflicts::ConflictStatus::Conflicting,
+                "clear" => crate::git::conflicts::ConflictStatus::Clear,
+                "checking" => crate::git::conflicts::ConflictStatus::Checking,
+                _ => crate::git::conflicts::ConflictStatus::Unknown,
+            }
+        };
         Ok(PullRequestItem {
             number: self.number,
             title: self.title,
@@ -87,6 +144,7 @@ impl FixturePullRequestItem {
             source_branch: self.source_branch,
             target_branch: self.target_branch,
             review_status,
+            conflict_status,
             conversation_count: self.conversation_count,
             created_at: (now - Duration::hours(self.updated_hours_ago + 1))
                 .to_rfc3339_opts(SecondsFormat::Secs, true),

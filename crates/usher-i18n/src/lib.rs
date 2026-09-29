@@ -8,6 +8,7 @@ pub struct LocaleMetadata {
     pub native_name: &'static str,
     pub aliases: &'static [&'static str],
     pub segmented_count_suffix_offset: i32,
+    pub pr_list_compact_text_offset_y: i32,
 }
 
 #[derive(Debug, Clone, Copy)]

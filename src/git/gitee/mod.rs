@@ -29,7 +29,9 @@ use super::{
     percent_encode_path,
 };
 
+mod conflicts;
 mod conversation;
+pub(super) use conflicts::{conflict_detail, load_conflicts};
 mod decode;
 mod public_prefix;
 mod readiness;
@@ -2501,6 +2503,7 @@ fn to_pull_request_item(value: &Value) -> PullRequestItem {
             .or_else(|| nested_string(value, "base", "label"))
             .unwrap_or_else(|| "—".to_string()),
         review_status: gitee_list_review_status(value),
+        conflict_status: Default::default(),
         conversation_count: conversation_count_from_detail(value),
         created_at: string_field(value, "created_at").unwrap_or_default(),
         updated_at: string_field(value, "updated_at").unwrap_or_default(),

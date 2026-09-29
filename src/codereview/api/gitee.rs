@@ -14,6 +14,8 @@ pub(crate) const ENTERPRISE_MERGE_REQUEST_DIFFS_URL: &str =
     "{api_base_url}/projects/{project_id}/merge_requests/{merge_request_iid}/diffs";
 pub(crate) const ENTERPRISE_MERGE_REQUEST_URL: &str =
     "{api_base_url}/projects/{project_id}/merge_requests/{merge_request_iid}";
+pub(crate) const ENTERPRISE_MERGE_REQUEST_CONFLICTS_URL: &str =
+    "{api_base_url}/projects/{project_id}/merge_requests/{merge_request_iid}/conflicts";
 pub(crate) const ENTERPRISE_MERGE_REQUEST_REVIEWS_URL: &str =
     "{api_base_url}/projects/{project_id}/merge_requests/{merge_request_iid}/reviews";
 pub(crate) const ENTERPRISE_WEB_PULL_REQUEST_REVIEWS_URL: &str =

@@ -2,6 +2,50 @@
 
 [中文](architecture.zh.md) · [README](../README.md) · [Specifications](specs/README.md)
 
+PR conflict browsing has a separate domain service in `src/git/conflicts/`,
+validated through the existing repository context, and provider-owned HTTP
+adapters. `workflow/pr_conflict_status.rs` shares ephemeral typed state between
+list and detail; `workflow/pr_review/conflicts/` owns read-only sessions,
+`LatestCompute` preparation and cancellation. Its Slint workspace and bridge
+do not reuse ordinary Diff selection state. Git writes only temporary bare
+objects. The process-tree guard lives in `app_runtime/process_tree.rs`, shared
+by Hooks and conflict analysis. See [the conflict contract](specs/pr-conflicts.md).
+Conflict document extents are independent of animated viewport offsets. Async
+clipboard completion is guarded by session and file-selection generations and
+uses the shared copy control's localized success feedback.
+The shared conflict status indicator mounts `GitHubSpinner` only while checking;
+its fixed icon slot and localized label are shared by list and workspace surfaces.
+Reopening the active conflict session is idempotent; explicit refresh owns reload.
+The conflict workspace owns its resizable file-pane width locally. Its entry uses
+the shared model-driven UnderlineNav in a single navigation row. Whole trailing
+tabs overflow into a root-owned More menu; inline and menu counters cap at 99+.
+Workflow, Tag operations and the component gallery use the same measured layout.
+PR totals use `ReviewCache.all_detail` and remain at the Tab row's right edge;
+the shared diff-stat component's measured width is reserved before tab overflow.
+The PR Tab row owns one full-width 1px baseline behind the selected underline;
+its nested UnderlineNav disables its own border to avoid stacking separators.
+Conflict file rows present basename/path with a trailing unresolved icon, including
+nontext conflicts; file selection and root-hosted path tooltips remain local to
+the conflict workspace.
+Its file-count badge is a snapshot-derived review projection retained when
+returning from Conflicts, and cleared by review resets or provider invalidation.
+Ordinary Review entry and route-history reentry start a cancellable background
+snapshot read through the conflict controller. Only count/status are projected
+until Conflicts opens; entry joins the pending read or reuses its result without
+mounting file/code models in ordinary Review. Reset generations reject stale results.
+PR list rows follow GitHub's compact inline metadata flow. Review and conflict
+segments hug localized labels, share a 24px centerline with author/time, and
+wrap independently when needed. Branch pairs follow in the remaining space or
+move together below; missing review labels reserve no column. Wrapped titles
+use native Slint `Text`, with one line-height factor shared by painting and
+preferred-height measurement. Branch chips use a smaller regular monospace face
+and share the metadata line's visual center. The existing test-fixtures launcher
+opens the production list offline with temporary state.
+PR Review commit identity prose and its relative timestamp are painted by one
+native `Text` shaping node. This keeps mixed CJK/Latin fallback-font metrics on
+one baseline without locale-specific pixel corrections. A measured trailing
+overlay preserves the timestamp-only Tooltip target without changing row geometry.
+
 ## Purpose and scope
 
 This document describes the current codebase, ownership boundaries, runtime lifecycle, and safe extension points. It is the canonical English architecture reference. Behavioral requirements that need explicit invariants live under `docs/specs/`.

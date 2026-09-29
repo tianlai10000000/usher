@@ -8,6 +8,7 @@ import { GitHubFilterMenuButton } from "../github_filter_menu.slint";
 import { GitHubMetrics, GitHubTheme } from "../../theme/github_theme.slint";
 import { AiReviewRuleChoice } from "@ai-review";
 import { I18n } from "@i18n";
+import { GitHubConflictStatus } from "../pr_review/conflict_status.slint";
 
 
 
@@ -34,6 +35,7 @@ export component GitHubPullRequestFlow {
     in property <length> viewport-width: 0px;
     in property <length> viewport-height: 0px;
     in property <string> code-font-family: "Menlo";
+    in property <int> compact-text-offset-y: 0;
     in property <string> repo-project-id;
     in property <string> repo-type;
     in property <[WorkflowPullRequestItem]> pr-items: [];
@@ -414,7 +416,8 @@ export component GitHubPullRequestFlow {
                 private property <string> display-author: item.author == ""
                     ? I18n.common-unknown-author
                     : item.author;
-                private property <length> conversation-action-width: item.conversation-count > 0 ? 40px : 32px;
+                private property <length> conversation-action-width: item.conversation-count > 0
+                    ? max(40px, conversation-count-measure.preferred-width + 32px) : 32px;
                 private property <length> ai-action-width: 32px;
                 private property <bool> ai-review-active:
                     item.ai-review-status == "queued" || item.ai-review-status == "running";
@@ -425,8 +428,9 @@ export component GitHubPullRequestFlow {
                     self.conversation-action-width + self.ai-action-width
                     + self.stop-action-gap + self.stop-action-width;
                 private property <length> content-x: 38px;
-                // StyledText provides stable paragraph line spacing for mixed
-                // CJK/Latin titles where Text's glyph rows otherwise crowd.
+                // Keep title painting and measurement on the same native Text
+                // contract so wrapped CJK/Latin rows share the 1.18 line height.
+                private property <float> title-line-height-factor: 1.12;
                 private property <length> title-max-width: max(
                     80px,
                     parent.width - self.content-x - self.action-width - 32px,
@@ -444,16 +448,16 @@ export component GitHubPullRequestFlow {
                 private property <bool> keyboard-focus-visible: false;
                 private property <length> metadata-y: 8px + self.title-block-height
                     + (self.title-wraps ? 4px : (root.wrap-row-branches ? 2px : 0px));
-                private property <length> branch-chip-height: 22px;
-                private property <length> branch-chip-y: root.wrap-row-branches
-                    ? self.metadata-y + 26px
-                    : self.metadata-y;
-                private property <length> natural-row-height: root.wrap-row-branches && self.has-branches
-                    ? self.branch-chip-y + self.branch-chip-height + 6px
-                    : max(
-                        root.wrap-row-branches ? 64px : 72px,
-                        self.metadata-y + 22px + 8px,
-                    );
+                private property <length> metadata-line-height: 24px;
+                private property <length> metadata-font-size: 12px;
+                private property <length> branch-chip-height: 20px;
+                private property <length> branch-font-size: 11px;
+                private property <length> natural-row-height: max(
+                    self.metadata-y + self.metadata-line-height,
+                    self.review-status-width > 0px ? self.review-y + self.metadata-line-height : 0px,
+                    self.conflict-status-width > 0px ? self.conflict-y + self.metadata-line-height : 0px,
+                    self.has-branches ? self.branch-chip-y + self.branch-chip-height : 0px
+                ) + 10px;
                 height: self.natural-row-height;
 
                 row-focus := FocusScope {
@@ -514,11 +518,14 @@ export component GitHubPullRequestFlow {
                     wrap: no-wrap;
                 }
 
-                title-wrapped-measure := StyledText {
+                title-wrapped-measure := Text {
                     visible: false;
                     width: parent.title-max-width;
-                    text: @markdown("**\{pr-row.display-title}**");
-                    default-font-size: 14px;
+                    text: pr-row.display-title;
+                    font-size: 14px;
+                    font-weight: 600;
+                    wrap: word-wrap;
+                    line-height-factor: pr-row.title-line-height-factor;
                 }
 
                 title-clip := Rectangle {
@@ -528,30 +535,20 @@ export component GitHubPullRequestFlow {
                     height: parent.title-block-height;
                     background: transparent;
 
-                    if !title-touch.has-hover: StyledText {
+                    Text {
                         width: parent.width;
                         height: parent.height;
-                        text: @markdown("**\{pr-row.display-title}**");
-                        default-font-size: 14px;
-                        default-color: root.fg-default;
+                        text: pr-row.display-title;
+                        font-size: 14px;
+                        font-weight: 600;
+                        color: title-touch.has-hover ? GitHubTheme.accent-fg : root.fg-default;
                         horizontal-alignment: left;
                         vertical-alignment: pr-row.title-wraps || root.wrap-row-branches
                             ? top
                             : center;
-                    }
-
-                    // StyledText underlines each glyph run and each wrapped line.
-                    // The measured host grows for every wrapped line.
-                    if title-touch.has-hover: StyledText {
-                        width: parent.width;
-                        height: parent.height;
-                        text: @markdown("<u>**\{pr-row.display-title}**</u>");
-                        default-font-size: 14px;
-                        default-color: GitHubTheme.accent-fg;
-                        horizontal-alignment: left;
-                        vertical-alignment: pr-row.title-wraps || root.wrap-row-branches
-                            ? top
-                            : center;
+                        wrap: word-wrap;
+                        overflow: clip;
+                        line-height-factor: pr-row.title-line-height-factor;
                     }
                 }
 
@@ -583,9 +580,6 @@ export component GitHubPullRequestFlow {
                             : " " + I18n.pr-list-was-opened + " "));
                 private property <bool> has-branches: item.target-branch != ""
                     && item.source-branch != "";
-                // Gitee's mixed CJK/Latin metadata needs a small optical
-                // correction; Latin-only GitHub/GitLab metadata does not.
-                private property <length> time-visual-offset-y: root.repo-type == "gitee" ? 1px : 0px;
                 private property <string> review-status-label: item.review-status == "approved"
                     ? I18n.pr-review-approved
                     : (item.review-status == "review_required"
@@ -600,72 +594,76 @@ export component GitHubPullRequestFlow {
                             : ""));
                 private property <length> meta-max-width: max(
                     0px,
-                    parent.width - self.content-x - 16px
-                        - (root.wrap-row-branches ? self.action-width + 8px : 0px),
+                    parent.width - self.content-x - 16px,
                 );
-                private property <length> inline-meta-budget: root.wrap-row-branches || !self.has-branches
-                    ? self.meta-max-width
-                    : max(0px, self.meta-max-width * 0.58);
-                private property <length> review-status-width: self.review-status-label == ""
-                    ? 0px
-                    : min(review-status-measure.preferred-width + 14px, self.inline-meta-budget);
+                private property <length> review-status-width: self.review-status-label == "" ? 0px : review-status-measure.preferred-width;
+                private property <length> conflict-status-width: item.state == "closed" || item.state == "merged" ? 0px : conflict-badge.preferred-width;
                 private property <length> meta-prefix-width: min(
                     meta-prefix-measure.preferred-width,
                     max(
                         0px,
-                        self.inline-meta-budget
-                            - self.review-status-width
-                            - time-measure.preferred-width,
+                        self.meta-max-width - time-measure.preferred-width - 6px,
                     ),
                 );
                 private property <length> time-width: min(
                     time-measure.preferred-width,
                     max(
                         0px,
-                        self.inline-meta-budget
-                            - self.meta-prefix-width
-                            - self.review-status-width,
+                        self.meta-max-width - self.meta-prefix-width - 6px,
                     ),
                 );
-                private property <length> branch-pair-x: root.wrap-row-branches
-                    ? self.content-x
-                    : self.content-x
-                        + self.meta-prefix-width
-                        + self.time-width
-                        + self.review-status-width
-                        + 12px;
+                // Follow GitHub's inline metadata flow. Each complete segment
+                // wraps only when it no longer fits, without reserved columns.
+                private property <length> metadata-end: self.content-x + self.meta-prefix-width + 6px + self.time-width;
+                private property <length> content-right: self.content-x + self.meta-max-width;
+                private property <bool> review-wraps: self.metadata-end + 16px + self.review-status-width > self.content-right;
+                private property <length> review-x: self.review-wraps ? self.content-x : self.metadata-end + 16px;
+                private property <length> review-y: self.metadata-y + (self.review-wraps ? self.metadata-line-height : 0px);
+                private property <length> before-conflict-end: self.review-status-width > 0px ? self.review-x + self.review-status-width : self.metadata-end;
+                private property <length> before-conflict-y: self.review-status-width > 0px ? self.review-y : self.metadata-y;
+                private property <bool> conflict-wraps: self.before-conflict-end + 16px + self.conflict-status-width > self.content-right;
+                private property <length> conflict-x: self.conflict-wraps ? self.content-x : self.before-conflict-end + 16px;
+                private property <length> conflict-y: self.before-conflict-y + (self.conflict-wraps ? self.metadata-line-height : 0px);
+                private property <length> before-branches-end: self.conflict-status-width > 0px ? self.conflict-x + self.conflict-status-width : self.before-conflict-end;
+                private property <length> before-branches-y: self.conflict-status-width > 0px ? self.conflict-y : self.before-conflict-y;
+                private property <length> branch-ideal-width: target-branch-measure.preferred-width + source-branch-measure.preferred-width + 48px;
+                private property <bool> branches-wrap: self.before-branches-end + 16px + min(self.branch-ideal-width, 260px) > self.content-right;
+                private property <length> branch-pair-x: self.branches-wrap ? self.content-x : self.before-branches-end + 16px;
+                private property <length> branch-line-y: self.before-branches-y
+                    + (self.branches-wrap ? self.metadata-line-height : 0px);
+                private property <length> branch-chip-y: self.branch-line-y
+                    + (self.metadata-line-height - self.branch-chip-height) / 2;
                 private property <length> branch-pair-width: max(
                     0px,
                     self.meta-max-width - (self.branch-pair-x - self.content-x),
                 );
-                private property <length> branch-label-space: max(0px, self.branch-pair-width - 28px);
+                private property <length> branch-label-space: max(0px, self.branch-pair-width - 24px);
                 private property <length> target-branch-width: min(
-                    target-branch-measure.preferred-width + 16px,
+                    target-branch-measure.preferred-width + 12px,
                     self.branch-label-space / 2,
                 );
                 private property <length> source-branch-width: min(
-                    source-branch-measure.preferred-width + 16px,
+                    source-branch-measure.preferred-width + 12px,
                     max(0px, self.branch-label-space - self.target-branch-width),
                 );
 
                 meta-prefix-measure := Text {
                     visible: false;
                     text: parent.meta-prefix;
-                    font-size: 12px;
-                    wrap: no-wrap;
-                }
-
-                time-measure := Text {
-                    visible: false;
-                    text: item.updated-at;
-                    font-size: 12px;
+                    font-size: parent.metadata-font-size;
                     wrap: no-wrap;
                 }
 
                 review-status-measure := Text {
                     visible: false;
                     text: parent.review-status-label;
-                    font-size: 12px;
+                    font-size: parent.metadata-font-size;
+                }
+
+                time-measure := Text {
+                    visible: false;
+                    text: item.updated-at;
+                    font-size: parent.metadata-font-size;
                     wrap: no-wrap;
                 }
 
@@ -673,7 +671,8 @@ export component GitHubPullRequestFlow {
                     visible: false;
                     text: item.target-branch;
                     font-family: root.code-font-family;
-                    font-size: 13px;
+                    font-size: parent.branch-font-size;
+                    font-italic: false;
                     wrap: no-wrap;
                 }
 
@@ -681,39 +680,40 @@ export component GitHubPullRequestFlow {
                     visible: false;
                     text: item.source-branch;
                     font-family: root.code-font-family;
-                    font-size: 13px;
+                    font-size: parent.branch-font-size;
+                    font-italic: false;
                     wrap: no-wrap;
                 }
 
-                Text {
+                metadata-prefix := Text {
                     x: parent.content-x;
-                    y: parent.metadata-y;
+                    y: parent.metadata-y + root.compact-text-offset-y * 1px;
                     width: parent.meta-prefix-width;
-                    height: 22px;
+                    height: parent.metadata-line-height;
                     text: parent.meta-prefix;
-                    font-size: 12px;
+                    font-size: parent.metadata-font-size;
                     color: root.fg-muted;
                     vertical-alignment: center;
                     overflow: elide;
                 }
 
-                Text {
-                    x: parent.content-x + parent.meta-prefix-width;
-                    y: parent.metadata-y + parent.time-visual-offset-y;
+                metadata-time := Text {
+                    x: parent.content-x + parent.meta-prefix-width + 6px;
+                    y: parent.metadata-y;
                     width: parent.time-width;
-                    height: 22px;
+                    height: parent.metadata-line-height;
                     text: item.updated-at;
-                    font-size: 12px;
+                    font-size: parent.metadata-font-size;
                     color: root.fg-muted;
                     vertical-alignment: center;
                     overflow: elide;
                 }
 
                 time-touch := TouchArea {
-                    x: parent.content-x + parent.meta-prefix-width;
-                    y: parent.metadata-y + parent.time-visual-offset-y;
+                    x: parent.content-x + parent.meta-prefix-width + 6px;
+                    y: parent.metadata-y;
                     width: parent.time-width;
-                    height: 22px;
+                    height: parent.metadata-line-height;
                     z: 2;
                     mouse-cursor: pointer;
                     changed has-hover => {
@@ -742,11 +742,41 @@ export component GitHubPullRequestFlow {
                     }
                 }
 
+                conflict-badge := GitHubConflictStatus {
+                    z: 2;
+                    visible: pr-row.conflict-status-width > 0px;
+                    x: parent.conflict-x;
+                    y: parent.conflict-y;
+                    width: parent.conflict-status-width;
+                    status: item.conflict-status;
+                    clicked => {root.open-detail(item.number,item.title,item.author,item.source-branch,item.target-branch,item.updated-at-raw,3);}
+                }
+
+                Text {
+                    visible: pr-row.review-status-width > 0px && !pr-row.review-wraps;
+                    x: parent.review-x - 12px;
+                    y: parent.review-y;
+                    width: 8px; height: parent.metadata-line-height;
+                    text: "·"; font-size: parent.metadata-font-size;
+                    color: root.fg-muted; vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    visible: pr-row.conflict-status-width > 0px && !pr-row.conflict-wraps;
+                    x: parent.conflict-x - 12px;
+                    y: parent.conflict-y;
+                    width: 8px; height: parent.metadata-line-height;
+                    text: "·"; font-size: parent.metadata-font-size;
+                    color: root.fg-muted; vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+
                 if pr-row.review-status-label != "": review-status := FocusScope {
-                    x: parent.content-x + parent.meta-prefix-width + parent.time-width;
-                    y: parent.metadata-y;
+                    z: 2;
+                    x: parent.review-x;
+                    y: parent.review-y;
                     width: parent.review-status-width;
-                    height: 22px;
+                    height: parent.metadata-line-height;
                     accessible-role: button;
                     accessible-enabled: true;
                     accessible-label: parent.review-status-label + ". " + I18n.pr-list-open-conversation;
@@ -774,30 +804,21 @@ export component GitHubPullRequestFlow {
                     focus-lost => { self.keyboard-focus-visible = false; }
 
                     Text {
-                        x: 2px;
-                        width: 10px;
-                        height: parent.height;
-                        text: "•";
-                        font-size: 12px;
-                        color: root.fg-muted;
-                        vertical-alignment: center;
-                    }
-                    Text {
-                        x: 14px;
-                        width: max(0px, parent.width - 14px);
+                        x: 0px;
+                        width: parent.width;
                         height: parent.height;
                         text: pr-row.review-status-label;
-                        font-size: 12px;
+                        font-size: pr-row.metadata-font-size;
                         color: review-status-touch.has-hover || review-status.has-focus
                             ? GitHubTheme.accent-fg
                             : root.fg-muted;
                         vertical-alignment: center;
-                        overflow: clip;
+                        overflow: elide;
                     }
                     if review-status.has-focus && review-status.keyboard-focus-visible: Rectangle {
-                        x: 11px;
+                        x: -2px;
                         y: 1px;
-                        width: max(0px, parent.width - 9px);
+                        width: parent.width + 4px;
                         height: parent.height - 2px;
                         border-radius: 4px;
                         border-width: 2px;
@@ -805,8 +826,8 @@ export component GitHubPullRequestFlow {
                         background: transparent;
                     }
                     review-status-touch := TouchArea {
-                        x: 12px;
-                        width: max(0px, parent.width - 12px);
+                        x: 0px;
+                        width: parent.width;
                         height: parent.height;
                         mouse-cursor: pointer;
                         changed has-hover => {
@@ -847,13 +868,15 @@ export component GitHubPullRequestFlow {
                     background: GitHubTheme.accent-subtle;
                     clip: true;
 
-                    Text {
-                        x: 8px;
-                        width: max(0px, parent.width - 16px);
+                    target-branch-label := Text {
+                        x: 6px;
+                        y: root.compact-text-offset-y * 1px;
+                        width: max(0px, parent.width - 12px);
                         height: parent.height;
                         text: item.target-branch;
                         font-family: root.code-font-family;
-                        font-size: 13px;
+                        font-size: pr-row.branch-font-size;
+                        font-italic: false;
                         color: root.fg-muted;
                         horizontal-alignment: center;
                         vertical-alignment: center;
@@ -892,19 +915,19 @@ export component GitHubPullRequestFlow {
                 }
 
                 if pr-row.has-branches: Text {
-                    x: parent.branch-pair-x + parent.target-branch-width + 6px;
+                    x: parent.branch-pair-x + parent.target-branch-width + 4px;
                     y: parent.branch-chip-y;
                     width: 16px;
                     height: parent.branch-chip-height;
                     text: "←";
-                    font-size: 16px;
+                    font-size: 14px;
                     color: root.fg-muted;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
 
                 if pr-row.has-branches: source-branch-chip := Rectangle {
-                    x: parent.branch-pair-x + parent.target-branch-width + 28px;
+                    x: parent.branch-pair-x + parent.target-branch-width + 24px;
                     y: parent.branch-chip-y;
                     width: parent.source-branch-width;
                     height: parent.branch-chip-height;
@@ -912,13 +935,15 @@ export component GitHubPullRequestFlow {
                     background: GitHubTheme.accent-subtle;
                     clip: true;
 
-                    Text {
-                        x: 8px;
-                        width: max(0px, parent.width - 16px);
+                    source-branch-label := Text {
+                        x: 6px;
+                        y: root.compact-text-offset-y * 1px;
+                        width: max(0px, parent.width - 12px);
                         height: parent.height;
                         text: item.source-branch;
                         font-family: root.code-font-family;
-                        font-size: 13px;
+                        font-size: pr-row.branch-font-size;
+                        font-italic: false;
                         color: root.fg-muted;
                         horizontal-alignment: center;
                         vertical-alignment: center;
@@ -956,6 +981,12 @@ export component GitHubPullRequestFlow {
                     }
                 }
 
+                conversation-count-measure := Text {
+                    visible: false;
+                    text: item.conversation-count;
+                    font-size: 12px;
+                }
+
                 conversation-action := Rectangle {
                     x: parent.width - parent.action-width - 16px;
                     y: parent.first-line-center-y - self.height / 2;
@@ -975,7 +1006,7 @@ export component GitHubPullRequestFlow {
                             ? GitHubTheme.accent-fg
                             : root.fg-muted;
                     }
-                    if item.conversation-count > 0: Text {
+                    if item.conversation-count > 0: conversation-count := Text {
                         x: 28px;
                         width: max(0px, parent.width - 32px);
                         height: parent.height;

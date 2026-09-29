@@ -63,6 +63,7 @@ export global GitHubSelectState {
 // Mount at the owning page/window root, outside every scrolling layout.
 export component GitHubSelectPopup inherits FocusScope {
     in property <string> owner;
+    in property <length> menu-width: 0px;
     in property <int> option-count;
     // Page factories can occupy the whole window while their usable viewport
     // stops above persistent chrome such as the status bar. Keep collision
@@ -79,7 +80,7 @@ export component GitHubSelectPopup inherits FocusScope {
     callback selected(int);
     private property <bool> open: GitHubSelectState.open && GitHubSelectState.owner == root.owner;
     private property <length> popup-width:
-        max(0px, min(GitHubSelectState.anchor-width,
+        max(0px, min(root.menu-width > 0px ? root.menu-width : GitHubSelectState.anchor-width,
             root.viewport-width - GitHubMetrics.size-16));
     private property <length> anchor-top: GitHubSelectState.anchor-y - root.absolute-position.y;
     private property <length> space-above: max(0px,
@@ -167,7 +168,7 @@ export component GitHubSelectPopup inherits FocusScope {
         anchor-y: GitHubSelectState.anchor-y - root.absolute-position.y - root.viewport-y;
         anchor-width: GitHubSelectState.anchor-width;
         anchor-height: GitHubSelectState.anchor-height;
-        menu-width: GitHubSelectState.anchor-width;
+        menu-width: root.popup-width;
         menu-max-height: 264px;
         content-height: root.list-content-height + GitHubMetrics.size-8;
         reveal-offset: root.active-option-offset;

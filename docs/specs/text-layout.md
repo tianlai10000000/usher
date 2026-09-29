@@ -70,6 +70,10 @@ accessibility remain part of the component contract.
 5. A factor, fallback pitch, font, scale or wrapping change is a layout-key
    change. Cancel stale work, recompute all affected extents and reject results
    prepared under the old key.
+6. Visually continuous inline prose that shares one style and baseline must be
+   painted by one native text shaping node. Do not split runs merely to attach
+   an interaction to a trailing substring; keep one paint node and place a
+   measured transparent interaction overlay over that substring instead.
 
 1. 新增或修改多行原生 `Text` 与直接 `TextInput` 时，只要当前固定的 Slint API
    支持，就以 `line-height-factor` 作为首选行距控制。
@@ -83,6 +87,9 @@ accessibility remain part of the component contract.
    使用同一契约。禁止只改绘制 factor，却继续使用旧 Worker extent 或源行数估算。
 5. Factor、fallback pitch、字体、缩放或换行变化都属于 layout-key 变化；必须取消旧
    工作、重算全部受影响 extent，并拒绝旧 key 结果。
+6. 视觉上连续、共享同一样式与基线的行内文案必须由同一个原生文本 shaping 节点
+   绘制。不得仅为给尾部子串添加交互而拆成多个绘制节点；应保留单一绘制节点，并在
+   该子串上放置实测的透明交互 overlay。
 
 ## Unsupported-surface exceptions / 暂不支持组件的例外
 
