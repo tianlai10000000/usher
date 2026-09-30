@@ -397,13 +397,15 @@ expanded/collapsed, and success confirmation.
   opaque theme fallbacks. The effect frame is derived from its full-size native
   parent bounds, not the pre-full-size render-view frame, and is refreshed after
   style changes and native resize so it covers the title-bar strip. The docked
-  sidebar paints Codex's final renderer surface above the native effect instead
-  of exposing the raw Menu material: while key it uses `#ffffffa6` in light mode
-  or `#2b2b2ba3` in dark mode, preserving blur while neutralizing wallpaper
-  saturation. On resign-key, the effect is disabled, the native window keeps
-  Codex's `#f9f9f9` light or `#000000` dark fallback, and the rendered sidebar
-  becomes opaque `#fdfdfd` light or `#212121` dark. The temporary hover sidebar
-  continues to use its independent opaque overlay surface.
+  sidebar paints the final renderer surfaces above the native effect instead of
+  exposing the raw Menu material. Codex's desktop Settings implementation first
+  paints the dark page surface as `color-mix(in srgb, #131313 80%, transparent)`
+  and then the navigation surface as
+  `color-mix(in oklab, #212121 65%, transparent)`. Usher preserves those as
+  explicit `#131313cc` and `#212121a6` layers; their rounded opaque source-over
+  fallback is `#1d1d1d`. Light mode keeps its existing `#ffffffa6` treatment.
+  On resign-key, the effect is disabled and the native window keeps Codex's
+  `#f9f9f9` light or `#000000` dark fallback beneath the renderer layers.
   Undocked mode removes it from page layout; an 8 px left-edge hover target
   opens the same component as a rounded, border-only root-layer overlay with a
   short pointer-exit delay. macOS places Toggle/Back/Forward in a native
@@ -473,12 +475,13 @@ expanded/collapsed, and success confirmation.
   前，Slint 窗口根层与固定侧栏都必须使用主题对应的不透明 fallback。Effect 几何取自
   全尺寸原生父视图 bounds，而不是启用 FullSizeContentView 前的 Render View frame；
   应用样式与原生 resize 后都要重新同步，确保覆盖标题栏带。固定侧栏不会直接
-  露出原始 Menu 材质，而是在原生 Effect 上绘制 Codex 最终的渲染表面：Key Window
-  在浅色模式使用 `#ffffffa6`，深色模式使用 `#2b2b2ba3`，保留模糊并压低壁纸饱和度。
-  失去 Key 状态时关闭 Effect，原生窗口继续使用 Codex 的浅色 `#f9f9f9` 或深色
-  `#000000` fallback，渲染侧栏则切换为浅色 `#fdfdfd` 或深色 `#212121` 不透明表面。
-  临时 Hover
-  侧栏继续使用自己独立的不透明浮层表面。
+  露出原始 Menu 材质，而是在原生 Effect 上绘制最终表面。Codex 桌面 Settings 的
+  实现先绘制 `color-mix(in srgb, #131313 80%, transparent)` 深色页面底层，再绘制
+  `color-mix(in oklab, #212121 65%, transparent)` 导航层。Usher 保留对应的
+  `#131313cc` 和 `#212121a6` 两层；两层按 source-over 合成后的不透明 fallback
+  取整为 `#1d1d1d`。浅色模式维持现有的 `#ffffffa6` 处理。失去 Key 状态时关闭
+  Effect，原生窗口继续在渲染层下使用 Codex 的浅色 `#f9f9f9` 或深色 `#000000`
+  fallback。
   macOS 使用原生左侧标题栏附件，Windows/Linux 使用侧栏页头和收起态
   控制条；macOS 侧栏按钮在收起态使用轮廓 `sidebar.left`，展开态使用左侧
   三分之一填充图标，两种状态不得共用同一视觉；Back/Forward 可用状态只能来自

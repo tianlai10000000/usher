@@ -149,23 +149,24 @@ export global GitHubTheme {
     out property <color> backdrop-medium: #00000055;
     out property <color> canvas-translucent:
         root.dark-mode ? #0d1117df : #ffffffdf;
-    // Desktop sidebar treatment follows the restrained macOS SwiftUI List
-    // hierarchy used by Codex while retaining cross-platform semantic colors.
+    // Codex's dark Settings shell first paints its #131313 page surface at
+    // 80% opacity, then its #212121 navigation surface at 65%. #1d1d1d is
+    // the rounded opaque source-over fallback for that pair.
     out property <color> sidebar-canvas:
-        root.dark-mode ? #151b23f2 : #f4f6f8f2;
-    // The native Menu backdrop is only the lower layer of Codex's sidebar.
-    // Its rendered sidebar surface neutralizes the wallpaper while focused
-    // and becomes opaque when the window resigns key.
+        root.dark-mode ? #1d1d1d : #f4f6f8f2;
+    out property <color> sidebar-native-underlay-canvas:
+        root.dark-mode ? #131313cc : transparent;
+    // The native Menu backdrop sits below both focused dark sidebar layers.
     out property <color> sidebar-native-active-canvas:
-        root.dark-mode ? #2b2b2ba3 : #ffffffa6;
+        root.dark-mode ? #212121a6 : #ffffffa6;
     out property <color> sidebar-native-inactive-canvas:
-        root.dark-mode ? #212121 : #fdfdfd;
+        root.dark-mode ? root.sidebar-native-underlay-canvas : #fdfdfd;
     out property <color> sidebar-overlay-canvas:
-        root.dark-mode ? #151b23fe : #f4f6f8fe;
+        root.dark-mode ? root.sidebar-canvas : #f4f6f8fe;
     // The temporary macOS hover sheet is a solid white Codex surface, not the
     // blue-gray translucency used as the docked-sidebar fallback.
     out property <color> sidebar-preview-canvas:
-        root.dark-mode ? #151b23 : #ffffff;
+        root.dark-mode ? root.sidebar-canvas : #ffffff;
     out property <color> sidebar-preview-border:
         root.dark-mode ? #3d444d : #dfdfe0;
     out property <color> sidebar-item-hover:

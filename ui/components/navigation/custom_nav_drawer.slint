@@ -165,7 +165,7 @@ export component GitHubNavigationSidebar inherits Rectangle {
     in property <bool> show-history-controls: true;
     in property <bool> native-vibrancy: false;
     in property <bool> native-window-active: true;
-    // Docked macOS sidebars paint the surface that Codex composites above its
+    // Docked macOS sidebars paint the surfaces that Codex composites above its
     // Menu backdrop. Temporary hover sidebars already own an opaque parent.
     in property <bool> paint-native-surface: true;
     in property <length> titlebar-inset: 0px;
@@ -191,13 +191,24 @@ export component GitHubNavigationSidebar inherits Rectangle {
     height: 100%;
     background: root.native-vibrancy
         ? (root.paint-native-surface
-            ? (root.native-window-active
-                ? GitHubTheme.sidebar-native-active-canvas
-                : GitHubTheme.sidebar-native-inactive-canvas)
+            ? (GitHubTheme.dark-mode
+                ? GitHubTheme.sidebar-native-underlay-canvas
+                : (root.native-window-active
+                    ? GitHubTheme.sidebar-native-active-canvas
+                    : GitHubTheme.sidebar-native-inactive-canvas))
             : transparent)
         : GitHubTheme.sidebar-canvas;
     accessible-role: tab-list;
     accessible-label: I18n.navigation-primary;
+
+    // Codex's dark page-surface layer remains below this 65% navigation layer.
+    // Keeping both layers explicit preserves the native Menu material instead
+    // of approximating the final focused color with one translucent rectangle.
+    if root.native-vibrancy && root.paint-native-surface && GitHubTheme.dark-mode: Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: GitHubTheme.sidebar-native-active-canvas;
+    }
 
     // Receive clicks on sidebar chrome that is not occupied by a control.
     // Interactive children are painted later and keep their own hit targets.

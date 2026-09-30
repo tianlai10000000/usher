@@ -332,6 +332,13 @@ impl HookService {
     }
 
     /// Lagging subscribers replay by sequence from the bounded durable journal.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "stable replay API reserved for lagging Hook event subscribers"
+        )
+    )]
     pub(crate) async fn events_after(&self, id: &str, seq: u64) -> Result<Vec<HookEvent>, String> {
         if !self
             .state
