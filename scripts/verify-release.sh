@@ -15,6 +15,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 APP_NAME="Usher"
+CARGO_BUNDLE_VERSION="0.12.0"
 OUTPUT_DIR="workflow-dist"
 
 mkdir -p "$OUTPUT_DIR"
@@ -122,9 +123,9 @@ build_macos() {
     require_cmd tar
     require_cmd hdiutil
 
-    if ! command -v cargo-bundle >/dev/null 2>&1; then
-        echo -e "${YELLOW}安装 cargo-bundle...${NC}"
-        cargo install cargo-bundle
+    if [ "$(cargo-bundle --version 2>/dev/null || true)" != "cargo-bundle v${CARGO_BUNDLE_VERSION}" ]; then
+        echo -e "${YELLOW}安装 cargo-bundle v${CARGO_BUNDLE_VERSION}...${NC}"
+        cargo install cargo-bundle --version "$CARGO_BUNDLE_VERSION" --locked
     fi
 
     if command -v create-dmg >/dev/null 2>&1; then
@@ -141,7 +142,7 @@ build_macos() {
     [ -f "$exe_path" ] || { echo -e "${RED}错误: 未找到可执行文件 $exe_path${NC}" >&2; exit 1; }
 
     echo -e "${GREEN}[2/5] 创建 App Bundle...${NC}"
-    cargo bundle --release --target "$target"
+    cargo bundle --release --format osx --target "$target"
     [ -d "$bundle_path" ] || { echo -e "${RED}错误: 未找到 App Bundle $bundle_path${NC}" >&2; exit 1; }
 
     echo -e "${GREEN}[3/5] 打包 tar.gz...${NC}"

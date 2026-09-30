@@ -6,6 +6,7 @@
 set -e
 
 APP_NAME="Usher"
+CARGO_BUNDLE_VERSION="0.12.0"
 VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
 
 echo "🔨 Building ${APP_NAME} v${VERSION}..."
@@ -16,10 +17,10 @@ if ! command -v create-dmg &> /dev/null; then
     brew install create-dmg
 fi
 
-# 检查是否安装了 cargo-bundle
-if ! cargo bundle --help &> /dev/null 2>&1; then
-    echo "📦 Installing cargo-bundle..."
-    cargo install cargo-bundle
+# 检查是否安装了发布流程锁定的 cargo-bundle 版本
+if [ "$(cargo-bundle --version 2>/dev/null || true)" != "cargo-bundle v${CARGO_BUNDLE_VERSION}" ]; then
+    echo "📦 Installing cargo-bundle v${CARGO_BUNDLE_VERSION}..."
+    cargo install cargo-bundle --version "$CARGO_BUNDLE_VERSION" --locked
 fi
 
 # 构建 Release 版本
@@ -28,7 +29,7 @@ cargo build --release
 
 # 创建 App Bundle
 echo "📦 Creating app bundle..."
-cargo bundle --release
+cargo bundle --release --format osx
 
 # 创建输出目录
 mkdir -p dist

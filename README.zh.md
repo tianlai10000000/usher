@@ -33,7 +33,7 @@ Linux 在具备合适 Slint 后端的环境中可能可以构建，但目前不�
 - 支持 Rust 2024 edition 的当前稳定版工具链。
 - `PATH` 中可用的 Git，用于工作流和仓库操作。
 - Slint/winit 所需的平台构建依赖。
-- 可选：macOS 打包需要 `cargo-bundle` 和 `create-dmg`。
+- 可选：macOS 打包需要 `cargo-bundle` v0.12.0 和 `create-dmg`；发布脚本会自动安装锁定版本的 `cargo-bundle`。
 
 生产构建只启用 FemtoVG，以固定渲染器选择并避免在常规应用中链接 Skia 或 Slint 实时预览支持。Skia 和实时预览均保留为显式开发选项。
 
@@ -89,7 +89,7 @@ cargo build --profile dev-full
 
 ```sh
 cargo build --profile release-fast --locked
-cargo bundle --profile release-fast
+cargo bundle --profile release-fast --format osx
 ```
 
 该 profile 的产物写入 `target/release-fast`，发布自动化不会使用它。最终分发产物仍由

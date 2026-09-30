@@ -73,7 +73,7 @@ invoke Cargo with `--release`. Routine optimized local builds may instead use
 `cargo build --profile release-fast --locked`; the isolated profile retains the
 release runtime policy while using Thin LTO, eight codegen units, and incremental
 compilation. Its output under `target/release-fast` is not a final distributable
-artifact. `cargo bundle --profile release-fast` provides the matching local
+artifact. `cargo bundle --profile release-fast --format osx` provides the matching local
 application bundle when needed.
 
 ### 2026-09-22 dev runtime residency A/B

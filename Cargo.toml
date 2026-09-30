@@ -146,7 +146,9 @@ resources = ["logo.png"]  # 将 logo.png 复制到 .app/Contents/Resources/ 用�
 category = "Utility"
 short_description = "Usher Application"
 long_description = "A modern desktop application built with Slint"
-osx_minimum_system_version = "10.14"
+
+[package.metadata.bundle.osx]
+minimum_system_version = "10.14"
 
 # Keep everyday macOS builds compact without giving up incremental compilation.
 # Cargo otherwise defaults to full + unpacked debug info on macOS, which retains

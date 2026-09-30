@@ -9,6 +9,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   APP_NAME: Usher
+  CARGO_BUNDLE_VERSION: 0.12.0
 
 jobs:
   build-macos:
@@ -54,8 +55,8 @@ jobs:
 
       - name: Install cargo-bundle
         run: |
-          if ! command -v cargo-bundle &> /dev/null; then
-            cargo install cargo-bundle
+          if [[ "$(cargo-bundle --version 2>/dev/null || true)" != "cargo-bundle v${CARGO_BUNDLE_VERSION}" ]]; then
+            cargo install cargo-bundle --version "${CARGO_BUNDLE_VERSION}" --locked
           fi
 
       - name: Install create-dmg
@@ -71,7 +72,7 @@ jobs:
           CARGO_NET_GIT_FETCH_WITH_CLI: true
 
       - name: Create App Bundle
-        run: cargo bundle --release --target ${{ matrix.target }}
+        run: cargo bundle --release --format osx --target ${{ matrix.target }}
 
       - name: Install Apple signing certificate
         if: startsWith(github.ref, 'refs/tags/') && vars.MACOS_SIGNING_NOTARIZATION_ENABLED == 'true'

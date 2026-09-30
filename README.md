@@ -33,7 +33,8 @@ Linux may build with a suitable Slint backend, but it is not currently covered b
 - A current stable Rust toolchain with the 2024 edition available.
 - Git in `PATH` for workflow and repository operations.
 - Platform build dependencies required by Slint/winit.
-- Optional: `cargo-bundle` and `create-dmg` for macOS packaging.
+- Optional: `cargo-bundle` v0.12.0 and `create-dmg` for macOS packaging. The
+  release scripts install the pinned `cargo-bundle` version automatically.
 
 Production builds enable only FemtoVG, which keeps renderer selection deterministic and avoids linking Skia or Slint live-preview support into the normal application. Skia and live preview remain explicit development options.
 
@@ -93,7 +94,7 @@ eight codegen units, and incremental compilation for shorter rebuilds:
 
 ```sh
 cargo build --profile release-fast --locked
-cargo bundle --profile release-fast
+cargo bundle --profile release-fast --format osx
 ```
 
 This profile writes to `target/release-fast` and is not used by release
