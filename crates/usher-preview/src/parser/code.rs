@@ -335,6 +335,7 @@ impl CodeParser for TreeSitterCodeParser {
             .highlight(
                 &self.configuration,
                 source.as_bytes(),
+                None,
                 Some(cancellation.parser_cancellation_flag()),
                 |_| None,
             )

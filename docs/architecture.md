@@ -52,6 +52,8 @@ This document describes the current codebase, ownership boundaries, runtime life
 
 Usher is a desktop-first Rust application. Slint owns presentation and declarative UI state; Rust owns persistence, process execution, networking, and application orchestration.
 
+The repository and CI pin Rust 1.98.1; all Slint runtime, build and testing packages use 1.18.1. The DPI reproduction remains an independent Cargo workspace with the same Slint version.
+
 Production builds select Winit with FemtoVG/OpenGL at compile time. Skia and FemtoVG/WGPU are opt-in Cargo features used for renderer diagnostics and A/B comparisons, so normal builds cannot silently change renderer because multiple implementations were linked. Slint's in-process live preview and the UI Components playground are explicit `live-preview` and `ui-components` development features; neither is compiled into default or production builds. The WGPU path is not a production default because current macOS tests reduce physical footprint but increase RSS.
 
 PR Review is exposed through the stable `@pr-review` Slint feature-package
@@ -361,12 +363,12 @@ bounds or replace manual input/paint validation.
 | `ui/components/messages/` | Reusable GitHub Inbox message rows with read/unread, semantic level, metadata, and mounted row actions; registered in UI Components. |
 | `ui/components/pr_review/` | PR Review public UI structs plus reusable shell, file-tree, and diff controls; cross-region state stays in the complete page implementation. |
 | `ui/theme/github_theme.slint` | Application-owned `GitHubTheme` semantic color roles and `GitHubMetrics` Primer geometry, control, typography, overlay, and breakpoint tokens. Raw functional UI colors are centralized here. |
-| `material-1.18.0/` | Byte-for-byte `ui-libraries/material/src` from Slint v1.18.0 commit `bd20dab8529add087b5cbc81aec70bf30861ae4c`; no application patches live in this tree. |
+| `material-1.18.1/` | Byte-for-byte `ui-libraries/material/src` from Slint v1.18.1 commit `372cf0ee5577c3dfec309a45e7b778ba4e81b734`; no application patches live in this tree. |
 | `vendor/i-slint-live-preview/` | Temporary Slint 1.18 override selected only by the opt-in `live-preview` feature. Its documented `mtime` guard prevents spurious macOS watcher events from causing an endless recompile loop. |
 
 Application UI must import Material through `@material`; direct imports from
 vendored implementation paths are forbidden. Never modify
-`material-1.18.0/` or other vendored Slint Material UI source for
+`material-1.18.1/` or other vendored Slint Material UI source for
 application behavior or appearance. Material palette, typography, and style
 metrics do not define the product UI. Application surfaces consume
 `GitHubTheme` and `GitHubMetrics`, and every visual adaptation stays in

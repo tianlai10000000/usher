@@ -30,10 +30,10 @@ Linux may build with a suitable Slint backend, but it is not currently covered b
 
 ## Requirements
 
-- A current stable Rust toolchain with the 2024 edition available.
+- Rust 1.98.1, pinned by `rust-toolchain.toml`, with the 2024 edition available.
 - Git in `PATH` for workflow and repository operations.
 - Platform build dependencies required by Slint/winit.
-- Optional: `cargo-bundle` v0.12.0 and `create-dmg` for macOS packaging. The
+- Optional: `cargo-bundle` v0.12.0 and `create-dmg` v1.3.0 for macOS packaging. The
   release scripts install the pinned `cargo-bundle` version automatically.
 
 Production builds enable only FemtoVG, which keeps renderer selection deterministic and avoids linking Skia or Slint live-preview support into the normal application. Skia and live preview remain explicit development options.
@@ -131,8 +131,15 @@ still compile the complete page; use normal `cargo check --locked` and
 `cargo run --locked` before delivering PR Review or final application changes.
 
 In-process Slint live preview is development-only and excluded from normal and
-release builds. Use the project scripts for fast UI validation and visual
-iteration:
+release builds.
+
+The fast UI check requires the matching stable viewer:
+
+```sh
+cargo install slint-viewer --version 1.18.1 --locked
+```
+
+Use the project scripts for fast UI validation and visual iteration:
 
 ```sh
 ./scripts/ui-check.sh
@@ -260,7 +267,7 @@ src/main.rs
      -> crates/usher-search/   shared text matching, result navigation, viewport reveal
      -> src/update/            update checks, download, install
      -> src/{toast,notification,message_center,dialog}.rs
-material-1.18.0/            exact Material source from the Slint v1.18.0 tag
+material-1.18.1/            exact Material source from the Slint v1.18.1 tag
 ```
 
 Read [docs/architecture.md](docs/architecture.md) for ownership, lifecycle, data flows, and extension points. Coding agents must also follow [AGENTS.md](AGENTS.md).
@@ -319,4 +326,4 @@ CI remains available through manual `workflow_dispatch` when needed.
 
 Usher is **proprietary, non-open-source** software. See [`LICENSE.txt`](LICENSE.txt): all rights reserved; use requires explicit permission from the copyright holder.
 
-Third-party components keep their own licenses (for example Material in `material-1.18.0/LICENSE.md`).
+Third-party components keep their own licenses (for example Material in `material-1.18.1/LICENSE.md`).

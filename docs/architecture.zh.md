@@ -41,6 +41,8 @@ PR Review 的 Commit 身份文案与相对时间由同一个原生 `Text` shapin
 
 Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态；Rust 负责持久化、进程执行、网络请求和应用装配。
 
+仓库和 CI 固定使用 Rust 1.98.1；所有 Slint runtime、build 和 testing package 统一使用 1.18.1。DPI 复现工程保留为独立 Cargo workspace，使用同一 Slint 版本。
+
 生产构建在编译期固定选择 Winit + FemtoVG/OpenGL。Skia 和 FemtoVG/WGPU 作为显式启用的 Cargo feature，仅用于渲染器诊断和 A/B 对比，避免常规构建因同时链接多个实现而静默切换渲染器。Slint 应用内实时预览和 UI Components 演练场分别由显式的 `live-preview`、`ui-components` 开发 feature 控制，默认构建和生产构建都不会编译它们。当前 macOS 测试中 WGPU 虽降低 physical footprint，但会增加 RSS，因此不作为生产默认配置。
 
 PR Review 通过稳定的 Slint `@pr-review` feature package 入口暴露，与打开它的
@@ -300,11 +302,11 @@ callback 耗时和夹具效果预算避免相对比较掩盖回归。显式 `--b
 | `ui/components/messages/` | 可复用 GitHub Inbox 消息行，统一已读/未读、语义级别、元数据和常驻行操作，并登记到 UI Components。 |
 | `ui/components/pr_review/` | PR Review 的公开 UI struct、可复用外壳/文件树/Diff 控件；跨区域状态仍留在完整页面实现。 |
 | `ui/theme/github_theme.slint` | 应用自有的 `GitHubTheme` 语义色，以及 `GitHubMetrics` Primer 几何、控件、字体、浮层与断点令牌；功能性 UI 原始颜色统一在此管理。 |
-| `material-1.18.0/` | 与 Slint v1.18.0 commit `bd20dab8529add087b5cbc81aec70bf30861ae4c` 的 `ui-libraries/material/src` 逐字节一致；目录内不保留应用补丁。 |
+| `material-1.18.1/` | 与 Slint v1.18.1 commit `372cf0ee5577c3dfec309a45e7b778ba4e81b734` 的 `ui-libraries/material/src` 逐字节一致；目录内不保留应用补丁。 |
 | `vendor/i-slint-live-preview/` | 仅由显式 `live-preview` feature 选择的临时 Slint 1.18 override；其中有文档记录的 `mtime` 保护避免 macOS 文件监听误报引发无限重编译。 |
 
 应用 UI 必须通过 `@material` 导入 Material，禁止直接引用 vendored 实现路径。
-绝对禁止为应用行为或外观修改 `material-1.18.0/` 或其他 vendored Slint
+绝对禁止为应用行为或外观修改 `material-1.18.1/` 或其他 vendored Slint
 Material UI 源码。Material palette、typography 和 style metrics 不定义产品
 外观；应用界面统一消费 `GitHubTheme` 与 `GitHubMetrics`。所有视觉适配必须放在
 项目自有代码中，确保依赖升级时可以直接替换 Material UI 目录而无需迁移补丁。

@@ -9,15 +9,15 @@ export SLINT_ENABLE_EXPERIMENTAL_FEATURES=1
 
 if ! command -v slint-viewer >/dev/null 2>&1; then
     echo "error: slint-viewer is required for the fast UI check" >&2
-    echo "install a Slint 1.18.x viewer, then retry" >&2
+    echo "install slint-viewer 1.18.1, then retry" >&2
     exit 1
 fi
 
 viewer_version=$(slint-viewer --version 2>/dev/null || true)
 case "$viewer_version" in
-    *" 1.18."*) ;;
+    "slint-viewer 1.18.1") ;;
     *)
-        echo "error: ui-check requires a Slint 1.18.x viewer; found: ${viewer_version:-unknown}" >&2
+        echo "error: ui-check requires slint-viewer 1.18.1; found: ${viewer_version:-unknown}" >&2
         exit 1
         ;;
 esac
@@ -27,7 +27,7 @@ cargo run --quiet --locked -p usher-i18n --example prepare-slint -- \
 
 exec slint-viewer \
     --check \
-    -L material=material-1.18.0/material.slint \
+    -L material=material-1.18.1/material.slint \
     -L ui-components=ui/features/ui_components_enabled.slint \
     -L pr-review=ui/features/pr_review/full.slint \
     -L ai-review=ui/features/ai_review/full.slint \

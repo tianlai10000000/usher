@@ -6,7 +6,7 @@ export component UpdateProgressFixture inherits Window {
     width: 800px;
     height: 600px;
     background: #ffffff;
-    in-out property <float> mock-progress: 0.19;
+    in-out property <float> mock-progress: 0.15;
     in property <bool> animate-progress: false;
 
     Timer {
@@ -22,7 +22,7 @@ export component UpdateProgressFixture inherits Window {
         height: parent.height;
         show-modal: true;
         progress: root.mock-progress;
-        version: "0.0.9-alpha.2";
+        version: "0.0.9-alpha.3";
         status: root.mock-progress > 0 ? I18n.update-downloading : I18n.update-preparing-download;
     }
 }

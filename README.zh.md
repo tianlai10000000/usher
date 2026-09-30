@@ -30,10 +30,10 @@ Linux 在具备合适 Slint 后端的环境中可能可以构建，但目前不�
 
 ## 环境要求
 
-- 支持 Rust 2024 edition 的当前稳定版工具链。
+- Rust 1.98.1 稳定版工具链，由 `rust-toolchain.toml` 固定，支持 Rust 2024 edition。
 - `PATH` 中可用的 Git，用于工作流和仓库操作。
 - Slint/winit 所需的平台构建依赖。
-- 可选：macOS 打包需要 `cargo-bundle` v0.12.0 和 `create-dmg`；发布脚本会自动安装锁定版本的 `cargo-bundle`。
+- 可选：macOS 打包需要 `cargo-bundle` v0.12.0 和 `create-dmg` v1.3.0；发布脚本会自动安装锁定版本的 `cargo-bundle`。
 
 生产构建只启用 FemtoVG，以固定渲染器选择并避免在常规应用中链接 Skia 或 Slint 实时预览支持。Skia 和实时预览均保留为显式开发选项。
 
@@ -119,8 +119,15 @@ PowerShell 对应入口为 `scripts/dev-shell-check.ps1` 和
 Workflow。默认构建和所有现有 Release 命令仍会编译完整页面；涉及 PR Review 或
 最终交付前，仍必须执行普通 `cargo check --locked` 和 `cargo run --locked`。
 
-应用内 Slint 实时预览仅用于开发，常规构建和 Release 构建默认不包含它。UI 快速
-校验和可视化迭代统一使用项目脚本：
+应用内 Slint 实时预览仅用于开发，常规构建和 Release 构建默认不包含它。
+
+UI 快速校验要求安装版本一致的稳定版 viewer：
+
+```sh
+cargo install slint-viewer --version 1.18.1 --locked
+```
+
+UI 快速校验和可视化迭代统一使用项目脚本：
 
 ```sh
 ./scripts/ui-check.sh
@@ -241,7 +248,7 @@ src/main.rs
      -> crates/usher-search/   通用文本匹配、结果导航与视口揭示算法
      -> src/update/            更新检查、下载和安装
      -> src/{toast,notification,message_center,dialog}.rs
-material-1.18.0/            Slint v1.18.0 标签中的原版 Material 源码
+material-1.18.1/            Slint v1.18.1 标签中的原版 Material 源码
 ```
 
 模块职责、生命周期、数据流和扩展点参见 [docs/architecture.zh.md](docs/architecture.zh.md)。Coding agent 还必须遵守 [AGENTS.md](AGENTS.md)。
@@ -299,4 +306,4 @@ push `v*` tag 是唯一的自动构建触发器，只会启动 Release workflow�
 
 Usher 为**专有、非开源**软件。详见 [`LICENSE.txt`](LICENSE.txt)：版权所有，未经版权方书面许可不得使用、复制、修改或分发。
 
-第三方组件仍保留各自许可证（例如 Material 见 `material-1.18.0/LICENSE.md`）。
+第三方组件仍保留各自许可证（例如 Material 见 `material-1.18.1/LICENSE.md`）。

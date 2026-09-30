@@ -17,7 +17,7 @@ use usher_lib::{
 
 slint::slint! {
     #[library_path(i18n) = "target/slint-macro-tests/usher-i18n/i18n.slint"]
-    #[library_path(material) = "material-1.18.0/material.slint"]
+    #[library_path(material) = "material-1.18.1/material.slint"]
     import {
         AgentResponseBlockKind,
         AgentResponseBlock,

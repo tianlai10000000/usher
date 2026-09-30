@@ -90,6 +90,7 @@ fn create_updater() -> Result<Box<dyn self_update::update::ReleaseUpdate>> {
         .bin_name("usher") // Windows can be changed to "myapp.exe"
         .current_version(cargo_crate_version!())
         .build()
+        .map(|updater| Box::new(updater) as Box<dyn self_update::update::ReleaseUpdate>)
         .context("Failed to configure updater")
 }
 
@@ -100,7 +101,7 @@ fn select_release(
     releases
         .into_iter()
         .filter_map(|release| {
-            Version::parse(&release.version)
+            Version::parse(release.version())
                 .ok()
                 .map(|version| (version, release))
         })
@@ -111,12 +112,14 @@ fn select_release(
 
 fn selected_release(
     updater: &dyn self_update::update::ReleaseUpdate,
-    current_version: &str,
 ) -> Result<Option<self_update::update::Release>> {
     let releases = updater
-        .get_latest_releases(current_version)
+        .get_newer_releases()
         .context("Failed to get available releases")?;
-    Ok(select_release(releases, UpdateChannel::configured()))
+    Ok(select_release(
+        releases.into_vec(),
+        UpdateChannel::configured(),
+    ))
 }
 
 pub async fn check_for_update(state: &Arc<Mutex<UpdateState>>) -> Result<bool> {
@@ -133,7 +136,7 @@ pub async fn check_for_update(state: &Arc<Mutex<UpdateState>>) -> Result<bool> {
 
         // Get latest version information
         log::debug!(" Getting latest version information...");
-        let Some(latest_release) = selected_release(updater.as_ref(), cargo_crate_version!()).map_err(|e| {
+        let Some(latest_release) = selected_release(updater.as_ref()).map_err(|e| {
             log::debug!(" Failed to get latest version: {}", e);
             let error_msg = e.to_string();
             // Provide more user-friendly error messages
@@ -155,7 +158,7 @@ pub async fn check_for_update(state: &Arc<Mutex<UpdateState>>) -> Result<bool> {
         let current_version_str = cargo_crate_version!();
         log::debug!(
             "Current version: {}, Latest version: {}",
-            current_version_str, latest_release.version
+            current_version_str, latest_release.version()
         );
 
         // Use semver for semantic version comparison
@@ -167,10 +170,10 @@ pub async fn check_for_update(state: &Arc<Mutex<UpdateState>>) -> Result<bool> {
             )
         })?;
 
-        let latest_ver = Version::parse(&latest_release.version).map_err(|e| {
+        let latest_ver = Version::parse(latest_release.version()).map_err(|e| {
             anyhow::anyhow!(
                 "Failed to parse remote version '{}': {}",
-                latest_release.version,
+                latest_release.version(),
                 e
             )
         })?;
@@ -188,7 +191,7 @@ pub async fn check_for_update(state: &Arc<Mutex<UpdateState>>) -> Result<bool> {
             "New version found: {} (current: {})",
             latest_ver, current_ver
         );
-        Ok((false, latest_release.version))
+        Ok((false, latest_release.version().to_string()))
     })
     .await
     .map_err(|e| anyhow::anyhow!("Task join error: {}", e))?
@@ -270,16 +273,16 @@ pub async fn perform_update_with_progress(
                 crate::i18n::tr("update.fetching_release").as_ref(),
             );
 
-            let releases = updater.get_latest_releases(cargo_crate_version!())?;
+            let releases = updater.get_newer_releases()?.into_vec();
             let latest_release = if selected_version.is_empty() {
                 select_release(releases, UpdateChannel::configured())
             } else {
                 releases
                     .into_iter()
-                    .find(|release| release.version == selected_version)
+                    .find(|release| release.version() == selected_version)
             }
             .context("The selected update release is no longer available")?;
-            log::debug!(" Got latest version: {}", latest_release.version);
+            log::debug!(" Got latest version: {}", latest_release.version());
 
             // Get download URL for current platform
             let target = self_update::get_target();
@@ -287,9 +290,9 @@ pub async fn perform_update_with_progress(
             log::debug!(
                 "Available assets list: {:?}",
                 latest_release
-                    .assets
+                    .assets()
                     .iter()
-                    .map(|a| &a.name)
+                    .map(|a| a.name())
                     .collect::<Vec<_>>()
             );
 
@@ -301,14 +304,14 @@ pub async fn perform_update_with_progress(
             // 3. apple-darwin generic match
             // First try to find tar.gz format (self_update preferred)
             let asset = latest_release
-                .assets
+                .assets()
                 .iter()
                 .filter(|a| {
-                    let name_lower = a.name.to_lowercase();
+                    let name_lower = a.name().to_lowercase();
                     name_lower.ends_with(".tar.gz") || name_lower.ends_with(".zip")
                 })
                 .find(|a| {
-                    let name_lower = a.name.to_lowercase();
+                    let name_lower = a.name().to_lowercase();
                     let target_lower = target.to_lowercase();
 
                     // Exact match for full target
@@ -322,14 +325,14 @@ pub async fn perform_update_with_progress(
                 .or_else(|| {
                     // If no exact match for tar.gz/zip found, try to find any archive containing platform-related keywords
                     latest_release
-                        .assets
+                        .assets()
                         .iter()
                         .filter(|a| {
-                            let name_lower = a.name.to_lowercase();
+                            let name_lower = a.name().to_lowercase();
                             name_lower.ends_with(".tar.gz") || name_lower.ends_with(".zip")
                         })
                         .find(|a| {
-                            let name_lower = a.name.to_lowercase();
+                            let name_lower = a.name().to_lowercase();
                             name_lower.contains("darwin")
                                 || name_lower.contains("macos")
                                 || name_lower.contains("osx")
@@ -337,8 +340,8 @@ pub async fn perform_update_with_progress(
                 })
                 .or_else(|| {
                     // If still not found, try to find any tar.gz or zip file
-                    latest_release.assets.iter().find(|a| {
-                        let name_lower = a.name.to_lowercase();
+                    latest_release.assets().iter().find(|a| {
+                        let name_lower = a.name().to_lowercase();
                         name_lower.ends_with(".tar.gz") || name_lower.ends_with(".zip")
                     })
                 })
@@ -347,15 +350,15 @@ pub async fn perform_update_with_progress(
                         "No suitable asset found for platform: {}. Available assets: {:?}",
                         target,
                         latest_release
-                            .assets
+                            .assets()
                             .iter()
-                            .map(|a| &a.name)
+                            .map(|a| a.name())
                             .collect::<Vec<_>>()
                     )
                 })?;
 
-            log::debug!(" Download URL: {}", asset.download_url);
-            Ok((asset.download_url.clone(), latest_release.version))
+            log::debug!(" Download URL: {}", asset.download_url());
+            Ok((asset.download_url().to_string(), latest_release.version().to_string()))
         })
         .await
         .map_err(|e| anyhow::anyhow!("Task join error: {}", e))??;
@@ -632,7 +635,6 @@ pub async fn perform_update_with_progress(
 
         // Replace current executable file
         // Use self_replace to safely replace executable file
-        use self_update::self_replace;
         self_replace::self_replace(&new_exe_path).context("Failed to replace executable")?;
 
         log::debug!(" Executable file replaced successfully");
@@ -1205,10 +1207,7 @@ mod tests {
     use self_update::update::Release;
 
     fn release(version: &str) -> Release {
-        Release {
-            version: version.to_string(),
-            ..Release::default()
-        }
+        Release::builder().version(version).build().unwrap()
     }
 
     #[test]
@@ -1216,7 +1215,7 @@ mod tests {
         let selected = select_release(
             vec![
                 release("1.2.0-alpha.3"),
-                release("not-semver"),
+                Release::default(),
                 release("1.1.9"),
                 release("1.2.0-rc.1"),
             ],
@@ -1224,7 +1223,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(selected.version, "1.1.9");
+        assert_eq!(selected.version(), "1.1.9");
     }
 
     #[test]
@@ -1239,7 +1238,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(selected.version, "1.2.0-beta.1");
+        assert_eq!(selected.version(), "1.2.0-beta.1");
     }
 
     #[test]

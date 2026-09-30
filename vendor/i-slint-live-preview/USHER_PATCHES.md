@@ -1,4 +1,4 @@
-# Usher patches to i-slint-live-preview 1.18.0
+# Usher patches to i-slint-live-preview 1.18.1
 
 ## Spurious macOS watcher reload loop
 
@@ -11,7 +11,7 @@ Before reloading, the local patch compares the last-seen `mtime` of every
 non-`builtin:` watch path. It ignores a notification when no watched file has
 actually changed.
 
-Upstream comparison: Slint v1.18.0 inspected on 2026-09-20 does not contain an
+Upstream comparison: Slint v1.18.1 inspected on 2026-09-30 does not contain an
 equivalent guard in `live_component.rs`.
 
 This crate is selected only by Usher's opt-in `live-preview` Cargo feature.

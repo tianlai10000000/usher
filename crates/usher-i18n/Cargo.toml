@@ -11,5 +11,5 @@ sys-locale = "0.3.2"
 
 [build-dependencies]
 rspolib = "0.1.2"
-serde = { version = "1.0", features = ["derive"] }
-toml = "1.1"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.6"

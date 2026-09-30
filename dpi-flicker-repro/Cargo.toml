@@ -3,9 +3,11 @@ name = "dpi-flicker-repro"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+resolver = "3"
+
 [dependencies]
-slint = { version = "1.15.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg"] }
+slint = { version = "1.18.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg"] }
 
 [build-dependencies]
-slint-build = { version = "1.15.1" }
-
+slint-build = { version = "1.18.1" }

@@ -38,8 +38,8 @@ Keep Usher a responsive desktop application with explicit module ownership, even
 - `docs/architecture.md` and `docs/architecture.zh.md`: ownership and data flow.
 - `docs/specs/`: stable behavior contracts.
 - `docs/terminal_viewport_iteration_notes.md`: historical investigation, not current truth.
-- `material-1.18.0/`: byte-for-byte upstream `ui-libraries/material/src` from
-  Slint v1.18.0 (`bd20dab8529add087b5cbc81aec70bf30861ae4c`); treat it as
+- `material-1.18.1/`: byte-for-byte upstream `ui-libraries/material/src` from
+  Slint v1.18.1 (`372cf0ee5577c3dfec309a45e7b778ba4e81b734`); treat it as
   replace-only third-party code.
 
 ## Module ownership / 模块边界
@@ -125,13 +125,13 @@ Keep Usher a responsive desktop application with explicit module ownership, even
 ### Vendored Material / 内置 Material
 
 - Prefer `@material` imports.
-- Never edit `material-1.18.0/` or any other vendored Slint Material UI source.
+- Never edit `material-1.18.1/` or any other vendored Slint Material UI source.
 - Implement every application behavior and visual adaptation in application-owned `ui/` code so Material UI can be upgraded by replacement.
 - Keep compatibility aliases, input-policy changes, and other upstream adaptations in application-owned wrappers; a Material upgrade must be an upstream directory replacement, not a patch rebase.
 - New code must not import private files from the vendored implementation path; use `@material` and project-owned wrappers.
 
 - 优先通过 `@material` 导入。
-- 绝对禁止修改 `material-1.18.0/` 或任何其他 vendored Slint Material UI 源码。
+- 绝对禁止修改 `material-1.18.1/` 或任何其他 vendored Slint Material UI 源码。
 - 所有应用行为和视觉适配都必须在项目自有 `ui/` 代码中实现，保证 Material UI 可直接替换升级。
 - 兼容别名、输入策略及其他上游适配必须进入项目自有 wrapper；Material 升级必须直接替换上游目录，禁止重新向 vendor 打补丁。
 - 新代码禁止引用 vendored 实现路径中的私有文件；必须使用 `@material` 和项目自有包装组件。

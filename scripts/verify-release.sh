@@ -16,6 +16,7 @@ NC='\033[0m'
 
 APP_NAME="Usher"
 CARGO_BUNDLE_VERSION="0.12.0"
+CREATE_DMG_VERSION="1.3.0"
 OUTPUT_DIR="workflow-dist"
 
 mkdir -p "$OUTPUT_DIR"
@@ -128,11 +129,11 @@ build_macos() {
         cargo install cargo-bundle --version "$CARGO_BUNDLE_VERSION" --locked
     fi
 
-    if command -v create-dmg >/dev/null 2>&1; then
+    if [ "$(create-dmg --version 2>/dev/null || true)" = "create-dmg ${CREATE_DMG_VERSION}" ]; then
         has_create_dmg=true
-        echo "✓ create-dmg 已安装"
+        echo "✓ create-dmg ${CREATE_DMG_VERSION} 已安装"
     else
-        echo "⚠ create-dmg 未安装，将使用 hdiutil 作为备选"
+        echo "⚠ 未找到 create-dmg ${CREATE_DMG_VERSION}，将使用 hdiutil 作为备选"
     fi
 
     echo -e "${GREEN}[1/5] 构建 Release...${NC}"

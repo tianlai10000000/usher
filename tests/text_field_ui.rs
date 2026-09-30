@@ -6,7 +6,7 @@ use slint::{ComponentHandle, LogicalPosition, LogicalSize};
 
 slint::slint! {
     #[library_path(i18n) = "target/slint-macro-tests/usher-i18n/i18n.slint"]
-    #[library_path(material) = "material-1.18.0/material.slint"]
+    #[library_path(material) = "material-1.18.1/material.slint"]
     import { GitHubTextField }
         from "ui/components/settings/github_settings_controls.slint";
 

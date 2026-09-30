@@ -1103,7 +1103,7 @@ Material may be used only as a replaceable low-level Slint implementation
 library:
 
 - import public controls through `@material`;
-- never import a file from `material-1.18.0/` directly;
+- never import a file from `material-1.18.1/` directly;
 - never edit vendored Material source;
 - do not consume Material palette, typography, or style metrics as product
   design tokens;
@@ -1117,7 +1117,7 @@ library:
 - run `./scripts/check-ui-policy.sh` to enforce the Material and icon boundary.
 
 Material 只能作为可替换的底层 Slint 实现库：必须通过 `@material` 导入公开控件，
-禁止直接导入或修改 `material-1.18.0/`，禁止把 Material palette、
+禁止直接导入或修改 `material-1.18.1/`，禁止把 Material palette、
 typography 或 style metrics 当作产品设计令牌，GitHub/Primer 视觉行为必须在
 项目自有 `ui/` 文件中实现。
 当前直接 `@material` 白名单仅包含 `ui/main.slint` 的

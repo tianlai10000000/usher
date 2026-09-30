@@ -11,7 +11,7 @@ fn mock_update_progress_grows_from_left_in_dialog_and_status_bar() {
     let window = MainWindow::new().unwrap();
     window.set_platform_is_macos(false);
     let update = window.global::<UpdateLogic>();
-    update.set_new_version("0.0.9-alpha.2".into());
+    update.set_new_version("0.0.9-alpha.3".into());
     update.set_is_downloading(true);
 
     for (locale, cancel_label) in [("en", "Cancel download"), ("zh-CN", "取消下载")] {
@@ -20,7 +20,7 @@ fn mock_update_progress_grows_from_left_in_dialog_and_status_bar() {
             window.window().dispatch_event(WindowEvent::Resized {
                 size: LogicalSize::new(width, height),
             });
-            for progress in [0.0, 0.19, 0.5, 1.0] {
+            for progress in [0.0, 0.15, 0.5, 1.0] {
                 update.set_download_progress(progress);
                 update.set_total_bytes(20_000_000);
                 update.set_downloaded_bytes((20_000_000.0 * progress) as i32);

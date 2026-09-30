@@ -2,7 +2,7 @@
 ide-check = "check --workspace --all-targets --profile ide --locked"
 
 [env]
-# Slint 1.17's ComponentContainer/component-factory pair is still gated as an
+# Slint 1.18.1's ComponentContainer/component-factory pair is still gated as an
 # experimental language feature. Usher uses it only for explicit cross-crate
 # page boundaries; keep every Cargo-driven compiler/runtime invocation aligned.
 SLINT_ENABLE_EXPERIMENTAL_FEATURES = "1"
