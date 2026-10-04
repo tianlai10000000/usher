@@ -41,34 +41,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-ci-
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Check architecture structure budgets
-        run: ./scripts/check-architecture-structure.sh
-
-      - name: Check UI policy
-        run: ./scripts/check-ui-policy.sh
-
-      - name: Check i18n catalogs
-        run: ./scripts/check-i18n.sh
-
-      - name: Test quality gates and benchmark threshold policy
-        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
-
-      - name: Test workspace
-        # The repository's documented baseline has one failing logger doctest;
-        # keep unit and integration coverage blocking without making CI
-        # permanently red on that separately tracked baseline.
-        run: cargo test --workspace --tests --locked
-        env:
-          SLINT_EMIT_DEBUG_INFO: 1
-
-      - name: Lint workspace
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-
-      - name: Check without default features
-        run: cargo check --workspace --all-targets --no-default-features --features renderer-femtovg --locked
+      - name: Run full quality checks and report all ordinary failures
+        run: ./scripts/check-quality.sh --full
 
   windows-check:
     name: Check Windows workspace

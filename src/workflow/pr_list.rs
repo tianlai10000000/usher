@@ -420,6 +420,7 @@ impl WorkflowPrListController {
         let ui_weak = ui.as_weak();
         crate::app_runtime::shared_runtime().spawn(async move {
             let conflict_identity = super::pr_conflict_status::Key::new(&context, "");
+            let conflict_scope = super::pr_conflict_status::shared().scope();
             let result = get_pull_requests(
                 context.repo_type.as_str(),
                 context.repo_project_id.as_str(),
@@ -437,6 +438,7 @@ impl WorkflowPrListController {
                     for item in &page.items {
                         if item.conflict_status != crate::git::conflicts::ConflictStatus::Unknown {
                             super::pr_conflict_status::shared().observe(
+                                conflict_scope,
                                 super::pr_conflict_status::Key::new(&context, &item.number),
                                 item.conflict_status,
                             );

@@ -143,10 +143,14 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
 1. Publishing updates the in-memory snapshot synchronously and returns the new
    message. It must not perform filesystem or OS-notification work on the Slint
    event loop.
-2. Every changed Store revision automatically notifies the persistence
-   subscriber. One owned worker serializes JSON persistence and native delivery;
-   individual Actions never call save manually. JSON lives at
+2. Every changed Store revision automatically offers its immutable shared
+   snapshot to `LatestPersistence`: one active write and one replaceable latest
+   pending/dirty snapshot. Actions never call save manually. JSON lives at
    `messages/messages.json` under the platform local-data directory.
+   `flush()` observes the accepted durable revision and actual write outcome,
+   independently of native delivery; explicit `retry_failed()` retries the same
+   failed revision without a new Action. A changed deferred state whose
+   hydration has not enabled persistence returns failure, never a false success.
 3. Native delivery uses community crate `notify-rust`; application code must not
    add per-platform notification implementations beside this adapter.
 4. `NativeDelivery` is an orthogonal per-draft policy: `WhenUnfocused` is the
@@ -157,18 +161,33 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
    reports key-window changes; platforms without an activity adapter currently
    remain conservatively active, so `WhenUnfocused` suppresses native delivery
    while `Always` remains available.
-6. Native delivery failure is logged and degrades to the durable in-app message;
-   it must never roll back the message or block feature completion.
+6. Native delivery has a separate FIFO event worker. Admission never waits for
+   capacity: at most 64 entries / 1 MiB UTF-8 payload bytes, including the active
+   call, and 128 KiB per entry. Fixed object/allocator overhead is excluded from
+   payload bytes and bounded separately by the entry/metadata limits. Overload
+   rejects only the new native event, counts/logs the rejection, and preserves
+   successful Inbox publication. Admitted events are not coalesced. Ordinary OS
+   delivery errors degrade to Inbox; notifier panics remain observable failures.
 7. Snapshot subscribers receive immutable copies. Slint subscribers schedule UI
    changes through `slint::invoke_from_event_loop` with weak handles.
-8. Shutdown flushes preceding worker commands and joins the owned worker through
-   the normal high-priority pre-shutdown stage.
+8. `shutdown_checked()` closes Action admission, waits for complete admitted
+   operations and joins both workers. It retains persistence/native failure
+   causes; repeated/concurrent calls observe the same completed barriers.
+   Calling close from this center's synchronous Action/subscriber or native
+   worker returns `ReentrantShutdown` before acquiring the shutdown lock, so it
+   cannot self-wait. The compatibility `shutdown()` logs checked errors.
+   These blocking barriers belong on a background lifecycle owner. The shell
+   still uses its existing pre-shutdown registration; migration remains pending
+   after the P7 #77 candidate was rejected.
 
 1. 发布操作同步更新内存快照并返回新消息；不得在 Slint event loop 执行文件系统或
    OS 通知工作。
-2. 每个有效 Store revision 自动通知持久化 subscriber；唯一 Worker 串行执行 JSON
-   持久化和原生投递，各 Action 禁止手工调用 save。JSON 位于平台本地数据目录下的
-   `messages/messages.json`。
+2. 每个有效 Store revision 自动把共享不可变快照交给 `LatestPersistence`：最多
+   一个活动写入和一个可替换的最新 pending/dirty 快照，Action 禁止手工 save。
+   JSON 位于平台本地数据目录的 `messages/messages.json`。`flush()` 观察已接受
+   持久版本与真实写入结果，不等待原生投递；`retry_failed()` 显式重试相同失败
+   revision，不产生新 Action。deferred State 已变化但 hydration 尚未启用持久化
+   时返回失败，不报告虚假成功。
 3. 原生投递统一使用社区 `notify-rust`，应用代码不得在适配器之外新增各平台实现。
 4. `NativeDelivery` 是独立的逐 Draft 策略：默认 `WhenUnfocused`，`Never` 只进入
    Inbox/Banner，`Always` 仅用于明确的严重事件或诊断。窗口激活时默认只显示应用内
@@ -176,10 +195,19 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
 5. Shell 向消息服务提供窗口激活状态。macOS 适配器报告 Key Window 变化；尚无活动
    状态适配器的平台保守视为激活，因此 `WhenUnfocused` 暂不投递原生通知，仍可显式
    使用 `Always`。
-6. 原生投递失败只记录日志并降级为应用内持久消息，不得回滚消息或阻塞功能完成。
+6. 原生投递使用独立 FIFO 事件 Worker，准入不等待容量：包括在途调用在内，最多
+   64 条/1 MiB UTF-8 payload bytes，单条最多 128 KiB。该 bytes 不含固定对象/
+   allocator 开销，对象和 metadata 节点另由条目上限约束。满载只拒绝新原生事件，
+   计数并记录日志，Inbox 发布仍成功；已准入事件不合并。普通 OS 错误降级到 Inbox，
+   notifier panic 仍作为失败可观测。
 7. 订阅者接收不可变快照；Slint 订阅者必须通过 weak handle 与
    `slint::invoke_from_event_loop` 更新 UI。
-8. 关闭时通过高优先级 pre-shutdown 阶段处理已排队命令并 Join Worker。
+8. `shutdown_checked()` 关闭 Action 准入，等待已接收操作完整结束并 join 两个
+   Worker；保留持久化/原生 Worker 的失败原因，并发/重复调用共享完成屏障。
+   从本中心的同步 Action/subscriber 或原生 Worker 中调用关闭时，在获取关闭锁前
+   返回 `ReentrantShutdown`，避免自等待。兼容 `shutdown()` 记录 checked 错误。
+   这些阻塞屏障应由后台生命周期 owner 调用。Shell 仍使用既有 pre-shutdown
+   接线；P7 #77 候选已拒绝，此迁移尚未完成。
 
 ## Inbox and unread behavior / Inbox 与未读行为
 
@@ -338,6 +366,19 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
   语义色。改变已读状态不得重排最新优先序列。
 
 ## Regression checklist / 回归清单
+
+- Block the real persistence adapter, dispatch 1,000 changes and verify only
+  active/latest shared owners remain; flush and restart must recover the final
+  read/delete state. Inject failure and retry the same durable revision.
+- Block the notifier and verify durable flush completes independently; test
+  FIFO, active-inclusive entry/byte caps, overload Inbox durability, ordinary
+  OS degradation, panic/dual-fault outcomes, admitted-operation shutdown and
+  rejected lifecycle reentry. Unhydrated changed state must not report success.
+- 阻塞真实持久适配器，提交 1,000 次变化并确认仅保留 active/latest 共享 owner；
+  flush/重启必须恢复最终已读/删除状态；注入故障并重试相同持久 revision。
+- 阻塞 notifier，验证 durable flush 独立完成；覆盖 FIFO、包含在途的条数/bytes
+  上限、满载时 Inbox 持久化、普通 OS 降级、panic/双故障、已接收操作的关闭及
+  生命周期重入拒绝；未 hydration 的变更状态不得报告成功。
 
 - In English and Chinese, open the inline showcase queue menu and click its
   overlay actions. Assert a 6 px button gap both below and above; verify scrolling, bottom-edge avoidance,

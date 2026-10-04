@@ -2,7 +2,7 @@
 mod save_worker;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use config::{Config, File as ConfigFile, FileFormat};
 use serde::{Deserialize, Serialize};
@@ -186,13 +186,13 @@ impl Default for AiAgentSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct GitSettings {
     #[serde(default)]
     pub platform: GitPlatformSettings,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct GitPlatformSettings {
     #[serde(default)]
     pub github: GitTokenSettings,
@@ -202,7 +202,7 @@ pub struct GitPlatformSettings {
     pub gitee: GitTokenSettings,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct GitTokenSettings {
     #[serde(default)]
     pub token: String,
@@ -370,6 +370,9 @@ pub struct SettingsManager {
     /// the backup rename fails, block writes for this process rather than
     /// truncating the only copy of the user's credentials.
     writes_blocked: bool,
+    // One composition-owned listener; no feature dependency or callback while
+    // the Settings write lock is held. No credentials are passed to it.
+    git_change_listener: OnceLock<Arc<dyn Fn() + Send + Sync>>,
 }
 
 struct SettingsLoad {
@@ -391,6 +394,7 @@ impl SettingsManager {
             settings: Arc::new(RwLock::new(loaded.settings)),
             config_path,
             write_lock: Mutex::new(()),
+            git_change_listener: OnceLock::new(),
             writes_blocked: loaded.writes_blocked,
         }
     }
@@ -611,7 +615,18 @@ impl SettingsManager {
         }
     }
 
-    /// Update git platform tokens
+    pub(crate) fn register_git_change_listener(
+        &self,
+        listener: Arc<dyn Fn() + Send + Sync>,
+    ) -> bool {
+        self.git_change_listener.set(listener).is_ok()
+    }
+    fn notify_git_changed(&self, changed: bool) {
+        if changed && let Some(listener) = self.git_change_listener.get() {
+            listener();
+        }
+    }
+    /// Notify after an effective memory change, independently of save success.
     pub fn set_git_platform_tokens(
         &self,
         github: &str,
@@ -619,14 +634,18 @@ impl SettingsManager {
         gitee: &str,
         gitee_enterprise: &str,
     ) {
-        if let Ok(mut settings) = self.settings.write() {
+        let changed = if let Ok(mut settings) = self.settings.write() {
+            let before = settings.git.clone();
             settings.git.platform.github.token = github.trim().to_string();
             settings.git.platform.gitlab.token = gitlab.trim().to_string();
             settings.git.platform.gitee.token = gitee.trim().to_string();
             settings.git.platform.gitee.enterprise_token = gitee_enterprise.trim().to_string();
-        }
+            settings.git != before
+        } else {
+            false
+        };
+        self.notify_git_changed(changed);
     }
-
     pub fn set_git_hosted_repository_configs(
         &self,
         github_api_base_url: &str,
@@ -636,14 +655,19 @@ impl SettingsManager {
         gitee_api_base_url: &str,
         gitee_enterprise: &str,
     ) {
-        if let Ok(mut settings) = self.settings.write() {
+        let changed = if let Ok(mut settings) = self.settings.write() {
+            let before = settings.git.clone();
             settings.git.platform.github.api_base_url = normalize_api_base_url(github_api_base_url);
             settings.git.platform.github.enterprise = github_enterprise.trim().to_string();
             settings.git.platform.gitlab.api_base_url = normalize_api_base_url(gitlab_api_base_url);
             settings.git.platform.gitlab.enterprise = gitlab_enterprise.trim().to_string();
             settings.git.platform.gitee.api_base_url = normalize_api_base_url(gitee_api_base_url);
             settings.git.platform.gitee.enterprise = gitee_enterprise.trim().to_string();
-        }
+            settings.git != before
+        } else {
+            false
+        };
+        self.notify_git_changed(changed);
     }
 
     /// Update the OpenAI-compatible AI Agent connection settings.
@@ -1375,5 +1399,43 @@ reply_language = "{configured}"
             std::process::id(),
             NEXT_TEST_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ))
+    }
+    #[test]
+    fn git_memory_change_notifies_before_failed_save_and_outside_write_lock() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let directory = unique_test_directory("git-change-notify");
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("settings.toml");
+        let manager = Arc::new(SettingsManager::with_config_path(path.clone()));
+        fs::create_dir(&path).unwrap();
+        let notifications = Arc::new(AtomicUsize::new(0));
+        let observed = notifications.clone();
+        let weak = Arc::downgrade(&manager);
+        assert!(manager.register_git_change_listener(Arc::new(move || {
+            let manager = weak.upgrade().unwrap();
+            manager.with_git(|git| assert_eq!(git.platform.github.token, "new-token"));
+            observed.fetch_add(1, Ordering::SeqCst);
+        })));
+        manager.set_git_platform_tokens("new-token", "", "", "");
+        assert_eq!(notifications.load(Ordering::SeqCst), 1);
+        assert!(manager.save().is_err());
+        assert_eq!(manager.get().git.platform.github.token, "new-token");
+        manager.set_git_platform_tokens(" new-token ", "", "", "");
+        assert_eq!(
+            notifications.load(Ordering::SeqCst),
+            1,
+            "normalized same value does not invalidate"
+        );
+        manager.set_git_hosted_repository_configs(
+            "https://host.example/api/v3",
+            "org",
+            "",
+            "",
+            "",
+            "",
+        );
+        assert_eq!(notifications.load(Ordering::SeqCst), 2);
+        assert!(manager.save().is_err());
+        fs::remove_dir_all(directory).unwrap();
     }
 }

@@ -505,10 +505,15 @@ class QualityRunnerTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         (self.root / "scripts").mkdir()
         (self.root / "bin").mkdir()
-        shutil.copy(ROOT / "scripts/check-quality.sh", self.root / "scripts")
+        source = Path(os.environ.get("USHER_TEST_QUALITY_BASE_SCRIPT", ROOT / "scripts/check-quality.sh"))
+        shutil.copy(source, self.root / "scripts/check-quality.sh")
         self.calls = self.root / "calls.txt"
+        self.environment_calls = self.root / "environment.txt"
+        self.source_file = self.root / "unchanged.rs"
+        self.source_file.write_text("fn main( ) { }\n")
         self.env = dict(os.environ, PATH=f"{self.root / 'bin'}:{os.environ['PATH']}",
-                        USHER_TEST_CALLS=str(self.calls))
+                        USHER_TEST_CALLS=str(self.calls),
+                        USHER_TEST_ENV_CALLS=str(self.environment_calls))
         for name in ["cargo", "python3", "git", "rg"]:
             self.stub(self.root / "bin" / name, name)
         for name in ["architecture-structure", "ui-policy", "i18n"]:
@@ -519,15 +524,17 @@ class QualityRunnerTests(unittest.TestCase):
             "#!/bin/sh\n"
             f'call="{label} $*"\n'
             'printf "%s\\n" "$call" >> "$USHER_TEST_CALLS"\n'
-            'if [ "$call" = "${USHER_TEST_FAIL:-}" ]; then exit 1; fi\n'
-            'if [ "$call" = "${USHER_TEST_INTERRUPT:-}" ]; then exit 130; fi\n'
+            'printf "%s|%s|%s\\n" "$call" "${CARGO_INCREMENTAL:-unset}" "${SLINT_EMIT_DEBUG_INFO:-unset}" >> "$USHER_TEST_ENV_CALLS"\n'
+            'if [ "$call" = "${USHER_TEST_FAIL:-}" ]; then exit "${USHER_TEST_FAIL_CODE:-1}"; fi\n'
+            'if [ "$call" = "${USHER_TEST_FAIL_SECOND:-}" ]; then exit "${USHER_TEST_FAIL_SECOND_CODE:-1}"; fi\n'
+            'if [ "$call" = "${USHER_TEST_INTERRUPT:-}" ]; then exit "${USHER_TEST_INTERRUPT_CODE:-130}"; fi\n'
             'exit 0\n'
         )
         path.chmod(0o755)
 
-    def run_checks(self):
+    def run_checks(self, *arguments):
         return subprocess.run(
-            ["sh", str(self.root / "scripts/check-quality.sh")],
+            ["/bin/sh", str(self.root / "scripts/check-quality.sh"), *arguments],
             cwd="/tmp",
             env=self.env,
             capture_output=True,
@@ -545,6 +552,57 @@ class QualityRunnerTests(unittest.TestCase):
         self.assertIn("cargo test --lib --locked", calls)
         self.assertEqual(calls[-1], "git diff --check")
         self.assertIn("8 checks passed", result.stdout)
+        self.assertEqual(self.source_file.read_text(), "fn main( ) { }\n")
+
+    def test_explicit_quick_keeps_root_scope_and_caller_environment(self):
+        self.env["CARGO_INCREMENTAL"] = "caller-setting"
+        self.env["SLINT_EMIT_DEBUG_INFO"] = "caller-debug"
+        result = self.run_checks("--quick")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        calls = self.calls.read_text().splitlines()
+        self.assertEqual(len(calls), 8)
+        self.assertIn("cargo check --locked", calls)
+        self.assertIn("cargo test --lib --locked", calls)
+        self.assertFalse(any("--workspace" in call for call in calls))
+        self.assertTrue(all(line.endswith("|caller-setting|caller-debug")
+                            for line in self.environment_calls.read_text().splitlines()))
+
+    def test_full_runs_workspace_and_no_ai_application_contracts(self):
+        self.env["CARGO_INCREMENTAL"] = "caller-setting"
+        self.env["SLINT_EMIT_DEBUG_INFO"] = "caller-debug"
+        result = self.run_checks("--full")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        calls = self.calls.read_text().splitlines()
+        self.assertEqual(calls, [
+            "cargo fmt --all -- --check", "architecture-structure ", "ui-policy ",
+            "i18n ", "python3 -m unittest discover -s scripts/tests -p test_*.py",
+            "cargo check --workspace --all-targets --locked",
+            "cargo test --workspace --tests --locked",
+            "cargo clippy --workspace --all-targets --locked -- -D warnings",
+            "cargo check -p usher --all-targets --no-default-features --features renderer-femtovg --locked",
+            "git diff --check",
+        ])
+        environment = self.environment_calls.read_text().splitlines()
+        self.assertIn("cargo test --workspace --tests --locked|0|1", environment)
+        self.assertTrue(all(line.endswith("|0|caller-debug") for line in environment
+                            if not line.startswith("cargo test --workspace ")))
+        self.assertIn("10 checks passed", result.stdout)
+        self.assertEqual(self.source_file.read_text(), "fn main( ) { }\n")
+
+    def test_full_retains_multiple_failures_and_runs_every_later_contract(self):
+        self.env.update(USHER_TEST_FAIL="architecture-structure ", USHER_TEST_FAIL_CODE="4",
+                        USHER_TEST_FAIL_SECOND="cargo clippy --workspace --all-targets --locked -- -D warnings",
+                        USHER_TEST_FAIL_SECOND_CODE="17")
+        result = self.run_checks("--full")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("architecture(4)", result.stderr)
+        self.assertIn("workspace-lint(17)", result.stderr)
+        self.assertIn("8 checks passed", result.stdout)
+        calls = self.calls.read_text().splitlines()
+        self.assertEqual(len(calls), 10)
+        self.assertIn("cargo test --workspace --tests --locked", calls)
+        self.assertIn("cargo check -p usher --all-targets --no-default-features --features renderer-femtovg --locked", calls)
+        self.assertEqual(calls[-1], "git diff --check")
 
     def test_architecture_failure_is_preserved_and_later_tests_run(self):
         self.env["USHER_TEST_FAIL"] = "architecture-structure "
@@ -561,6 +619,47 @@ class QualityRunnerTests(unittest.TestCase):
         result = self.run_checks()
         self.assertEqual(result.returncode, 130)
         self.assertEqual(len(self.calls.read_text().splitlines()), 1)
+
+    def test_full_termination_does_not_start_more_checks(self):
+        self.env.update(USHER_TEST_INTERRUPT="cargo fmt --all -- --check",
+                        USHER_TEST_INTERRUPT_CODE="143")
+        result = self.run_checks("--full")
+        self.assertEqual(result.returncode, 143)
+        self.assertEqual(self.calls.read_text().splitlines(), ["cargo fmt --all -- --check"])
+
+    def test_invalid_arguments_never_start_checks(self):
+        for arguments in [("--unknown",), ("--quick", "--full"), ("--help", "--full")]:
+            with self.subTest(arguments=arguments):
+                result = self.run_checks(*arguments)
+                self.assertEqual(result.returncode, 2)
+                self.assertFalse(self.calls.exists())
+
+    def test_missing_dependency_is_setup_failure_without_partial_checks(self):
+        self.env["PATH"] = str(self.root / "bin")
+        (self.root / "bin/rg").unlink()
+        dirname = self.root / "bin/dirname"
+        dirname.write_text('#!/bin/sh\nif [ "$1" = -- ]; then shift; fi\nprintf "%s\\n" "${1%/*}"\n')
+        dirname.chmod(0o755)
+        result = self.run_checks()
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("require rg on PATH", result.stderr)
+        self.assertFalse(self.calls.exists())
+
+
+class QualityWorkflowTests(unittest.TestCase):
+    def test_manual_ci_reuses_full_entry_and_keeps_windows_scope(self):
+        source = (ROOT / ".github/workflows/ci.yml").read_text()
+        trigger = source.split("\non:\n", 1)[1].split("\npermissions:", 1)[0].strip()
+        self.assertEqual(trigger, "workflow_dispatch:")
+        quality, windows = source.split("\n  quality:\n", 1)[1].split("\n  windows-check:\n", 1)
+        self.assertEqual(quality.count("run: ./scripts/check-quality.sh --full"), 1)
+        self.assertNotIn("run: cargo", quality)
+        self.assertEqual(windows.count("run: cargo check --workspace --all-targets --locked"), 1)
+        self.assertNotIn("check-quality.sh", windows)
+        nightly = (ROOT / ".github/workflows/nightly-performance.yml").read_text()
+        active = "\n".join(line for line in nightly.splitlines() if not line.lstrip().startswith("#"))
+        self.assertNotIn("schedule:", active)
+        self.assertIn("workflow_dispatch:", active)
 
 
 if __name__ == "__main__":

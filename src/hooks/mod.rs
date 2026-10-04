@@ -394,25 +394,30 @@ impl HookService {
         let _configuration = self.configuration.lock().unwrap();
         self.ensure_ready()?;
         self.state.dispatch(Action::Save(hook))?;
-        self.state.flush()
+        self.flush_configuration()
     }
     pub(crate) fn delete(&self, id: String) -> Result<(), String> {
         let _configuration = self.configuration.lock().unwrap();
         self.ensure_ready()?;
         self.state.dispatch(Action::Delete(id))?;
-        self.state.flush()
+        self.flush_configuration()
     }
     pub(crate) fn enable(&self, enabled: bool) -> Result<(), String> {
         let _configuration = self.configuration.lock().unwrap();
         self.ensure_ready()?;
         self.state.dispatch(Action::Enable(enabled))?;
-        self.state.flush()
+        self.flush_configuration()
     }
     pub(crate) fn set_hook_enabled(&self, id: String, enabled: bool) -> Result<(), String> {
         let _configuration = self.configuration.lock().unwrap();
         self.ensure_ready()?;
         self.state
             .dispatch(Action::SetHookEnabled { id, enabled })?;
+        self.flush_configuration()
+    }
+
+    fn flush_configuration(&self) -> Result<(), String> {
+        self.state.retry_failed()?;
         self.state.flush()
     }
 

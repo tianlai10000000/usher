@@ -13,6 +13,8 @@ use serde_json::Value;
 use crate::codereview::api::gitee as endpoints;
 use crate::http::{self, RequestOptions};
 
+use super::response_budget::{MAX_DIFF_RESPONSE_BYTES, MAX_METADATA_RESPONSE_BYTES};
+
 use super::json::{
     fallback_total, header_u32, nested_string, string_field, value_to_id, value_u32,
 };
@@ -125,7 +127,9 @@ async fn get_enterprise_repo_detail(locator: &RepoLocator) -> Result<String, Str
 
     let payload: Value = http::send_json(
         request,
-        RequestOptions::new("Load Gitee project details").retry_transient(3),
+        RequestOptions::new("Load Gitee project details")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -151,7 +155,9 @@ async fn get_public_gitee_repo_detail(locator: &RepoLocator) -> Result<String, S
 
     let payload: Value = http::send_json(
         request,
-        RequestOptions::new("Load Gitee project details").retry_transient(3),
+        RequestOptions::new("Load Gitee project details")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -337,7 +343,9 @@ pub(super) async fn get_pull_request_diff(
     let diffs_future = async {
         http::send_json(
             diffs_request,
-            RequestOptions::new("Load Gitee pull request diff").retry_transient(3),
+            RequestOptions::new("Load Gitee pull request diff")
+                .response_byte_limit(MAX_DIFF_RESPONSE_BYTES)
+                .retry_transient(3),
         )
         .await
         .map_err(|error| error.to_string())
@@ -353,6 +361,7 @@ pub(super) async fn get_pull_request_diff(
         let detail: Value = http::send_json(
             enterprise_pull_request_get(detail_endpoint),
             RequestOptions::new("Load Gitee enterprise pull request detail summary")
+                .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
                 .retry_transient(3),
         )
         .await
@@ -424,7 +433,9 @@ async fn get_public_pull_request_diff(
     );
     let detail: Value = http::send_json(
         public_authenticated_request(detail_endpoint),
-        RequestOptions::new("Load Gitee pull request details").retry_transient(3),
+        RequestOptions::new("Load Gitee pull request details")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -441,7 +452,9 @@ async fn get_public_pull_request_diff(
                 ("page", pages.page().to_string()),
                 ("per_page", "100".to_string()),
             ]),
-            RequestOptions::new("Load Gitee pull request files").retry_transient(3),
+            RequestOptions::new("Load Gitee pull request files")
+                .response_byte_limit(MAX_DIFF_RESPONSE_BYTES)
+                .retry_transient(3),
         )
         .await
         .map_err(|error| error.to_string())?;
@@ -542,7 +555,9 @@ pub(super) async fn get_commit_range_diff(
             .replace("{head}", percent_encode_path(head_sha.trim()).as_str());
             http::send_json(
                 public_authenticated_request(endpoint),
-                RequestOptions::new("Compare Gitee pull request commits").retry_transient(3),
+                RequestOptions::new("Compare Gitee pull request commits")
+                    .response_byte_limit(MAX_DIFF_RESPONSE_BYTES)
+                    .retry_transient(3),
             )
             .await
             .map_err(|error| error.to_string())?
@@ -560,6 +575,7 @@ pub(super) async fn get_commit_range_diff(
             http::send_json(
                 request,
                 RequestOptions::new("Compare Gitee Enterprise pull request commits")
+                    .response_byte_limit(MAX_DIFF_RESPONSE_BYTES)
                     .retry_transient(3),
             )
             .await
@@ -782,11 +798,15 @@ async fn get_enterprise_pull_request_action_state(
     // reads; fetch them concurrently and keep each error path intact.
     let current_future = http::send_json::<Value>(
         enterprise_pull_request_get(current_endpoint),
-        RequestOptions::new("Load Gitee enterprise merge state").retry_transient(3),
+        RequestOptions::new("Load Gitee enterprise merge state")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     );
     let detail_future = http::send_json::<Value>(
         enterprise_pull_request_get(detail_endpoint),
-        RequestOptions::new("Load Gitee enterprise pull request details").retry_transient(3),
+        RequestOptions::new("Load Gitee enterprise pull request details")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     );
     let (current, detail) = tokio::join!(current_future, detail_future);
     let current = current.map_err(|error| error.to_string())?;
@@ -884,7 +904,9 @@ async fn get_public_pull_request_action_state(
     );
     let detail: Value = http::send_json(
         public_authenticated_request(endpoint),
-        RequestOptions::new("Load Gitee public pull request merge state").retry_transient(3),
+        RequestOptions::new("Load Gitee public pull request merge state")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -941,6 +963,7 @@ pub(super) async fn get_pull_request_conversation(
                 let detail: Value = http::send_json(
                     enterprise_pull_request_get(detail_endpoint),
                     RequestOptions::new("Load Gitee enterprise merge request conversation header")
+                        .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
                         .retry_transient(3),
                 )
                 .await
@@ -953,6 +976,7 @@ pub(super) async fn get_pull_request_conversation(
                     enterprise_authenticated_builder(http::get(notes_endpoint))
                         .query(&[("per_page", "100")]),
                     RequestOptions::new("Load Gitee enterprise merge request notes")
+                        .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
                         .retry_transient(3),
                 )
                 .await
@@ -962,6 +986,7 @@ pub(super) async fn get_pull_request_conversation(
                 http::send_json(
                     enterprise_authenticated_builder(http::get(current_user_endpoint)),
                     RequestOptions::new("Load Gitee enterprise current review user")
+                        .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
                         .retry_transient(3),
                 )
                 .await
@@ -984,6 +1009,7 @@ pub(super) async fn get_pull_request_conversation(
                         ("per_page", "100"),
                     ]),
                     RequestOptions::new("Load Gitee enterprise source branch push events")
+                        .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
                         .retry_transient(3),
                 )
                 .await
@@ -1020,6 +1046,7 @@ pub(super) async fn get_pull_request_conversation(
                 http::send_json(
                     public_authenticated_request(detail_endpoint),
                     RequestOptions::new("Load Gitee public pull request conversation header")
+                        .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
                         .retry_transient(3),
                 )
                 .await
@@ -1030,6 +1057,7 @@ pub(super) async fn get_pull_request_conversation(
                     public_authenticated_request(comments_endpoint)
                         .query(&[("page", "1"), ("per_page", "100")]),
                     RequestOptions::new("Load Gitee public pull request comments")
+                        .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
                         .retry_transient(3),
                 )
                 .await
@@ -1043,6 +1071,7 @@ pub(super) async fn get_pull_request_conversation(
                         ("per_page", "100"),
                     ]),
                     RequestOptions::new("Load Gitee public pull request operation logs")
+                        .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
                         .retry_transient(3),
                 )
                 .await
@@ -1232,7 +1261,8 @@ async fn load_enterprise_merge_actor_user(repo_project_id: &str, account: &str) 
             ("per_page", "100"),
             ("query", account),
         ]),
-        RequestOptions::new("Resolve Gitee enterprise merge actor from project members"),
+        RequestOptions::new("Resolve Gitee enterprise merge actor from project members")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
     )
     .await
     .ok();
@@ -1248,7 +1278,8 @@ async fn load_enterprise_merge_actor_user(repo_project_id: &str, account: &str) 
         .replace("{api_base_url}", enterprise_api_base_url().ok()?.as_str());
     let users: Value = http::send_json(
         enterprise_authenticated_builder(http::get(users_endpoint)).query(&[("search", account)]),
-        RequestOptions::new("Resolve Gitee enterprise merge actor from user directory"),
+        RequestOptions::new("Resolve Gitee enterprise merge actor from user directory")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
     )
     .await
     .ok()?;
@@ -1331,7 +1362,9 @@ async fn load_enterprise_merge_commit(
     .ok()?;
     let payload: Value = http::send_json(
         enterprise_authenticated_builder(http::get(endpoint)),
-        RequestOptions::new("Load Gitee enterprise merge commit actor").retry_transient(3),
+        RequestOptions::new("Load Gitee enterprise merge commit actor")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .ok()?;
@@ -1506,7 +1539,9 @@ async fn load_pull_request_commits(
     };
     let payload: Value = http::send_json(
         request,
-        RequestOptions::new("Load Gitee pull request commits").retry_transient(3),
+        RequestOptions::new("Load Gitee pull request commits")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -1539,6 +1574,7 @@ async fn enrich_enterprise_commit_identities(
             let detail = http::send_json::<Value>(
                 enterprise_authenticated_builder(http::get(endpoint)),
                 RequestOptions::new("Load Gitee enterprise commit author and committer")
+                    .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
                     .retry_transient(3),
             )
             .await
@@ -1660,6 +1696,7 @@ async fn load_enterprise_commit_identity_avatars(
                     enterprise_authenticated_builder(http::get(endpoint))
                         .query(&[("search", name.as_str())]),
                     RequestOptions::new("Resolve Gitee enterprise commit identity avatar")
+                        .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
                         .retry_transient(3),
                 )
                 .await
@@ -1738,7 +1775,9 @@ async fn count_pull_request_commits(
     };
     let response = http::send(
         request,
-        RequestOptions::new("Count Gitee pull request commits").retry_transient(3),
+        RequestOptions::new("Count Gitee pull request commits")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .ok()?;
@@ -1764,6 +1803,7 @@ async fn count_pull_request_commits(
                 enterprise_authenticated_builder(http::get(endpoint))
                     .query(&[("with_page", "false")]),
                 RequestOptions::new("Count Gitee enterprise pull request commits fallback")
+                    .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
                     .retry_transient(3),
             )
             .await
@@ -1812,7 +1852,9 @@ async fn count_pull_request_comments(
     };
     let response = http::send(
         request,
-        RequestOptions::new("Count Gitee pull request comments").retry_transient(3),
+        RequestOptions::new("Count Gitee pull request comments")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .ok()?;
@@ -1865,9 +1907,12 @@ pub(super) async fn submit_pull_request_review(
             } else {
                 "Submit Gitee enterprise review"
             };
-            http::send(request, RequestOptions::new(operation))
-                .await
-                .map_err(|error| error.to_string())?;
+            http::send(
+                request,
+                RequestOptions::new(operation).response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
             Ok(())
         }
         GiteeApiProfile::PublicV5 => {
@@ -1896,7 +1941,8 @@ pub(super) async fn submit_pull_request_review(
                 .json(&serde_json::json!({ "body": body.trim() }));
             http::send(
                 request,
-                RequestOptions::new("Submit Gitee public pull request comment"),
+                RequestOptions::new("Submit Gitee public pull request comment")
+                    .response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
             )
             .await
             .map_err(|error| error.to_string())?;
@@ -1926,7 +1972,8 @@ pub(super) async fn dismiss_pull_request_review(
     let web_endpoint = enterprise_web_pull_request_review_endpoint(locator, pull_request_iid)?;
     let web_result = http::send(
         enterprise_authenticated_builder(http::post(web_endpoint)).json(&payload),
-        RequestOptions::new("Dismiss Gitee enterprise pull request review"),
+        RequestOptions::new("Dismiss Gitee enterprise pull request review")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
     )
     .await;
 
@@ -1941,7 +1988,8 @@ pub(super) async fn dismiss_pull_request_review(
         )?;
         http::send(
             enterprise_authenticated_builder(http::post(api_endpoint)).json(&payload),
-            RequestOptions::new("Dismiss Gitee enterprise pull request review through v8"),
+            RequestOptions::new("Dismiss Gitee enterprise pull request review through v8")
+                .response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
         )
         .await
         .map_err(|error| error.to_string())?;
@@ -1959,7 +2007,8 @@ pub(super) async fn dismiss_pull_request_review(
     if let Err(error) = http::send(
         enterprise_authenticated_builder(http::post(note_endpoint))
             .json(&enterprise_note_payload(reason)),
-        RequestOptions::new("Add Gitee enterprise review dismissal reason"),
+        RequestOptions::new("Add Gitee enterprise review dismissal reason")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
     )
     .await
     {
@@ -2022,7 +2071,8 @@ pub(super) async fn merge_pull_request(
                 }));
             http::send(
                 request,
-                RequestOptions::new("Merge Gitee enterprise pull request"),
+                RequestOptions::new("Merge Gitee enterprise pull request")
+                    .response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
             )
             .await
             .map_err(|error| error.to_string())?;
@@ -2053,7 +2103,8 @@ pub(super) async fn merge_pull_request(
                 }));
             http::send(
                 request,
-                RequestOptions::new("Merge Gitee public pull request"),
+                RequestOptions::new("Merge Gitee public pull request")
+                    .response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
             )
             .await
             .map_err(|error| error.to_string())?;
@@ -2082,7 +2133,8 @@ pub(super) async fn revert_pull_request(
             )?;
             let detail: Value = http::send_json(
                 enterprise_pull_request_get(detail_endpoint),
-                RequestOptions::new("Reload Gitee enterprise pull request before revert"),
+                RequestOptions::new("Reload Gitee enterprise pull request before revert")
+                    .response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
             )
             .await
             .map_err(|error| error.to_string())?;
@@ -2100,7 +2152,8 @@ pub(super) async fn revert_pull_request(
             let response: Value = http::send_json(
                 enterprise_authenticated_builder(http::post(endpoint))
                     .json(&serde_json::json!({ "branch_name": target_branch })),
-                RequestOptions::new("Revert Gitee enterprise pull request merge commit"),
+                RequestOptions::new("Revert Gitee enterprise pull request merge commit")
+                    .response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
             )
             .await
             .map_err(|error| error.to_string())?;
@@ -2152,7 +2205,8 @@ async fn enterprise_revert_context_from_detail(
     )?;
     let refs: Value = http::send_json(
         enterprise_authenticated_builder(http::get(endpoint)),
-        RequestOptions::new("Inspect Gitee enterprise commit references for revert capability"),
+        RequestOptions::new("Inspect Gitee enterprise commit references for revert capability")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -2322,7 +2376,9 @@ async fn decode_pull_request_page(
 ) -> Result<PullRequestPage, String> {
     let response = http::send(
         request,
-        RequestOptions::new("Load Gitee merge requests").retry_transient(3),
+        RequestOptions::new("Load Gitee merge requests")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;

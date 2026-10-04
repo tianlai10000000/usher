@@ -1,6 +1,47 @@
 use super::*;
 
 #[test]
+fn failed_switch_saves_retry_the_same_state_after_the_target_is_repaired() {
+    let (dir, service) = tests::service();
+    let hook = HookDefinition {
+        script: "echo saved".into(),
+        ..Default::default()
+    };
+    service.save(hook.clone()).unwrap();
+    let path = dir.path().join("hooks.json");
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    assert!(service.enable(true).is_err());
+    let failed = service.state.snapshot();
+    assert!(failed.state().enabled);
+    std::fs::remove_dir(&path).unwrap();
+    service.enable(true).unwrap();
+    assert_eq!(service.state.snapshot().revision(), failed.revision());
+    let saved: HookState = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert!(saved.enabled);
+
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    assert!(
+        service
+            .set_hook_enabled(hook.id.clone(), !hook.enabled)
+            .is_err()
+    );
+    let failed = service.state.snapshot();
+    std::fs::remove_dir(&path).unwrap();
+    service
+        .set_hook_enabled(hook.id.clone(), !hook.enabled)
+        .unwrap();
+    assert_eq!(service.state.snapshot().revision(), failed.revision());
+    service.state.shutdown();
+    let restored = HookStateFacade::new(path).unwrap();
+    restored.hydrate().unwrap();
+    assert!(restored.snapshot().state().enabled);
+    assert_eq!(restored.snapshot().state().hooks[0].enabled, !hook.enabled);
+    restored.shutdown();
+}
+
+#[test]
 fn output_shares_configuration_skips_disk_and_terminal_state_survives_reload() {
     let (dir, service) = tests::service();
     for index in 0..32 {

@@ -63,10 +63,6 @@ pub(crate) fn sync_language(ui: &MainWindow) {
     });
 }
 
-pub(crate) fn invalidate_conflict_status(ui: &MainWindow) {
-    pr_conflict_status::invalidate(ui);
-}
-
 pub(crate) fn release_unreachable_state(ui: &MainWindow) {
     let mode = std::env::var("USHER_MEMORY_WORKFLOW_LIFECYCLE").unwrap_or_default();
     if mode != "clear" {

@@ -7,6 +7,7 @@
 mod center;
 mod desktop;
 mod model;
+mod native_worker;
 mod paging;
 mod storage;
 

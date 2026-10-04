@@ -5,7 +5,18 @@
 PR conflict browsing has a separate domain service in `src/git/conflicts/`,
 validated through the existing repository context, and provider-owned HTTP
 adapters. `workflow/pr_conflict_status.rs` shares ephemeral typed state between
-list and detail; `workflow/pr_review/conflicts/` owns read-only sessions,
+list and detail. Its `pr_conflict_status_owner.rs` lifetime driver retains one
+replaceable pending enrichment round and four shared logical-job permits;
+replacement, project/refresh invalidation and effective Git settings memory
+changes cancel its actual HTTP/backoff futures. Typed scope epochs fence cache
+commits and queued UI projections. The settings listener runs after releasing
+its write lock, before persistence, including a failed save. Equal normalized
+current stored fields do not notify; the first normalization of legacy loaded
+fields may conservatively invalidate. Workflow composition
+registers a real owner join in the existing async-drain stage before synchronous
+cleanup; a join error is logged under that legacy shutdown policy. This bound
+covers list enrichment, not list metadata/totals or the conflict workspace.
+`workflow/pr_review/conflicts/` owns read-only sessions,
 `LatestCompute` preparation and cancellation. Its Slint workspace and bridge
 do not reuse ordinary Diff selection state. Git writes only temporary bare
 objects. The process-tree guard lives in `app_runtime/process_tree.rs`, shared
@@ -268,7 +279,7 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | `src/terminal/` | PTY lifecycle, viewport synchronization, rendering, selection, and project switching; pure input mapping, diagnostics, and refresh throttling use dedicated modules. |
 | `src/chat/` | Shared AI/RAG Chat presentation and interaction, mode-isolated sessions/JSONL histories, request elapsed-time ownership, transports, width-independent plain-text/artifact projection, bounded rendering cache, pagination, and pure bounded virtual layout. Full artifact rendering belongs to the shared preview feature. |
 | `src/agent_response/` | Width-independent projection for agent-authored Markdown. It owns the 16 KiB/48-block inline budget, the 128-entry/approximately 2 MiB accounted content-identity cache, and opaque repository-Markdown action tokens; it performs no file I/O and does not own a Preview host. |
-| `src/ai_review/` | Optional AI review configuration facade, corruption-preserving JSON storage boundary, and application controller. It owns state-store subscriptions, automatic persistence workers, dynamic task scheduling, review/Ask elapsed-time projection, on-demand diff/rule loading, AI calls, in-flight provider cancellation, completed-review and lightweight PR-chat session storage, notifications, and route-independent PR result projection. |
+| `src/ai_review/` | Optional AI review configuration facade, corruption-preserving JSON storage boundary, and application controller. It owns state-store subscriptions, automatic persistence workers, dynamic task scheduling, review/Ask elapsed-time projection, on-demand diff/rule loading, AI calls, in-flight provider cancellation, per-task Review/PR Chat session transactions with owned I/O receipts, notifications, and route-independent PR result projection. |
 | `src/artifact_preview/` | Application preview facade: provider policy, background preparation, stale-result cancellation, Slint model adaptation, one active session, immediate migration between docked and detached hosts, explicit effective-theme synchronization into the detached component tree, and worker-side canonical containment/read for explicitly activated repository Markdown. Its `test-fixtures` adapter is development-only and submits playground samples through this same facade. |
 | `src/update/` | Stable/alpha release selection, streamed downloads, progress, cancellation, installation, and restart; restart releases the process instance lock before launching the replacement. Stable excludes SemVer prereleases, while alpha accepts both stable and prerelease versions. |
 | `src/router/` | Route mapping, history, visibility, transition hooks, and route-scope reachability hooks; it does not perform feature cleanup. |
@@ -299,11 +310,33 @@ Rust API. It holds no shared domain state or persistence.
 Chat's `interactive.rs` retains route/request orchestration and timers;
 `viewport_policy.rs` owns coverage/window-shift/anchor settlement policy and
 `message_model.rs` owns the stable incremental Slint row model. AI Review's
-`sessions.rs` owns Review/PR Chat session serialization and interrupted-task
-hydration; `controller.rs` schedules those operations and `task_persistence.rs`
-continues to own automatic task commit persistence. These leaf owners do not
-import their controllers; extraction does not change cache bounds, event-loop
-scheduling, generation guards, persisted formats, or shutdown priorities.
+`session_transactions.rs` owns production Review/PR Chat reads, fresh-read
+updates, Review completion merges, blocking I/O drivers, and coordinated file
+reconciliation. `sessions.rs` owns the lightweight schema and interrupted-task
+hydration; its whole-session load/save helpers compile only for tests or
+`test-fixtures`. `controller.rs` owns request and presentation orchestration;
+`task_persistence.rs` owns automatic task snapshot persistence and invokes the
+same Session transaction owner after successful writes. Production leaf owners
+do not import their controllers.
+
+Session transactions use a per-task mutex and a shared I/O read lease; file
+reconciliation takes the exclusive lease. The owner registry retains weak
+references, while accepted operations retain their own task owner. A new Ask
+receives an operation ID and attempt version at UI admission, before its async
+future is polled. Optional conversation `message_id` fields preserve old JSON:
+new operations merge by ID, retries retain that ID, and separate submissions
+with identical text remain separate. Rows without IDs retain legacy tuple
+matching; they are not assigned IDs merely by loading or merging them.
+
+An accepted user message awaits its real blocking-write receipt before any
+cancellable context/model work. Stop cancels that network work but retains the
+duplicate-start guard and the localized stopping state until that Ask's admitted
+I/O settles. Context/assistant effects check the live task, attempt version, and
+cancellation before admission; an atomic write already admitted may finish.
+`close_admission` rejects new user acceptance without discarding accepted work.
+`drain` reports Session I/O completion and bounded failures only: it does not
+prove completion of controller terminal Task actions, Message Center publishes,
+or Hook events.
 
 The architecture gate retains the original controller/root budgets and also
 checks extracted owners and reverse controller dependencies. CI is manual-only;
@@ -940,13 +973,25 @@ Shutdown rejects new submissions, drains the accepted state, and joins once;
 concurrent/repeated shutdown is safe. These semantics apply to state snapshots,
 not lossless events or audit records.
 
+The latest failed snapshot remains dirty with bounded ownership.
+`retry_failed()` schedules one explicit attempt without changing the Store's
+business revision; flush also observes the scheduled attempt, so an earlier
+failure cannot finish a retry barrier. Ordinary flush/shutdown do not retry.
+Hook configuration saves/toggles and explicit AI Agent Settings Save request
+this recovery through their feature facades before flushing.
+
 AI Review task persistence keeps its feature policy in `task_persistence.rs`
 and uses the same bounded writer. It rejects older Store revisions but permits
 an explicit repeat of an unchanged hydration revision after writes become enabled;
 a separate monotonic submission revision covers that write in the barrier.
-Temporary-file cleanup runs before the first submitted snapshot is processed,
-and successful writes still reconcile session files. Disabled/failed writes
-cannot lose the shutdown barrier.
+Task-snapshot temporary-file cleanup runs before the first submitted snapshot is
+processed. Successful writes reconcile Session files through `SessionTransactions`
+against the current task catalog, rather than the writer's older snapshot.
+Reconciliation waits for accepted user writes, takes the exclusive I/O lease, and
+rechecks admission before removing retired sessions and stale temporary files;
+it cannot remove a live atomic-write temporary file. Corrupt backups survive.
+Directory/read-entry/remove failures propagate to the task writer and Session
+I/O receipt. Disabled/failed writes cannot lose the shutdown barrier.
 
 `app_runtime/latest_ui.rs` coalesces replaceable view snapshots using
 `LatestDelivery`, with one pending value and one queued Slint callback. The Inbox,
@@ -1016,9 +1061,19 @@ keyboard interaction as the regular NavList.
 
 `usher-messages` stores the newest 1,000 application messages in
 `messages/messages.json` under the platform local-data directory. Publishing
-updates a small in-memory snapshot immediately; one owned worker performs JSON
-persistence and `notify-rust` OS delivery outside the Slint event loop. Native
-delivery failure is non-fatal and leaves the durable application message intact.
+updates the in-memory snapshot immediately. Automatic commit observation offers
+shared state to a latest-state persistence worker; its revision/attempt flush
+returns real write failures and supports explicit same-revision retry. A separate
+`notify-rust` worker preserves admitted native FIFO events, with 64 entries /
+1 MiB UTF-8 payload bytes including the active call, and 128 KiB per event.
+Overload or ordinary OS delivery failure leaves Inbox publication intact;
+notifier panic remains observable. Short Action permits cover hydration and
+publication without holding a lock across subscriber callbacks. Checked shutdown
+drains both workers and retains both failure causes; lifecycle reentry is rejected
+before waiting. A changed deferred state cannot report durable success before
+hydration enables persistence. The shell still uses its existing pre-shutdown
+registration; moving these waits off the event loop remains pending after the
+P7 #77 candidate was rejected.
 Delivery policy is orthogonal to category and severity: normal events use
 `WhenUnfocused`, explicit in-app events use `Never`, and critical/diagnostic
 events may use `Always`. The shell feeds window activity into the service so a
@@ -1550,6 +1605,13 @@ of the Slint compile and live-preview dependency graph.
    repository binding. It dismisses only a Docked PR-context Preview; an already
    Detached Preview and background Review work remain independent; the current
    Ask is cancelled and mount generation rejects stale worker commits.
+7. Ask delivery has a separate generation in addition to mount/task guards.
+   Status-key changes check it under the status mutex; the actual event-loop
+   commit checks it again. An old Ask terminal callback or initial Session read
+   cannot replace a newer Ask's conversation or sending state. A valid Review
+   completion still updates summary/findings when an Ask has advanced, while
+   preserving that newer Ask's conversation and repository-action map. Dynamic
+   status and terminal copy continues to use the shared locale catalog.
 
 ### AI Agent connection test
 
@@ -1582,6 +1644,13 @@ Every request supplies `RequestOptions`:
   headers. Remote Logos use 8 MiB; AI model-list JSON and buffered completions, including JSON fallback
   from streaming requests, use 16 MiB. Repository raw source uses 8 MiB, Base64
   JSON uses 12 MiB, and `src/git/source.rs` bounds decoded source to 8 MiB.
+  `src/git/response_budget.rs` declares 16 MiB for GitHub/GitLab/Gitee
+  public/enterprise ordinary metadata JSON and 64 MiB for PR files, diff and
+  commit comparisons. Source/conflict reads keep their existing limits. These
+  are finite per-response inputs, not all-provider-legal payload support or an
+  aggregate pagination/cache budget. Essential overflow remains an error;
+  optional probes keep their existing fallback. Headers-only/ignored success
+  bodies, write retry policy and post-download large-diff syntax gates are unchanged.
   SSE and updater streams keep their own policies. These are payload limits,
   not total RSS limits: transport chunks, JSON/text expansion and consumers add
   allocations. Error excerpts collect at most an 8,000-byte prefix before truncation.
@@ -1628,11 +1697,24 @@ Interceptors execute in registration order. Request hooks may mutate headers; re
 
 ## Validation
 
-`scripts/check-quality.sh` is the local read-only validation entry point. It runs
-fmt, structure/UI/i18n gates, script regressions, default check, library tests and
-diff checks sequentially, continuing after ordinary failures and returning a
-failing aggregate status. Interrupts stop the sequence. It does not waive known
-structure overruns or replace feature-specific UI/Release A/B acceptance.
+`scripts/check-quality.sh` is the local validation entry point that does not rewrite
+source. Its default/`--quick` layer retains fmt, structure/UI/i18n gates, script
+regressions, the default root check, root library tests and diff checks. `--full`
+replaces the two root Cargo checks with workspace all-targets check, workspace
+unit/integration tests (`--tests`, excluding the separately tracked logger doctest),
+workspace all-targets Clippy with warnings denied, and an all-targets check selecting
+only `-p usher --no-default-features --features renderer-femtovg`. That last check
+verifies the application graph without its optional AI core or UI/Settings bridges;
+selecting the entire workspace would still include the AI core member. Full sets
+`CARGO_INCREMENTAL=0` and supplies `SLINT_EMIT_DEBUG_INFO=1` to workspace tests.
+
+Both layers execute sequentially, preserve each ordinary failure's exit code,
+continue collecting later results and return a failing aggregate status. Interrupts
+stop the sequence. The manual macOS CI job invokes this same full entry; the Windows
+job retains its separate default workspace all-targets check. Trigger frequency and
+the paused hosted Nightly schedule remain unchanged. Known structure/lint failures
+remain blocking, and these checks do not replace feature-specific UI/Release A/B
+acceptance or claim that the separate logger doctest passed.
 
 Minimum validation for Rust or Slint changes:
 

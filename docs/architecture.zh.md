@@ -4,7 +4,14 @@
 
 PR 冲突查看由 `src/git/conflicts/` 负责领域语义与隔离 Git 分析，复用仓库上下文
 校验，HTTP 归平台 adapter。`workflow/pr_conflict_status.rs` 通过临时 typed
-state-store 门面共享列表与详情观测；`workflow/pr_review/conflicts/` 独立拥有
+state-store 门面共享列表与详情观测。`pr_conflict_status_owner.rs` 的常驻 driver
+保留一个可替换的最新待处理轮次，并为列表 enrichment 共用四个逻辑任务许可。
+替换、项目/刷新失效及 Git 设置的有效内存变更会释放实际 HTTP/backoff Future；
+typed scope epoch 同时约束缓存提交与排队的 UI 投影。设置监听在释放写锁后、
+持久化前触发，保存失败也触发。规范化后当前存储字段相同时不重复通知；
+首次规范化旧文件中带空白或尾斜杠的字段时允许保守失效。Workflow 装配阶段向既有 async-drain 注册真实
+owner join，先于同步清理；join 失败按旧关闭策略记日志。四许可不覆盖列表元数据、
+总数查询或 Conflicts 工作区的独立加载。`workflow/pr_review/conflicts/` 独立拥有
 只读会话、LatestCompute 文件准备和取消。Slint 工作区不复用普通 Diff 选区。
 Git 只写临时 bare 对象。进程树 guard 已归入 `app_runtime/process_tree.rs`，
 由 Hooks 和冲突分析共同复用。详见 [冲突查看契约](specs/pr-conflicts.md)。
@@ -214,7 +221,7 @@ Hook UI bridge 统一负责开始/结束通知、
 | `src/terminal/` | PTY 生命周期、viewport 同步、渲染、选择和项目切换；纯输入映射、诊断与刷新节流使用独立模块。 |
 | `src/chat/` | AI/RAG 共用 Chat 展示和交互、按模式隔离的 Session/JSONL 历史、请求耗时管理、transport、宽度无关纯文本/Artifact 投影、有界渲染缓存、分页和纯有界虚拟布局；完整 Artifact 渲染归通用预览 Feature。 |
 | `src/agent_response/` | Agent Markdown 的宽度无关投影；负责 16 KiB/48 block 行内预算、128 项/近似记账 2 MiB 的内容身份缓存，以及不透明仓库 Markdown action token；不执行文件 I/O，也不拥有 Preview Host。 |
-| `src/ai_review/` | 可选 AI Review 配置门面、保留损坏 JSON 的统一存储边界和应用 controller；负责 State Store 订阅、自动持久化 Worker、动态任务调度、Review/Ask 耗时投影、按需加载 diff/规则、AI 调用、在途 Provider 取消、已完成 Review 与轻量 PR Chat Session 存储、通知和不依赖路由的 PR 结果投影。 |
+| `src/ai_review/` | 可选 AI Review 配置门面、保留损坏 JSON 的统一存储边界和应用 controller；负责 State Store 订阅、自动持久化 Worker、动态任务调度、Review/Ask 耗时投影、按需加载 diff/规则、AI 调用、在途 Provider 取消、按任务隔离且持有真实 IO receipt 的 Review/PR Chat Session 事务、通知和不依赖路由的 PR 结果投影。 |
 | `src/artifact_preview/` | 应用预览门面：Provider 策略、后台准备、过期结果取消、Slint model 适配、单活动 Session、固定面板与独立窗口之间的即时迁移、向 Detached component tree 显式同步 effective theme，以及显式激活仓库 Markdown 时由 Worker 执行的 canonical containment 校验和读取。其 `test-fixtures` 适配器仅在开发构建存在，并让演练样例通过同一门面提交。 |
 | `src/update/` | Stable/Alpha Release 选择、流式下载、进度、取消、安装和重启；重启时先释放进程单实例锁，再拉起替换进程。Stable 排除 SemVer 预发布版本，Alpha 同时接受稳定版与预发布版。 |
 | `src/router/` | 路由映射、历史、可见性、普通 transition hook 与路由 scope 可达性 hook；不执行 feature 清理。 |
@@ -243,10 +250,26 @@ PR Review 的 `controller.rs` 保留加载、上下文和导航编排；子模�
 
 Chat 的 `interactive.rs` 保留路由/请求编排和计时器；`viewport_policy.rs`
 负责覆盖、窗口移动和锚点收敛策略，`message_model.rs` 负责稳定增量 Slint 行
-model。AI Review 的 `sessions.rs` 负责 Review/PR Chat 会话序列化及中断任务
-恢复，`controller.rs` 调度这些操作，`task_persistence.rs` 继续负责自动任务
-commit 持久化。叶子模块不反向导入 controller；拆分不改变缓存上限、event-loop
-调度、generation guard、存储格式或关闭优先级。
+model。AI Review 的 `session_transactions.rs` 负责生产环境的 Review/PR Chat
+读取、基于当前文件的读改写、Review 完成合并、blocking IO driver 和协调文件对账。
+`sessions.rs` 负责轻量 schema 与中断任务恢复；整份会话 load/save helper 仅在测试
+或 `test-fixtures` 中编译。`controller.rs` 负责请求与展示编排；
+`task_persistence.rs` 负责自动任务快照持久化，并在成功写入后调用同一 Session
+事务 owner。生产叶子模块不反向导入 controller。
+
+Session 事务取得按任务的 mutex 与全局 IO 读租约；文件对账取得独占租约。Owner
+注册表仅保留 weak 引用，已接收操作持有自己的任务 owner。新 Ask 在 UI 准入时就
+取得 operation ID 与 attempt version，不依赖后台 Future 首次 poll 的顺序。可选
+conversation `message_id` 字段兼容旧 JSON：新操作按 ID 合并，重试保留同一 ID，
+不同提交即使文本相同也分别保留。无 ID 的旧行继续按旧 tuple 匹配，加载或合并
+不会给它们补发 ID。
+
+已接收的用户消息必须等待实际 blocking 写入 receipt，再开始可取消的上下文/模型
+工作。Stop 取消网络工作，但在该 Ask 已准入的 IO 完成前保留防重入保护与本地化的
+正在停止状态。Context/assistant 副作用在准入前核验任务仍存在、attempt version
+与取消标记；已经准入的原子写入可以完成。`close_admission` 拒绝新用户消息准入，
+不会丢弃已接收工作。`drain` 只报告 Session IO 完成及有界失败信息，不证明
+controller 的终态 Task Action、Message Center 发布或 Hook 事件已经完成。
 
 结构门禁保留原 controller/根窗口预算，并增加提取模块规模与反向 controller
 依赖检查。CI 仅支持手工触发；直接 push `main` 或创建 PR 都不会启动第二个
@@ -725,10 +748,19 @@ Debug 构建默认启用进程内存诊断；持久化的 Settings 控制项可�
 等待该版本或更新版本成功写入，失败仍可观测且 flush 返回错误。Shutdown 拒绝新提交，
 排空已接受状态并 join，支持并发/重复关闭。该语义只用于状态快照，不用于审计或逐条事件。
 
+失败的最新快照以有界 owner 保留 dirty。`retry_failed()` 显式安排一次尝试，不增加
+Store 业务 revision；flush 同时观察已安排的尝试，旧失败不能提前结束新重试屏障。
+普通 flush/shutdown 不自动重试。Hook 配置保存/开关和 AI Agent Settings 显式保存
+通过 Feature 门面在 flush 前请求该恢复。
+
 AI Review 在 `task_persistence.rs` 保留 Feature 策略并复用该有界 Writer。拒绝较旧的
 Store revision，但启用写入后允许显式补写同一 hydration revision；独立递增的提交版本
-把补写纳入屏障。处理首个提交快照前清理临时文件，成功写入后继续对账会话文件。
-禁用写入或失败不能丢失关闭屏障。
+把补写纳入屏障。处理首个提交快照前清理任务快照临时文件。成功写入后通过
+`SessionTransactions` 按当前任务 catalog 对账 Session 文件，不使用 Writer 的旧快照。
+对账等待已接收的用户写入，取得独占 IO 租约后再次核验准入，再删除已退役 Session
+与残留临时文件，不会删除活跃原子写入的临时文件；corrupt 备份保留。目录读取、
+entry 读取或删除失败返回到任务 Writer 与 Session IO receipt。禁用写入或失败不能
+丢失关闭屏障。
 
 `app_runtime/latest_ui.rs` 使用 `LatestDelivery` 合并可替换的展示快照，最多一个待投递值
 和一个排队 Slint 回调。Inbox/未读数、AI Review 任务/当前结果、PR 标记及配置桥接
@@ -783,8 +815,15 @@ model 和键盘交互契约。
 ### 消息
 
 `usher-messages` 在平台本地数据目录的 `messages/messages.json` 中保存最新 1,000
-条应用消息。发布操作立即更新小型内存快照；唯一 Worker 在 Slint event loop 之外
-执行 JSON 持久化和 `notify-rust` 系统投递。原生投递失败不影响应用内持久消息。
+条应用消息。发布操作立即更新内存快照；自动 commit 观察把共享状态交给最新状态
+持久化 Worker，revision/attempt flush 返回真实写入错误并支持同 revision 显式
+重试。独立 `notify-rust` Worker 按 FIFO 处理已准入原生事件：包含在途调用在内，
+最多 64 条/1 MiB UTF-8 payload bytes，单条最多 128 KiB。满载或普通 OS 错误
+不影响 Inbox 发布；notifier panic 仍可观测。短 Action permit 覆盖 hydration/
+发布，但不跨 subscriber callback 持锁；checked shutdown 排空两个 Worker 并
+保留双方失败原因，生命周期重入在等待前拒绝。deferred State 已变化但 hydration
+未启用持久化时不得报告保存成功。Shell 仍使用既有 pre-shutdown 接线；P7 #77
+候选已拒绝，将关闭等待移出 event loop 的迁移尚未完成。
 投递策略与分类、语义级别正交：普通事件使用 `WhenUnfocused`，明确的应用内事件使用
 `Never`，严重或诊断事件可使用 `Always`。Shell 把窗口活动状态传给消息服务，避免
 应用聚焦时 Banner 与系统通知重复。
@@ -1213,6 +1252,11 @@ Toast、Dialog demo 路由已删除。关闭 feature 时，两个侧边栏都不
 6. 关闭 AI 面板或离开 PR 路由时，清空回复投影、token 映射和仓库绑定；仅关闭 Docked
    的 PR 上下文 Preview；已经 Detached 的 Preview 和后台 Review 工作继续独立存在，
    当前 Ask 被取消，mount generation 会拒绝迟到 Worker commit。
+7. Ask 投递在 mount/task guard 之外另有独立 generation。状态 key 在 mutex 内核验
+   generation，实际 event-loop commit 再次核验。旧 Ask 终态回调或首次 Session
+   读取不能替换新 Ask 的对话与 sending 状态。合法的 Review 完成结果在 Ask 已推进时
+   仍更新摘要/finding，同时保留新 Ask 的对话与仓库 action 映射。动态状态与终态
+   文案继续使用共享 locale catalog。
 
 ### AI Agent 连通性测试
 
@@ -1243,7 +1287,12 @@ Toast、Dialog demo 路由已删除。关闭 feature 时，两个侧边栏都不
   超限后保持失败且仅反馈一次；读取 header 后的 `HttpResponse::response_byte_limit`
   只能收紧限制。远程 Logo 为 8 MiB，AI 模型列表与缓冲 completion（含流式请求回退 JSON）
   为 16 MiB。仓库原始源码为 8 MiB，Base64 JSON 为 12 MiB，`src/git/source.rs`
-  将解码源码限制为 8 MiB。SSE/更新下载保留自身策略。这是 payload 预算，不是
+  将解码源码限制为 8 MiB。`src/git/response_budget.rs` 为 GitHub/GitLab/Gitee
+  public/enterprise 普通元数据 JSON 声明 16 MiB，为 PR 文件、diff 与 commit
+  比较声明 64 MiB；源码/冲突读取保留既有上限。这是每响应有限输入契约，不承诺
+  支持所有 Provider 合法 payload，也不限制分页累积/缓存。关键超限保持错误，
+  选填探测保留回退；只读 header/忽略成功正文、变更重试策略及下载后的大 diff
+  语法显式加载保持原行为。SSE/更新下载保留自身策略。这是 payload 预算，不是
   总 RSS 上限；传输 chunk、JSON/文本转换及消费者仍有分配。错误摘要最多收集
   8,000 字节前缀再截断，不再读取完整错误正文。
 
@@ -1283,9 +1332,21 @@ Interceptor 按注册顺序执行。Request hook 可修改 header；Response hoo
 
 ## 验证要求
 
-`scripts/check-quality.sh` 是不改写源码的本地统一检查入口，顺序执行 fmt、结构/UI/i18n、
-脚本回归、默认 check、库测试与 diff 检查。普通失败后继续采集，最终汇总返回失败；
-中断立即停止。该入口不豁免既有结构超限，也不替代功能专项 UI/Release A/B 验收。
+`scripts/check-quality.sh` 是不改写源码的本地统一检查入口。默认/`--quick` 快速层
+保留 fmt、结构/UI/i18n、脚本回归、默认 root check、root 库测试与 diff 检查。
+`--full` 完整层把两项 root Cargo 检查替换为 workspace all-targets check、workspace
+单元/集成测试（`--tests`，不执行另行跟踪的 logger doctest）、workspace all-targets
+Clippy（警告视为错误），以及仅选择根包的
+`-p usher --no-default-features --features renderer-femtovg` all-targets check。
+最后一项验证排除可选 AI core 和 UI/Settings bridge 的应用图；选择整个 workspace
+仍会包含 AI core 成员。完整层固定 `CARGO_INCREMENTAL=0`，并为 workspace 测试
+注入 `SLINT_EMIT_DEBUG_INFO=1`。
+
+两层都串行执行，保留每项普通失败的原退出码并继续采集后续结果，最终汇总返回
+失败；中断立即停止。macOS 手动 CI 复用同一完整入口，Windows 保留独立的默认
+workspace all-targets 编译检查。触发频率和已暂停的托管 Nightly schedule 保持
+原状。既有结构/lint 失败不得豁免；该入口不替代功能专项 UI/Release A/B 验收，
+也不宣称另行跟踪的 logger doctest 已通过。
 
 Rust 或 Slint 改动至少运行：
 

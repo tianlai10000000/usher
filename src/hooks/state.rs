@@ -288,6 +288,9 @@ impl HookStateFacade {
     pub(super) fn flush(&self) -> Result<(), String> {
         self.store.flush()
     }
+    pub(super) fn retry_failed(&self) -> Result<bool, String> {
+        self.store.retry_failed()
+    }
     pub(super) fn shutdown(&self) {
         self.store.shutdown();
     }

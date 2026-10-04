@@ -34,8 +34,28 @@ remain independent. Body failures do not restart a successful-header request.
 | --- | --- |
 | Remote Logo / 远程 Logo | 8 MiB, shared with local source input / 与本地源输入相同 |
 | AI model list and buffered completion, including stream-to-JSON fallback / AI 模型列表、缓冲完成及 JSON 回退 | 16 MiB |
+| GitHub/GitLab/Gitee public and enterprise ordinary metadata JSON / 普通元数据 JSON | 16 MiB per consumed response / 每个实际读取的响应 |
+| Provider PR files, diff and commit-comparison JSON / PR 文件、diff 与 commit 比较 JSON | 64 MiB per consumed response / 每个实际读取的响应 |
 | GitLab raw repository source / 原始源码 | 8 MiB |
 | GitHub/Gitee source JSON / 源码 JSON | 12 MiB envelope; decoded bytes <=8 MiB / 包装 12 MiB，解码 <=8 MiB |
+
+Provider limits are a finite accepted-input contract, not a promise to accept
+all provider-legal PRs. `src/git/response_budget.rs` owns the ordinary metadata
+and diff constants; repository source and conflict reads retain their separate
+limits. They do not bound all pages in one operation or normalized/cache memory.
+A headers-only or ignored-success-body caller does not begin reading that body
+merely because its request declares a limit. Mutation replies keep their existing
+single-attempt and response-consumption behavior. Essential list/detail/diff
+failures stay errors; optional metadata probes retain their existing fallback.
+The PR large-diff explicit-load gate remains a post-download highlighting policy
+and does not bypass the transport limit.
+
+Provider 限制是有限输入契约，不承诺接受所有 Provider 合法 PR。
+`src/git/response_budget.rs` 统一定义普通元数据与 diff 常量；源码与冲突读取
+保留独立上限。每响应限制不等于整次分页或归一化/缓存内存预算。只读 header
+或忽略成功正文的调用不会因声明预算而开始读取正文；变更请求仍保持原有单次
+尝试和正文消费方式。关键列表/详情/diff 超限保持错误，选填元数据探测保留
+现有回退。大 diff 显式加载仍是下载后的高亮策略，不绕过传输限制。
 
 SSE and update downloads retain their streaming policies. These limits do not cap
 transport-internal buffers, JSON objects, lossy UTF-8 expansion or process RSS.

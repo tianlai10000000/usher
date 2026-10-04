@@ -1,4 +1,5 @@
 //! Feature policy over a bounded latest-snapshot writer. Session cleanup stays here.
+use super::session_transactions::SessionTransactions;
 use super::storage::{reconcile_session_files, remove_stale_temporary_files};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -38,7 +39,24 @@ pub(super) struct TaskPersistenceWorker {
     writes_allowed: Arc<AtomicBool>,
 }
 impl TaskPersistenceWorker {
+    #[cfg(test)]
     pub(super) fn start(path: PathBuf, session_dir: PathBuf, allowed: bool) -> Self {
+        Self::start_inner(path, session_dir, allowed, None)
+    }
+    pub(super) fn start_coordinated(
+        path: PathBuf,
+        session_dir: PathBuf,
+        allowed: bool,
+        sessions: Arc<SessionTransactions>,
+    ) -> Self {
+        Self::start_inner(path, session_dir, allowed, Some(sessions))
+    }
+    fn start_inner(
+        path: PathBuf,
+        session_dir: PathBuf,
+        allowed: bool,
+        sessions: Option<Arc<SessionTransactions>>,
+    ) -> Self {
         let writes_allowed = Arc::new(AtomicBool::new(allowed));
         let permission = writes_allowed.clone();
         let cleanup = Once::new();
@@ -53,7 +71,11 @@ impl TaskPersistenceWorker {
                     return Ok(());
                 }
                 persist_task_state(&path, latest)?;
-                let _ = reconcile_session_files(&session_dir, latest.tasks.keys());
+                if let Some(sessions) = &sessions {
+                    sessions.reconcile()?;
+                } else {
+                    let _ = reconcile_session_files(&session_dir, latest.tasks.keys());
+                }
                 Ok(())
             },
             |_, error| log::error!("[AI Review][Task Store] Persistence failed: {error}"),

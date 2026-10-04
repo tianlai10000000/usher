@@ -495,6 +495,12 @@ where
         self.worker.flush()
     }
 
+    /// Retry the latest failed durable state once, without dispatching an Action
+    /// or incrementing the Store revision. A following flush awaits the attempt.
+    pub fn retry_failed(&self) -> Result<bool, String> {
+        self.worker.retry_failed()
+    }
+
     pub fn shutdown(&self) {
         let _ = self
             .commit_subscription
@@ -512,6 +518,50 @@ mod tests {
 
     #[derive(Clone, Debug, PartialEq, Eq)]
     struct Counter(i32);
+
+    #[test]
+    fn failure_callback_can_commit_a_newer_state_without_reviving_the_failed_snapshot() {
+        let slot = Arc::new(Mutex::new(None::<PersistentStore<Counter, i32, ()>>));
+        let recovery = slot.clone();
+        let written = Arc::new(Mutex::new(Vec::new()));
+        let record = written.clone();
+        let (reported, failures) = std::sync::mpsc::channel();
+        let store = PersistentStore::new(
+            Counter(0),
+            |state: &Counter, value: i32| {
+                if state.0 == value {
+                    Reduction::unchanged(state.clone(), ())
+                } else {
+                    Reduction::changed(Counter(value), ())
+                }
+            },
+            "commit-on-write-failure-test",
+            move |state| {
+                record.lock().unwrap().push(state.0);
+                if state.0 == 1 {
+                    Err("failed optimistic commit".into())
+                } else {
+                    Ok(())
+                }
+            },
+            move |_, _| {
+                recovery.lock().unwrap().as_ref().unwrap().dispatch(2);
+                reported.send(()).unwrap();
+            },
+        )
+        .unwrap();
+        *slot.lock().unwrap() = Some(store.clone());
+        store.dispatch(1);
+        failures
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap();
+        store.flush().unwrap();
+        assert_eq!(store.snapshot().revision(), 2);
+        assert!(!store.retry_failed().unwrap());
+        assert_eq!(*written.lock().unwrap(), vec![1, 2]);
+        store.shutdown();
+        slot.lock().unwrap().take();
+    }
 
     #[test]
     fn subscribers_hydrate_immediately_and_follow_changed_revisions() {

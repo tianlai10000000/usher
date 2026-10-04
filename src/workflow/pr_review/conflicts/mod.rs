@@ -313,6 +313,7 @@ impl ConflictController {
                 Ok(Arc::new(snapshot))
             } else if let Some(meta) = metadata.as_ref() {
                 let identity = Key::new(meta, &context.number);
+                let conflict_scope = shared().scope();
                 let result = conflicts::load(
                     &meta.repo_type,
                     &meta.repo_project_id,
@@ -330,7 +331,7 @@ impl ConflictController {
                 };
                 if let Ok(snapshot) = &result {
                     if !cancel.load(Ordering::Relaxed) && !snapshot.local {
-                        shared().observe(Key::new(meta, &context.number), snapshot.status);
+                        shared().observe(conflict_scope, identity, snapshot.status);
                     }
                 }
                 result.map(Arc::new)

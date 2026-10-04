@@ -20,12 +20,16 @@ review task does not own a route or require a visible page.
 - `src/ai_review/config.rs`: `usher-state-store` facade plus automatic
   configuration persistence.
 - `src/ai_review/task_persistence.rs`: ordered task snapshot persistence,
-  shutdown barriers, and post-write session reconciliation.
+  shutdown barriers, and checked post-write reconciliation through the Session owner.
 - `src/ai_review/controller.rs`: task orchestration, Git/provider diff loading,
   AI calls, cancellation, session I/O scheduling, notifications, and on-demand UI
   projection.
-- `src/ai_review/sessions.rs`: worker-side Review/PR Chat session serialization
-  and loading, plus corruption-preserving interrupted-task hydration.
+- `src/ai_review/session_transactions.rs`: production Review/PR Chat read-modify-write
+  transactions, operation/attempt identity, owned blocking I/O receipts, and file
+  reconciliation coordinated with those transactions.
+- `src/ai_review/sessions.rs`: lightweight PR Chat schema and corruption-preserving
+  interrupted-task hydration. Whole-session load/save helpers are test-only legacy
+  baseline seams, compiled under `test` or `test-fixtures`.
 - `src/agent_response/`: width-independent, bounded projection of agent-authored
   Markdown, content-identity caching, and opaque repository-file actions. It
   performs no file I/O and owns no Preview host.
@@ -42,11 +46,15 @@ review task does not own a route or require a visible page.
 - `src/ai/prompts.toml` 与 `src/ai/prompts.rs`：与 AI Chat 共用、受版本控制的 Prompt
   catalog，以及强类型、有界的请求组装。
 - `src/ai_review/config.rs`：基于 `usher-state-store` 的门面和自动配置持久化。
-- `src/ai_review/task_persistence.rs`：有序任务快照持久化、关闭屏障与写后会话对账。
+- `src/ai_review/task_persistence.rs`：有序任务快照持久化、关闭屏障，以及通过 Session
+  owner 执行并返回失败的写后对账。
 - `src/ai_review/controller.rs`：任务编排、Git/Provider diff 获取、AI 调用、取消、
   Session I/O 调度、通知和按需 UI 投影。
-- `src/ai_review/sessions.rs`：Worker 上的 Review/PR Chat 会话序列化与加载，
-  以及保留损坏文件的中断任务恢复。
+- `src/ai_review/session_transactions.rs`：生产环境的 Review/PR Chat 读改写事务、
+  operation/attempt 身份、实际 blocking IO receipt，以及与事务协调的文件对账。
+- `src/ai_review/sessions.rs`：轻量 PR Chat schema 和保留损坏文件的中断任务恢复。
+  整份会话 load/save helper 仅作为旧版基线测试接缝，在 `test` 或 `test-fixtures`
+  下编译。
 - `src/agent_response/`：Agent Markdown 的宽度无关有界投影、内容身份缓存和不透明
   仓库文件 action；不执行文件 I/O，也不拥有 Preview Host。
 - `src/artifact_preview/`：由 Worker 解析并读取用户显式激活的仓库 Markdown，再经
@@ -54,6 +62,84 @@ review task does not own a route or require a visible page.
 - `ui/features/ai_review/`：Feature 包协议和可选 PR 右侧面板；Primer finding row
   与严重级标签位于 `ui/components/ai_review/`，紧凑回复 block 位于
   `ui/components/agent_response/`；两层视觉代码都不承担解析或 I/O。
+
+## Session transaction contract / 会话事务契约
+
+1. Production reads and writes use `SessionTransactions`. A transaction holds
+   the shared I/O read lease and its task mutex while loading the current Review
+   and Chat files, merging, and atomically writing. Review completion merges the
+   current conversation into its result under that same boundary; a session
+   snapshot retained across an Agent request is never a whole-file write payload.
+   The registry uses weak task-owner references, pruned as owners are acquired or
+   files reconciled; active tickets/drivers retain their own owners.
+2. UI acceptance assigns an independent operation ID and attempt version before
+   the Ask future is polled. New user/assistant rows carry optional `message_id`
+   values derived from that operation. A retry of the same accepted operation
+   keeps its identity and merges once; distinct submissions with identical text
+   and timestamps remain distinct. Old JSON without IDs still loads and keeps
+   its absent IDs. Two legacy rows match by role, content, creation time, and
+   elapsed time; an identified row does not alias a legacy row. Reusing an ID
+   with conflicting message fields is an error.
+3. An accepted user's real write receipt is awaited outside the network
+   cancellation select. Dropping the caller or cancelling before its first poll
+   cannot discard the write: an owner driver retains and awaits the actual
+   `spawn_blocking` handle on the shared application runtime. Stop keeps the
+   localized stopping state and duplicate-start protection until this Ask's
+   accepted user and admitted I/O settle. Context/assistant effects check live
+   task membership, cancellation, and attempt version before admission. An
+   already-admitted atomic write can finish and must be awaited.
+4. Accepted initial user writes survive cancellation or task retirement. The
+   task writer waits for those receipts before deliberate file cleanup. It then
+   takes the exclusive I/O lease, rechecks pending user admission, and uses the
+   current task catalog. This prevents cleanup of an active atomic-write
+   temporary file and recreation of a retired session by a delayed accepted
+   user. Later retries and Review/context/assistant effects require a live task.
+   Corrupt backups survive; directory, entry, and removal failures propagate to
+   the task writer and the Session I/O failure receipt.
+5. `close_admission` rejects new user acceptance while allowing accepted work to
+   settle. `drain` waits for owned Session I/O, including checked reconciliation,
+   and returns completion counts or bounded failure samples. It is not a receipt
+   for the controller's final Task actions, Message Center publications, or Hook
+   emits; those producers need their own lifecycle barrier.
+6. The event-loop delivery boundary checks both mount/task identity and the Ask
+   delivery generation. Semantic status keys check that generation under their
+   mutex. Old terminal callbacks and initial reads cannot overwrite a newer
+   Ask's conversation, actions, or sending state. A valid Review completion can
+   still update summary/findings after a new Ask, while preserving that Ask's
+   conversation/actions. Existing catalog keys own stopping and terminal text;
+   runtime locale changes refresh the dynamic projection.
+
+1. 生产读取与写入统一经过 `SessionTransactions`。事务持有全局 IO 读租约和任务
+   mutex，读取当前 Review/Chat 文件、合并并原子写入。Review 完成在同一边界内
+   合并当前对话；跨 Agent 请求保留的 Session 快照不能直接作为整份文件写入载荷。
+   注册表仅保留任务 owner 的 weak 引用，在获取 owner 或对账时清理；活跃 ticket
+   与 driver 持有自己的 owner。
+2. UI 接收 Ask 时就分配独立 operation ID 和 attempt version，不依赖 Future
+   首次 poll。新 user/assistant 行的可选 `message_id` 来自该操作。同一已接收
+   操作的重试保留身份并只合并一次；不同提交即使文本与时间戳相同也分别保留。
+   无 ID 的旧 JSON 仍可读取并保留空 ID。两条旧行按 role、content、创建时间和
+   elapsed time 匹配；有 ID 的行不与旧行视为同一条。同一 ID 的消息字段冲突报错。
+3. 已接收用户消息的真实写入 receipt 在网络取消 select 之外等待。调用方被丢弃
+   或首次 poll 前被取消都不能丢掉写入：owner driver 在共用应用 runtime 上持有
+   并等待实际 `spawn_blocking` handle。Stop 在该 Ask 的用户写入与已准入 IO
+   完成前保留本地化的正在停止状态及防重入保护。Context/assistant 副作用在准入前
+   核验任务仍存在、取消标记与 attempt version；已经准入的原子写入可以完成，且
+   必须等待。
+4. 已接收的首次用户写入不因取消或任务退役而丢弃。Task Writer 在有意清理文件前
+   等待这些 receipt，再取得独占 IO 租约、再次核验待提交用户准入，并使用当前
+   task catalog。这样既不会删除活跃原子写入的临时文件，也不会让迟到的已接收
+   用户写入在清理后重建退役 Session。后续重试与 Review/context/assistant 副作用
+   仍要求任务存在。Corrupt 备份保留；目录、entry 读取与删除失败返回任务 Writer
+   及 Session IO 失败 receipt。
+5. `close_admission` 拒绝新用户消息准入，允许已接收工作完成。`drain` 等待实际
+   持有的 Session IO（包括 checked 对账），返回完成计数或有界失败样本。它不代表
+   controller 最后的 Task Action、Message Center 发布或 Hook emit 完成；这些
+   producer 需要自己的生命周期屏障。
+6. Event-loop 投递边界同时核验 mount/task 身份与 Ask delivery generation；语义
+   状态 key 在自己的 mutex 内核验 generation。旧终态回调与首次读取不能覆盖新
+   Ask 的对话、action 或 sending 状态。新 Ask 已启动时，合法 Review 完成仍可
+   更新摘要/finding，同时保留该 Ask 的对话/action。正在停止和终态文案使用既有
+   catalog key，运行时切换 locale 会刷新动态投影。
 
 ## Inputs and configuration / 输入与配置
 
@@ -194,13 +280,29 @@ operational phases such as PR-context preparation and thinking; these phases
 never claim to expose hidden model reasoning. The composer action becomes the
 same compact Stop control used by Review cancellation. Activating it aborts
 context loading or the in-flight Agent completion without cancelling the AI
-Review task, then marks the visible response as stopped.
-The same user message is committed to the review or lightweight chat session before model validation, PR-context loading, or any Agent request starts. The assistant response is committed in a second write. Configuration, task, review-session, and chat-history JSON loads preserve invalid input as a `.corrupt-*` sibling before falling back or reporting an error; if preservation fails, automatic writes for that store remain disabled so defaults cannot overwrite the original file. Task-state disk hydration starts after the first frame and merges through a typed Action so tasks enqueued during startup win over stored rows with the same ID; automatic task persistence remains disabled until preservation succeeds. Startup then reconciles task/session files against the merged task IDs, removes orphan session JSON and stale temporary siblings, and preserves corrupt backups. Large deterministic fixture payloads compile only for tests or the explicit `test-fixtures` feature.
+Review task. The visible response remains stopping until that Ask's accepted
+user write and admitted Session I/O finish, then becomes stopped or reports the
+commit failure. A second Ask for that task remains blocked until this receipt.
+The same user message is committed to the review or lightweight chat session
+before model validation, PR-context loading, or any Agent request starts. The
+assistant response uses a separate guarded transaction.
+
+Configuration, task, review-session, and chat-history JSON loads preserve invalid
+input as a `.corrupt-*` sibling before falling back or reporting an error; if
+preservation fails, automatic writes for that store remain disabled so defaults
+cannot overwrite the original file. Task-state disk hydration starts after the
+first frame and merges through a typed Action so tasks enqueued during startup
+win over stored rows with the same ID; automatic task persistence remains
+disabled until preservation succeeds. Subsequent task writes reconcile Session
+files through the transaction owner against current task IDs, remove orphan JSON
+and inactive temporary siblings, and preserve corrupt backups. Large deterministic
+fixture payloads compile only for tests or the explicit `test-fixtures` feature.
 The review status and every pending Ask response show one compact live elapsed
 timer. Review duration starts when the task is enqueued and freezes on
 completion, failure, or cancellation. Ask duration starts on submission;
 successful assistant messages persist their final elapsed milliseconds, while
-stopped and failed visible responses freeze the measured duration immediately.
+stopped and failed visible responses freeze the measured duration when the
+terminal response is delivered after its Session I/O receipt.
 Running reviews also show the exact current diff chunk and total chunk count.
 The percentage is derived from completed chunks on a 96-percent processing
 scale; it is workflow progress, not provider token or model-generation progress.
@@ -269,11 +371,22 @@ SHA、UTF-8 安全且最多 48 KiB 的 diff 摘要、可选完成结果及最近
 提交 Ask 后，用户消息必须立即追加到可见对话。等待回复期间，Agent 行显示“准备 PR
 上下文”“正在思考”等有界运行阶段；这些阶段不得声称展示模型隐藏推理。Composer
 主操作切换为与 Review 取消一致的紧凑 Stop 控件；点击后中止上下文读取或在途 Agent
-completion，但不取消 AI Review 任务，并在当前对话中标记回复已停止。
-同一条用户消息必须在模型配置校验、PR 上下文加载或任何 Agent 请求开始前提交到 Review Session 或轻量 Chat Session；assistant 回复通过第二次写入提交。配置、任务、Review Session 和 Chat 历史 JSON 解析失败时，必须先把原始内容保留为同目录 `.corrupt-*` 文件，再回退或报错；如果保留失败，对应 Store 的自动写入保持禁用，默认值不得覆盖原文件。Task State 磁盘 hydration 在首帧后启动，并通过强类型 Action 合并；同 ID 下启动期间新入队的任务优先于旧磁盘行，且保留成功前不得开启自动任务持久化。随后按合并后的 task ID 对账任务/Session 文件，删除孤儿 Session JSON 与残留临时同级文件，并保留 corrupt 备份。大型确定性 fixture payload 只在测试或显式 `test-fixtures` feature 中编译。
+completion，但不取消 AI Review 任务。该 Ask 已接收的用户写入与已准入 Session IO
+完成前，可见回复保持正在停止；随后标记已停止或报告提交失败。在此 receipt 到达前，
+同任务第二次 Ask 仍受防重入保护。
+同一条用户消息必须在模型配置校验、PR 上下文加载或任何 Agent 请求开始前提交到
+Review Session 或轻量 Chat Session；assistant 回复通过另一条受保护的事务提交。
+
+配置、任务、Review Session 和 Chat 历史 JSON 解析失败时，必须先把原始内容保留
+为同目录 `.corrupt-*` 文件，再回退或报错；如果保留失败，对应 Store 的自动写入
+保持禁用，默认值不得覆盖原文件。Task State 磁盘 hydration 在首帧后启动，并通过
+强类型 Action 合并；同 ID 下启动期间新入队的任务优先于旧磁盘行，且保留成功前
+不得开启自动任务持久化。后续任务写入通过事务 owner 按当前 task ID 对账 Session
+文件，删除孤儿 JSON 与非活跃临时同级文件，并保留 corrupt 备份。大型确定性
+fixture payload 只在测试或显式 `test-fixtures` feature 中编译。
 Review 状态和每条等待中的 Ask 回复都显示一个紧凑的实时耗时。Review 从任务入队开始
 计时，并在完成、失败或取消时冻结；Ask 从提交开始计时，成功的 assistant 消息会持久化
-最终毫秒耗时，停止或失败的可见回复立即冻结实测耗时。
+最终毫秒耗时，停止或失败的可见回复在 Session IO receipt 后投递终态时冻结实测耗时。
 运行中的 Review 同时显示当前 diff chunk 和总 chunk 数。百分比由已完成 chunk 按处理阶段
 最高 96% 推导，表示工作流进度，不是 Provider token 或模型生成进度。缺少 chunk 计数的
 旧任务摘要继续回退显示原有百分比。
@@ -593,6 +706,24 @@ Prompt 诊断另外只记录 catalog id/version、实际回复 locale、消息�
 
 ## Regression checklist / 回归检查
 
+Session tests use controlled write/admission barriers to cover early Stop,
+same-operation retry versus a distinct identical submission, Review promotion,
+dropped receipts, active temporary files, retirement during reconciliation, and
+checked I/O failures. `controller_session_tests.rs` invokes production UI
+delivery operations in a deliberately delayed order on the testing backend.
+Its old-terminal/new-Ask case checks the source locale `en` and packaged `zh-CN`;
+the initial-read and Review-result preservation cases check model behavior.
+These tests do not replace full-route multilingual visual inspection. Controlled
+Release component/native evidence and its limits are recorded in
+[the Session commit acceptance record](../p7-76-session-commits.md).
+
+Session 测试通过受控写入/准入屏障覆盖过早 Stop、同操作重试与独立同文案提交、Review
+promotion、receipt 被丢弃、活跃临时文件、对账期间退役，以及可返回的 IO 失败。
+`controller_session_tests.rs` 在测试 backend 上按故意延后的顺序调用生产 UI 投递
+操作。旧终态/新 Ask 用例核验源语言 `en` 与内置 `zh-CN`；首次读取及 Review 结果
+保留用例核验 model 行为。这些测试不替代全路由多语言视觉检查。受控 Release 组件/
+原生证据及其边界见[Session 提交验收记录](../p7-76-session-commits.md)。
+
 - Queue more tasks than the configured limit with `USHER_AI_REVIEW_FIXTURE=review-v1`;
   verify the running high-water equals the configured limit and queued tasks
   start as slots become free.
@@ -609,7 +740,9 @@ Prompt 诊断另外只记录 catalog id/version、实际回复 locale、消息�
 - Send an Ask question and verify the user row appears before the Agent
   completes. Verify the pending Agent row advances from context preparation to
   thinking, its elapsed timer advances in real time, the Send action becomes
-  Stop, and Stop ends only that response with a frozen duration.
+  Stop, and Stop ends only that response. With its user write gated, verify the
+  stopping state and duplicate-start protection remain until actual I/O settles;
+  then verify terminal delivery freezes the duration and reopening retains the user.
 - Let a review run for more than 300 seconds and verify it continues until the
   provider completes or the user cancels it. Verify ordinary AI Chat still
   reports a timeout at the shared 30-second deadline.
@@ -642,7 +775,8 @@ Prompt 诊断另外只记录 catalog id/version、实际回复 locale、消息�
   same rows and order while only the numeric limit changes.
 - Close the panel and leave PR Review while work runs; verify both actions clear
   projected models, the Review task still completes, and the current Ask is
-  cancelled without committing a late response into a reopened mount.
+  cancelled without projecting a late response into a reopened mount; accepted
+  Session effects still settle under the transaction owner's receipt.
 - Drag the PR/AI Review divider to both limits and resize the window. Verify the
   pointer remains attached to the divider, the session preference survives a
   close/reopen, and the diff performs its final layout after release.
@@ -671,7 +805,8 @@ Prompt 诊断另外只记录 catalog id/version、实际回复 locale、消息�
   完整源码。
 - 发送追问、增加一次性要求并再次 Review。
 - 发送 Ask 后确认用户行在 Agent 完成前立即出现；确认等待行从准备上下文进入思考状态，
-  实时耗时持续增长，Send 操作切换为 Stop，且 Stop 只终止该次回复并冻结耗时。
+  实时耗时持续增长，Send 操作切换为 Stop，且 Stop 只终止该次回复。阻住用户写入时，
+  确认实际 IO 完成前保持正在停止与防重入保护；随后终态投递冻结耗时，重开仍保留用户行。
 - 让 Review 运行超过 300 秒，确认 Provider 完成或用户取消前任务继续运行；同时确认普通
   AI Chat 仍在共享的 30 秒截止时间触发超时。
 - 让传输 chunk 持续零散到达并不断重置空闲阈值，确认单个 Review chunk 仍在 600 秒
@@ -693,7 +828,8 @@ Prompt 诊断另外只记录 catalog id/version、实际回复 locale、消息�
   显示行内错误且不会新增规则。
 - 连续调整并发 Review 数量，确认 rules 列表的内容与顺序均保持不变，只有并发数字变化。
 - 工作运行时关闭面板或离开 PR Review，确认投影 model 被清空、Review task 仍能完成，
-  当前 Ask 被取消，且迟到回复不会提交到随后重开的 mount。
+  当前 Ask 被取消，且迟到回复不会投影到随后重开的 mount；已准入的 Session 副作用
+  仍由事务 owner 等待实际 receipt。
 - 将 PR/AI Review 分隔线拖到两侧边界后调整窗口大小，确认指针始终贴住分隔线、关闭再
   打开仍保留本次会话宽度偏好，且 Diff 只在释放指针后采用最终排版。
 - 分别打开 PR/状态栏浮层，再点击 formatted AI Review 正文与链接；确认浮层关闭且链接

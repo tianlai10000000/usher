@@ -1,7 +1,7 @@
 # Usher 项目缺陷分析与优化提案
 
-> **最新复审：2026-09-16，HEAD=`209e5c6`，见 [第四轮复审](#21-第四轮范围与结论)。**
-> §0–§20 为对应提交的历史分析/实施记录；其中的“当前”“已完成”、规模、CI 触发方式和测试结果不能直接当作本版本结论。第四轮审查只更新分析与建议；随后第 64 批工具与格式修复已实施并完成行为 A/B，见 §27，没有重跑 Release RSS A/B。
+> **最新复审：2026-10-02，HEAD=`de643e4`，见 [第五轮复审](#37-第五轮范围与架构判断)；P1 实施验收更新于 2026-10-03，见 §41。**
+> §0–§36 为对应提交的历史分析/实施记录；其中的“当前”“已完成”、规模、CI 触发方式和测试结果不能直接当作本版本结论。§37–§40 记录只读分析；随后用户授权依次实施全部 P1，逐批代码、Release A/B 及采用/撤回结论见 §41。
 
 > 首轮审查：2026-08-27 ｜ **第二轮复审：2026-08-30（HEAD=73ae042，见 §9）** ｜ 分支：`feature/pr-review`
 > 方法：5 路并行深度审查（Git Provider 层 / PR&AI Review 控制器 / Slint UI 与渲染 / 基础设施与平台层 / 全局质量体检），所有结论均附代码位置证据，未经证实的猜测不收录。
@@ -1204,3 +1204,550 @@ UI policy、catalog 和 diff 通过，无 AI 编译及默认 Release 构建通�
 保持原文，测试窗口已退出。**采用本批语义改造，不宣称性能收益**；#72 长跑
 未完成及重复性失败记录仍保留。原生通知送达、Windows 和完整 doctest 未验证。
 详见 [第71批报告](docs/p6-71-hook-semantics.md)。
+
+---
+
+# 第五轮架构与改进批次复审（2026-10-02，HEAD=de643e4）
+
+## 37. 第五轮范围与架构判断
+
+本轮按现有提案续写，不新增另一套优化路线。起始工作区干净；核对中文 README、
+架构相关章节、spec 索引与对应功能契约，沿持久化、关闭、消息、AI Ask、Chat、
+PR 缓存与冲突读取的调用链审查，并复核质量/发布检查。结论不是全仓逐行审计，
+也不是本版本的桌面性能实测。以下代码行号固定于 `de643e4`。
+
+**架构判断：当前应优先补齐“业务版本—副作用提交—失败恢复”的一致性，再补
+队列、会话和缓存的资源边界。** 项目已有 Provider façade、Feature State Store、
+共享 Runtime/HTTP、精确虚拟化、后台测量与局部代际保护；继续替换技术栈、
+全面拆 crate 或按文件长度重构，不能解决本轮确认的问题。
+
+UI 结果过期保护、文件原子替换、持久化成功屏障是三个不同的约束。前两项已经
+存在，不意味着取消的旧任务不能晚写磁盘，也不意味着排空队列就代表写盘成功。
+同样，单个 Inbox 1000 条、每页 Chat 10 条、缓存 4 项，分别只约束一种表示，
+不能外推为整条数据通路的字节预算。
+
+### 37.1 历史完成状态与本轮边界
+
+| 事项 | 当前核查结果 | 本轮处理 |
+| --- | --- | --- |
+| #65 Terminal、#67 Logo/AI JSON/源码输入、#68–#69 Hooks、#70 Job | 已存在有界 IO、输入限制、journal/replay、共享配置/增量投影和共享测量快照 | 不重列为未实施；压力/平台覆盖不能由源码审查补签 |
+| #66 高亮 | 小范围 loading 回写保护已在源码；宽调度候选此前被拒绝 | 不把被拒绝的调度方案当作生产基线 |
+| #59 持久化与 UI 合并 | 通用 Store/AI Writer 与 Inbox UI 合并已实现；消息中心专用持久队列仍是另一实现 | 单独核查消息 Worker，不外推旧 A/B 的覆盖范围 |
+| #70 数据保留 | Job 子项已采用；PR bytes/共享源码、Chat 索引/内存页仍待实施 | 作为 #70 的后续交付单元，不宣称新发现或整批完成 |
+| #64 结构职责方案、#71 文案 | #71 采用的是 Hooks 语义改造；四项结构超限仍存在 | 按真实 owner 收口，不搬测试、不抬预算 |
+| #72 持续验证 | 工具行为 A/B 已通过；报告仍保留 Hooks 重复性失败和被取消的 Job 长跑 | 未完成部分仍是验收债务 |
+| CI | CI/性能 workflow 存在，当前手动触发；Nightly 定时明确暂停 | 保持成本策略，不建议擅自恢复 schedule |
+| 最新工具链 | `rust-toolchain.toml` 为 Rust 1.98.1，应用 Slint 为 1.18.1 | 1.97.1/旧 Slint 证据保留为历史，不能视为本 HEAD 的性能基线 |
+
+9 月末的内存实验必须继续遵守原决策：
+
+- [PR Batch A](docs/pr-review-memory-batch-a-20260927.md) 拒绝
+  `release-transient-v2`；正常隐藏保留同一 PR，不能重新默认卸载语法/展示资源。
+- [Settings Batch B](docs/settings-memory-batch-b-20260928.md) 拒绝圆角控制层候选；
+  [Batch C](docs/settings-memory-batch-c-attribution-20260928.md) 只确认组合残留，
+  未找到通过原筛选线的单一 owner。
+- [Terminal Batch D](docs/terminal-memory-batch-d-attribution-20260928.md)
+  归因未达到筛选线；同项目 PTY/content/cwd 保留契约继续有效。
+- [Project Batch E](docs/project-list-memory-batch-e-20260928.md) 降低 active 峰值，
+  但 returned-Home 收益未过门槛，产品改动已回滚。
+
+这些是相应提交/fixture 的证据，不是本 HEAD 的 RSS 预测；析构成功、malloc
+在用量降低、active 峰值改善均不能替代稳定 returned-Home 回收验收。
+
+## 38. 第五轮发现、范围与验收
+
+### R5-1【P1·最小夹具复现】失败持久化不能在同一业务状态上重试
+
+**证据**：`crates/usher-state-store/src/latest.rs:81` 取走待写快照，
+`:102–106` 失败后记录 attempted/error，没有保留可重试输入；`:121–124`
+拒绝同一 accepted revision；`:135–159` 的 flush 观察完成状态，不重新写入。
+现实入口是 `src/hooks/mod.rs:405–416` 的开关 dispatch→flush，以及
+`src/hooks/state.rs:94–117` 的同值 unchanged。AI Agent Replace 的同值处理
+也见 `src/ai/settings_state.rs:117–120`。
+
+本轮用临时 Rust 夹具直接引用当前 `latest.rs`，注入首次写失败并恢复写入条件：
+首次 flush 返回错误；同 revision submit 返回 false；恢复后 flush 仍返回旧错误，
+写入次数仍为 1；只有新 revision 才再次尝试并成功。它证明 writer 的恢复缺口，
+不代表已复现真实磁盘损坏。现有失败回调和“提交新版本后可恢复”能力仍然存在。
+
+**方案与验收**：区分业务 revision 和写入 attempt，保留最新 dirty 状态并提供
+显式、有界重试入口；不制造伪业务变化。测首次失败→介质恢复→同值重试、
+失败 A→新 B→重试、并发 flush/重复 shutdown；旧 A 不得覆盖 B，重试不能忙循环。
+同时验证 Hook 开关和 AI Agent 显式保存的重启恢复。对应 #74。
+
+### R5-2【P1·代码确认，压力影响待测】消息持久化无界排队，Flush 不能报告写失败
+
+**证据**：`src/message_center.rs:41–46` 使用实际 MessageCenter；
+`crates/usher-messages/src/center.rs:207–210` 每个 commit 深复制
+`messages.to_vec()` 并发送 Persist；`:535` 为无界 mpsc；
+`:552–571` 在一个 Worker 中串行写盘、原生通知与控制命令。
+`:555–556` 写失败只记录日志，`:564–565` 无条件 ACK，
+所以公开 `flush()`（`:361–367`）不能返回前序写失败。
+
+1000 条上限约束单个状态，不限制排队的完整副本；Inbox 最新 UI 投递也不限制
+持久化队列。慢原生 notifier 还会延迟后续保存。这里确认上限和错误传播缺口，
+没有测得本 HEAD 的消息压力 RSS。旧 #59 慢写夹具测的是 PersistentStore，
+不能替这条专用队列签署验收。
+
+**方案与验收**：持久状态接入带 revision 的 latest writer，最多一个在写和一个
+最新 pending；原生通知保留事件语义，独立设置容量和满队列策略，不能简单丢成
+“只留最新”。阻塞写盘后提交 1000 次变化，检查 pending 数/bytes、最终版本与
+已读/删除重载；写失败时 flush 必须 Err；慢/失败 notifier 不阻断状态落盘。
+容量策略、错误反馈和 shutdown 结果在消息 façade 内定义。对应 #75，依赖 #74。
+
+### R5-3【P1·提交防护缺口确认，交错后果待复现】AI Ask 取消只保护 Future/UI，未保护磁盘提交
+
+**证据**：`src/ai_review/controller.rs:1953–2041` 将包括会话保存的整个
+work 放进 `:261–269` 的取消 select；`sessions.rs:18–24/43–52`
+通过 spawn_blocking 序列化和 atomic_write。已经启动的 blocking 工作不会因
+等待 Future 被丢弃而自动停止；`controller.rs:2043–2062` 随后释放同 task
+重复启动保护并允许再次发送。`crates/usher-fs/src/lib.rs:25–30` 的原子替换
+没有会话 revision 条件。
+
+因此存在“旧保存延迟→取消→新 Ask 保存→旧保存最后替换”的交错风险。当前只确认
+调用链缺少提交屏障，**未定向复现旧内容覆盖或用户数据丢失**；UI mount generation
+不能充当磁盘版本检查。第一步必须用可控写入 barrier 建立实际失败用例。
+
+**方案与验收**：由 task-owned Session façade 串行管理读改写/提交版本，并区分
+网络取消与已接受的用户消息持久化；规定取消成功时哪个版本已经落盘。仅给
+atomic_write 加全局锁不足以保证版本顺序。覆盖延迟旧写后 Stop/重发、面板/任务
+切换、Review 完成与 Ask 交错及退出；旧版本不得覆盖新版本，用户消息不重复。
+若生产路径反例未成立，先补契约测试，重新缩小方案。对应 #76。
+
+### R5-4【P1·代码确认，故障影响待测】关闭时仍在事件循环等待 Worker，排空缺少故障边界
+
+**证据**：`src/shutdown.rs:351–366` 先异步 drain，再在 Slint event loop
+调用同步 cleanup；`src/lib.rs:810–833` 的 pre-shutdown 关闭 AI 配置、
+Project、AI Review、MessageCenter 和 Settings。Project 的 controller→state→
+PersistentStore→LatestPersistence 最终执行 `latest.rs:165–177` 的 join/flush；
+消息中心在 `center.rs:387–390` 等 ACK/join。慢持久化/通知会使 UI cleanup 等待。
+
+异步 drain（`shutdown.rs:52–57`）串行 await 且输出为 ()，没有每项结果、
+超时或 panic 隔离；`:375–379` 的两秒 watchdog 在 cleanup 完成后才启动，
+不能约束前面的卡住。部分 façade 又丢弃 shutdown 的写入结果。不能由这些路径
+推断正常退出已经卡死，也不能把“两秒”描述成完整退出 SLA。
+
+**方案与验收**：保留现有优先级，按禁止新任务→生产者取消/排空→后台
+flush/join→事件循环 UI/AppKit 清理执行，并汇总各阶段 outcome。先明确故障预算
+和最终退出政策，不能超时后直接丢 JoinHandle、留下进程或未提交状态。注入慢写、
+写失败、慢 notifier、单 drain 故障，覆盖 Hook/Terminal 运行中退出和并发 Quit；
+验证排空时 UI 心跳、生产者先停止、最终版本结果、后续清理和进程树回收。
+对应 #77；#75/#76 必须提供可等待的实际提交屏障。
+
+### R5-5【P2·#67 接入范围的后续】普通 Provider JSON 仍未声明下载字节预算
+
+**证据**：`src/http/mod.rs:404` 的 response_byte_limit 默认 None；
+`:990–1005` 的 bytes_raw 在未设限制时仍完整累积。
+`src/git/github.rs:124–129` 的 PR 列表、
+`:315/339` 的详情/文件请求及 `src/git/gitlab.rs:207–215` 的列表、
+`:520/550` 的详情/diff 请求设置了 retry，没有字节限制。
+这与已经受限的 Logo、AI JSON、仓库源码和新冲突 endpoint 是不同调用路径。
+
+**方案与验收**：先登记这些读取的 payload/operation，再按普通元数据与大 diff
+分配预算，复用统一 HTTP 超限错误和 UI 降级。测试合法大 PR、无/错误
+Content-Length、越界 chunk、重试/取消；超限停止读取并保留明确失败状态。
+预算须兼容现有“大 diff 显式加载/完整性”契约，不能用统一小阈值静默截断。
+分页条数和请求超时均不等于响应 bytes 限制；不承诺未测 RSS 收益。对应 #78。
+
+### R5-6【P2·新路径】冲突列表的“四并发”只约束一次 enrich，旧请求没有主动取消
+
+**证据**：每次列表投影的 `src/workflow/pr_list.rs:733–743` 都调用 refresh-list；
+`pr_conflict_status.rs:170–217` 独立 spawn，并在该轮内
+for_each_concurrent(4)。`:197–207` 在发请求前检查 generation，但已经 await
+的 HTTP Future 不因 generation 变化而取消；invalidate（`:220–238`）只推进
+代际/清投影，没有保留旧任务句柄或共享 permit。快速翻页/刷新时多轮在途请求
+可能重叠；不能把“每轮 4”写成“整个 Feature 始终最多 4”。
+
+现有 TTL 状态缓存、旧结果回写校验、Conflicts 工作区的独立 load 取消与
+ProcessTree guard 应保留，本项不是重复实现它们。
+
+**方案与验收**：为列表 enrichment 设置单一任务 owner，取消被替换的在途读取，
+并以 Feature 级 permit 限制总在途数；Page/Totals/Mutation 代际仍独立。用慢
+本地响应夹具连续翻页/刷新、切项目、换凭据和退出，记录实际活跃连接、请求数、
+取消时延、当前页最终状态；旧请求不可继续占满预算。对应 #79。
+
+### R5-7【P2·#70 遗留】Chat 历史分页反复全文件解析，已加载原文没有内存页预算
+
+**证据**：`src/chat/persistence.rs:177–205` 的 load_before 每页从头
+lines/parse，连续加载 K 页约有 O(KN) 扫描工作；`session.rs:168–170/295`
+把 prepend/append 原文留在双模式 Session，未按页或 bytes 淘汰。
+生产 UI 窗口、分页大小、后台 I/O 及提交校验已经存在；不能重提“生产未虚拟化”
+或“分页在 UI 读盘”。`load_recent()` 的 tail 读取也已经实现。
+
+**方案与验收**：拆成两个独立候选：先做可重建稀疏 byte-offset 索引/反向游标
+（#80），再评估有界内存页与按稳定 ID 重载（#81）。AI/RAG 各用十万条长短
+混合历史，检查连续/随机分页的实际读入 bytes、解析条数、索引失效/追加/损坏
+尾记录；随后验证双向滚动、prepend 锚点、模式切换贴底及全文 Preview。
+淘汰不得删除磁盘历史；须保留已加载逻辑历史的页元数据、按宽度计算的
+prefix/精确 extent 和稳定 ID 锚点，不能让已建立的滚动范围随淘汰缩短。
+当前并未预先测量全部磁盘历史；首次索引构建、追加及失效重建单列成本，
+索引建立后的稳态分页再验收按页读取。页策略先由测量定额。
+
+### R5-8【P2·#70 遗留】PR 缓存按条目淘汰，源码复制与全文行构建仍在 UI 入口
+
+**证据**：`src/workflow/pr_review/cache.rs:12–20/42–50` 的高亮/源码/range
+缓存只限 4/3/4 项；`controller.rs:105` 的 source cache 是 String。
+`:2740–2745` 命中后深复制，`:2775–2779` 新加载源码再次 clone；
+`:2803` 在启动后台高亮前于 event loop 构造 full_source_file。
+PR 列表 `pr_list.rs:18/458–459` 的 visited_pages 也仍按访问页增长。
+
+**方案与验收**：#82 先改共享不可变源码及后台全文构建，保持结果代际；
+#83 再为高亮/源码/range 及列表历史页建立条目+估算 retained bytes 双目标，
+区分活动文档 pin、可淘汰缓存、超大单项不入缓存，并按唯一 Arc owner 记账。
+每项独立 A/B，不把两候选叠成一个未经归因的收益。测大小文件交替、范围/全文
+往返、展开/收起、深分页删除后退页、快换 PR 与迟到任务，检查缓存命中、所有权、
+多 PR 重复增长和原生重入/帧耗时。活动 lease 可能超过缓存软目标，不能声称
+硬性总内存上限；也不能以清空同 PR 或恢复被拒绝的离页清理来达标。
+
+### R5-9【P2·新发现，规模影响待测】AI Review/Ask 历史的完整读写与投影随会话增长
+
+**证据**：`src/ai_review/storage.rs:22–29` 整体 read/parse JSON；
+`sessions.rs:20/48` 整体序列化；`controller.rs:1966–1993/2010–2036`
+每轮增加 conversation，并保存整个 Session 两次或三次，包含固定 Review
+input/result。`:392–447` 的投影复制所有 conversation 原文；
+`:2791–2808` 为全会话生成 UI 数据。
+
+128 个 task summary、文件对账清理、损坏 JSON 保全、response projection cache
+和最近助手窗口已有实现；Prompt 最近 20 条限制网络上下文，不限制历史文件。
+这里是单会话增长/写放大问题，不是已证实的泄漏。
+
+**方案与验收**：先记录 100/1000 轮短/长回复的文件 bytes、每轮读写量、
+序列化次数、owned bytes 与恢复时间；由 #76 的同 task façade 分离不可变
+Review 结果和可追加/分页的 conversation（#84）。按实际负载选择读取预算，
+超限与 JSON 损坏分别处理，不能把合法大历史自动移走或丢弃。覆盖旧格式迁移、
+完整历史重载、取消/并发提交、locale 切换和关闭；进行独立 Release A/B。
+
+### R5-10【P2·源码与扫描反例确认】i18n 表达式检查存在盲区，Commit 弹层仍有拼接英文
+
+**证据**：`scripts/check-i18n.sh:21–28` 只匹配独立属性行且 RHS 以字符串
+开头的写法。实际 `ui/views/workflow/pr_review_workspace.slint:4002`
+拼接数量与 “ commits”，`:4130` 将已翻译 identity-action 与 “ on ”、
+date-label 拼接；`timeline.rs:349–381` 已提供身份动作翻译，问题是句子收口
+遗漏，不代表整个 PR i18n 失效。
+
+临时隔离扫描夹具实跑：独立行字面量被拒绝；表达式
+`root.name + " on " + root.date` 和内联
+`Text { text: "Hardcoded message"; }` 均通过。夹具使用无副作用 Cargo 替身，
+只证明扫描覆盖盲区，不冒充 UI 编译。
+
+**方案与验收**：#85 将上述完整句子纳入共享 semantic catalog/命名参数，
+并让门禁覆盖表达式、多行和内联节点，精确保留品牌、协议值及远端正文例外。
+用正反例做工具行为 A/B；原生打开 Commit 选择器 en→zh-CN→en 切换，检查
+计数、日期、作者、范围与已挂载文本立即刷新，检查受影响弹层布局；若实际
+改动涉及 Tooltip 或多行测量，再执行对应专项契约矩阵。
+
+### R5-11【P2·已知治理残留】本地完整契约检查缺少 workspace/feature 层，结构红项未收口
+
+**证据**：`Cargo.toml:12` 的 default-members 只有根包；
+`scripts/check-quality.sh:57–58` 的默认 check/root lib test 不执行
+state-store、virtual-list、search 等依赖包自身单测。
+手动 CI（`.github/workflows/ci.yml:59–71`）已有 workspace tests、Clippy 和
+关闭 AI feature 检查，但结构失败会先中断同一 job 后续步骤。不能称为零 CI，
+也不能把今天根库 699 项通过写成整个 workspace 全绿。
+
+本轮结构门禁仍失败四项：AI controller **3876/3850**；根 Slint
+**3084/3000**；根属性 **422/410**；PR actions **717/580**。
+文件长度是警报，不是业务缺陷证明；沿用
+[第64批职责方案](docs/p6-64-quality.md)，优先由 #76/#84 收口 Ask/session，
+PR action 捕获上下文/Hook payload 与能力投影按独立变化原因收口，根层保留
+窗口/路由/overlay，Feature 独占展示协议归既有 feature global。
+
+**方案与验收**：#73 补“快速/完整”显式检查层及失败汇总，完整层覆盖
+workspace tests、默认/关闭 AI feature 与 lint，手动 CI 复用命令定义，不改触发
+频率；正反例证明失败继续采集、中断停止、真实子包/feature 命令被调度。
+#86 只处理剩余职责债与依赖方向；所有原预算不提高，新增 owner 需独立可测，
+不得通过搬测试、转发空壳或删检查制造通过。结构通过也不能替代专项行为 A/B。
+
+### R5-12【P3·工具反例复现】产物检查把“库存中有文件”当作成功
+
+**证据**：`scripts/check-artifacts.sh:66–77/88–98` 的 target 检查只要任一
+文件存在就返回成功；`:170–173` 最终只要求所有 target 中 FOUND_ANY。
+归档列表失败又被 `:73/94` 的 “|| true” 吞掉。
+临时目录仅放损坏的 Windows debug.zip，请求 aarch64-apple-darwin，脚本提示
+当前目标不完整，却 exit 0。该反例没有使用或修改真实发布产物。
+
+**方案与验收**：#87 保留库存展示，另定义指定 target 的严格产物清单、可读
+归档、必要 executable/格式与退出码契约。工具 A/B 覆盖完整目标、只有其它目标、
+缺 self-update 包、损坏/空包及错误内部名称。现有 Release 创建步骤有文件存在
+检查，不能据此宣称已发生实际漏包；本项也不重新开启签名/公证等历史议题。
+
+## 39. 第七批（P7）建议路线图
+
+**分析登记时状态：全部为建议。** 2026-10-03 用户已授权按顺序执行全部 P1
+（#74–#77），逐批验证，失败候选回退、通过候选保留；实施结论见第 41 节。
+2026-10-03 用户继续授权 P2（#73、#78–#86），沿用逐批验证、失败撤回规则，
+实施结论见第 42 节；P3 仍为建议。编号续接 #72；#80–#83 是原 #70
+尚未交付子项的拆分，避免混用 Job 的已通过结果。批次是独立决策/验收单位，
+不预估缺少测量依据的人日或百分比收益。
+
+| 阶段 | 编号 | 优先级 | 独立交付范围 | 前置与退出条件 |
+| --- | ---: | --- | --- | --- |
+| P7-A 工程基线 | 73 | P2，先准备 | 快速/完整 workspace 与 feature 检查层，汇总失败并与手动 CI 对齐 | 工具正反例 A/B；真实完整命令结果逐项登记，结构红项不得豁免 |
+| P7-B 持久一致性 | 74 | P1 | 最新持久状态的同值重试/dirty 恢复契约 | R5-1 故障夹具；失败 A/新 B/重试及 flush/shutdown 顺序全部正确 |
+| P7-B 持久一致性 | 75 | P1 | MessageCenter 最新状态持久化、Flush 错误传播、独立通知队列 | 依赖 #74；慢写/慢 notifier 下队列 bytes 有界，最终版本可重载 |
+| P7-B 持久一致性 | 76 | P1 | AI Ask 取消与 Session 提交屏障 | 先定向复现 R5-3；按 task 串行版本提交，不能丢或重复用户消息 |
+| P7-B 生命周期 | 77 | P1 | 后台持久化关闭屏障、排空 outcome 与故障预算 | #75/#76 提供提交结果；UI/AppKit 仍在事件循环；故障与正常退出分开验收 |
+| P7-C 输入/任务预算 | 78 | P2 | GitHub/GitLab/Gitee 普通 JSON 与 diff 下载预算接入 | 实施核对补入 Gitee public/enterprise 同类路径；继承 #67 管线；边界值、合法大 PR、显式大 diff 和错误反馈正确 |
+| P7-C 输入/任务预算 | 79 | P2 | 冲突列表 enrichment 任务 owner、在途取消和总并发限制 | 慢响应连续翻页/刷新测试；每轮 generation 与 Feature 总预算分别证明 |
+| P7-D 内容规模 | 80 | P2 | Chat 历史稀疏索引/反向分页游标 | #70 续项；完整历史/损坏尾部兼容，索引建立后稳态读取/解码随页增长，构建/重建单列 |
+| P7-D 内容规模 | 81 | P2，条件采用 | Chat 原文内存页/bytes 策略和按 ID 重载 | 依赖 #80；先测原文 owner，再定额；已加载逻辑历史的 extent/锚点、滚动/Preview 不回退 |
+| P7-D 内容规模 | 82 | P2 | PR 共享源码、后台全文行准备 | #70 续项；缓存 hit/miss、快速切换与 loading/选中代际正确 |
+| P7-D 内容规模 | 83 | P2，条件采用 | PR 内容缓存/visited_pages 的 retained bytes 与淘汰策略 | 依赖 #82；活动 pin 与缓存软目标分开；深分页/范围/重入验收及独立 A/B |
+| P7-D 内容规模 | 84 | P2，测量后定案 | AI 单会话 immutable Review 与分页 conversation | 依赖 #76；先记录 100/1000 轮负载，迁移/历史完整性和提交屏障正确 |
+| P7-E 语义与职责 | 85 | P2 | PR Commit 文案收口与表达式 i18n 门禁 | 扫描正反例 A/B及源语言/非源语言原生即时切换 |
+| P7-E 语义与职责 | 86 | P2，继承旧债 | #64 尚余 PR actions/根 Feature 展示职责收口 | 在 #76/#84 后重跑结构；只拆仍有独立变化原因的 owner，原预算不变 |
+| P7-F 发布检查 | 87 | P3，发布前 | 指定 target 的严格产物完整性检查 | 损坏/缺失/错误 target 必须非零；工具 A/B，不宣称运行时收益 |
+
+推荐实施顺序：先用 #73 固定验证边界，优先完成 #74–#77；随后按真实用户负载
+选择 #78–#85。#80→#81、#82→#83、#76→#84 必须分候选验证；没有达到相应
+采用门槛就停在前一已通过批次。#86 在实际功能所有权收口后处理剩余红项，
+不启动新一轮全仓机械拆分；#87 应在下一次相关发布改造前完成。
+
+#73 验收的是检查入口覆盖与准确失败汇总，既有结构红项须继续非零并登记；
+修完四项不是进入 #74–#85 的前置。#86 负责其后剩余职责债的实际收口，
+不能为解除前置而放宽预算，也不能把 #73 工具已通过写成仓库整体全绿。
+
+每个批次必须遵循仓库逐批自测、独立 A/B、失败记录与用户试用交接规则。仅把
+方案登记在此不构成执行后续代码改造、开启托管 schedule 或远端写入的授权。
+
+### 39.1 保留为条件候选，不列当前必做
+
+- 冲突 Git 大量文件准备：`src/git/conflicts/merge_tree.rs:265–270` 每文件
+  分别执行 ls-tree/cat-file；`:100–118` 每条命令的监控可启动整树目录计费。
+  先用 1/100/1000 个冲突文件记录进程次数、扫描次数与取消后 Worker 存活，
+  再决定批处理/共享监控。select 时序决定实际扫描次数，不能据代码断言当前
+  已有二次方耗时，更不能牺牲 256 MiB 临时仓库/8 MiB 内容/超时与取消限制。
+- 通用 Preview File 入口：`crates/usher-preview/src/lib.rs:449–466`
+  是 metadata→完整 read→检查长度，后续可采用句柄上的有界读取与协作取消。
+  当前未找到生产 open_file 调用，不列为现有页面卡顿来源；已保护的仓库
+  Markdown 路径不能重复列作缺陷。
+- Hook 终态 journal 故障一致性：`src/hooks/runner.rs:66/83/90–102`
+  先序列化/写入，终态 sync_data 失败后才修改运行失败类别和 event 数据。
+  需注入 write/sync 故障，定义业务终态与持久化失败的各自语义后再决定处理；
+  尚未复现真实介质故障，不直接宣称磁盘已有相反终态。
+- 多账户 RepositoryContext、全局事件总线、渲染器切换、allocator purge、
+  稳定 factory 卸载和 vendored Material 修改，不具备本轮立项证据。
+
+## 40. 本轮检查结果、证据与后续测量要求
+
+### 40.1 实际运行结果
+
+| 检查 | 本轮结果 |
+| --- | --- |
+| `git status --short`（审查开始） | 干净，无需合并或回退用户改动 |
+| `cargo fmt --all -- --check` | 通过；用只读检查保留“暂不改代码”范围 |
+| `cargo check --locked` | 通过，编译完整默认根 UI |
+| `cargo test --lib --locked` | 699 passed、0 failed、2 ignored；不是 workspace 全量结果 |
+| 上述库测试警告 | `src/hooks/projection.rs:101` 有未使用 ComponentHandle 导入，未修改 |
+| `scripts/check-architecture-structure.sh` | 失败：R5-11 四项；本轮未放宽预算 |
+| `scripts/check-ui-policy.sh` | 通过 |
+| `scripts/check-i18n.sh` | 通过；R5-10 反例说明扫描通过不等于全部展示文案无硬编码 |
+| `python3 -m unittest discover -s scripts/tests -p 'test_*.py'` | 70 项通过；i18n/产物反例是额外临时夹具，不计为已有 suite 用例 |
+| `git diff --check` | 通过；最终变更仅为本提案文档 |
+
+本轮未运行完整 workspace/integration、Clippy、禁用 feature 构建、Windows、
+远端手动 CI、logger doctest、原生多语言 UI 或 Release A/B/15 分钟持续负载。
+完整 doctest 失败仍是仓库声明的已知基线，本轮未重跑确认；两项 ignored 不是
+验收通过。编译通过也不补签上述未执行矩阵。
+
+### 40.2 定向反例的证据边界
+
+R5-1 临时夹具在 `/tmp/usher-runtime-audit/retry.rs`，直接 include 本仓库
+`crates/usher-state-store/src/latest.rs`；编译/运行均 exit 0，结果为：
+
+    initial_flush=Err("injected write failure")
+    same_revision_accepted=false
+    recovery_flush=Err("injected write failure")
+    attempts_after_same_state_retry=1
+    new_revision_flush=Ok(())
+    total_attempts=2
+
+可用 `rustc --edition=2024 /tmp/usher-runtime-audit/retry.rs -o /tmp/usher-runtime-audit/retry`
+后执行该二进制复查。临时路径可能被系统清理；正式 #74 须将相同故障语义纳入
+持久单测。编译时另有 xcrun cache/FSEvent 环境警告，不是该行为夹具失败。
+R5-10 在临时目录复制 i18n 检查脚本并使用 Cargo 替身；R5-12 在临时 cwd
+直接执行仓库产物脚本，仅注入假的 workflow-dist 输入。两组临时目录已自动清理，
+未修改仓库、真实配置或发布产物；这些反例是检查器的 A 基线，本轮没有 B 候选。
+以下自包含命令可从仓库根目录重建两组反例；它只测试扫描和退出码，不编译 UI：
+
+```sh
+python3 - <<'PY'
+from pathlib import Path
+import os, shutil, subprocess, tempfile
+
+repo = Path.cwd()
+fixtures = {
+    'direct literal': 'Text {\n text: "Hardcoded message";\n}\n',
+    'concatenated literal': 'Text {\n text: root.name + " on " + root.date;\n}\n',
+    'inline literal': 'Text { text: "Hardcoded message"; }\n',
+}
+with tempfile.TemporaryDirectory(prefix='usher-audit-i18n-') as temp:
+    root = Path(temp)
+    for folder in ('scripts', 'ui', 'bin'):
+        (root / folder).mkdir()
+    shutil.copy(repo / 'scripts/check-i18n.sh', root / 'scripts/check-i18n.sh')
+    stub = root / 'bin/cargo'
+    stub.write_text('#!/bin/sh\nexit 0\n')
+    stub.chmod(0o755)
+    env = dict(os.environ, PATH=str(root / 'bin') + os.pathsep + os.environ['PATH'])
+    for name, content in fixtures.items():
+        (root / 'ui/fixture.slint').write_text(content)
+        result = subprocess.run(['sh', str(root / 'scripts/check-i18n.sh')],
+                                env=env, capture_output=True, text=True)
+        print(name + ': exit=' + str(result.returncode))
+with tempfile.TemporaryDirectory(prefix='usher-audit-artifact-') as temp:
+    output = Path(temp) / 'workflow-dist'
+    output.mkdir()
+    (output / 'Usher-x86_64-pc-windows-msvc-debug.zip').write_bytes(b'not an archive')
+    result = subprocess.run([str(repo / 'scripts/check-artifacts.sh'),
+                             'aarch64-apple-darwin'],
+                            cwd=temp, capture_output=True, text=True)
+    print('only corrupt Windows debug.zip / requested macOS: exit='
+          + str(result.returncode))
+PY
+```
+
+本轮对应输出依次为 1、0、0、0。后续 #85/#87 必须使遗漏文案和缺失指定目标
+被正确拒绝，并补合法输入通过的正例；不能仅让这四项全部失败。
+
+### 40.3 下一实施批次的统一证据要求
+
+- 正确性批次先用可控故障/交错夹具证明目标行为：提交 revision、失败/成功
+  outcome、旧写拒绝、退出顺序；不能只测最终 UI 文本或文件能否解析。
+- 工具批次用接受/拒绝的正反例做行为 A/B，再运行真实入口。纯职责迁移只验证
+  行为和成本不回退，不宣称把代码移出文件就能降低 RSS。
+- 性能候选使用当前源码构建的冻结 Release 二进制；记录 HEAD/源码差异、
+  Cargo.lock、二进制 hash、Rust/Slint、renderer、窗口/DPI、locale、fixture
+  及隔离状态。三对独立进程按既有协议执行，测量期间不并行编译或跑单测。
+- 分别记录队列 bytes、唯一内容 owner、解析/写入次数、UI/原生帧耗时与
+  RSS/footprint；工作量减少不能直接换算成进程内存收益。用户原有前台工作
+  不应被测量夹具接管，优先复用已验证的非激活协议。
+- [P6 回归协议](docs/p6-regression.md) 的六场景和持续负载仍有未完成项，
+  新工具链下先建立相同二进制重复性，再完成 Terminal/Hooks/Job 的完整
+  15 分钟循环；保留失败/取消原始证据，不用延长空闲或中断样本冒充长跑。
+  returned-Home 候选沿用各专项预先冻结的门槛，不混用 P6 检测上限。
+- 每批结论只能为采用、拒绝或证据不足；被拒绝候选不能叠入下一基线。
+  实施确实改变行为/所有权时再同步双语架构与相关 spec/index；本轮只登记
+  建议，不把尚未实现的设计写进现行契约。
+
+## 41. P7 P1 逐批实施记录（2026-10-03）
+
+用户本次授权范围为 #74、#75、#76、#77。每批采用后才成为下一批基线；
+失败或证据不足的候选撤回其代码和现行契约改动，并保留失败证据与原因。
+本轮开始时已有未提交的第五轮分析文档改动，予以保留。#73 等 P2/P3 批次
+不在本次实施范围内，既有结构预算不提高。
+
+| 批次 | 状态 | 证据与决定 |
+| --- | --- | --- |
+| #74 同值持久化恢复 | **采用，保留代码** | [独立记录](docs/p7-74-persistence.md)；Store 18 项、默认根库 701 项、组件 Release A/B 和三对原生回归通过；候选 Peak RSS +0.391 MiB、growth 不变 |
+| #75 MessageCenter | **采用，保留代码** | [独立记录](docs/p7-75-message-center.md)；消息 27 项、默认根库 701 项、组件 Release A/B 和三对原生回归通过；所测场景 Peak RSS -8.531 MiB |
+| #76 Ask/Session 提交 | **采用，保留代码** | [独立记录](docs/p7-76-session-commits.md)；真实会话 Release 42 项 A/B、根库 715 项、三对原生回归通过；Peak RSS +0.281 MiB、growth 不变 |
+| #77 后台关闭屏障 | **拒绝，已撤回代码** | [失败记录](docs/p7-77-shutdown.md)；候选根库 778 项通过，但三对真实 Release A/B 复现同值保存恢复后误报退出失败：A 三次退出 0，B 三次退出 1 且保留 sentinel。已按冻结基线恢复 #74+#75+#76，未保留 #77 局部代码 |
+
+首次沙箱根库测试 691 passed、10 failed、2 ignored；十项失败均为本机
+测试服务器 bind 返回 `PermissionDenied`。允许回环测试服务器后重跑为
+701 passed、0 failed、2 ignored。这两次结果均保留，环境失败不冒充代码
+回归，也不删除对应测试。完整 logger doctest 未运行，仍为已知声明基线。
+
+#77 的失败发生在应用层恢复语义：首次实际保存 EIO 被永久计入 owner 账本，
+后续同值显式重试虽已成功、磁盘数据正确且当前 writer 正常关闭，历史错误仍
+阻止正常退出。三个 B 进程均自行退出，没有外部强杀；六次输入、故障和恢复
+receipt 全部有效。不能以单元测试通过代替跨批次恢复验收，也没有把 B 的失败
+期望改成通过。恢复 39 个既有源文件并删除 14 个批次新增源文件，保留该批
+历史文档及原始证据。其余原生故障、P5 内存与 Terminal 回归未执行，不能声称
+#77 的关闭方案已通过或带来性能收益。回退后的交付检查见独立记录。
+
+最终保留代码的 fmt、默认 check、根库测试和 diff 检查通过；根库为
+715 passed、0 failed、2 ignored。回退后的源码与已采用 #76 冻结基线一致。
+结构检查仍有三项既有超限：root Slint 3084/3000、属性 422/410、PR actions
+717/580；没有抬预算。#77 新增 SettingsFeedback 超限已随代码撤回。
+回退后的默认正式 Release 构建通过，构建目录中的候选应用已替换；关闭屏障
+原问题仍待后续候选解决，双语架构和消息规范已明确迁移尚未完成。
+
+## 42. P7 P2 逐批实施记录（2026-10-03）
+
+用户授权继续 P2：#73、#78–#86。基线为已采用 #74+#75+#76，保留 #77 拒绝
+记录及此前未提交分析/实施文档；#77 的候选代码不进入本轮。每批独立冻结
+基线、执行自测和 A/B，记录未执行项与采用/拒绝决定，失败候选全部撤回。
+#81/#83 的前置与 #84 的先测量条件仍有效，P3 #87 不在本轮范围。
+
+| 批次 | 状态 | 证据与决定 |
+| --- | --- | --- |
+| #73 快速/完整检查层 | **采用，保留工具改动** | [独立记录](docs/p7-73-quality.md)；13 组/26 次工具 A/B、77 项脚本测试通过；真实 full 878 项测试通过，但保留结构与既有 Clippy 失败，实际入口返回非零；业务源码未改，不宣称运行时收益 |
+| #78 Provider JSON/diff 预算 | **采用，保留代码** | [独立记录](docs/p7-78-provider-budgets.md)；87 个 options 保留 8 个旧预算；metadata 16 MiB/diff 64 MiB，根库 718 passed/0 failed/2 ignored；组件 360 次通过；有效原生矩阵 120 次通过（114 v3 + 6 v4 分类断言修正重跑，原失败记录保留）；Home 六次 RSS/持久化/正常关闭通过；full 881 tests 通过，仍准确报告原结构与 Clippy 两项失败，不宣称内存收益 |
+| #79 冲突列表任务 owner/总并发 | 已采用，代码保留 | [独立记录](docs/p7-79-conflict-owner.md)；11 项 owner/cache、真实 Settings SaveErr、根库 730 项通过；Release 组件正式 60 项、原生完整有效对照 156 项及 Home 六轮通过。B 并发峰值 4，保守替换/设置取消观测最大 6.923ms，切项目旧轮次完整生命周期最大 52.089ms。原生首矩阵 A 一次缺帧超时、整场景重跑及检查器/构建缓存修正均保留原证据；完整质量实际 893 passed/0 failed/4 ignored，8 检查通过、2 既有门禁红项仍 exit1，不豁免 |
+| #80 Chat 历史索引/游标 | 本轮拒绝，代码已撤回 | [独立记录](docs/p7-80-chat-index.md)；168组件场景、24真实 OS 场景、749 root 单测及A/B标准Release通过，完整质量原结构/Clippy仍红。原生 smoke 超时、物理尺寸不符及后续锁屏/显示器休眠证据保留；fresh真实显示预检仍失败，原生/物理/完整Preview/Home采用门槛未完成。5个Rust文件及4项架构/spec改动已逐SHA恢复至已采用#79，候选与全部原始结果保留；未宣称候选独有渲染缺陷或应用/RSS收益 |
+| #81 Chat 原文页/bytes | 条件未满足，本轮不实施 | 前置 #80 本轮未采用；4项装配工具测试通过不构成原文owner测量或候选验收，不能使用失败#80继续 |
+| #82 PR 共享源码/后台行准备 | 本轮拒绝，未合入 | [独立记录](docs/p7-82-full-source.md)。已采用#79隔离v6的fmt/check通过，实际库测试745通过、0失败、2忽略，含新增15项；26项reader通过。早期9处API、3处test编译错误及首轮10项localhost沙箱失败保留；合法hunk展开与旧冷全文交错回退已窄修并补测试。fresh真实显示预检仍锁屏/休眠；受控Release A/B、真实HTTP/native48场景、P6/Preview/Home未执行，采用门槛未完成，不宣称收益或推进基线 |
+| #83 PR retained bytes/淘汰 | 条件未满足，本轮不实施 | 前置#82本轮未采用；不能使用失败候选或未测owner设置配额 |
+| #84 AI 会话 Review/conversation | 本轮拒绝，未合入 | [独立记录](docs/p7-84-session-journal.md)。accepted73快照中已采用#76行为的8组前置测量及1组receipt控制通过，并非最终受控Release A臂；1000轮长Review累计写约9.2GiB。v4 reader15项通过，format通过，但全UI locked check101：派生组件无法绑定基类2项只读out高度属性。49项业务测试未运行；Release/内核故障/原生/Preview/locale验收未执行，不保留失败代码、不宣称收益 |
+| #85 PR Commit/i18n 表达式 | 本轮拒绝，未合入 | [独立记录](docs/p7-85-commit-i18n.md)。25表达式/入口、5reader、132正反例工具A/B通过；全UI fmt/check通过，库测试初始化修正后735通过、0失败、2忽略，真实catalog7项通过，初次1失败保留。全项目扫描A8诊断→B仍6；实际i18n shell返回1，包含3条Notify真实文案遗漏及3条工程标签规则覆盖缺口。原生en/zh/en、Dialog像素及Release/Home未执行，不作采用或收益声称 |
+| #86 剩余职责/结构债 | 本轮拒绝，未合入 | [独立记录](docs/p7-86-owner-structure.md)。真实同源结构对照经相同fmt：原候选1139→窄修1107，仍>940，测试292>220；独立owner命令及接入同一门禁的候选shell均实际返回1，保留missing-crates扫描警告，不构成完整现行旧检查覆盖，旧968仅未fmt计数。reader26项及真实4线程/128事件writer1项通过；结构工具14项中11通过、3正例因复用超预算源码失败，前置路径/编译失败保留。#85未采用，业务/真实HTTP/native/性能验收未执行，所有预算不提高 |
+
+桌面恢复前的独立预验证只核临时草稿与工具，不代替各批正式验收。66项早期
+工具测试的命令、结果及原始日志位于
+`memory-benchmark-results/p7-p2-prepared-tools-20261004/`：#81装配4项、
+#82读取器15项、#85表达式/入口25项及读取器5项、#86旧读取器17项。
+#81/#83的条件仍未满足；原生窗口、实际 HTTP/UI 交错、性能及采用决定另行登记。
+
+新工具修订实际结果见 `memory-benchmark-results/p7-p2-tool-revisions-20261004/`：
+#84 v4读取器15项、#86 v3读取器26项通过；#86实际并发writer探针1项通过，
+此前两个编译失败及完整执行源码/独立锁文件均保留。它们仅验证证据工具和实际
+writer路径，不是业务功能、原生窗口、HTTP场景或运行时性能通过。
+#80回退后的471个归档应用目录/构建条目逐SHA一致，其中包含3个既有跟踪Finder
+文件；最终编译输入摘要记录468个非Finder代码/构建条目。2个无关的忽略Finder
+文件保留；原始snapshot将这2文件计为额外条目的失败及修正后的对比保留。
+
+正式工作区最终复验原始记录：
+`memory-benchmark-results/p7-p2-final-production-20261004/`。实际
+`cargo fmt --all`、`cargo check --locked --offline`、
+`cargo test --lib --locked --offline` 均exit0，根库730 passed/0 failed/2 ignored。
+首次完整质量命令误用不支持的`--profile full`参数，实际exit2/Usage，未执行
+检查；该失败日志保留，随后已使用`--full`重新执行。正式Release及完整质量
+复验分开记录：`cargo build --release --locked --offline`实际exit0，耗时
+397.175秒，`target/release/usher`已被默认特性正式产物替换，SHA-256为
+`8e3cc724b3e5d2d2caf9a7d2096f8a75c266e241c95c93f842aa910224f56ec3`。
+独立审计核对了实际bin/lib特性和依赖fingerprint：默认
+`ai-code-review/default/renderer-femtovg`，无`test-fixtures`；实际产物和468项
+源码摘要均匹配记录。此次未启动原生应用，构建成功不补足被拒绝批次的原生验收。
+
+修正后的`sh scripts/check-quality.sh --full`已完成，实际exit1：30组Rust目标
+共893 passed/0 failed/4 ignored，77项脚本测试通过；共8个检查通过、2项既有
+门禁失败。结构仍为root Slint 3084/3000、属性422/410、PR actions717/580；
+Clippy仍报`crates/usher-i18n/src/lib.rs:84`的`unnecessary_lazy_evaluations`，
+与已采用#79基线一致。UI policy、i18n、workspace check/tests、no-AI check和
+diff均通过，没有抬预算或豁免。初次`git diff --check`和full内diff均exit0。
+已知logger doctest未重跑，workspace `--tests`不包含doctest，不能声称全量
+`cargo test --locked`通过。原始31项Git状态全部保留，既有业务源码没有被回退；
+后续新增文档仅记录本轮授权的批次、拒绝与复验结果。
+
+## 43. P7 P2 桌面恢复重验（2026-10-06）
+
+用户仅授权重试因锁屏/休眠未完成的#80/#82；#84/#85/#86原技术失败及#81/#83
+条件不在本次扩大实施范围。起点HEAD为`30e7862e5da168a38e8662a68a87f9af696bf2f2`，
+Git状态干净，468项生产代码/构建输入与已采用#79逐SHA一致。当前807文件Git归档
+独立冻结，原始证据保留于`memory-benchmark-results/p7-p2-retry-20261006/`。
+
+| 批次 | 本次状态 | 实际证据与决定 |
+| --- | --- | --- |
+| #80 Chat 历史索引/游标 | 重试仍拒绝，未合入 | [独立记录](docs/p7-80-chat-index.md)：真实显示已active/awake；旧预检对null锁字段误拒已窄修为仅允许尝试，16项工具测试通过，不伪造已解锁证明。A/B smoke及正式AB/BA/AB六进程均正常退出；B smoke提交相邻帧p95 52.9641ms>50ms，正式B三次中两次第一idle就绪帧实际移除锚行、下一帧重挂载，严格F−1/F的1px门槛未通过。物理/Home/P6未继续推进，不采用失败代码，不宣称索引独有根因或应用/RSS收益 |
+| #82 PR 共享源码/后台行准备 | 重试仍拒绝，未合入 | [独立记录](docs/p7-82-full-source.md)：标准Release/组件6及修订后真实HTTP/native48格通过，旧45格无效夹具失败保留。原#66六轮完整采样、应用退出/显示/回收通过，但B三轮RSS峰值360.50/358.73/366.75MiB均超严格300；final footprint中位数138.97→206.86MiB、+67.89超原允许8MiB。两资源门槛失败，不采用代码；positive12、普通UI/物理/Preview及独立Home未推进，编译或部分通过不替代验收 |
+
+正式工作区复验原始记录在
+`memory-benchmark-results/p7-p2-retry-final-production-20261006/`。
+实际`cargo fmt --all`、`cargo check --locked --offline`、
+`cargo test --lib --locked --offline`及`git diff --check`均exit0，
+根库730 passed/0 failed/2 ignored。完整`sh scripts/check-quality.sh --full`
+实际exit1：30组workspace目标893 passed/0 failed/4 ignored，脚本77项通过，
+8项门禁通过、2项既有失败未豁免：根Slint3084/3000、属性422/410、
+PR actions717/580结构超限，以及`usher-i18n/src/lib.rs:84`的
+`unnecessary_lazy_evaluations`。无新增测试失败；已知logger doctest未重跑，
+不宣称完整`cargo test --locked`通过。
+
+实际默认标准Release重建exit0，耗时412.084s；独立实际产物/当前bin-lib
+fingerprint/源码dep-info审计通过，默认`ai-code-review/default/renderer-femtovg`
+且无测试夹具/开发UI特性。正式`target/release/usher`SHA256为
+`8e3cc724b3e5d2d2caf9a7d2096f8a75c266e241c95c93f842aa910224f56ec3`，
+与重试前正式产物一致。468项生产源码/构建输入逐字节等于本次冻结基线；
+起点工作区干净，最终只改本文与#80/#82两份独立文档，未覆盖此前通过的代码，
+未创建提交。普通UI/物理/Preview/Home及项目级完整P6/soak的未执行状态保留。

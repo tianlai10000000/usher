@@ -12,6 +12,9 @@ mod model;
 mod overview;
 mod prefix_cache;
 mod provider;
+mod response_budget;
+#[cfg(test)]
+mod response_budget_tests;
 mod source;
 
 use diff::{parse_unified_diff, unavailable_diff_file};

@@ -71,6 +71,17 @@ pub(super) fn reconcile_session_files<'a>(
     session_dir: &Path,
     current_ids: impl Iterator<Item = &'a ReviewTaskId>,
 ) -> HashSet<ReviewTaskId> {
+    let ids = current_ids.cloned().collect::<HashSet<_>>();
+    if let Err(error) = reconcile_session_files_checked(session_dir, ids.iter()) {
+        log::warn!("[AI Review][Session Store] {error}");
+    }
+    ids
+}
+
+pub(super) fn reconcile_session_files_checked<'a>(
+    session_dir: &Path,
+    current_ids: impl Iterator<Item = &'a ReviewTaskId>,
+) -> Result<HashSet<ReviewTaskId>, String> {
     let current_ids = current_ids.cloned().collect::<HashSet<_>>();
     let mut desired_paths = HashSet::new();
     for id in &current_ids {
@@ -81,16 +92,25 @@ pub(super) fn reconcile_session_files<'a>(
 
     let entries = match fs::read_dir(session_dir) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return current_ids,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(current_ids),
         Err(error) => {
-            log::warn!(
-                "[AI Review][Session Store] Failed to reconcile {}: {error}",
+            return Err(format!(
+                "AI review session reconciliation failed for {}: {error}",
                 session_dir.display()
-            );
-            return current_ids;
+            ));
         }
     };
-    for entry in entries.flatten() {
+    let mut failure_count = 0;
+    let mut first_failure = None;
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                failure_count += 1;
+                first_failure.get_or_insert_with(|| error.to_string());
+                continue;
+            }
+        };
         let path = entry.path();
         let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
@@ -101,13 +121,16 @@ pub(super) fn reconcile_session_files<'a>(
             && let Err(error) = fs::remove_file(&path)
             && error.kind() != std::io::ErrorKind::NotFound
         {
-            log::warn!(
-                "[AI Review][Session Store] Failed to remove stale file {}: {error}",
-                path.display()
-            );
+            failure_count += 1;
+            first_failure.get_or_insert_with(|| format!("{}: {error}", path.display()));
         }
     }
-    current_ids
+    match first_failure {
+        Some(error) => Err(format!(
+            "AI review session reconciliation had {failure_count} failure(s): {error}"
+        )),
+        None => Ok(current_ids),
+    }
 }
 
 pub(super) fn remove_stale_temporary_files(directory: &Path) {

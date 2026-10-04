@@ -56,18 +56,28 @@ cargo test --lib --locked
 git diff --check
 ```
 
-Run the complete local quality sequence without rewriting source:
+Run local quality checks without rewriting source:
 
 ```sh
-./scripts/check-quality.sh
+./scripts/check-quality.sh          # Default quick layer; --quick is equivalent
+./scripts/check-quality.sh --full   # Workspace and feature contracts
 ```
 
-It runs formatting, architecture/UI/i18n gates, script tests, default compilation,
-library tests, and whitespace checks, then reports every failure with a nonzero
-exit status. It requires `cargo`, `rg`, `python3`, and `git`; library HTTP fixtures
-need localhost listening permission. Known structure overruns remain blocking;
-their ownership plan and batch A/B evidence are in [batch 64](docs/p6-64-quality.md).
-This command does not enable hosted CI or replace targeted UI/performance checks.
+Both layers run formatting, architecture/UI/i18n gates, script tests and whitespace
+checks. Quick adds the default root check and root library tests. Full instead runs
+workspace all-targets check, workspace unit/integration tests, workspace all-targets
+Clippy with warnings denied, and an all-targets check of the `usher` application
+without its optional AI core and UI/Settings bridges. Full sets `CARGO_INCREMENTAL=0`
+and enables Slint debug metadata for workspace tests, matching manual CI. Workspace
+tests deliberately exclude the separately tracked logger doctest.
+
+Every ordinary failure is reported with its original exit code; later checks still
+run and the aggregate exit status remains nonzero. Interrupts stop the sequence.
+The commands require `cargo`, `rg`, `python3`, and `git`; HTTP fixtures need localhost
+listening permission. Known structure and lint failures remain blocking. The manual
+macOS CI job uses the full entry; Windows retains its separate default workspace
+check. This does not enable hosted schedules or replace targeted UI/Release A/B
+checks. The original structure ownership plan is in [batch 64](docs/p6-64-quality.md).
 
 AI Code Review is a detachable Cargo feature enabled by the default product
 build. For a constrained build without its core package or UI/settings bridge:

@@ -90,6 +90,15 @@ features when their shared state is materially changed.
 - A persistence failure is observable through the facade callback and bounded
   logs/diagnostics. The feature must document retry, rollback, or memory-only
   degradation and must not silently block UI dispatch.
+- A failed latest snapshot remains dirty until superseded or successfully
+  retried. `retry_failed()` explicitly schedules one write attempt without an
+  Action or a business-revision increment; concurrent callers share an active
+  attempt. Flush captures both the accepted revision and scheduled attempt so
+  an old failure cannot satisfy a new retry barrier. Ordinary flush/shutdown
+  never create retries or busy loops; retry after closing returns failure.
+  Hook configuration saves/toggles and explicit AI Agent Settings saves request
+  this recovery before their durable flush. The worker retains at most one
+  active and one latest pending/dirty unique snapshot.
 - Feature workers may skip serialization/writes when a separate durable revision
   is unchanged. Output-only commits still notify live subscribers and satisfy
   the flush barrier because the durable projection has already been written.
@@ -114,6 +123,12 @@ features when their shared state is materially changed.
   并发/重复关闭安全。控制等待通过版本条件实现，不使用无界控制消息队列。
 - 持久化失败必须通过门面回调及有界日志/诊断可观测；Feature 应明确重试、回滚或降级
   为仅内存状态，禁止静默阻塞 UI dispatch。
+- 失败的最新快照保持 dirty，直到被新状态替代或重试成功。`retry_failed()` 显式安排
+  一次写入，不 dispatch Action、不增加业务 revision；并发调用共享在途尝试。Flush
+  同时捕获已接受 revision 与已安排的尝试，旧失败不能提前结束新重试的屏障。普通
+  flush/shutdown 不自动重试、不忙循环；关闭后重试返回失败。Hook 配置保存/开关和
+  AI Agent Settings 显式保存在持久化 flush 前请求恢复。Worker 最多保留一个活动
+  快照和一个最新 pending/dirty 独占快照。
 - Hover、Focus、打开菜单、本地确认计时器等临时 UI 状态，除非确有其他页面消费，
   否则不得进入持久 Store。
 
@@ -173,6 +188,10 @@ The message center and Project registry are reference implementations:
 - Restart after each durable action class and verify the final State reloads.
 - For deferred stores, verify hydration causes no write, then verify the first
   changed post-hydration action persists and `flush` observes it.
+- Fail a durable write, restore the target and explicitly save the same value;
+  verify successful reload without a business revision increment. Interleave an
+  old failure/new state, repeated failures, concurrent retry/flush/shutdown and
+  closing; verify bounded owners, no automatic retry and the correct barrier.
 - Drop a subscription and verify it receives no later commits.
 - Run Store crate tests, the feature's persistence tests, full library tests,
   and the affected route-switch matrix.
@@ -185,6 +204,9 @@ The message center and Project registry are reference implementations:
 - 每类持久 Action 后重启，确认最终 State 正确恢复。
 - 对 deferred store，确认 hydration 不写盘，随后第一个变更 Action 会持久化且 `flush`
   能观察到该写入。
+- 注入写失败、恢复目标并显式保存同值；确认重载成功且业务 revision 不变。交错旧
+  失败/新状态、重复失败、并发 retry/flush/shutdown 与关闭；确认 owner 有界、不自动
+  重试且屏障结果正确。
 - Drop subscription 后不得再收到 commit。
 - 运行 Store crate 测试、Feature 持久化测试、完整 lib 测试和受影响路由切换矩阵。
 

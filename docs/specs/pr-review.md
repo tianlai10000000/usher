@@ -253,6 +253,23 @@ An implementation in another stack should preserve these provider-neutral record
 
 Provider adapters accept a validated `RepositoryContext` and return only the domain records above. They own provider URLs, authentication headers, pagination interpretation, JSON decoding, and normalization. The UI and workflow controller neither construct URLs nor parse provider JSON.
 
+GitHub, GitLab and Gitee public/enterprise ordinary metadata responses declare a
+16 MiB limit; PR files, diff and commit-comparison responses declare 64 MiB.
+These are per-response finite accepted inputs checked by the shared HTTP chunk
+pipeline. Oversize essential reads fail without partial normalized results;
+optional probes retain their existing fallback. Source/conflict budgets remain
+separate. Pagination aggregation and retained content are not bounded by these
+limits, and the large-file explicit syntax-load gate is applied only after a
+successful complete download. Declaring a response limit does not change retry,
+authentication, outgoing mutation payloads or ignored/header-only body behavior.
+
+GitHub、GitLab 与 Gitee public/enterprise 普通元数据响应声明 16 MiB 上限；
+PR 文件、diff 与 commit 比较响应声明 64 MiB 上限。这是通过统一 HTTP chunk
+管线执行的每响应有限输入边界。关键读取超限失败，不返回部分归一化结果；
+选填探测保留既有回退。源码/冲突预算独立，分页累积及 retained 内容不由这些
+上限约束；大文件显式语法加载在完整下载成功后执行。声明响应预算不改变重试、
+认证、外发变更 payload 或忽略正文/只读 header 的既有行为。
+
 | Provider | Read path | Review | Merge | Authentication | Tab badge counts |
 | --- | --- | --- | --- | --- | --- |
 | GitHub / GitHub Enterprise | issue search plus visible-row detail; PR files and contents | Comment, Approve, Request changes | repository-enabled Merge, Squash, Rebase | `Authorization: Bearer <token>` | Commits from detail `commits` or one `per_page=1` probe via Link `rel=last`; Conversation is detail `comments` plus the independently counted reviews collection, because COMMENT reviews are excluded from `comments` |

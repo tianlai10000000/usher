@@ -39,10 +39,9 @@ use crate::{
 
 use super::config::{ReviewConfigFacade, default_session_dir};
 use super::response::{self, ResponseVariant};
-use super::storage::session_paths;
 
 #[cfg(test)]
-use super::storage::reconcile_session_files;
+use super::storage::{reconcile_session_files, session_paths};
 use super::task_persistence::TaskPersistenceWorker;
 
 type TaskStore = dyn StateStore<ReviewTaskState, ReviewTaskAction, ReviewTaskActionResult>;
@@ -223,19 +222,22 @@ struct PendingReviewRequest {
     extra_requirements: String,
 }
 
-use super::sessions::{
-    PullRequestChatSession, load_chat_session, load_session, load_task_state, persist_chat_session,
-    persist_session, unix_millis,
-};
+use super::session_transactions::{SessionSnapshot, SessionTransactions};
+#[cfg(test)]
+use super::sessions::load_chat_session;
+use super::sessions::{PullRequestChatSession, load_task_state, unix_millis};
 
 #[derive(Default)]
-struct ReviewCancellation {
-    cancelled: AtomicBool,
+pub(super) struct ReviewCancellation {
+    cancelled: Arc<AtomicBool>,
     notify: Notify,
 }
 
 impl ReviewCancellation {
-    fn cancel(&self) {
+    pub(super) fn flag(&self) -> Arc<AtomicBool> {
+        self.cancelled.clone()
+    }
+    pub(super) fn cancel(&self) {
         if !self.cancelled.swap(true, Ordering::AcqRel) {
             // One task owns each cancellation handle. `notify_one` retains a
             // permit if cancellation races with registration of the waiter.
@@ -258,7 +260,7 @@ impl ReviewCancellation {
     }
 }
 
-async fn run_review_work_until_cancelled<T>(
+pub(super) async fn run_review_work_until_cancelled<T>(
     cancellation: Arc<ReviewCancellation>,
     work: impl Future<Output = T>,
 ) -> Result<T, ()> {
@@ -286,6 +288,8 @@ struct ControllerInner {
     cancellations: Mutex<HashMap<ReviewTaskId, Arc<ReviewCancellation>>>,
     chat_cancellations: Mutex<HashMap<ReviewTaskId, Arc<ReviewCancellation>>>,
     chat_status_key: Mutex<Option<&'static str>>,
+    chat_delivery_generation: Arc<AtomicU64>,
+    sessions: Arc<SessionTransactions>,
     response_projector: Mutex<AgentResponseProjector>,
     response_projection_suspended: AtomicBool,
     response_projector_clear_requested: AtomicBool,
@@ -293,7 +297,6 @@ struct ControllerInner {
     response_actions: Mutex<HashMap<String, BoundRepositoryFileAction>>,
     response_variant: ResponseVariant,
     artifact_preview: ArtifactPreviewHandle,
-    session_dir: PathBuf,
     task_persistence: TaskPersistenceWorker,
     message_center: MessageCenter,
 }
@@ -554,8 +557,17 @@ pub(crate) fn setup_ai_review(
         ReviewTaskState::default(),
         reduce_tasks,
     ));
-    let task_persistence =
-        TaskPersistenceWorker::start(task_state_path.clone(), session_dir.clone(), false);
+    let session_catalog = task_store.clone();
+    let sessions = SessionTransactions::new(
+        session_dir.clone(),
+        Arc::new(move || session_catalog.snapshot().state_arc()),
+    );
+    let task_persistence = TaskPersistenceWorker::start_coordinated(
+        task_state_path.clone(),
+        session_dir.clone(),
+        false,
+        sessions.clone(),
+    );
     let persistence_sender = task_persistence.sender.clone();
     let persistence_subscription = task_store.observe_commits(Arc::new(move |snapshot| {
         let _ = persistence_sender.send(snapshot.revision(), snapshot.state_arc());
@@ -577,6 +589,8 @@ pub(crate) fn setup_ai_review(
         cancellations: Mutex::new(HashMap::new()),
         chat_cancellations: Mutex::new(HashMap::new()),
         chat_status_key: Mutex::new(None),
+        chat_delivery_generation: Arc::new(AtomicU64::new(0)),
+        sessions,
         response_projector: Mutex::new(AgentResponseProjector::default()),
         response_projection_suspended: AtomicBool::new(true),
         response_projector_clear_requested: AtomicBool::new(false),
@@ -584,7 +598,6 @@ pub(crate) fn setup_ai_review(
         response_actions: Mutex::new(HashMap::new()),
         response_variant,
         artifact_preview,
-        session_dir,
         task_persistence,
         message_center,
     });
@@ -1360,17 +1373,9 @@ impl ControllerInner {
         };
 
         match outcome {
-            Ok(mut session) if !self.is_cancelled(&id) => {
-                if let Ok(Some(chat_session)) = load_chat_session(self.chat_session_path(&id)).await
-                {
-                    merge_conversations(
-                        &mut session.conversation,
-                        chat_session.conversation.as_slice(),
-                    );
-                }
+            Ok(session) if !self.is_cancelled(&id) => {
                 let mount_generation = self.response_mount_generation.load(Ordering::Acquire);
-                let projection =
-                    SessionProjection::from_review(&session, self.as_ref(), mount_generation);
+                let delivery_generation = self.chat_delivery_generation.load(Ordering::Acquire);
                 let finding_count = session.result.findings.len() as u32;
                 let mut hook_event = crate::hooks::HookTrigger::new(
                     crate::hooks::AI_REVIEW_COMPLETED,
@@ -1387,15 +1392,20 @@ impl ControllerInner {
                 hook_event.event_id = format!("ai-review-completed-{}", id.0);
                 hook_event.project = Some(session.task.target.project_key.0.clone());
                 hook_event.cwd = session.input.repository_context.local_repo.clone();
-                match persist_session(self.session_path(&id), session).await {
-                    Ok(()) => {
+                match self.sessions.complete_review(id.clone(), session).await {
+                    Ok(session) => {
+                        let projection = SessionProjection::from_review(
+                            &session,
+                            self.as_ref(),
+                            mount_generation,
+                        );
                         self.task_store.dispatch(ReviewTaskAction::Complete {
                             id: id.clone(),
                             finding_count,
                             updated_at_unix_ms: unix_millis(),
                         });
                         if let Some(projection) = projection {
-                            self.apply_projection_if_visible(projection);
+                            self.apply_projection_if_visible(projection, delivery_generation, true);
                         }
                         self.publish_terminal_message(&id, true, finding_count, "");
                         if let Err(error) = crate::hooks::emit(hook_event).await {
@@ -1673,46 +1683,20 @@ impl ControllerInner {
         ui.set_ai_review_chat_elapsed_seconds(0);
         self.log_owned_bytes("panel.opened");
 
-        let path = self.session_path(id);
-        let chat_path = self.chat_session_path(id);
-        let completed = task.status == ReviewTaskStatus::Completed;
+        let delivery_generation = self.chat_delivery_generation.load(Ordering::Acquire);
         let task_id_for_load = id.0.clone();
+        let session_id = id.clone();
         let inner = self.clone();
         crate::app_runtime::shared_runtime().spawn(async move {
-            let projection = if completed {
-                match load_session(path).await {
-                    Ok(mut session) => {
-                        if let Ok(Some(chat_session)) = load_chat_session(chat_path).await {
-                            merge_conversations(
-                                &mut session.conversation,
-                                chat_session.conversation.as_slice(),
-                            );
-                        }
-                        Ok(SessionProjection::from_review(
-                            &session,
-                            inner.as_ref(),
-                            mount_generation,
-                        ))
-                    }
-                    Err(error) => match load_chat_session(chat_path).await {
-                        Ok(Some(session)) => Ok(SessionProjection::from_chat(
-                            &session,
-                            inner.as_ref(),
-                            mount_generation,
-                        )),
-                        Ok(None) => Err(error),
-                        Err(chat_error) => Err(chat_error),
-                    },
-                }
-            } else {
-                load_chat_session(chat_path).await.map(|session| {
-                    session.as_ref().and_then(|session| {
-                        SessionProjection::from_chat(session, inner.as_ref(), mount_generation)
-                    })
+            let projection = inner.sessions.read(session_id).await.map(|session| {
+                session.as_ref().and_then(|session| {
+                    project_session_snapshot(session, inner.as_ref(), mount_generation)
                 })
-            };
+            });
             match projection {
-                Ok(Some(projection)) => inner.apply_projection_if_visible(projection),
+                Ok(Some(projection)) => {
+                    inner.apply_projection_if_visible(projection, delivery_generation, false)
+                }
                 Ok(None) => {}
                 Err(error) => {
                     log::warn!("[AI Review][Session] Failed to open task result: {error}");
@@ -1722,7 +1706,10 @@ impl ControllerInner {
                         let Some(ui) = window.upgrade() else {
                             return;
                         };
-                        if inner.response_mount_is_current(mount_generation)
+                        if chat_delivery_is_current(
+                            &inner.chat_delivery_generation,
+                            delivery_generation,
+                        ) && inner.response_mount_is_current(mount_generation)
                             && ui.get_ai_review_current_task_id() == task_id
                         {
                             ui.set_ai_review_error(localized_review_failure(&error).into());
@@ -1734,7 +1721,12 @@ impl ControllerInner {
         });
     }
 
-    fn apply_projection_if_visible(self: &Arc<Self>, projection: SessionProjection) {
+    fn apply_projection_if_visible(
+        self: &Arc<Self>,
+        projection: SessionProjection,
+        delivery_generation: u64,
+        review_completion: bool,
+    ) {
         let window = self.window.clone();
         let inner = self.clone();
         let _ = slint::invoke_from_event_loop(move || {
@@ -1747,7 +1739,23 @@ impl ControllerInner {
             {
                 return;
             }
-            apply_projection(&ui, projection, &inner.response_actions);
+            if review_completion {
+                apply_review_projection_for_ask_generation(
+                    &ui,
+                    projection,
+                    &inner.response_actions,
+                    &inner.chat_delivery_generation,
+                    delivery_generation,
+                );
+            } else {
+                apply_projection_for_ask_generation(
+                    &ui,
+                    projection,
+                    &inner.response_actions,
+                    &inner.chat_delivery_generation,
+                    delivery_generation,
+                );
+            }
         });
     }
 
@@ -1817,13 +1825,13 @@ impl ControllerInner {
             return;
         };
         cancellation.cancel();
-        *self
-            .chat_status_key
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some("ai_review.stopping_response");
         if let Some(ui) = self.window.upgrade()
             && ui.get_ai_review_current_task_id() == id.0
         {
+            *self
+                .chat_status_key
+                .lock()
+                .unwrap_or_else(|p| p.into_inner()) = Some("ai_review.stopping_response");
             ui.set_ai_review_chat_status(
                 crate::i18n::tr("ai_review.stopping_response")
                     .into_owned()
@@ -1858,17 +1866,27 @@ impl ControllerInner {
         &self,
         id: &ReviewTaskId,
         cancellation: &Arc<ReviewCancellation>,
+        delivery_generation: u64,
         key: &'static str,
     ) {
-        *self
-            .chat_status_key
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(key);
+        {
+            let mut status = self
+                .chat_status_key
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            if !chat_delivery_is_current(&self.chat_delivery_generation, delivery_generation) {
+                return;
+            }
+            *status = Some(key);
+        }
         let id = id.0.clone();
         let cancellation = cancellation.clone();
         let window = self.window.clone();
+        let current_delivery = self.chat_delivery_generation.clone();
         let _ = slint::invoke_from_event_loop(move || {
-            if cancellation.is_cancelled() {
+            if cancellation.is_cancelled()
+                || !chat_delivery_is_current(&current_delivery, delivery_generation)
+            {
                 return;
             }
             let Some(ui) = window.upgrade() else {
@@ -1932,12 +1950,41 @@ impl ControllerInner {
             ui.get_workflow_pr_review_target_branch().as_str(),
             "",
         );
+        let settings = crate::ai::settings_state::current();
+        let fallback = PullRequestChatSession {
+            input: provisional_chat_input(&request, &settings, &task.target),
+            task,
+            conversation: Vec::new(),
+        };
+        let accepted = self.sessions.accept_user(
+            id.clone(),
+            user_chat_message(message.clone()),
+            fallback,
+            cancellation.flag(),
+        );
+        let (attempt, user_receipt) = match accepted {
+            Ok(accepted) => accepted,
+            Err(error) => {
+                self.chat_cancellations
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .remove(&id);
+                ui.set_ai_review_chat_sending(false);
+                ui.set_ai_review_error(localized_review_failure(&error).into());
+                return;
+            }
+        };
+        let delivery_generation = {
+            let mut status = self
+                .chat_status_key
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            let generation = self.chat_delivery_generation.fetch_add(1, Ordering::AcqRel) + 1;
+            *status = Some("ai_review.preparing_context");
+            generation
+        };
         append_ui_conversation(&ui, "user", message.as_str(), None);
         ui.set_ai_review_chat_sending(true);
-        *self
-            .chat_status_key
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some("ai_review.preparing_context");
         ui.set_ai_review_chat_status(
             crate::i18n::tr("ai_review.preparing_context")
                 .into_owned()
@@ -1945,152 +1992,52 @@ impl ControllerInner {
         );
         ui.set_ai_review_chat_elapsed_seconds(0);
         ui.set_ai_review_message_input("".into());
-        let path = self.session_path(&id);
-        let chat_path = self.chat_session_path(&id);
         let request_started = Instant::now();
         crate::app_runtime::shared_runtime().spawn(async move {
             let work_cancellation = cancellation.clone();
-            let result = run_review_work_until_cancelled(cancellation.clone(), async {
-                async {
+            // Do not select cancellation against the accepted user's real blocking receipt.
+            let committed_user = user_receipt.await.unwrap_or_else(|_| Err("AI review session user receipt was lost".into()));
+            let result = match committed_user {
+                Err(error) => Ok(Err(error)),
+                Ok(mut snapshot) => run_review_work_until_cancelled(cancellation.clone(), async {
                     let fixture = fixture_enabled();
-                    let settings = crate::ai::settings_state::current();
-
-                    if task.status == ReviewTaskStatus::Completed {
-                        let mut session = load_session(path.clone()).await?;
-                        if let Some(chat_session) = load_chat_session(chat_path.clone()).await? {
-                            merge_conversations(
-                                &mut session.conversation,
-                                chat_session.conversation.as_slice(),
-                            );
-                        }
-                        session
-                            .conversation
-                            .push(user_chat_message(message.clone()));
-                        persist_session(path.clone(), session.clone()).await?;
-                        if !fixture {
-                            validate_model_settings(&settings)?;
-                        }
-                        self.update_chat_status(&id, &work_cancellation, "ai_review.thinking");
-                        let (answer, prompt) = complete_chat(
-                            &settings,
-                            &id,
-                            &session.input,
-                            Some(&session.result),
-                            session.conversation.as_slice(),
-                            fixture,
-                        )
-                        .await?;
-                        session.conversation.push(assistant_chat_message(
-                            answer,
-                            elapsed_millis(request_started.elapsed()),
-                            prompt,
-                        ));
-                        let projection = SessionProjection::from_review(
-                            &session,
-                            self.as_ref(),
-                            mount_generation,
-                        );
-                        persist_session(path, session).await?;
-                        return Ok::<_, String>(projection);
+                    if !fixture { validate_model_settings(&settings)?; }
+                    if matches!(&snapshot, SessionSnapshot::Chat(chat) if chat.input.unified_diff.is_empty()) {
+                        let input = build_chat_input(&request, &settings, fixture).await?;
+                        let Some(current) = self.sessions.update_context(attempt.clone(), input).await? else { return Ok(None); };
+                        snapshot = current;
                     }
-
-                    let (mut session, needs_context) = match load_chat_session(chat_path.clone())
-                        .await?
-                    {
-                        Some(session) => (session, false),
-                        None => (
-                            PullRequestChatSession {
-                                input: provisional_chat_input(&request, &settings, &task.target),
-                                task,
-                                conversation: Vec::new(),
-                            },
-                            true,
-                        ),
-                    };
-                    session.conversation.push(user_chat_message(message));
-                    persist_chat_session(chat_path.clone(), session.clone()).await?;
-                    if !fixture {
-                        validate_model_settings(&settings)?;
-                    }
-                    if needs_context {
-                        session.input = build_chat_input(&request, &settings, fixture).await?;
-                        persist_chat_session(chat_path.clone(), session.clone()).await?;
-                    }
-                    self.update_chat_status(&id, &work_cancellation, "ai_review.thinking");
-                    let (answer, prompt) = complete_chat(
-                        &settings,
-                        &id,
-                        &session.input,
-                        None,
-                        session.conversation.as_slice(),
-                        fixture,
-                    )
-                    .await?;
-                    session.conversation.push(assistant_chat_message(
-                        answer,
-                        elapsed_millis(request_started.elapsed()),
-                        prompt,
-                    ));
-                    let projection =
-                        SessionProjection::from_chat(&session, self.as_ref(), mount_generation);
-                    persist_chat_session(chat_path, session).await?;
-                    Ok(projection)
-                }
-                .await
-            })
-            .await;
+                    self.update_chat_status(&id, &work_cancellation, delivery_generation, "ai_review.thinking");
+                    let result = match &snapshot { SessionSnapshot::Review(review) => Some(&review.result), SessionSnapshot::Chat(_) => None };
+                    let (answer, prompt) = complete_chat(&settings, &id, snapshot.input(), result, snapshot.conversation(), fixture).await?;
+                    let assistant = assistant_chat_message(answer, elapsed_millis(request_started.elapsed()), prompt);
+                    let committed = self.sessions.append_assistant(attempt.clone(), assistant).await?;
+                    Ok::<_, String>(committed.as_ref().and_then(|session| project_session_snapshot(session, self.as_ref(), mount_generation)))
+                }).await,
+            };
+            // An assistant/context commit already admitted before Stop owns a real handle.
+            // Keep duplicate-start protection until that handle, too, has settled.
+            self.sessions.wait_attempt(&attempt).await;
             let elapsed_ms = elapsed_millis(request_started.elapsed());
-            self.chat_cancellations
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .remove(&id);
-            *self
-                .chat_status_key
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+            {
+                let mut status = self.chat_status_key.lock().unwrap_or_else(|p| p.into_inner());
+                if chat_delivery_is_current(&self.chat_delivery_generation, delivery_generation) { *status = None; }
+            }
+            self.chat_cancellations.lock().unwrap_or_else(|p| p.into_inner()).remove(&id);
             let window = self.window.clone();
             let inner_for_ui = self.clone();
             let _ = slint::invoke_from_event_loop(move || {
                 let Some(ui) = window.upgrade() else {
                     return;
                 };
-                if !inner_for_ui.response_mount_is_current(mount_generation)
+                if !chat_delivery_is_current(&inner_for_ui.chat_delivery_generation, delivery_generation)
+                    || !inner_for_ui.response_mount_is_current(mount_generation)
                     || ui.get_ai_review_current_task_id() != id.0
                 {
                     return;
                 }
-                ui.set_ai_review_chat_sending(false);
-                ui.set_ai_review_chat_status("".into());
-                ui.set_ai_review_chat_elapsed_seconds(0);
-                match result {
-                    Ok(Ok(Some(projection)))
-                        if ui.get_ai_review_panel_visible()
-                            && ui.get_ai_review_current_task_id() == projection.task.id.0 =>
-                    {
-                        apply_projection(&ui, projection, &inner_for_ui.response_actions);
-                    }
-                    Ok(Ok(_)) => {}
-                    Ok(Err(error)) => {
-                        log::warn!("[AI Review][Chat] Completion failed: {error}");
-                        let reason = localized_review_failure(error.as_str());
-                        let message = crate::i18n::tr_args(
-                            "ai_review.response_failed",
-                            &[("reason", reason.as_str())],
-                        );
-                        append_ui_conversation(
-                            &ui,
-                            "assistant",
-                            message.as_str(),
-                            Some(elapsed_ms),
-                        );
-                    }
-                    Err(()) => append_ui_conversation(
-                        &ui,
-                        "assistant",
-                        crate::i18n::tr("ai_review.response_stopped").as_ref(),
-                        Some(elapsed_ms),
-                    ),
-                }
+                apply_chat_completion(&ui, result, elapsed_ms, &inner_for_ui.response_actions,
+                    &inner_for_ui.chat_delivery_generation, delivery_generation);
             });
         });
     }
@@ -2138,14 +2085,6 @@ impl ControllerInner {
         ) {
             log::warn!("[AI Review] Failed to publish completion message: {publish_error}");
         }
-    }
-
-    fn session_path(&self, id: &ReviewTaskId) -> PathBuf {
-        session_paths(&self.session_dir, id).0
-    }
-
-    fn chat_session_path(&self, id: &ReviewTaskId) -> PathBuf {
-        session_paths(&self.session_dir, id).1
     }
 
     fn log_owned_bytes(&self, reason: &str) {
@@ -2420,6 +2359,7 @@ fn bounded_utf8_prefix(value: &str, max_bytes: usize) -> &str {
 
 fn user_chat_message(content: String) -> ReviewConversationMessage {
     ReviewConversationMessage {
+        message_id: None,
         role: ReviewConversationRole::User,
         content,
         created_at_unix_ms: unix_millis(),
@@ -2434,6 +2374,7 @@ fn assistant_chat_message(
     prompt: Option<PromptProvenance>,
 ) -> ReviewConversationMessage {
     ReviewConversationMessage {
+        message_id: None,
         role: ReviewConversationRole::Assistant,
         content,
         created_at_unix_ms: unix_millis(),
@@ -2471,25 +2412,89 @@ fn merge_prompt_provenance(target: &mut PromptProvenance, additional: PromptProv
     }
 }
 
-fn merge_conversations(
-    conversation: &mut Vec<ReviewConversationMessage>,
-    additional: &[ReviewConversationMessage],
+fn apply_review_projection_for_ask_generation(
+    ui: &MainWindow,
+    projection: SessionProjection,
+    actions: &Mutex<HashMap<String, BoundRepositoryFileAction>>,
+    current: &AtomicU64,
+    generation: u64,
 ) {
-    for message in additional {
-        if let Some(existing) = conversation.iter_mut().find(|existing| {
-            existing.role == message.role
-                && existing.content == message.content
-                && existing.created_at_unix_ms == message.created_at_unix_ms
-                && existing.elapsed_ms == message.elapsed_ms
-        }) {
-            if existing.prompt.is_none() {
-                existing.prompt = message.prompt.clone();
-            }
-        } else {
-            conversation.push(message.clone());
-        }
+    if chat_delivery_is_current(current, generation) {
+        apply_projection(ui, projection, actions);
+    } else if let Some(result) = projection.result {
+        // New Ask owns conversation, but the current Review's completed findings remain valid.
+        apply_review_result(ui, &projection.task, result);
+        rebuild_response_visual_rows(ui);
     }
-    conversation.sort_by_key(|message| message.created_at_unix_ms);
+}
+
+fn apply_projection_for_ask_generation(
+    ui: &MainWindow,
+    projection: SessionProjection,
+    actions: &Mutex<HashMap<String, BoundRepositoryFileAction>>,
+    current: &AtomicU64,
+    generation: u64,
+) -> bool {
+    if !chat_delivery_is_current(current, generation) {
+        return false;
+    }
+    apply_projection(ui, projection, actions);
+    true
+}
+fn apply_chat_completion(
+    ui: &MainWindow,
+    result: Result<Result<Option<SessionProjection>, String>, ()>,
+    elapsed_ms: u64,
+    response_actions: &Mutex<HashMap<String, BoundRepositoryFileAction>>,
+    current: &AtomicU64,
+    generation: u64,
+) -> bool {
+    if !chat_delivery_is_current(current, generation) {
+        return false;
+    }
+    ui.set_ai_review_chat_sending(false);
+    ui.set_ai_review_chat_status("".into());
+    ui.set_ai_review_chat_elapsed_seconds(0);
+    match result {
+        Ok(Ok(Some(projection)))
+            if ui.get_ai_review_panel_visible()
+                && ui.get_ai_review_current_task_id() == projection.task.id.0 =>
+        {
+            apply_projection(ui, projection, response_actions);
+        }
+        Ok(Ok(_)) => {}
+        Ok(Err(error)) => {
+            log::warn!("[AI Review][Chat] Completion failed: {error}");
+            let reason = localized_review_failure(error.as_str());
+            let message =
+                crate::i18n::tr_args("ai_review.response_failed", &[("reason", reason.as_str())]);
+            append_ui_conversation(ui, "assistant", message.as_str(), Some(elapsed_ms));
+        }
+        Err(()) => append_ui_conversation(
+            ui,
+            "assistant",
+            crate::i18n::tr("ai_review.response_stopped").as_ref(),
+            Some(elapsed_ms),
+        ),
+    }
+    true
+}
+
+fn chat_delivery_is_current(current: &AtomicU64, delivery_generation: u64) -> bool {
+    current.load(Ordering::Acquire) == delivery_generation
+}
+
+fn project_session_snapshot(
+    session: &SessionSnapshot,
+    inner: &ControllerInner,
+    generation: u64,
+) -> Option<SessionProjection> {
+    match session {
+        SessionSnapshot::Review(session) => {
+            SessionProjection::from_review(session, inner, generation)
+        }
+        SessionSnapshot::Chat(session) => SessionProjection::from_chat(session, inner, generation),
+    }
 }
 
 fn current_pr_row(ui: &MainWindow, number: &str) -> Option<WorkflowPullRequestItem> {
@@ -2750,6 +2755,29 @@ fn apply_task_header(ui: &MainWindow, task: &ReviewTaskSummary) {
     ui.set_ai_review_elapsed_seconds((elapsed_ms / 1_000).min(i32::MAX as u64) as i32);
 }
 
+fn apply_review_result(ui: &MainWindow, task: &ReviewTaskSummary, result: ReviewResult) {
+    apply_task_header(ui, task);
+    ui.set_ai_review_summary(result.summary.into());
+    ui.set_ai_review_findings(ModelRc::new(VecModel::from(
+        result
+            .findings
+            .into_iter()
+            .enumerate()
+            .map(|(index, finding)| AiReviewFindingItem {
+                id: format!("{}:{index}", task.id.0).into(),
+                severity: finding.severity.as_str().into(),
+                file: finding.file.into(),
+                line: finding.line,
+                side: finding.side.as_str().into(),
+                head_sha: task.target.head_sha.clone().into(),
+                title: finding.title.into(),
+                explanation: finding.explanation.into(),
+                suggestion: finding.suggestion.into(),
+            })
+            .collect::<Vec<_>>(),
+    )));
+}
+
 fn apply_projection(
     ui: &MainWindow,
     projection: SessionProjection,
@@ -2763,26 +2791,7 @@ fn apply_projection(
         response_actions,
     } = projection;
     if let Some(result) = result {
-        apply_task_header(ui, &task);
-        ui.set_ai_review_summary(result.summary.into());
-        ui.set_ai_review_findings(ModelRc::new(VecModel::from(
-            result
-                .findings
-                .into_iter()
-                .enumerate()
-                .map(|(index, finding)| AiReviewFindingItem {
-                    id: format!("{}:{index}", task.id.0).into(),
-                    severity: finding.severity.as_str().into(),
-                    file: finding.file.into(),
-                    line: finding.line,
-                    side: finding.side.as_str().into(),
-                    head_sha: task.target.head_sha.clone().into(),
-                    title: finding.title.into(),
-                    explanation: finding.explanation.into(),
-                    suggestion: finding.suggestion.into(),
-                })
-                .collect::<Vec<_>>(),
-        )));
+        apply_review_result(ui, &task, result);
     }
     if !ui.get_ai_review_chat_sending() {
         *active_response_actions
@@ -3152,6 +3161,7 @@ fn response_fixture_session(
     for index in 0..message_count {
         let created_at = 1_777_088_600_000 + index as u64 * 2_000;
         conversation.push(ReviewConversationMessage {
+            message_id: None,
             role: ReviewConversationRole::User,
             content: if index == 0 {
                 "你这样改对消息块的性能有没有影响？".to_string()
@@ -3163,6 +3173,7 @@ fn response_fixture_session(
             prompt: None,
         });
         conversation.push(ReviewConversationMessage {
+            message_id: None,
             role: ReviewConversationRole::Assistant,
             content: response_fixture_markdown(index + 1, bytes_per_response),
             created_at_unix_ms: created_at + 1_000,
@@ -3383,6 +3394,10 @@ fn format_elapsed_ms(elapsed_ms: u64) -> String {
 }
 
 #[cfg(test)]
+#[path = "controller_session_tests.rs"]
+mod session_tests;
+
+#[cfg(test)]
 mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -3420,54 +3435,6 @@ mod tests {
             additional_rules: Vec::new(),
             extra_requirements: String::new(),
         }
-    }
-
-    #[tokio::test]
-    async fn cancellation_interrupts_in_flight_review_work() {
-        let cancellation = Arc::new(ReviewCancellation::default());
-        let work_cancellation = cancellation.clone();
-        let work = tokio::spawn(async move {
-            run_review_work_until_cancelled(work_cancellation, std::future::pending::<()>()).await
-        });
-
-        tokio::task::yield_now().await;
-        cancellation.cancel();
-
-        let result = tokio::time::timeout(Duration::from_secs(1), work)
-            .await
-            .expect("cancelled review work should finish promptly")
-            .expect("review work task should not panic");
-        assert_eq!(result, Err(()));
-    }
-
-    #[tokio::test]
-    async fn invalid_chat_history_is_preserved_instead_of_overwritten() {
-        let dir = std::env::temp_dir().join(format!(
-            "usher-ai-review-corrupt-chat-{}-{}",
-            std::process::id(),
-            NEXT_TASK_ID.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("review.chat.json");
-        fs::write(&path, b"{invalid").unwrap();
-
-        let error = load_chat_session(path.clone()).await.unwrap_err();
-        assert!(error.contains("was preserved"));
-        assert!(!path.exists());
-        let backup = fs::read_dir(&dir)
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .find(|candidate| {
-                candidate
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.starts_with("review.chat.json.corrupt-"))
-            })
-            .expect("corrupt chat backup");
-        assert_eq!(fs::read(&backup).unwrap(), b"{invalid");
-
-        fs::remove_file(backup).unwrap();
-        fs::remove_dir(dir).unwrap();
     }
 
     #[test]

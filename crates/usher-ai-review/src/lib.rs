@@ -674,6 +674,8 @@ impl ReviewConversationRole {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReviewConversationMessage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
     pub role: ReviewConversationRole,
     pub content: String,
     pub created_at_unix_ms: u64,
@@ -1137,8 +1139,45 @@ mod tests {
         )
         .expect("legacy review conversation");
 
+        assert_eq!(message.message_id, None);
         assert_eq!(message.elapsed_ms, None);
         assert_eq!(message.prompt, None);
+    }
+
+    #[test]
+    fn legacy_conversation_message_roundtrip_omits_message_identity() {
+        let legacy = serde_json::json!({
+            "role": "user",
+            "content": "legacy",
+            "created_at_unix_ms": 1
+        });
+        let message: ReviewConversationMessage =
+            serde_json::from_value(legacy.clone()).expect("legacy review conversation");
+
+        assert_eq!(message.message_id, None);
+        assert_eq!(serde_json::to_value(message).unwrap(), legacy);
+    }
+
+    #[test]
+    fn conversation_identity_roundtrip_preserves_distinct_submissions() {
+        let first = ReviewConversationMessage {
+            message_id: Some("operation-1:user".to_owned()),
+            role: ReviewConversationRole::User,
+            content: "same question".to_owned(),
+            created_at_unix_ms: 1,
+            elapsed_ms: None,
+            prompt: None,
+        };
+        let second = ReviewConversationMessage {
+            message_id: Some("operation-2:user".to_owned()),
+            ..first.clone()
+        };
+        let messages = vec![first, second];
+        let restored: Vec<ReviewConversationMessage> =
+            serde_json::from_slice(&serde_json::to_vec(&messages).unwrap()).unwrap();
+
+        assert_eq!(restored, messages);
+        assert_ne!(restored[0].message_id, restored[1].message_id);
     }
 
     #[test]

@@ -70,6 +70,9 @@ impl AiAgentSettingsFacade {
     }
 
     pub(crate) fn flush(&self) -> Result<(), String> {
+        // This is the explicit Settings Save barrier, including a same-value
+        // retry after a previously failed automatic commit.
+        self.store.retry_failed()?;
         self.store.flush()
     }
 
@@ -124,7 +127,46 @@ fn reduce_ai_agent_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn explicit_save_recovers_an_unchanged_failed_configuration() {
+        let failing = Arc::new(AtomicBool::new(true));
+        let failure = failing.clone();
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let count = attempts.clone();
+        let persisted = Arc::new(Mutex::new(None));
+        let saved = persisted.clone();
+        let facade = AiAgentSettingsFacade {
+            store: PersistentStore::new(
+                AiAgentSettings::default(),
+                reduce_ai_agent_settings,
+                "ai-agent-same-value-retry-test",
+                move |state| {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    if failure.load(Ordering::SeqCst) {
+                        return Err("injected write failure".into());
+                    }
+                    *saved.lock().unwrap() = Some(state.clone());
+                    Ok(())
+                },
+                |_, _| {},
+            )
+            .unwrap(),
+        };
+        let configuration = apply_provider_preset(&AiAgentSettings::default(), "openai");
+        let committed = facade.replace(configuration.clone());
+        assert_eq!(facade.store.flush().unwrap_err(), "injected write failure");
+        assert!(persisted.lock().unwrap().is_none());
+        failing.store(false, Ordering::SeqCst);
+        let retried = facade.replace(configuration.clone());
+        assert_eq!(retried.revision(), committed.revision());
+        facade.flush().unwrap();
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        assert_eq!(persisted.lock().unwrap().as_ref(), Some(&configuration));
+        facade.shutdown();
+    }
 
     #[test]
     fn provider_selection_updates_the_complete_preset_atomically() {

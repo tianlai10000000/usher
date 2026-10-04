@@ -11,6 +11,8 @@ use serde_json::Value;
 use crate::codereview::api::gitlab as endpoints;
 use crate::http::{self, RequestOptions};
 
+use super::response_budget::{MAX_DIFF_RESPONSE_BYTES, MAX_METADATA_RESPONSE_BYTES};
+
 use super::json::{
     fallback_total, header_u32, nested_string, string_field, value_to_id, value_u32,
 };
@@ -124,7 +126,9 @@ pub(super) async fn get_repo_detail(locator: &RepoLocator) -> Result<String, Str
 
     let response: GitLabProject = http::send_json(
         request,
-        RequestOptions::new("Load GitLab project details").retry_transient(3),
+        RequestOptions::new("Load GitLab project details")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -206,7 +210,9 @@ async fn get_gitlab_pull_request_server_page(
 
     let response = http::send(
         request,
-        RequestOptions::new("Load GitLab merge requests").retry_transient(3),
+        RequestOptions::new("Load GitLab merge requests")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -439,7 +445,9 @@ async fn hydrate_gitlab_review_statuses(
             );
             let approvals = http::send_json::<Value>(
                 gitlab_request(endpoint),
-                RequestOptions::new("Load GitLab merge request list approvals").retry_transient(3),
+                RequestOptions::new("Load GitLab merge request list approvals")
+                    .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+                    .retry_transient(3),
             )
             .await
             .ok();
@@ -517,7 +525,9 @@ pub(super) async fn get_pull_request_diff(
     }
     let detail: Value = http::send_json(
         detail_request,
-        RequestOptions::new("Load GitLab merge request details").retry_transient(3),
+        RequestOptions::new("Load GitLab merge request details")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -547,7 +557,9 @@ pub(super) async fn get_pull_request_diff(
         }
         let batch: Vec<Value> = http::send_json(
             request,
-            RequestOptions::new("Load GitLab merge request diffs").retry_transient(3),
+            RequestOptions::new("Load GitLab merge request diffs")
+                .response_byte_limit(MAX_DIFF_RESPONSE_BYTES)
+                .retry_transient(3),
         )
         .await
         .map_err(|error| error.to_string())?;
@@ -614,7 +626,9 @@ pub(super) async fn get_commit_range_diff(
             ("straight", "true"),
             ("unidiff", "true"),
         ]),
-        RequestOptions::new("Compare GitLab merge request commits").retry_transient(3),
+        RequestOptions::new("Compare GitLab merge request commits")
+            .response_byte_limit(MAX_DIFF_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -670,7 +684,9 @@ pub(super) async fn get_pull_request_action_state(
     // reads; fetch them concurrently while keeping each error path intact.
     let detail_future = http::send_json::<Value>(
         request,
-        RequestOptions::new("Load GitLab merge request readiness").retry_transient(3),
+        RequestOptions::new("Load GitLab merge request readiness")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     );
     let project_future = load_project_settings(locator, repo_project_id);
     let (detail, project) = tokio::join!(detail_future, project_future);
@@ -726,10 +742,13 @@ pub(super) async fn submit_pull_request_review(
     let request = gitlab_authenticated(http::post(endpoint)).json(&serde_json::json!({
         "sha": sha,
     }));
-    let result: Result<Value, String> =
-        http::send_json(request, RequestOptions::new("Approve GitLab merge request"))
-            .await
-            .map_err(|error| error.to_string());
+    let result: Result<Value, String> = http::send_json(
+        request,
+        RequestOptions::new("Approve GitLab merge request")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
+    )
+    .await
+    .map_err(|error| error.to_string());
     result.map(|_| ()).map_err(|error| {
         if posted_summary {
             format!("GitLab posted the review summary, but approval failed: {error}")
@@ -763,7 +782,8 @@ pub(super) async fn dismiss_pull_request_review(
     );
     let result: Result<Value, String> = http::send_json(
         gitlab_authenticated(http::post(endpoint)),
-        RequestOptions::new("Unapprove GitLab merge request"),
+        RequestOptions::new("Unapprove GitLab merge request")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
     )
     .await
     .map_err(|error| error.to_string());
@@ -817,10 +837,13 @@ pub(super) async fn merge_pull_request(
         remove_source_branch,
         sha.as_str(),
     ));
-    let payload: Value =
-        http::send_json(request, RequestOptions::new("Merge GitLab merge request"))
-            .await
-            .map_err(|error| error.to_string())?;
+    let payload: Value = http::send_json(
+        request,
+        RequestOptions::new("Merge GitLab merge request")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
     if string_field(&payload, "state").as_deref() != Some("merged") {
         return Err(string_field(&payload, "merge_error")
             .filter(|message| !message.trim().is_empty())
@@ -872,7 +895,9 @@ pub(super) async fn get_pull_request_conversation(
     let detail_future = async {
         http::send_json(
             gitlab_request(detail_endpoint),
-            RequestOptions::new("Load GitLab merge request conversation header").retry_transient(3),
+            RequestOptions::new("Load GitLab merge request conversation header")
+                .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+                .retry_transient(3),
         )
         .await
         .map_err(|error| error.to_string())
@@ -880,7 +905,9 @@ pub(super) async fn get_pull_request_conversation(
     let notes_future = async {
         http::send_json(
             gitlab_request(notes_endpoint).query(&[("per_page", "100")]),
-            RequestOptions::new("Load GitLab merge request notes").retry_transient(3),
+            RequestOptions::new("Load GitLab merge request notes")
+                .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+                .retry_transient(3),
         )
         .await
         .map_err(|error| error.to_string())
@@ -889,6 +916,7 @@ pub(super) async fn get_pull_request_conversation(
         http::send_json(
             gitlab_request(commits_endpoint).query(&[("per_page", "100")]),
             RequestOptions::new("Load GitLab merge request conversation commits")
+                .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
                 .retry_transient(3),
         )
         .await
@@ -898,7 +926,9 @@ pub(super) async fn get_pull_request_conversation(
         Ok::<Option<Value>, String>(
             http::send_json(
                 gitlab_request(approvals_endpoint),
-                RequestOptions::new("Load GitLab merge request approvals").retry_transient(3),
+                RequestOptions::new("Load GitLab merge request approvals")
+                    .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+                    .retry_transient(3),
             )
             .await
             .ok(),
@@ -908,7 +938,9 @@ pub(super) async fn get_pull_request_conversation(
         Ok::<Option<Value>, String>(
             http::send_json(
                 gitlab_request(current_user_endpoint),
-                RequestOptions::new("Load GitLab current review user").retry_transient(3),
+                RequestOptions::new("Load GitLab current review user")
+                    .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+                    .retry_transient(3),
             )
             .await
             .ok(),
@@ -1283,7 +1315,9 @@ pub(super) async fn get_pull_request_commits(
     );
     let values: Vec<Value> = http::send_json(
         gitlab_request(endpoint).query(&[("per_page", "100")]),
-        RequestOptions::new("Load GitLab merge request commits").retry_transient(3),
+        RequestOptions::new("Load GitLab merge request commits")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -1331,7 +1365,9 @@ async fn count_merge_request_commits(
     );
     let response = http::send(
         gitlab_request(endpoint).query(&[("page", "1"), ("per_page", "1")]),
-        RequestOptions::new("Count GitLab merge request commits").retry_transient(3),
+        RequestOptions::new("Count GitLab merge request commits")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .ok()?;
@@ -1352,7 +1388,8 @@ async fn load_merge_request_detail(
     );
     http::send_json(
         gitlab_request(endpoint).query(&[("with_merge_status_recheck", "true")]),
-        RequestOptions::new("Reload GitLab merge request before remote action"),
+        RequestOptions::new("Reload GitLab merge request before remote action")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
     )
     .await
     .map_err(|error| error.to_string())
@@ -1370,7 +1407,9 @@ async fn load_project_settings(
         );
     http::send_json(
         gitlab_request(endpoint),
-        RequestOptions::new("Load GitLab project merge settings").retry_transient(3),
+        RequestOptions::new("Load GitLab project merge settings")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())
@@ -1396,7 +1435,8 @@ async fn post_merge_request_note(
         gitlab_authenticated(http::post(endpoint)).json(&serde_json::json!({ "body": body }));
     let _: Value = http::send_json(
         request,
-        RequestOptions::new("Submit GitLab merge request comment"),
+        RequestOptions::new("Submit GitLab merge request comment")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
     )
     .await
     .map_err(|error| error.to_string())?;

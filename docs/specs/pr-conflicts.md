@@ -27,11 +27,34 @@ explicit refresh action reloads that session; re-entry preserves selection and s
   blocker does not prove Clear.
 - Enterprise Gitee v8 reverses `conflict_result`: true is Clear. Public v5 false
   `mergeable` remains Unknown. Overall merge eligibility is not conflict evidence.
-- Fresh list detail observations are reused. Enrichment uses at most four
-  concurrent lightweight reads, with at most two delayed rereads for Checking.
-  It never downloads Git objects for list rows. The 64-entry ephemeral cache
-  expires after 30 seconds. Refresh/project/settings changes invalidate it;
-  repository, PR and hosting/credential fingerprints prevent cross-context reuse.
+- Fresh list detail observations are reused. A lifetime owner accepts only the
+  newest pending list enrichment round; the driver drops a replaced round's
+  actual HTTP/backoff futures and RAII permits before starting its successor.
+  Four shared permits bound logical enrichment jobs, including backoff. This
+  does not bound list metadata/totals, workspace reads or all physical TCP
+  connections. Checking retains at most two delayed rereads and list rows never
+  download Git objects. The 64-entry ephemeral cache expires after 30 seconds;
+  replacement can reuse valid entries, while refresh/project invalidation clears
+  eligibility. Effective hosting/credential memory changes invalidate before
+  disk save, including SaveErr; setters do not notify when normalized current stored fields remain equal.
+  Legacy loaded fields with whitespace/trailing-slash differences may invalidate
+  conservatively on their first normalization.
+- Typed scope epochs are captured before contributing reads. A private short
+  gate serializes invalidation/close with typed cache commits; a stale epoch
+  cannot repopulate a cleared cache or update a newer UI scope. Repository, PR
+  and hosting/credential fingerprints remain part of identity. Projection
+  subscriptions only enqueue event-loop work and must not reenter that gate.
+- Workflow binding installs the driver and its existing async-drain registration
+  eagerly. Close rejects new rounds/observations, clears pending work and drops
+  active reads/backoffs; drain retains the real JoinHandle until completion and
+  caches its actual join receipt. Dropping a drain waiter does not abort/drop the
+  owned driver. The current void legacy shutdown adapter logs join failures;
+  this feature does not introduce a global exit deadline or nonzero-exit policy.
+
+四许可仅约束列表 enrichment 的逻辑任务；共享 Runtime、Provider HTTP、Workspace
+独立取消和 Page/Totals 代际保持原职责。最新轮次替换与设置失效会取消实际读取和
+退避 Future，服务器可能稍后才观测连接关闭。保存失败不撤销已生效的内存凭据，
+因此仍须推进 scope 并拒绝旧观测。缓存、UI 排队回写和关闭准入共用同一短 gate。
 - Local analysis is labelled and does not overwrite server list observations.
 
 跨平台状态只依据精确信号，不能把审批、流水线等阻塞解释成代码冲突。列表与详情

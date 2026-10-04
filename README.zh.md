@@ -58,13 +58,22 @@ git diff --check
 统一运行本地质量检查（不改写源码）：
 
 ```sh
-./scripts/check-quality.sh
+./scripts/check-quality.sh          # 默认快速层；等同 --quick
+./scripts/check-quality.sh --full   # workspace 与 feature 契约完整层
 ```
 
-依次检查格式、结构/UI/i18n、脚本测试、默认编译、库测试及空白错误，最后汇总所有
-失败并返回非零退出码。需要 `cargo`、`rg`、`python3`、`git`；库测试的 HTTP 夹具
-需要本地监听权限。已知结构超限仍会阻断；职责方案与本批 A/B 证据见
-[第 64 批](docs/p6-64-quality.md)。该命令不会启用托管 CI，也不替代专项 UI/性能验收。
+两层都检查格式、结构/UI/i18n、脚本测试及空白错误。快速层另执行默认 root check
+和 root 库测试；完整层改为 workspace all-targets check、workspace 单元/集成测试、
+所有 target 的 workspace Clippy（警告视为错误），以及排除可选 AI core 和
+UI/Settings bridge 的根应用 all-targets check。完整层固定 `CARGO_INCREMENTAL=0`，
+并为 workspace 测试启用 Slint debug metadata，与手动 CI 一致。workspace 测试
+显式不执行另行跟踪的 logger doctest。
+
+普通失败保留原退出码并继续后续检查，最终汇总返回非零；中断立即停止。需要
+`cargo`、`rg`、`python3`、`git`；HTTP 夹具需要本地监听权限。已知结构和 lint
+失败仍会阻断。macOS 手动 CI 复用完整入口，Windows 保留独立的默认 workspace
+编译检查；不会启用托管 schedule，也不替代专项 UI/Release A/B 验收。原结构
+职责方案见[第 64 批](docs/p6-64-quality.md)。
 
 AI Code Review 是默认产品构建启用的可拆卸 Cargo feature。受限构建可排除其核心包和
 UI/Settings bridge：

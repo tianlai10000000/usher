@@ -9,6 +9,8 @@ use serde_json::Value;
 use crate::codereview::api::github as endpoints;
 use crate::http::{self, RequestOptions};
 
+use super::response_budget::{MAX_DIFF_RESPONSE_BYTES, MAX_METADATA_RESPONSE_BYTES};
+
 use super::json::{nested_string, string_field, value_to_id, value_u32};
 use super::{
     PageCollector, PullRequestActionState, PullRequestCommit, PullRequestConversationItem,
@@ -64,7 +66,9 @@ pub(super) async fn get_repo_detail(locator: &RepoLocator) -> Result<String, Str
 
     let response: GitHubRepository = http::send_json(
         request,
-        RequestOptions::new("Load GitHub project details").retry_transient(3),
+        RequestOptions::new("Load GitHub project details")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -123,7 +127,9 @@ pub(super) async fn get_pull_requests(
 
     let payload: Value = http::send_json(
         request,
-        RequestOptions::new("Load GitHub pull requests").retry_transient(3),
+        RequestOptions::new("Load GitHub pull requests")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -192,7 +198,9 @@ pub(super) async fn get_open_pull_request_count(
 
     let payload: Value = http::send_json(
         request,
-        RequestOptions::new("Load GitHub pull request overview").retry_transient(3),
+        RequestOptions::new("Load GitHub pull request overview")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -279,11 +287,15 @@ async fn load_pull_request_summary(
     );
     let detail_future = http::send_json(
         authenticated_request(locator, detail_endpoint),
-        RequestOptions::new("Load GitHub pull request list summary").retry_transient(3),
+        RequestOptions::new("Load GitHub pull request list summary")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     );
     let reviews_future = http::send_json::<Vec<Value>>(
         authenticated_request(locator, reviews_endpoint).query(&[("per_page", "100")]),
-        RequestOptions::new("Load GitHub pull request list reviews").retry_transient(3),
+        RequestOptions::new("Load GitHub pull request list reviews")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     );
     let (detail, reviews) = tokio::join!(detail_future, reviews_future);
     let detail: Value = detail.ok()?;
@@ -312,7 +324,9 @@ pub(super) async fn get_pull_request_diff(
     );
     let detail: Value = http::send_json(
         authenticated_request(locator, detail_endpoint),
-        RequestOptions::new("Load GitHub pull request details").retry_transient(3),
+        RequestOptions::new("Load GitHub pull request details")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -336,7 +350,9 @@ pub(super) async fn get_pull_request_diff(
         ]);
         let batch: Vec<Value> = http::send_json(
             request,
-            RequestOptions::new("Load GitHub pull request files").retry_transient(3),
+            RequestOptions::new("Load GitHub pull request files")
+                .response_byte_limit(MAX_DIFF_RESPONSE_BYTES)
+                .retry_transient(3),
         )
         .await
         .map_err(|error| error.to_string())?;
@@ -391,7 +407,9 @@ pub(super) async fn get_commit_range_diff(
         .replace("{head}", percent_encode_path(head_sha.trim()).as_str());
     let payload: Value = http::send_json(
         authenticated_request(locator, endpoint),
-        RequestOptions::new("Compare GitHub pull request commits").retry_transient(3),
+        RequestOptions::new("Compare GitHub pull request commits")
+            .response_byte_limit(MAX_DIFF_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -489,11 +507,15 @@ pub(super) async fn get_pull_request_action_state(
     // one's error semantics unchanged.
     let detail_future = http::send_json::<Value>(
         authenticated_request(locator, detail_endpoint),
-        RequestOptions::new("Load GitHub pull request merge state").retry_transient(3),
+        RequestOptions::new("Load GitHub pull request merge state")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     );
     let repository_future = http::send_json::<Value>(
         authenticated_request(locator, repository_url),
-        RequestOptions::new("Load GitHub repository merge settings").retry_transient(3),
+        RequestOptions::new("Load GitHub repository merge settings")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     );
     let reviews_future = load_github_pages(
         locator,
@@ -604,7 +626,9 @@ pub(super) async fn get_pull_request_conversation(
     let detail_future = async {
         http::send_json(
             authenticated_request(locator, detail_endpoint),
-            RequestOptions::new("Load GitHub pull request conversation header").retry_transient(3),
+            RequestOptions::new("Load GitHub pull request conversation header")
+                .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+                .retry_transient(3),
         )
         .await
         .map_err(|error| error.to_string())
@@ -646,7 +670,9 @@ pub(super) async fn get_pull_request_conversation(
         Ok::<Option<Value>, String>(
             http::send_json(
                 authenticated_request(locator, repository_endpoint),
-                RequestOptions::new("Load GitHub repository review permissions").retry_transient(3),
+                RequestOptions::new("Load GitHub repository review permissions")
+                    .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+                    .retry_transient(3),
             )
             .await
             .ok(),
@@ -945,7 +971,9 @@ async fn count_pull_request_commits(
     );
     let response = http::send(
         authenticated_request(locator, endpoint).query(&[("page", "1"), ("per_page", "1")]),
-        RequestOptions::new("Count GitHub pull request commits").retry_transient(3),
+        RequestOptions::new("Count GitHub pull request commits")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .ok()?;
@@ -968,7 +996,9 @@ async fn count_pull_request_reviews(
     );
     let response = http::send(
         authenticated_request(locator, endpoint).query(&[("page", "1"), ("per_page", "1")]),
-        RequestOptions::new("Count GitHub pull request reviews").retry_transient(3),
+        RequestOptions::new("Count GitHub pull request reviews")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .ok()?;
@@ -1058,7 +1088,9 @@ async fn load_github_pages(
         let batch: Vec<Value> = http::send_json(
             authenticated_request(locator, endpoint.clone())
                 .query(&[("page", page.to_string()), ("per_page", "100".to_string())]),
-            RequestOptions::new(operation).retry_transient(3),
+            RequestOptions::new(operation)
+                .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+                .retry_transient(3),
         )
         .await?;
         let complete = batch.len() < 100;
@@ -1108,7 +1140,8 @@ pub(super) async fn submit_pull_request_review(
         .json(&serde_json::json!({ "body": body.trim() }));
         let _: Value = http::send_json(
             request,
-            RequestOptions::new("Submit GitHub pull request comment"),
+            RequestOptions::new("Submit GitHub pull request comment")
+                .response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
         )
         .await
         .map_err(|error| error.to_string())?;
@@ -1134,7 +1167,8 @@ pub(super) async fn submit_pull_request_review(
     .json(&serde_json::json!({ "body": body.trim(), "event": event }));
     let _: Value = http::send_json(
         request,
-        RequestOptions::new("Submit GitHub pull request review"),
+        RequestOptions::new("Submit GitHub pull request review")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -1174,7 +1208,8 @@ pub(super) async fn dismiss_pull_request_review(
     .json(&serde_json::json!({ "message": reason.trim() }));
     let _: Value = http::send_json(
         request,
-        RequestOptions::new("Dismiss GitHub pull request review"),
+        RequestOptions::new("Dismiss GitHub pull request review")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -1203,9 +1238,13 @@ pub(super) async fn merge_pull_request(
         configured_token(RepoType::GitHub).as_deref(),
     )
     .json(&serde_json::json!({ "merge_method": method.as_str() }));
-    let payload: Value = http::send_json(request, RequestOptions::new("Merge GitHub pull request"))
-        .await
-        .map_err(|error| error.to_string())?;
+    let payload: Value = http::send_json(
+        request,
+        RequestOptions::new("Merge GitHub pull request")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
     if payload.get("merged").and_then(Value::as_bool) == Some(false) {
         return Err(string_field(&payload, "message")
             .unwrap_or_else(|| "GitHub did not merge this pull request.".to_string()));
@@ -1230,7 +1269,9 @@ pub(super) async fn revert_pull_request(
     );
     let detail: Value = http::send_json(
         authenticated_request(locator, detail_endpoint),
-        RequestOptions::new("Load GitHub pull request before revert").retry_transient(3),
+        RequestOptions::new("Load GitHub pull request before revert")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+            .retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -1245,7 +1286,8 @@ pub(super) async fn revert_pull_request(
         .json(&revert_pull_request_payload(pull_request_node_id.as_str()));
     let payload: Value = http::send_json(
         request,
-        RequestOptions::new("Create GitHub revert pull request"),
+        RequestOptions::new("Create GitHub revert pull request")
+            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
     )
     .await
     .map_err(|error| error.to_string())?;

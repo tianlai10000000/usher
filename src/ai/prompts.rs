@@ -588,6 +588,7 @@ mod tests {
         input.unified_diff = format!("{}中", "x".repeat(MAX_REVIEW_CHAT_DIFF_BYTES));
         let conversation = (0..25)
             .map(|index| ReviewConversationMessage {
+                message_id: None,
                 role: if index % 2 == 0 {
                     ReviewConversationRole::User
                 } else {
