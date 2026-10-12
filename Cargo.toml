@@ -46,6 +46,11 @@ ai-code-review = ["dep:usher-ai-review", "usher-ui/ai-code-review", "usher-ui-se
 path = "src/main.rs"
 name = "usher"
 
+[[example]]
+name = "pr_approval_state_fixture"
+path = "examples/pr_approval_state_fixture.rs"
+required-features = ["test-fixtures"]
+
 [dependencies]
 # "backend-android-activity-06",
 # 生产构建只启用 FemtoVG/OpenGL。Skia 与 FemtoVG/WGPU 仅用于显式诊断构建：

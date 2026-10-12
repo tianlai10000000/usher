@@ -2,6 +2,7 @@ mod bindings;
 pub mod branch;
 pub mod cd;
 mod pr_conflict_status;
+pub(crate) mod pr_data;
 mod pr_list;
 #[cfg(feature = "test-fixtures")]
 mod pr_list_fixture;
@@ -90,5 +91,19 @@ pub(crate) fn pr_review_route_changed(
     let controller = LIFECYCLE_CONTROLLER.with(|registered| registered.borrow().clone());
     if let Some(controller) = controller {
         controller.pr_review.route_changed(ui, previous, current);
+        if current == crate::Route::Workflow {
+            resume_pr_list(ui);
+        }
+    }
+}
+
+pub(crate) fn resume_pr_list(ui: &MainWindow) -> bool {
+    let controller = LIFECYCLE_CONTROLLER.with(|registered| registered.borrow().clone());
+    if let Some(controller) = controller {
+        controller.pr_review.refresh_list_on_return(ui);
+        controller.pr_list.resume(ui);
+        true
+    } else {
+        false
     }
 }

@@ -1,16 +1,31 @@
 use chrono::{DateTime, Datelike, FixedOffset, Timelike, Utc};
 
-use crate::git::{PullRequestFilters, PullRequestItem, PullRequestState, get_pull_requests};
+use crate::git::{
+    GitResult, PullRequestFilters, PullRequestItem, PullRequestPage, PullRequestState,
+    get_pull_requests,
+};
 use crate::project::{ProjectRepositoryMetadata, load_repository_metadata};
 use crate::{MainWindow, WorkflowPullRequestItem};
 use slint::{ComponentHandle, ModelRc, VecModel};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use usher_state_store::Subscription;
 
 use super::pr_list_state::{PrListGenerationFacade, PrListRequestKind};
 
 const PAGE_SIZE: u32 = 10;
 const REVIEW_STATUS_FIXTURE: &str = "review-status-v1";
+
+struct DeferredPage {
+    metadata: ProjectRepositoryMetadata,
+    state: PullRequestState,
+    page: u32,
+    result: GitResult<PullRequestPage>,
+}
+
+fn list_visible(ui: &MainWindow) -> bool {
+    ui.get_current_route() == crate::Route::Workflow && ui.get_workflow_selected_flow() == 2
+}
 
 #[derive(Clone)]
 pub(crate) struct WorkflowPrListController {
@@ -19,16 +34,58 @@ pub(crate) struct WorkflowPrListController {
     filters: Arc<Mutex<PullRequestFilters>>,
     generations: PrListGenerationFacade,
     fixture_enabled: bool,
+    deferred_page: Arc<Mutex<Option<DeferredPage>>>,
+    data_subscription: Option<Arc<Subscription>>,
 }
 
 pub(crate) fn bind_pr_list(ui: &MainWindow) -> WorkflowPrListController {
-    let controller = WorkflowPrListController {
+    let mut controller = WorkflowPrListController {
         context: Arc::new(Mutex::new(None)),
         visited_pages: Arc::new(Mutex::new(HashMap::new())),
         filters: Arc::new(Mutex::new(default_pull_request_filters())),
         generations: PrListGenerationFacade::new(),
         fixture_enabled: review_status_fixture_enabled(),
+        deferred_page: Arc::new(Mutex::new(None)),
+        data_subscription: None,
     };
+
+    let context = controller.context.clone();
+    let pages = controller.visited_pages.clone();
+    let mut_revision = Arc::new(Mutex::new(0u64));
+    controller.data_subscription = Some(Arc::new(super::pr_data::shared().subscribe(
+        move |snapshot| {
+            let Ok(mut revision) = mut_revision.lock() else {
+                return;
+            };
+            if snapshot.revision <= *revision {
+                return;
+            }
+            *revision = snapshot.revision;
+            let Ok(context) = context.lock() else {
+                return;
+            };
+            let Some(metadata) = context.as_ref() else {
+                return;
+            };
+            if let Ok(mut pages) = pages.lock() {
+                for items in pages.values_mut() {
+                    snapshot.overlay(metadata, items);
+                }
+            }
+            // Domain commits update cached data only. Slint projection is owned
+            // by resume/project_page when the PR list is visible.
+        },
+    )));
+
+    let resume_controller = controller.clone();
+    let weak = ui.as_weak();
+    ui.on_workflow_pr_list_resume(move || {
+        if let Some(ui) = weak.upgrade() {
+            if !super::resume_pr_list(&ui) {
+                resume_controller.resume(&ui);
+            }
+        }
+    });
 
     let conflict_controller = controller.clone();
     let weak = ui.as_weak();
@@ -184,6 +241,9 @@ pub(crate) fn bind_pr_list(ui: &MainWindow) -> WorkflowPrListController {
 
 impl WorkflowPrListController {
     pub(crate) fn sync_language(&self, ui: &MainWindow) {
+        if !list_visible(ui) {
+            return;
+        }
         let state = PullRequestState::parse(ui.get_workflow_pr_list_state().as_str())
             .unwrap_or(PullRequestState::Open);
         let page = ui.get_workflow_pr_list_page().max(1) as u32;
@@ -197,7 +257,10 @@ impl WorkflowPrListController {
             .lock()
             .ok()
             .and_then(|pages| pages.get(&page).cloned());
-        if let Some(items) = items {
+        if let Some(mut items) = items {
+            if let Some(metadata) = self.context.lock().ok().and_then(|context| context.clone()) {
+                super::pr_data::shared().overlay(&metadata, &mut items);
+            }
             apply_page_to_ui(
                 ui,
                 page,
@@ -208,6 +271,61 @@ impl WorkflowPrListController {
         }
     }
 
+    pub(crate) fn resume(&self, ui: &MainWindow) {
+        if !list_visible(ui) {
+            return;
+        }
+        let deferred = self
+            .deferred_page
+            .lock()
+            .ok()
+            .and_then(|mut page| page.take());
+        if let Some(page) = deferred {
+            self.project_page(ui, page);
+        } else {
+            self.sync_language(ui);
+        }
+    }
+
+    fn project_page(&self, ui: &MainWindow, page: DeferredPage) {
+        if !list_visible(ui) {
+            if let Ok(mut deferred) = self.deferred_page.lock() {
+                *deferred = Some(page);
+            }
+            return;
+        }
+        ui.set_workflow_pr_list_loading(false);
+        match page.result {
+            Ok(mut result) => {
+                let is_final_page = result.items.len() < PAGE_SIZE as usize;
+                super::pr_data::shared().overlay(&page.metadata, &mut result.items);
+                if let Ok(mut pages) = self.visited_pages.lock() {
+                    pages.insert(page.page, result.items.clone());
+                }
+                render_remote_page(
+                    ui,
+                    &self.visited_pages,
+                    page.state,
+                    page.page,
+                    result.items,
+                    result.total,
+                    result.total_exact,
+                    result.page_count,
+                    is_final_page,
+                );
+            }
+            Err(error) => {
+                log::warn!("[Workflow] Failed to load pull requests: {error}");
+                ui.set_workflow_pr_list_error(
+                    crate::i18n::tr(error.user_message_key())
+                        .into_owned()
+                        .into(),
+                );
+                ui.set_workflow_pr_list_error_kind(error.error_kind().into());
+            }
+        }
+    }
+
     pub(crate) fn release_unreachable(&self, ui: &MainWindow) {
         super::pr_conflict_status::invalidate(ui);
         self.generations.invalidate_all();
@@ -215,6 +333,7 @@ impl WorkflowPrListController {
             *context = None;
         }
         clear_pages(&self.visited_pages);
+        *self.deferred_page.lock().unwrap() = None;
         reset_ui(ui);
     }
 
@@ -236,6 +355,7 @@ impl WorkflowPrListController {
             *filters = default_pull_request_filters();
         }
         clear_pages(&self.visited_pages);
+        *self.deferred_page.lock().unwrap() = None;
         reset_ui(ui);
         ui.set_workflow_pr_list_loading(true);
 
@@ -307,7 +427,9 @@ impl WorkflowPrListController {
 
     fn clear_and_load_page(&self, ui: &MainWindow, state: PullRequestState, page: u32) {
         super::pr_conflict_status::invalidate(ui);
+        self.generations.invalidate(PrListRequestKind::Page);
         clear_pages(&self.visited_pages);
+        *self.deferred_page.lock().unwrap() = None;
         ui.set_workflow_pr_list_items(ModelRc::new(VecModel::from(
             Vec::<WorkflowPullRequestItem>::new(),
         )));
@@ -405,6 +527,7 @@ impl WorkflowPrListController {
         };
 
         let request = self.generations.begin(PrListRequestKind::Page);
+        *self.deferred_page.lock().unwrap() = None;
         ui.set_workflow_pr_list_loading(true);
         ui.set_workflow_pr_list_error("".into());
         ui.set_workflow_pr_list_error_kind("".into());
@@ -412,6 +535,8 @@ impl WorkflowPrListController {
 
         let generations = self.generations.clone();
         let visited_pages = self.visited_pages.clone();
+        let controller = self.clone();
+        let data_ticket = super::pr_data::shared().ticket();
         let filters = self
             .filters
             .lock()
@@ -434,8 +559,17 @@ impl WorkflowPrListController {
             if generations.is_current(PrListRequestKind::Page, request)
                 && conflict_identity == super::pr_conflict_status::Key::new(&context, "")
             {
-                if let Ok(page) = &result {
-                    for item in &page.items {
+                if let Ok(response) = &result {
+                    super::pr_data::shared().publish_list(data_ticket, &context, &response.items);
+                    if let Ok(mut pages) = visited_pages.lock() {
+                        if !generations.is_current(PrListRequestKind::Page, request) {
+                            return;
+                        }
+                        let mut items = response.items.clone();
+                        super::pr_data::shared().overlay(&context, &mut items);
+                        pages.insert(page, items);
+                    }
+                    for item in &response.items {
                         if item.conflict_status != crate::git::conflicts::ConflictStatus::Unknown {
                             super::pr_conflict_status::shared().observe(
                                 conflict_scope,
@@ -453,35 +587,15 @@ impl WorkflowPrListController {
                 let Some(ui) = ui_weak.upgrade() else {
                     return;
                 };
-                ui.set_workflow_pr_list_loading(false);
-                match result {
-                    Ok(result) => {
-                        let is_final_page = result.items.len() < PAGE_SIZE as usize;
-                        if let Ok(mut pages) = visited_pages.lock() {
-                            pages.insert(page, result.items.clone());
-                        }
-                        render_remote_page(
-                            &ui,
-                            &visited_pages,
-                            state,
-                            page,
-                            result.items,
-                            result.total,
-                            result.total_exact,
-                            result.page_count,
-                            is_final_page,
-                        );
-                    }
-                    Err(error) => {
-                        log::warn!("[Workflow] Failed to load pull requests: {error}");
-                        ui.set_workflow_pr_list_error(
-                            crate::i18n::tr(error.user_message_key())
-                                .into_owned()
-                                .into(),
-                        );
-                        ui.set_workflow_pr_list_error_kind(error.error_kind().into());
-                    }
-                }
+                controller.project_page(
+                    &ui,
+                    DeferredPage {
+                        metadata: context,
+                        state,
+                        page,
+                        result,
+                    },
+                );
             });
         });
     }
@@ -1041,6 +1155,95 @@ mod tests {
         format_pull_request_query, format_updated_at_in_utc_plus_eight, parse_pull_request_query,
     };
     use crate::git::PullRequestState;
+
+    #[test]
+    fn hidden_list_defers_projection_and_hydrates_latest_data_on_return() {
+        use crate::git::{
+            PullRequestItem, PullRequestPage, PullRequestReviewAction, PullRequestReviewStatus,
+        };
+        use crate::project::ProjectRepositoryMetadata;
+        use crate::workflow::pr_data::{PrKey, shared};
+        use slint::{ComponentHandle, Model, ModelRc, VecModel};
+
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = crate::MainWindow::new().unwrap();
+        ui.set_current_route(crate::Route::PrReview);
+        let controller = super::bind_pr_list(&ui);
+        let metadata = ProjectRepositoryMetadata {
+            repo_project_id: "list-return-hydration".into(),
+            repo_type: "github".into(),
+            remote_repo: "https://example.invalid/list-return-hydration".into(),
+        };
+        *controller.context.lock().unwrap() = Some(metadata.clone());
+        let item = PullRequestItem {
+            number: "42".into(),
+            title: "Separate approval from merge".into(),
+            state: "open".into(),
+            author: "reviewer".into(),
+            source_branch: "feature".into(),
+            target_branch: "main".into(),
+            review_status: PullRequestReviewStatus::None,
+            conflict_status: crate::git::conflicts::ConflictStatus::Unknown,
+            conversation_count: Some(1),
+            created_at: String::new(),
+            updated_at: String::new(),
+            web_url: String::new(),
+        };
+        let retained = ModelRc::new(VecModel::from(vec![super::to_slint_item(&item)]));
+        ui.set_workflow_pr_list_items(retained.clone());
+        controller
+            .visited_pages
+            .lock()
+            .unwrap()
+            .insert(1, vec![item.clone()]);
+        let key = PrKey::new(&metadata, "42");
+        let worker_metadata = metadata.clone();
+        let worker_item = item.clone();
+        std::thread::spawn(move || {
+            let data = shared();
+            data.publish_list(data.ticket(), &worker_metadata, &[worker_item]);
+            data.publish_review(data.ticket(), &key, PullRequestReviewAction::Approve);
+            assert_eq!(
+                data.get(&key).unwrap().review_status,
+                Some(PullRequestReviewStatus::Approved)
+            );
+        })
+        .join()
+        .unwrap();
+        controller.project_page(
+            &ui,
+            super::DeferredPage {
+                metadata,
+                state: PullRequestState::Open,
+                page: 1,
+                result: Ok(PullRequestPage {
+                    items: vec![item],
+                    total: 1,
+                    total_exact: true,
+                    page_count: Some(1),
+                }),
+            },
+        );
+        controller.sync_language(&ui);
+        assert_eq!(ui.get_workflow_pr_list_items(), retained);
+        assert_eq!(
+            ui.get_workflow_pr_list_items()
+                .row_data(0)
+                .unwrap()
+                .review_status,
+            ""
+        );
+
+        ui.set_current_route(crate::Route::Workflow);
+        ui.set_workflow_selected_flow(2);
+        controller.resume(&ui);
+        let projected = ui.get_workflow_pr_list_items().row_data(0).unwrap();
+        assert_eq!(projected.review_status, "approved");
+        assert_eq!(projected.state, "open");
+        assert!(controller.deferred_page.lock().unwrap().is_none());
+        assert_eq!(ui.get_workflow_pr_list_total(), 1);
+    }
 
     #[test]
     fn formats_provider_timestamps_in_utc_plus_eight() {

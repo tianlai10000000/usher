@@ -1054,7 +1054,7 @@ Find 移动 viewport。
 
 Conversation 与 Commits 的 commit 链接会按 SHA 定位并复用 Files changed 工作区，把当前 commit 应用为单项范围。审核控制器会把来源 Conversation 或 Commits Tab 记录为 feature 页内下钻返回点，因此 Shell Back 会先恢复来源 Tab，下一次 Back 才返回 Workflow 的 PR 列表；如果 commits 尚未加载，控制器会在加载完成后应用待处理选择，复制 SHA 保持独立。
 
-合并成功会把保留的 PR 列表标记为过期。审核页顶层 Back 会重新加载当前列表筛选的第一页及状态总数，确保已合并请求不再留在 Open 列表中；页内 commit Back 仍只恢复来源 Tab，不会提前消费这次刷新。
+评审提交、撤回评审或合并成功均会把保留的 PR 列表标记为过期。审核页顶层 Back 重新加载当前列表筛选的第一页及状态总数，同时更新评审结论和生命周期归属；页内 commit Back 仍只恢复来源 Tab，不会提前消费这次刷新。批准结论始终与合并就绪状态及能力独立。评论成功使用独立的根窗口/feature revision 信号清空 Conversation 输入框，不覆盖聚合评审结论。最新 action-state 必须替换空结论；切换语言只翻译当前展示，不重新应用缓存结论或能力。
 
 PR 展示层遵循统一 UI 边界：列表、筛选、分页、审核外壳、文件树和 diff
 等可复用控件位于 `ui/components/`，组件符号以 `GitHub` 开头；
@@ -1064,6 +1064,8 @@ ListView/ScrollView 可以为大型时间线、文件树和 diff 提供虚拟化
 空白/错误状态复用 `GitHubBlankslate`，图标操作复用 `GitHubIconButton`。
 
 PR Review 为 diff、高亮、展开、AI finding Reveal、远端 action-state 读取、远端 mutation、Conversation 与 Commits 使用八个相互独立的 typed state-store 代际；启动 action-state 刷新不会使正在执行的 mutation 失效，启动一种惰性读取也不会使另一种失效。切换 PR、手动 Reload 与 ignore-whitespace 变更通过一个 reducer action 使八类代际全部失效；强刷绕过 diff 缓存、清空惰性 Tab model，并重新加载当前 Tab。Provider changed-file 分页共用一个有界收集器；最后一页仍满时把归一化 detail 标记为 `files_truncated`，Files changed 明确展示该限制。Conversation block 按解析后的 RFC3339 时刻而不是 Provider 原始字符串比较。Merge 能力采用 fail-closed：必需的 Review/approval 状态读取失败时，action-state bridge 清空全部写能力并发布不可用 readiness。
+
+`workflow/pr_data.rs` 通过共享 StateStore 持有有界临时 PR 数据门面，按仓库/凭据域隔离。Worker 在 Hook 与 UI 回调前发布成功变更，并随后发布最新 action-state。selector/订阅立即提供最新状态，读取/成功 ticket 拦截迟到旧响应。列表订阅只更新缓存领域行；隐藏路由与 Tab 推迟 model 重建（包含语言和在途页面投影），返回时再读取最新数据，不新增页面常驻轮询。
 
 ### Pull Request 子系统边界
 

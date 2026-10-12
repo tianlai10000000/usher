@@ -18,6 +18,53 @@ This specification is the portable contract for the current pull-request capabil
 
 本文是当前 Pull Request 能力的可迁移契约：项目级计数、分页 PR/MR 列表、全窗口审核工作区、diff/源码补全、远端评审、合并与按能力开放的回退命令。
 
+Approval is a review decision, independent of Open/Closed/Merged lifecycle and
+merge readiness. A successful Approve shows the existing Approved marker but
+never starts a merge or grants merge capability. Comment completion has a
+separate revision signal for clearing the Conversation composer; it must not
+replace an approval decision. A fresh remote action-state snapshot replaces
+the review decision even when empty, so withdrawn approvals disappear. Locale
+refresh translates current presentation without restoring an older decision or
+write capability. Successful review submissions and review dismissals, like
+merges, mark the retained list stale; top-level Back reloads the active filter
+and state totals. List rows keep lifecycle icons, inline review decisions and
+conflict status separate.
+
+`workflow/pr_data.rs` owns bounded, ephemeral repository/credential-scoped PR
+records through the shared StateStore port. Workers publish confirmed remote
+mutations before Hooks and UI delivery; immediate action-state reads publish
+the authoritative result. Other consumers use selectors/subscriptions without
+waiting for navigation. Read tickets precede requests; confirmed mutations take
+a newer ticket on success, fencing late reads. List subscriptions update only
+cached domain rows. Hidden routes/tabs defer Slint model projection (including
+locale refresh and in-flight page completions); re-entry hydrates current data.
+This is event-driven synchronization, without page-resident polling.
+
+The offline `tests/run-pr-approval-state-fixture.sh` uses the production Slint
+list/detail UI with isolated mock callbacks. Open includes required, approved
+and changes-requested rows; Closed includes merged and unmerged closed rows.
+`--detail` opens a PR whose approval leaves another review requirement unmet.
+Approve/Request changes update mock data immediately, assert the hidden list
+model is unchanged and return to the list after two seconds. A merge-ready row
+requires explicit Merge confirmation. `--locale en` and `--locale zh-CN` select
+packaged copy. This presentation fixture does not replace provider integration
+or the shared-data/worker regression tests and never reads normal configuration
+or contacts a provider.
+
+批准是评审结论，与 Open/Closed/Merged 生命周期和合并就绪状态独立。Approve 成功后
+显示已有的 Approved 标记，不会启动合并或授予合并能力。评论成功通过独立 revision
+清空 Conversation 输入框，不覆盖批准结论。最新远端 action-state 即使结论为空，也必须
+替换旧结论，让撤回的批准消失。切换语言只翻译当前展示，不恢复旧结论或写入能力。
+评审提交、撤回评审和合并成功均将保留列表标记为过期；顶层 Back 重新加载当前筛选及
+状态总数。列表继续分别展示生命周期图标、行内评审结论和冲突状态。
+
+`workflow/pr_data.rs` 通过共享 StateStore 管理有界、临时的 PR 记录，按仓库及凭据域
+隔离。Worker 在 Hook 和 UI 投递之前发布远端操作成功的已知结果，再立即读取并发布
+权威 action-state；其他使用方通过 selector/订阅读取，不必等待页面返回。读取在请求
+前取得 ticket，成功变更取得更新的 ticket，迟到读取不能覆盖新变更。列表订阅只更新
+缓存中的领域行；路由/Tab 隐藏时推迟 Slint model 投影，包括语言刷新与在途列表响应，
+返回时再加载最新快照。这是事件驱动的同步，不新增页面常驻轮询。
+
 The Slint presentation is application-owned: reusable PR/Review visual
 components live in `ui/components/workflow/` or `ui/components/pr_review/`
 and every visual symbol uses the `GitHub` prefix. The PR collection follows a
@@ -665,6 +712,12 @@ Rust `virtualizer` 引擎，Feature 只依赖本地门面。轻量行指标与�
 - Verify the list columns remain aligned across a wide desktop layout and that a GitHub timestamp such as `2026-07-15T05:26:44Z` is displayed as `2026-07-15 13:26:44 +08:00`.
 - Open `Review changes` and verify GitHub and Gitee Enterprise expose Comment/Approve/Request changes, while Gitee public exposes Comment and visibly disables the two unsupported review decisions.
 - Submit each supported review action and verify the dialog closes only after provider success, failures remain actionable, and Approve refreshes merge state without starting a merge. From the Conversation tab, submit a plain-text comment via the bottom composer and verify the green `Comment` button, empty-state disablement, successful remote write, composer clear, and conversation refresh. Merge while Conversation is active and verify both the header readiness badge and the timeline update to merged without switching tabs. On Conversation, verify commit-batch and merge activity rows for GitHub timeline-backed PRs and for GitLab/Gitee synthesized activity, without duplicating filtered system notes.
+- Approve a PR with a separate merge blocker, then post two consecutive comments;
+  verify Approved remains visible, Merge remains disabled and each successful
+  comment clears the composer. Switch English/Chinese while the remote refresh
+  is pending; neither the decision nor capabilities may revert. Return to the
+  list and verify its review decision/filter is refreshed. Dismiss the last
+  approval and repeat: fresh empty state removes Approved in detail and list.
 - Expand an eligible review in Conversation and verify only that review summary has a trailing kebab with `Dismiss review`; while open, the trigger has Primer selected styling, and clicking non-interactive timeline content closes the menu. The aggregate header `Approved` state must not become a command. The required-reason dialog must use the full-window scrim and close only after remote success. Verify GitHub requires admin/maintain/push permission and dismisses the selected active review, GitLab exposes only the authenticated user's approval and writes the reason note before unapproving, Gitee Enterprise exposes only the authenticated user's active approved/rejected review and sends exactly `{"state":"initialized"}` to the full-path Web reviews route, and Gitee public v5 exposes no dismissal action. After success, both action state and Conversation must refresh.
 - Verify `Merge pull request` stays disabled with the provider block reason until the latest remote state is mergeable; confirm that only repository-supported methods appear and source-branch deletion is sent only from explicit confirmation.
 - Open Review changes, Dismiss review, Merge, Revert, and commit-range dialogs and verify each full-window scrim owns a TouchArea so header readiness/review/merge controls, file-tree actions, and other underlay hits cannot click or hover through. On macOS, verify every Dialog surface stays fully below the native title bar with its top radius and shadow visible while the scrim still covers that title-bar band and the complete AI Review panel. While any dialog is open, the readiness popover must close and stay disabled. Open the file-extension popover, then move to the file-action or readiness trigger: hover must remain visible, and the first click must close the old popover and open the target popover. Repeat in the reverse direction to verify all three in-window popovers are mutually exclusive and never consume the switching click. Open readiness, Diff view, file-filter, and file-action popovers one at a time, click blank native-title-bar space, and verify each closes while the native title-bar action still occurs; a non-dismissible Dialog must remain open. Hover Review changes / Merge / readiness tips on the compact header and verify the tip text is fully visible above the title (action-row z above title/summary).

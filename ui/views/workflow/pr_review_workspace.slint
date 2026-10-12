@@ -541,9 +541,9 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             root.active-popover = "";
         }
     }
-    changed remote-review-state => {
-        // Clear the Conversation composer after a successful Comment submit.
-        if root.remote-review-state == "commented" && root.pending-conversation-comment != "" {
+    changed comment-submission-revision => {
+        // Comment completion is independent of the aggregate review decision.
+        if root.pending-conversation-comment != "" {
             root.conversation-comment-body = "";
             root.pending-conversation-comment = "";
         }

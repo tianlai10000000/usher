@@ -117,9 +117,9 @@ fn builder_coverage_parser_does_not_borrow_a_later_requests_limit() {
 #[test]
 fn all_provider_requests_declare_their_class_and_keep_source_conflict_limits() {
     let sources = [
-        ("github.rs", include_str!("github.rs"), 23),
-        ("gitlab.rs", include_str!("gitlab.rs"), 22),
-        ("gitee/mod.rs", include_str!("gitee/mod.rs"), 39),
+        ("github.rs", include_str!("github.rs"), 22),
+        ("gitlab.rs", include_str!("gitlab.rs"), 23),
+        ("gitee/mod.rs", include_str!("gitee/mod.rs"), 40),
         ("gitee/conflicts.rs", include_str!("gitee/conflicts.rs"), 3),
     ];
     let diff_operations = [
@@ -181,5 +181,5 @@ fn all_provider_requests_declare_their_class_and_keep_source_conflict_limits() {
             );
         }
     }
-    assert_eq!((metadata, diff, protected), (71, 8, 8));
+    assert_eq!((metadata, diff, protected), (72, 8, 8));
 }

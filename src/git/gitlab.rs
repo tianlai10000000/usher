@@ -471,6 +471,7 @@ fn gitlab_list_review_status(value: &Value) -> PullRequestReviewStatus {
         .unwrap_or_default()
         .as_str()
     {
+        "requested_changes" => PullRequestReviewStatus::ChangesRequested,
         "not_approved" | "approvals_syncing" => PullRequestReviewStatus::ReviewRequired,
         _ => PullRequestReviewStatus::None,
     }
@@ -480,22 +481,34 @@ fn gitlab_approval_review_status(
     approvals: &Value,
     fallback: PullRequestReviewStatus,
 ) -> PullRequestReviewStatus {
-    let approvals_left = value_u32(approvals, "approvals_left");
-    let approvals_required = value_u32(approvals, "approvals_required");
+    if fallback == PullRequestReviewStatus::ChangesRequested {
+        return fallback;
+    }
     let approval_count = approvals
         .get("approved_by")
         .and_then(Value::as_array)
         .map(|approved_by| approved_by.len())
         .unwrap_or(0);
-    if approvals_left.is_some_and(|left| left > 0)
-        || (approvals_required.is_some_and(|required| required > 0) && approval_count == 0)
-    {
-        PullRequestReviewStatus::ReviewRequired
-    } else if approval_count > 0 {
+    if approval_count > 0 {
         PullRequestReviewStatus::Approved
+    } else if gitlab_approval_requirements_unmet(approvals) {
+        PullRequestReviewStatus::ReviewRequired
     } else {
         fallback
     }
+}
+
+fn gitlab_approval_requirements_unmet(approvals: &Value) -> bool {
+    let approvals_left = value_u32(approvals, "approvals_left");
+    let approvals_required = value_u32(approvals, "approvals_required");
+    let approval_count = approvals
+        .get("approved_by")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    approvals_left.is_some_and(|left| left > 0)
+        || (approvals_required.is_some_and(|required| required > 0) && approval_count == 0)
+        || (approvals.get("approved").and_then(Value::as_bool) == Some(false)
+            && (approval_count > 0 || approvals_required.is_some_and(|required| required > 0)))
 }
 
 fn gitlab_list_sort(value: &str) -> (&'static str, &'static str) {
@@ -680,8 +693,9 @@ pub(super) async fn get_pull_request_action_state(
     if let Some(token) = configured_token(RepoType::GitLab) {
         request = request.header("PRIVATE-TOKEN", token);
     }
-    // The merge-request detail and the project merge settings are independent
-    // reads; fetch them concurrently while keeping each error path intact.
+    let has_token = configured_token(RepoType::GitLab).is_some();
+    // Review decisions are independent of mergeability: an approved request
+    // can still have pending CI or other merge requirements.
     let detail_future = http::send_json::<Value>(
         request,
         RequestOptions::new("Load GitLab merge request readiness")
@@ -689,14 +703,32 @@ pub(super) async fn get_pull_request_action_state(
             .retry_transient(3),
     );
     let project_future = load_project_settings(locator, repo_project_id);
-    let (detail, project) = tokio::join!(detail_future, project_future);
+    let approvals_future = async {
+        if !has_token {
+            return Ok(None);
+        }
+        let endpoint = merge_request_endpoint(
+            endpoints::MERGE_REQUEST_APPROVALS_URL,
+            locator,
+            repo_project_id,
+            pull_request_iid,
+        );
+        http::send_json::<Value>(
+            gitlab_request(endpoint),
+            RequestOptions::new("Load GitLab merge request action approvals")
+                .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+                .retry_transient(3),
+        )
+        .await
+        .map(Some)
+        .map_err(|error| error.to_string())
+    };
+    let (detail, project, approvals) =
+        tokio::join!(detail_future, project_future, approvals_future);
     let detail = detail.map_err(|error| error.to_string())?;
     let project = project?;
-    Ok(gitlab_action_state(
-        &detail,
-        Some(&project),
-        configured_token(RepoType::GitLab).is_some(),
-    ))
+    let approvals = approvals?;
+    gitlab_action_state(&detail, Some(&project), approvals.as_ref(), has_token)
 }
 
 pub(super) async fn submit_pull_request_review(
@@ -1476,15 +1508,51 @@ fn gitlab_authenticated(request: reqwest::RequestBuilder) -> reqwest::RequestBui
 fn gitlab_action_state(
     detail: &Value,
     project: Option<&Value>,
+    approvals: Option<&Value>,
     has_token: bool,
-) -> PullRequestActionState {
-    let readiness = gitlab_merge_readiness(detail);
-    let review_state = match string_field(detail, "detailed_merge_status").as_deref() {
-        Some("requested_changes") => "rejected",
-        Some("not_approved") | Some("approvals_syncing") => "pending",
-        _ => "",
+) -> Result<PullRequestActionState, String> {
+    if has_token
+        && !approvals.is_some_and(|snapshot| {
+            snapshot
+                .get("approved_by")
+                .and_then(Value::as_array)
+                .is_some_and(|approved_by| {
+                    approved_by.iter().all(|approval| {
+                        approval.get("user").is_some_and(|user| {
+                            value_u32(user, "id").is_some()
+                                || string_field(user, "username")
+                                    .is_some_and(|name| !name.trim().is_empty())
+                        })
+                    })
+                })
+                && snapshot.get("approved").is_none_or(Value::is_boolean)
+                && ["approvals_left", "approvals_required"]
+                    .iter()
+                    .all(|key| snapshot.get(*key).is_none() || value_u32(snapshot, key).is_some())
+        })
+    {
+        return Err("GitLab approval state is unavailable or invalid.".to_string());
+    }
+    let fallback = gitlab_list_review_status(detail);
+    let review_status = approvals
+        .map(|snapshot| gitlab_approval_review_status(snapshot, fallback))
+        .unwrap_or(fallback);
+    let review_state = match review_status {
+        PullRequestReviewStatus::Approved => "approved",
+        PullRequestReviewStatus::ChangesRequested => "rejected",
+        PullRequestReviewStatus::ReviewRequired => "pending",
+        PullRequestReviewStatus::None => "",
     }
     .to_string();
+    let mut readiness = gitlab_merge_readiness(detail);
+    if readiness.kind == PullRequestReadinessKind::Ready
+        && approvals.is_some_and(gitlab_approval_requirements_unmet)
+    {
+        readiness = PullRequestReadiness::new(
+            PullRequestReadinessKind::ReviewRequired,
+            "Required GitLab approvals have not been completed.",
+        );
+    }
     let terminal = matches!(
         readiness.kind,
         PullRequestReadinessKind::Merged | PullRequestReadinessKind::Closed
@@ -1506,7 +1574,7 @@ fn gitlab_action_state(
         PullRequestMergeBlockKind::None
     };
 
-    PullRequestActionState {
+    Ok(PullRequestActionState {
         // GitLab notes remain available on terminal merge requests when the
         // authenticated user is allowed to participate in the discussion.
         can_comment: has_token,
@@ -1521,7 +1589,7 @@ fn gitlab_action_state(
         merge_block_kind,
         revert_strategy: PullRequestRevertStrategy::Unsupported,
         allowed_merge_methods: gitlab_merge_methods(project),
-    }
+    })
 }
 
 fn gitlab_merge_methods(project: Option<&Value>) -> Vec<PullRequestMergeMethod> {
@@ -1997,6 +2065,17 @@ mod tests {
                 }),
                 PullRequestReviewStatus::None,
             ),
+            PullRequestReviewStatus::Approved
+        );
+        assert_eq!(
+            gitlab_approval_review_status(
+                &json!({
+                    "approvals_required": 2,
+                    "approvals_left": 2,
+                    "approved_by": []
+                }),
+                PullRequestReviewStatus::None,
+            ),
             PullRequestReviewStatus::ReviewRequired
         );
         assert_eq!(
@@ -2136,8 +2215,10 @@ mod tests {
                 "user": { "can_merge": true }
             }),
             Some(&json!({ "squash_option": "default_on" })),
+            Some(&json!({ "approved_by": [] })),
             true,
-        );
+        )
+        .unwrap();
 
         assert!(state.can_comment);
         assert!(state.can_approve);
@@ -2161,8 +2242,10 @@ mod tests {
                 "user": { "can_merge": true }
             }),
             None,
+            None,
             false,
-        );
+        )
+        .unwrap();
 
         assert!(!state.can_comment);
         assert!(!state.can_approve);
@@ -2171,6 +2254,119 @@ mod tests {
             state.merge_block_kind,
             PullRequestMergeBlockKind::ConfigureProvider
         );
+    }
+
+    #[test]
+    fn shows_gitlab_approval_independently_of_pending_merge_checks() {
+        let state = gitlab_action_state(
+            &json!({
+                "state": "opened",
+                "detailed_merge_status": "ci_still_running",
+                "user": { "can_merge": true }
+            }),
+            None,
+            Some(&json!({
+                "approved": true,
+                "approvals_left": 0,
+                "approved_by": [{ "user": { "id": 7 } }]
+            })),
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(state.review_state, "approved");
+        assert_eq!(
+            state.readiness.kind,
+            PullRequestReadinessKind::ChecksPending
+        );
+        assert!(!state.can_merge);
+    }
+
+    #[test]
+    fn shows_gitlab_approval_while_remaining_approvals_still_block_merge() {
+        let state = gitlab_action_state(
+            &json!({
+                "state": "opened",
+                "detailed_merge_status": "mergeable",
+                "user": { "can_merge": true }
+            }),
+            None,
+            Some(&json!({
+                "approved": false,
+                "approvals_required": 2,
+                "approvals_left": 1,
+                "approved_by": [{ "user": { "id": 7 } }]
+            })),
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(state.review_state, "approved");
+        assert_eq!(
+            state.readiness.kind,
+            PullRequestReadinessKind::ReviewRequired
+        );
+        assert!(!state.can_merge);
+    }
+
+    #[test]
+    fn does_not_invent_gitlab_approval_when_no_rules_apply() {
+        let state = gitlab_action_state(
+            &json!({ "state": "opened", "detailed_merge_status": "mergeable" }),
+            None,
+            Some(&json!({
+                "approved": true,
+                "approvals_required": 0,
+                "approvals_left": 0,
+                "approved_by": []
+            })),
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(state.review_state, "");
+    }
+
+    #[test]
+    fn keeps_gitlab_requested_changes_visible_despite_other_approvals() {
+        let state = gitlab_action_state(
+            &json!({ "state": "opened", "detailed_merge_status": "requested_changes" }),
+            None,
+            Some(&json!({
+                "approved": true,
+                "approved_by": [{ "user": { "id": 7 } }]
+            })),
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(state.review_state, "rejected");
+        assert_eq!(
+            state.readiness.kind,
+            PullRequestReadinessKind::ChangesRequested
+        );
+        assert!(!state.can_merge);
+    }
+
+    #[test]
+    fn rejects_missing_or_malformed_gitlab_approval_snapshots() {
+        let detail = json!({
+            "state": "opened",
+            "detailed_merge_status": "mergeable",
+            "user": { "can_merge": true }
+        });
+        assert!(gitlab_action_state(&detail, None, None, true).is_err());
+        for approvals in [
+            json!(null),
+            json!({}),
+            json!({ "approved_by": null }),
+            json!({ "approved_by": [null] }),
+            json!({ "approved_by": [{ "user": {} }] }),
+            json!({ "approved_by": [], "approved": "true" }),
+            json!({ "approved_by": [], "approvals_left": "unknown" }),
+        ] {
+            assert!(gitlab_action_state(&detail, None, Some(&approvals), true).is_err());
+        }
     }
 
     #[test]

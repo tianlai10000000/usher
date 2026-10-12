@@ -194,6 +194,23 @@ Optional environment variables: `USHER_PR_LIST_WIDTH=800`,
 `USHER_PR_LIST_PROVIDER=gitee` (or `github`/`gitlab`). These select fixture
 presentation only; they do not validate live provider APIs.
 
+Use the interactive offline approval/merge fixture to inspect detail actions and
+list reentry:
+
+```sh
+./tests/run-pr-approval-state-fixture.sh --list --locale zh-CN
+./tests/run-pr-approval-state-fixture.sh --detail --locale en
+```
+
+Open includes required, approved and changes-requested rows; Closed includes
+merged and unmerged closed rows. Approve updates mock data immediately while the
+hidden list retains its model, then returns to the list after two seconds. It
+never merges; a merge-ready row requires explicit confirmation. This tool uses
+the production Slint UI with mock callbacks, reads no normal configuration and
+contacts no provider. Library regressions separately verify shared data and
+worker ordering.
+
+
 The full `cargo test --locked` command currently exposes a pre-existing failing doctest in `src/logger/debug_logger.rs`; the library unit tests pass.
 
 To inspect the optional Skia path:

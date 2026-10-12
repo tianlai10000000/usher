@@ -4,12 +4,13 @@ use super::WorkflowPrReviewController;
 use crate::MainWindow;
 use crate::git::{
     GitResult, PullRequestActionState, PullRequestMergeBlockKind, PullRequestMergeMethod,
-    PullRequestRevertStrategy, PullRequestReviewAction, dismiss_pull_request_review,
-    get_pull_request_action_state, merge_pull_request, revert_pull_request,
-    submit_pull_request_review,
+    PullRequestReadinessKind, PullRequestRevertStrategy, PullRequestReviewAction,
+    dismiss_pull_request_review, get_pull_request_action_state, merge_pull_request,
+    revert_pull_request, submit_pull_request_review,
 };
 use crate::project::ProjectRepositoryMetadata;
 use crate::workflow::bindings::{show_error, show_success};
+use crate::workflow::pr_data::{PrKey, shared as shared_pr_data};
 use slint::ComponentHandle;
 use std::future::Future;
 use std::sync::atomic::Ordering;
@@ -157,6 +158,7 @@ impl WorkflowPrReviewController {
             );
         }
         let generation = self.state.begin(ReviewRequestKind::RemoteActionState);
+        let ticket = shared_pr_data().ticket();
         let controller = self.clone();
         let ui_weak = ui.as_weak();
         crate::app_runtime::shared_runtime().spawn(async move {
@@ -174,13 +176,22 @@ impl WorkflowPrReviewController {
             };
             let result = match context {
                 Ok((metadata, pull_request_iid)) => {
-                    get_pull_request_action_state(
+                    let key = PrKey::new(&metadata, &pull_request_iid);
+                    let result = get_pull_request_action_state(
                         metadata.repo_type.as_str(),
                         metadata.repo_project_id.as_str(),
                         metadata.remote_repo.as_str(),
                         pull_request_iid.as_str(),
                     )
-                    .await
+                    .await;
+                    let accepted = match &result {
+                        Ok(state) => shared_pr_data().publish_action(ticket, &key, state.clone()),
+                        Err(_) => shared_pr_data().publish_action_unavailable(ticket, &key),
+                    };
+                    if !accepted {
+                        return;
+                    }
+                    result
                 }
                 Err(error) => Err(error),
             };
@@ -266,6 +277,7 @@ impl WorkflowPrReviewController {
         let body = body.to_string();
         let hook_event = review_hook_event(&context, action);
         let metadata = context.metadata;
+        let key = PrKey::new(&metadata, &pull_request_iid);
         self.run_action(
             ui,
             async move {
@@ -278,30 +290,20 @@ impl WorkflowPrReviewController {
                     body.as_str(),
                 )
                 .await;
-                if result.is_ok()
-                    && let Some(hook_event) = hook_event
-                {
-                    if let Err(error) = crate::hooks::emit(hook_event).await {
-                        log::warn!("[Hooks] PR approval dispatch failed: {error}");
+                if result.is_ok() {
+                    let data = shared_pr_data();
+                    data.publish_review(data.ticket(), &key, action);
+                    if let Some(hook_event) = hook_event {
+                        if let Err(error) = crate::hooks::emit(hook_event).await {
+                            log::warn!("[Hooks] PR approval dispatch failed: {error}");
+                        }
                     }
                 }
                 result
             },
             move |controller, ui, result| match result {
                 Ok(()) => {
-                    ui.set_workflow_pr_review_dialog_open(false);
-                    if action == PullRequestReviewAction::Comment {
-                        let count = ui.get_workflow_pr_review_conversation_count();
-                        ui.set_workflow_pr_review_conversation_count(count.saturating_add(1));
-                    }
-                    ui.set_workflow_pr_remote_review_state(
-                        match action {
-                            PullRequestReviewAction::Comment => "commented",
-                            PullRequestReviewAction::Approve => "approved",
-                            PullRequestReviewAction::RequestChanges => "rejected",
-                        }
-                        .into(),
-                    );
+                    apply_submitted_review(ui, action);
                     show_success(
                         ui,
                         if action == PullRequestReviewAction::Comment {
@@ -311,8 +313,7 @@ impl WorkflowPrReviewController {
                         }
                         .as_ref(),
                     );
-                    controller.refresh_action_state(ui);
-                    controller.refresh_conversation_after_remote_action(ui);
+                    controller.refresh_after_review_mutation(ui);
                 }
                 Err(error) => {
                     log::warn!("[Workflow][PR Review] Failed to submit review: {error}");
@@ -339,10 +340,11 @@ impl WorkflowPrReviewController {
         };
         let review_id = review_id.to_string();
         let reason = reason.to_string();
+        let key = PrKey::new(&metadata, &pull_request_iid);
         self.run_action(
             ui,
             async move {
-                dismiss_pull_request_review(
+                let result = dismiss_pull_request_review(
                     metadata.repo_type.as_str(),
                     metadata.repo_project_id.as_str(),
                     metadata.remote_repo.as_str(),
@@ -350,7 +352,12 @@ impl WorkflowPrReviewController {
                     review_id.as_str(),
                     reason.as_str(),
                 )
-                .await
+                .await;
+                if result.is_ok() {
+                    let data = shared_pr_data();
+                    data.publish_dismissal(data.ticket(), &key);
+                }
+                result
             },
             |controller, ui, result| match result {
                 Ok(()) => {
@@ -358,8 +365,7 @@ impl WorkflowPrReviewController {
                     let count = ui.get_workflow_pr_review_conversation_count();
                     ui.set_workflow_pr_review_conversation_count(count.saturating_add(1));
                     show_success(ui, crate::i18n::tr("pr_review.dismissed").as_ref());
-                    controller.refresh_action_state(ui);
-                    controller.refresh_conversation_after_remote_action(ui);
+                    controller.refresh_after_review_mutation(ui);
                 }
                 Err(error) => {
                     log::warn!("[Workflow][PR Review] Failed to dismiss review: {error}");
@@ -367,6 +373,12 @@ impl WorkflowPrReviewController {
                 }
             },
         );
+    }
+
+    fn refresh_after_review_mutation(&self, ui: &MainWindow) {
+        self.pr_list_refresh_pending.store(true, Ordering::SeqCst);
+        self.refresh_action_state(ui);
+        self.refresh_conversation_after_remote_action(ui);
     }
 
     pub(super) fn merge(&self, ui: &MainWindow, method: &str, remove_source_branch: bool) {
@@ -413,6 +425,7 @@ impl WorkflowPrReviewController {
         let pull_request_iid = context.request.number.clone();
         let hook_event = merged_hook_event(&context, method, remove_source_branch);
         let metadata = context.metadata;
+        let key = PrKey::new(&metadata, &pull_request_iid);
         self.run_action(
             ui,
             async move {
@@ -425,10 +438,12 @@ impl WorkflowPrReviewController {
                     remove_source_branch,
                 )
                 .await;
-                if result.is_ok()
-                    && let Err(error) = crate::hooks::emit(hook_event).await
-                {
-                    log::warn!("[Hooks] PR merge dispatch failed: {error}");
+                if result.is_ok() {
+                    let data = shared_pr_data();
+                    data.publish_merge(data.ticket(), &key);
+                    if let Err(error) = crate::hooks::emit(hook_event).await {
+                        log::warn!("[Hooks] PR merge dispatch failed: {error}");
+                    }
                 }
                 result
             },
@@ -527,24 +542,75 @@ impl WorkflowPrReviewController {
     }
 }
 
+fn apply_submitted_review(ui: &MainWindow, action: PullRequestReviewAction) {
+    ui.set_workflow_pr_review_dialog_open(false);
+    match action {
+        PullRequestReviewAction::Comment => {
+            let count = ui.get_workflow_pr_review_conversation_count();
+            ui.set_workflow_pr_review_conversation_count(count.saturating_add(1));
+            // Comment completion belongs to the composer, not the aggregate
+            // review decision. Repeated comments must each clear the composer.
+            let revision = ui.get_workflow_pr_comment_submission_revision();
+            ui.set_workflow_pr_comment_submission_revision(revision.wrapping_add(1));
+        }
+        PullRequestReviewAction::Approve => {
+            ui.set_workflow_pr_remote_review_state("approved".into());
+        }
+        PullRequestReviewAction::RequestChanges => {
+            ui.set_workflow_pr_remote_review_state("rejected".into());
+        }
+    }
+}
+
 pub(super) fn apply_action_state(ui: &MainWindow, state: &PullRequestActionState) {
     ui.set_workflow_pr_can_comment(state.can_comment);
     ui.set_workflow_pr_can_approve(state.can_approve);
     ui.set_workflow_pr_can_request_changes(state.can_request_changes);
     ui.set_workflow_pr_can_merge(state.can_merge);
     ui.set_workflow_pr_can_revert(state.can_revert);
-    if !state.review_state.trim().is_empty() {
-        ui.set_workflow_pr_remote_review_state(state.review_state.clone().into());
-    }
+    // An empty authoritative decision clears a withdrawn or dismissed review.
+    ui.set_workflow_pr_remote_review_state(state.review_state.clone().into());
     ui.set_workflow_pr_merge_readiness_kind(state.readiness.kind.as_str().into());
-    ui.set_workflow_pr_merge_readiness_label(
-        crate::i18n::tr(state.readiness.kind.label_key())
-            .into_owned()
-            .into(),
+    ui.set_workflow_pr_merge_method_merge(
+        state
+            .allowed_merge_methods
+            .contains(&PullRequestMergeMethod::Merge),
     );
-    let readiness_detail = crate::i18n::tr(state.readiness.kind.detail_key()).into_owned();
+    ui.set_workflow_pr_merge_method_squash(
+        state
+            .allowed_merge_methods
+            .contains(&PullRequestMergeMethod::Squash),
+    );
+    ui.set_workflow_pr_merge_method_rebase(
+        state
+            .allowed_merge_methods
+            .contains(&PullRequestMergeMethod::Rebase),
+    );
+    ui.set_workflow_pr_merge_method_fast_forward(
+        state
+            .allowed_merge_methods
+            .contains(&PullRequestMergeMethod::FastForward),
+    );
+    retranslate_action_state(ui, state);
+}
+
+pub(super) fn retranslate_action_state(ui: &MainWindow, state: &PullRequestActionState) {
+    // The cached provider snapshot can predate a successful local mutation.
+    // Language refresh changes copy without restoring stale decisions/capabilities.
+    let readiness = projected_readiness_kind(ui.get_workflow_pr_merge_readiness_kind().as_str());
+    ui.set_workflow_pr_merge_readiness_label(
+        crate::i18n::tr(readiness.label_key()).into_owned().into(),
+    );
+    let readiness_detail = crate::i18n::tr(readiness.detail_key()).into_owned();
     ui.set_workflow_pr_merge_readiness_detail(readiness_detail.clone().into());
-    let merge_block_reason = match state.merge_block_kind {
+    let merge_block_kind = if ui.get_workflow_pr_can_merge() {
+        PullRequestMergeBlockKind::None
+    } else if readiness != state.readiness.kind {
+        PullRequestMergeBlockKind::Readiness
+    } else {
+        state.merge_block_kind
+    };
+    let merge_block_reason = match merge_block_kind {
         PullRequestMergeBlockKind::None => String::new(),
         PullRequestMergeBlockKind::ConfigureProvider => {
             crate::i18n::tr("pr_review.configure_provider_for_merge").into_owned()
@@ -556,7 +622,7 @@ pub(super) fn apply_action_state(ui: &MainWindow, state: &PullRequestActionState
     };
     ui.set_workflow_pr_merge_block_reason(merge_block_reason.into());
     ui.set_workflow_pr_revert_block_reason(
-        if state.can_revert {
+        if ui.get_workflow_pr_can_revert() {
             String::new()
         } else {
             crate::i18n::tr("pr_review.revert_not_available").into_owned()
@@ -581,44 +647,28 @@ pub(super) fn apply_action_state(ui: &MainWindow, state: &PullRequestActionState
     ui.set_workflow_pr_revert_confirmation(
         crate::i18n::tr(revert_confirmation_key).into_owned().into(),
     );
-    ui.set_workflow_pr_merge_method_merge(
-        state
-            .allowed_merge_methods
-            .contains(&PullRequestMergeMethod::Merge),
-    );
-    ui.set_workflow_pr_merge_method_squash(
-        state
-            .allowed_merge_methods
-            .contains(&PullRequestMergeMethod::Squash),
-    );
-    ui.set_workflow_pr_merge_method_rebase(
-        state
-            .allowed_merge_methods
-            .contains(&PullRequestMergeMethod::Rebase),
-    );
-    ui.set_workflow_pr_merge_method_fast_forward(
-        state
-            .allowed_merge_methods
-            .contains(&PullRequestMergeMethod::FastForward),
-    );
 }
 
 pub(super) fn readiness_label_key(kind: &str) -> &'static str {
+    projected_readiness_kind(kind).label_key()
+}
+
+fn projected_readiness_kind(kind: &str) -> PullRequestReadinessKind {
     match kind {
-        "checking" => "pr_review.readiness.checking",
-        "ready" => "pr_review.readiness.ready",
-        "conflicts" => "pr_review.readiness.conflicts",
-        "draft" => "pr_review.readiness.draft",
-        "review_required" => "pr_review.readiness.review_required",
-        "changes_requested" => "pr_review.readiness.changes_requested",
-        "checks_pending" => "pr_review.readiness.checks_pending",
-        "checks_failed" => "pr_review.readiness.checks_failed",
-        "branch_out_of_date" => "pr_review.readiness.branch_out_of_date",
-        "discussions_unresolved" => "pr_review.readiness.discussions_unresolved",
-        "blocked" => "pr_review.readiness.blocked",
-        "merged" => "pr_review.readiness.merged",
-        "closed" => "pr_review.readiness.closed",
-        _ => "pr_review.readiness.unavailable",
+        "checking" => PullRequestReadinessKind::Checking,
+        "ready" => PullRequestReadinessKind::Ready,
+        "conflicts" => PullRequestReadinessKind::Conflicts,
+        "draft" => PullRequestReadinessKind::Draft,
+        "review_required" => PullRequestReadinessKind::ReviewRequired,
+        "changes_requested" => PullRequestReadinessKind::ChangesRequested,
+        "checks_pending" => PullRequestReadinessKind::ChecksPending,
+        "checks_failed" => PullRequestReadinessKind::ChecksFailed,
+        "branch_out_of_date" => PullRequestReadinessKind::BranchOutOfDate,
+        "discussions_unresolved" => PullRequestReadinessKind::DiscussionsUnresolved,
+        "blocked" => PullRequestReadinessKind::Blocked,
+        "merged" => PullRequestReadinessKind::Merged,
+        "closed" => PullRequestReadinessKind::Closed,
+        _ => PullRequestReadinessKind::Unavailable,
     }
 }
 
@@ -658,6 +708,225 @@ pub(super) fn reset_action_ui(ui: &MainWindow) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn successful_approval_does_not_merge_or_change_merge_readiness() {
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().unwrap();
+        ui.set_workflow_pr_review_dialog_open(true);
+        ui.set_workflow_pr_merge_readiness_kind("conflicts".into());
+        ui.set_workflow_pr_can_merge(false);
+
+        apply_submitted_review(&ui, PullRequestReviewAction::Approve);
+
+        assert_eq!(ui.get_workflow_pr_remote_review_state(), "approved");
+        assert_eq!(ui.get_workflow_pr_merge_readiness_kind(), "conflicts");
+        assert!(!ui.get_workflow_pr_can_merge());
+        assert!(!ui.get_workflow_pr_review_dialog_open());
+        assert_eq!(ui.get_workflow_pr_comment_submission_revision(), 0);
+    }
+
+    #[test]
+    fn consecutive_comments_preserve_review_decision_and_complete_each_composer_submit() {
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().unwrap();
+        for decision in ["approved", "rejected", ""] {
+            ui.set_workflow_pr_remote_review_state(decision.into());
+            let initial_revision = ui.get_workflow_pr_comment_submission_revision();
+            let initial_count = ui.get_workflow_pr_review_conversation_count();
+            for submission in 1..=2 {
+                apply_submitted_review(&ui, PullRequestReviewAction::Comment);
+                assert_eq!(ui.get_workflow_pr_remote_review_state(), decision);
+                assert_eq!(
+                    ui.get_workflow_pr_comment_submission_revision(),
+                    initial_revision + submission
+                );
+                assert_eq!(
+                    ui.get_workflow_pr_review_conversation_count(),
+                    initial_count + submission
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn authoritative_empty_review_state_clears_a_dismissed_approval() {
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().unwrap();
+        let mut state = PullRequestActionState {
+            can_comment: true,
+            can_approve: true,
+            can_request_changes: true,
+            can_merge: false,
+            can_revert: false,
+            review_state: "approved".into(),
+            readiness: crate::git::PullRequestReadiness::new(
+                crate::git::PullRequestReadinessKind::ReviewRequired,
+                "Review required",
+            ),
+            merge_block_kind: PullRequestMergeBlockKind::Readiness,
+            revert_strategy: PullRequestRevertStrategy::Unsupported,
+            allowed_merge_methods: vec![PullRequestMergeMethod::Merge],
+        };
+        apply_action_state(&ui, &state);
+        assert_eq!(ui.get_workflow_pr_remote_review_state(), "approved");
+
+        state.review_state.clear();
+        apply_action_state(&ui, &state);
+
+        assert_eq!(ui.get_workflow_pr_remote_review_state(), "");
+        assert_eq!(ui.get_workflow_pr_merge_readiness_kind(), "review_required");
+        assert!(!ui.get_workflow_pr_can_merge());
+    }
+
+    #[test]
+    fn review_mutations_invalidate_the_retained_list_and_conversation() {
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().unwrap();
+        ui.set_workflow_pr_review_tab(2);
+        let list = crate::workflow::pr_list::bind_pr_list(&ui);
+        let controller = super::super::bind_pr_review(&ui, list);
+        *controller.conversation_loaded.lock().unwrap() = true;
+        assert!(!controller.pr_list_refresh_pending.load(Ordering::SeqCst));
+
+        controller.refresh_after_review_mutation(&ui);
+
+        assert!(controller.pr_list_refresh_pending.load(Ordering::SeqCst));
+        assert!(!*controller.conversation_loaded.lock().unwrap());
+    }
+
+    #[test]
+    fn pending_list_refresh_is_consumed_only_when_the_pr_list_returns() {
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().unwrap();
+        let list = crate::workflow::pr_list::bind_pr_list(&ui);
+        let controller = super::super::bind_pr_review(&ui, list);
+        controller
+            .pr_list_refresh_pending
+            .store(true, Ordering::SeqCst);
+        ui.set_current_route(crate::Route::PrReview);
+        controller.refresh_list_on_return(&ui);
+        assert!(controller.pr_list_refresh_pending.load(Ordering::SeqCst));
+        ui.set_current_route(crate::Route::Workflow);
+        ui.set_workflow_selected_flow(0);
+        controller.refresh_list_on_return(&ui);
+        assert!(controller.pr_list_refresh_pending.load(Ordering::SeqCst));
+        ui.set_workflow_selected_flow(2);
+        controller.refresh_list_on_return(&ui);
+        assert!(!controller.pr_list_refresh_pending.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn worker_publishes_latest_approval_without_rebuilding_the_hidden_list() {
+        use slint::{Model, ModelRc, VecModel};
+
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().unwrap();
+        let list = crate::workflow::pr_list::bind_pr_list(&ui);
+        let _controller = super::super::bind_pr_review(&ui, list);
+        ui.set_current_route(crate::Route::PrReview);
+        let retained = ModelRc::new(VecModel::from(vec![crate::WorkflowPullRequestItem {
+            number: "815".into(),
+            title: "Worker-published approval".into(),
+            state: "open".into(),
+            review_status: "".into(),
+            ..Default::default()
+        }]));
+        ui.set_workflow_pr_list_items(retained.clone());
+        let metadata = ProjectRepositoryMetadata {
+            repo_project_id: "hidden-list-worker-publish".into(),
+            repo_type: "github".into(),
+            remote_repo: "https://example.invalid/hidden-list-worker-publish".into(),
+        };
+        let key = PrKey::new(&metadata, "815");
+        let published = std::thread::spawn(move || {
+            let data = shared_pr_data();
+            assert!(data.publish_review(data.ticket(), &key, PullRequestReviewAction::Approve));
+            data.get(&key).unwrap()
+        })
+        .join()
+        .unwrap();
+
+        assert_eq!(
+            published.review_status,
+            Some(crate::git::PullRequestReviewStatus::Approved)
+        );
+        assert_eq!(ui.get_current_route(), crate::Route::PrReview);
+        assert!(ui.get_workflow_pr_list_items() == retained);
+        assert_eq!(retained.row_data(0).unwrap().review_status, "");
+        assert_eq!(retained.row_data(0).unwrap().state, "open");
+    }
+
+    #[test]
+    fn locale_refresh_cannot_restore_the_snapshot_before_approval_or_merge() {
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().unwrap();
+        let list = crate::workflow::pr_list::bind_pr_list(&ui);
+        let controller = super::super::bind_pr_review(&ui, list);
+        let state = PullRequestActionState {
+            can_comment: true,
+            can_approve: true,
+            can_request_changes: true,
+            can_merge: true,
+            can_revert: false,
+            review_state: String::new(),
+            readiness: crate::git::PullRequestReadiness::new(
+                PullRequestReadinessKind::Ready,
+                "Ready",
+            ),
+            merge_block_kind: PullRequestMergeBlockKind::None,
+            revert_strategy: PullRequestRevertStrategy::PullRequest,
+            allowed_merge_methods: vec![PullRequestMergeMethod::Merge],
+        };
+        apply_action_state(&ui, &state);
+        *controller.action_state.lock().unwrap() = Some(state);
+        apply_submitted_review(&ui, PullRequestReviewAction::Approve);
+
+        for locale in ["en", "zh-CN"] {
+            crate::i18n::apply_preference(locale).unwrap();
+            controller.sync_language(&ui);
+            assert_eq!(ui.get_workflow_pr_remote_review_state(), "approved");
+            assert_eq!(ui.get_workflow_pr_merge_readiness_kind(), "ready");
+            assert!(ui.get_workflow_pr_can_merge());
+            assert_eq!(
+                ui.get_workflow_pr_merge_readiness_label(),
+                usher_i18n::translate_for(locale, "pr_review.readiness.ready")
+            );
+        }
+
+        // A successful merge changes current semantic state before the next
+        // provider snapshot arrives. A language switch must retain that state.
+        ui.set_workflow_pr_merge_readiness_kind("merged".into());
+        ui.set_workflow_pr_can_merge(false);
+        ui.set_workflow_pr_can_approve(false);
+        ui.set_workflow_pr_can_revert(true);
+        for locale in ["en", "zh-CN"] {
+            crate::i18n::apply_preference(locale).unwrap();
+            controller.sync_language(&ui);
+            assert_eq!(ui.get_workflow_pr_remote_review_state(), "approved");
+            assert_eq!(ui.get_workflow_pr_merge_readiness_kind(), "merged");
+            assert!(!ui.get_workflow_pr_can_merge());
+            assert!(!ui.get_workflow_pr_can_approve());
+            assert!(ui.get_workflow_pr_can_revert());
+            assert_eq!(
+                ui.get_workflow_pr_merge_readiness_label(),
+                usher_i18n::translate_for(locale, "pr_review.readiness.merged")
+            );
+            assert_eq!(
+                ui.get_workflow_pr_merge_block_reason(),
+                usher_i18n::translate_for(locale, "pr_review.readiness_detail.merged")
+            );
+            assert_eq!(ui.get_workflow_pr_revert_block_reason(), "");
+        }
+        crate::i18n::apply_preference(usher_i18n::fallback_locale().id).unwrap();
+    }
 
     fn context() -> PrHookContext {
         PrHookContext {

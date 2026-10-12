@@ -38,12 +38,16 @@ mod decode;
 mod public_prefix;
 mod readiness;
 mod revert;
+mod review_status;
 mod transport;
 
 use conversation::*;
 use decode::*;
 use readiness::{gitee_enterprise_merge_readiness, gitee_public_merge_readiness};
 use revert::{enterprise_commit_refs_can_revert, enterprise_data_object};
+use review_status::{
+    enterprise_native_review_state, enterprise_review_state, gitee_list_review_status,
+};
 use transport::{
     enterprise_authenticated_builder, enterprise_project_endpoint,
     enterprise_pull_request_endpoint, enterprise_pull_request_get,
@@ -263,7 +267,56 @@ async fn get_enterprise_pull_requests(
     if let Some(token) = configured_gitee_token(GiteeApiProfile::EnterpriseV8) {
         request = request.header("PRIVATE-TOKEN", token);
     }
-    decode_pull_request_page(request, page, per_page).await
+    let mut result = decode_pull_request_page(request, page, per_page).await?;
+    // Count probes have no visible rows to enrich. Public v5 keeps its own
+    // comment-only contract; this detail fallback is enterprise-only.
+    if per_page > 1 && configured_gitee_token(GiteeApiProfile::EnterpriseV8).is_some() {
+        result.items = hydrate_enterprise_review_statuses(repo_project_id, result.items).await;
+    }
+    Ok(result)
+}
+
+async fn hydrate_enterprise_review_statuses(
+    repo_project_id: &str,
+    items: Vec<PullRequestItem>,
+) -> Vec<PullRequestItem> {
+    let mut enriched = stream::iter(items.into_iter().enumerate())
+        .map(|(index, mut item)| async move {
+            if matches!(
+                item.review_status,
+                PullRequestReviewStatus::Approved | PullRequestReviewStatus::ChangesRequested
+            ) || item.number.is_empty()
+                || item.number == "—"
+            {
+                return (index, item);
+            }
+            let Ok(endpoint) = enterprise_pull_request_endpoint(
+                endpoints::ENTERPRISE_MERGE_REQUEST_URL,
+                repo_project_id,
+                item.number.as_str(),
+            ) else {
+                return (index, item);
+            };
+            if let Ok(detail) = http::send_json::<Value>(
+                enterprise_pull_request_get(endpoint),
+                RequestOptions::new("Load Gitee enterprise pull request review status")
+                    .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
+                    .retry_transient(3),
+            )
+            .await
+            {
+                let review_status = gitee_list_review_status(&detail);
+                if review_status != PullRequestReviewStatus::None {
+                    item.review_status = review_status;
+                }
+            }
+            (index, item)
+        })
+        .buffer_unordered(4)
+        .collect::<Vec<_>>()
+        .await;
+    enriched.sort_by_key(|(index, _)| *index);
+    enriched.into_iter().map(|(_, item)| item).collect()
 }
 
 fn gitee_enterprise_state_query(state: PullRequestState) -> Vec<(&'static str, &'static str)> {
@@ -821,11 +874,15 @@ async fn get_enterprise_pull_request_action_state(
         .and_then(Value::as_bool)
         .or_else(|| current_object.get("can_be_merge").and_then(Value::as_bool))
         .unwrap_or(false);
-    let review_state = string_field(detail_object, "review_state")
-        .or_else(|| string_field(current_object, "review_state"))
-        .unwrap_or_default();
-    let readiness =
-        gitee_enterprise_merge_readiness(current_object, detail_object, review_state.as_str());
+    let review_state = enterprise_review_state(detail_object, current_object);
+    // Individual reviewer decisions describe approval separately from the
+    // provider's aggregate review requirements and merge conditions.
+    let native_review_state = enterprise_native_review_state(detail_object, current_object);
+    let readiness = gitee_enterprise_merge_readiness(
+        current_object,
+        detail_object,
+        native_review_state.as_str(),
+    );
     let terminal = matches!(
         readiness.kind,
         PullRequestReadinessKind::Merged | PullRequestReadinessKind::Closed
@@ -2566,20 +2623,6 @@ fn to_pull_request_item(value: &Value) -> PullRequestItem {
         web_url: string_field(value, "web_url")
             .or_else(|| string_field(value, "html_url"))
             .unwrap_or_default(),
-    }
-}
-
-fn gitee_list_review_status(value: &Value) -> PullRequestReviewStatus {
-    match string_field(value, "review_state")
-        .or_else(|| string_field(value, "reviewState"))
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "review_approved" | "approved" => PullRequestReviewStatus::Approved,
-        "review_rejected" | "rejected" => PullRequestReviewStatus::ChangesRequested,
-        "review_pending" | "pending" => PullRequestReviewStatus::ReviewRequired,
-        _ => PullRequestReviewStatus::None,
     }
 }
 

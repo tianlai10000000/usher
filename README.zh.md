@@ -176,6 +176,19 @@ Host 打开 Markdown、PNG、纯文本、JSON 和不支持二进制样例。`ui-
 `USHER_PR_LIST_LOCALE=zh-CN`（或 `en`）、`USHER_PR_LIST_PROVIDER=gitee`
 （或 `github`/`gitlab`）。Provider 选项只切换 mock 展示，不代表线上接口验收。
 
+使用交互式批准/合并离线 mock 检查详情操作与返回列表的状态：
+
+```sh
+./tests/run-pr-approval-state-fixture.sh --list --locale zh-CN
+./tests/run-pr-approval-state-fixture.sh --detail --locale en
+```
+
+Open 包含待评审、已批准和请求修改；Closed 包含已合并和关闭未合并。Approve 后底层
+mock 数据立即更新，隐藏列表保持原 model；两秒后返回列表显示新结论。批准不会合并；
+可合并记录需要显式确认。该工具使用真实 Slint UI 和模拟 callback，不读取普通应用
+配置，也不调用 Provider；共享数据及 Worker 顺序另由库回归测试验证。
+
+
 完整的 `cargo test --locked` 当前会暴露 `src/logger/debug_logger.rs` 中已有的 doctest 问题；库单元测试本身可以通过。
 
 验证可选的 Skia 渲染路径：

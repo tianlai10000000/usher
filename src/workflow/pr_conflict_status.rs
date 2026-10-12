@@ -269,6 +269,42 @@ pub(super) fn shared() -> StatusFacade {
         .clone()
 }
 thread_local! {static SUBSCRIPTION:std::cell::RefCell<Option<Subscription>>=const{std::cell::RefCell::new(None)};}
+fn list_visible(ui: &MainWindow) -> bool {
+    ui.get_current_route() == crate::Route::Workflow && ui.get_workflow_selected_flow() == 2
+}
+
+fn apply_observations(ui: &MainWindow, observations: &[Observation]) {
+    let bridge = ui.global::<PrConflictsBridge>();
+    if list_visible(ui) {
+        let repo = bridge.get_list_repository();
+        let rows = ui.get_workflow_pr_list_items();
+        for i in 0..rows.row_count() {
+            let Some(mut row) = rows.row_data(i) else {
+                continue;
+            };
+            if matches!(row.state.as_str(), "closed" | "merged") {
+                continue;
+            }
+            if let Some(o) = observations
+                .iter()
+                .find(|o| o.key.repository == repo.as_str() && o.key.number == row.number.as_str())
+                && row.conflict_status != o.status.as_str()
+            {
+                row.conflict_status = o.status.as_str().into();
+                rows.set_row_data(i, row);
+            }
+        }
+    }
+    if !bridge.get_local()
+        && let Some(o) = observations.iter().find(|o| {
+            o.key.repository == bridge.get_repository().as_str()
+                && o.key.number == bridge.get_number().as_str()
+        })
+    {
+        bridge.set_status(o.status.as_str().into());
+    }
+}
+
 pub(super) fn bind(ui: &MainWindow) {
     let facade = shared();
     // Eager owner/drain registration during workflow composition, never a lazy
@@ -312,32 +348,7 @@ pub(super) fn bind(ui: &MainWindow) {
             let Some(observations) = projection.observations(epoch) else {
                 return;
             };
-            let bridge = ui.global::<PrConflictsBridge>();
-            let repo = bridge.get_list_repository();
-            let rows = ui.get_workflow_pr_list_items();
-            for i in 0..rows.row_count() {
-                let Some(mut row) = rows.row_data(i) else {
-                    continue;
-                };
-                if matches!(row.state.as_str(), "closed" | "merged") {
-                    continue;
-                }
-                if let Some(o) = observations.iter().find(|o| {
-                    o.key.repository == repo.as_str() && o.key.number == row.number.as_str()
-                }) && row.conflict_status != o.status.as_str()
-                {
-                    row.conflict_status = o.status.as_str().into();
-                    rows.set_row_data(i, row);
-                }
-            }
-            if !bridge.get_local()
-                && let Some(o) = observations.iter().find(|o| {
-                    o.key.repository == bridge.get_repository().as_str()
-                        && o.key.number == bridge.get_number().as_str()
-                })
-            {
-                bridge.set_status(o.status.as_str().into());
-            }
+            apply_observations(&ui, &observations);
         });
     }));
     SUBSCRIPTION.with(|s| *s.borrow_mut() = Some(subscription));
@@ -363,6 +374,9 @@ pub(super) fn enrich(ui: &MainWindow, metadata: ProjectRepositoryMetadata) {
     }
     ui.global::<PrConflictsBridge>()
         .set_list_repository(repository.into());
+    if !list_visible(ui) {
+        return;
+    }
     for i in 0..rows.row_count() {
         if let Some(mut row) = rows.row_data(i)
             && !matches!(row.state.as_str(), "closed" | "merged")
@@ -378,6 +392,9 @@ fn reset_projection(ui: &MainWindow) {
     b.set_list_repository("".into());
     b.set_repository("".into());
     b.set_status("unknown".into());
+    if !list_visible(ui) {
+        return;
+    }
     let rows = ui.get_workflow_pr_list_items();
     for i in 0..rows.row_count() {
         if let Some(mut row) = rows.row_data(i)
@@ -391,4 +408,67 @@ fn reset_projection(ui: &MainWindow) {
 pub(super) fn invalidate(ui: &MainWindow) {
     shared().owner.invalidate();
     reset_projection(ui);
+}
+
+#[cfg(test)]
+mod projection_tests {
+    use super::*;
+    use slint::{ModelRc, VecModel};
+
+    #[test]
+    fn hidden_conflict_rows_wait_for_list_return_while_detail_updates() {
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().unwrap();
+        let rows = ModelRc::new(VecModel::from(vec![crate::WorkflowPullRequestItem {
+            number: "42".into(),
+            state: "open".into(),
+            conflict_status: "unknown".into(),
+            ..Default::default()
+        }]));
+        ui.set_workflow_pr_list_items(rows.clone());
+        let bridge = ui.global::<PrConflictsBridge>();
+        bridge.set_list_repository("fixture-repository".into());
+        bridge.set_repository("fixture-repository".into());
+        bridge.set_number("42".into());
+        bridge.set_local(false);
+        let observations = [Observation {
+            key: Key {
+                repository: "fixture-repository".into(),
+                number: "42".into(),
+            },
+            status: ConflictStatus::Conflicting,
+            epoch: ScopeEpoch(0),
+            at: Instant::now(),
+        }];
+
+        ui.set_current_route(crate::Route::PrReview);
+        apply_observations(&ui, &observations);
+        assert_eq!(rows.row_data(0).unwrap().conflict_status, "unknown");
+        assert_eq!(bridge.get_status(), "conflicting");
+
+        ui.set_current_route(crate::Route::Workflow);
+        ui.set_workflow_selected_flow(0);
+        apply_observations(&ui, &observations);
+        assert_eq!(rows.row_data(0).unwrap().conflict_status, "unknown");
+
+        ui.set_workflow_selected_flow(2);
+        apply_observations(&ui, &observations);
+        assert_eq!(rows.row_data(0).unwrap().conflict_status, "conflicting");
+        assert_eq!(ui.get_workflow_pr_list_items(), rows);
+
+        ui.set_current_route(crate::Route::PrReview);
+        reset_projection(&ui);
+        assert_eq!(rows.row_data(0).unwrap().conflict_status, "conflicting");
+        assert_eq!(bridge.get_status(), "unknown");
+
+        ui.set_current_route(crate::Route::Workflow);
+        ui.set_workflow_selected_flow(0);
+        reset_projection(&ui);
+        assert_eq!(rows.row_data(0).unwrap().conflict_status, "conflicting");
+
+        ui.set_workflow_selected_flow(2);
+        reset_projection(&ui);
+        assert_eq!(rows.row_data(0).unwrap().conflict_status, "unknown");
+    }
 }

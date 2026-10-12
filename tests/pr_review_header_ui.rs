@@ -10,6 +10,71 @@ fn find(window: &MainWindow, id: &str) -> ElementHandle {
 }
 
 #[test]
+fn approved_status_survives_repeated_comment_completion_and_locale_switch() {
+    use std::{cell::RefCell, rc::Rc, time::Duration};
+
+    i_slint_backend_testing::init_no_event_loop();
+    let window = MainWindow::new().unwrap();
+    window.window().dispatch_event(WindowEvent::Resized {
+        size: LogicalSize::new(1200.0, 900.0),
+    });
+    window.set_platform_is_macos(true);
+    window.set_show_navigation_drawer(false);
+    window.set_current_route(Route::PrReview);
+    window.set_workflow_pr_review_tab(0);
+    window.set_workflow_pr_can_comment(true);
+    window.set_workflow_pr_can_approve(true);
+    window.set_workflow_pr_can_merge(false);
+    window.set_workflow_pr_merge_readiness_kind("review_required".into());
+    window.set_workflow_pr_remote_review_state("approved".into());
+    let submissions = Rc::new(RefCell::new(Vec::new()));
+    let observed = submissions.clone();
+    window.on_workflow_pr_submit_review(move |action, body| {
+        observed.borrow_mut().push((action, body));
+    });
+
+    for (index, locale) in ["en", "zh-CN", "en"].into_iter().enumerate() {
+        slint::select_bundled_translation(locale).unwrap();
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(20));
+        let approved = find(&window, "GitHubHeaderActionStrip::approved-label");
+        assert_eq!(
+            approved.accessible_label().as_deref(),
+            Some(usher_i18n::translate_for(locale, "pr_review.approved").as_ref())
+        );
+        let editor = find(
+            &window,
+            "GitHubPullRequestReviewPage::conversation-comment-editor",
+        );
+        let body = format!("Comment {}", index + 1);
+        editor.set_accessible_value(body.clone());
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(20));
+        find(&window, "GitHubCommentButton::action-touch")
+            .mock_single_click(slint::platform::PointerEventButton::Left);
+        assert_eq!(submissions.borrow().len(), index + 1);
+        assert_eq!(submissions.borrow()[index].0, "comment");
+        assert_eq!(submissions.borrow()[index].1, body);
+        // A failed/incomplete request must keep the draft until success arrives.
+        assert_eq!(editor.accessible_value().as_deref(), Some(body.as_str()));
+        window.set_workflow_pr_comment_submission_revision(index as i32 + 1);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(20));
+        assert_eq!(editor.accessible_value().as_deref(), Some(""));
+        assert_eq!(window.get_workflow_pr_remote_review_state(), "approved");
+        assert_eq!(
+            window.get_workflow_pr_merge_readiness_kind(),
+            "review_required"
+        );
+        assert!(!window.get_workflow_pr_can_merge());
+    }
+    window.set_workflow_pr_remote_review_state("".into());
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(20));
+    assert!(
+        ElementHandle::find_by_element_id(&window, "GitHubHeaderActionStrip::approved-label")
+            .next()
+            .is_none()
+    );
+}
+
+#[test]
 fn wide_pr_summary_clears_the_header_divider() {
     i_slint_backend_testing::init_no_event_loop();
     let window = MainWindow::new().expect("main window");

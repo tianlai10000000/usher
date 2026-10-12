@@ -2686,6 +2686,9 @@ fn project_pr_list_rows(state: &ReviewTaskState) -> Vec<PrListTaskProjection> {
 }
 
 fn apply_pr_list_review_projection(ui: &MainWindow, tasks: &[PrListTaskProjection]) {
+    if ui.get_current_route() != crate::Route::Workflow || ui.get_workflow_selected_flow() != 2 {
+        return;
+    }
     let project = ui.get_workflow_project_id();
     let latest_by_number = tasks
         .iter()
@@ -3406,6 +3409,44 @@ mod tests {
     use crate::git::{PullRequestDiffFile, PullRequestDiffLine};
     use slint::platform::{PointerEventButton, WindowEvent};
     use slint::{ComponentHandle, LogicalPosition, LogicalSize};
+
+    #[test]
+    fn hidden_pr_ai_review_rows_hydrate_on_visible_list_return() {
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().unwrap();
+        ui.set_workflow_project_id("fixture-project".into());
+        let rows = ModelRc::new(VecModel::from(vec![WorkflowPullRequestItem {
+            number: "42".into(),
+            state: "open".into(),
+            ..Default::default()
+        }]));
+        ui.set_workflow_pr_list_items(rows.clone());
+        let tasks = [PrListTaskProjection {
+            project_key: "fixture-project".into(),
+            pull_request_number: "42".into(),
+            task_id: "fixture-task".into(),
+            status: ReviewTaskStatus::Completed,
+            finding_count: 3,
+        }];
+
+        ui.set_current_route(Route::PrReview);
+        apply_pr_list_review_projection(&ui, &tasks);
+        assert_eq!(rows.row_data(0).unwrap().ai_review_status, "");
+
+        ui.set_current_route(Route::Workflow);
+        ui.set_workflow_selected_flow(0);
+        apply_pr_list_review_projection(&ui, &tasks);
+        assert_eq!(rows.row_data(0).unwrap().ai_review_status, "");
+
+        ui.set_workflow_selected_flow(2);
+        apply_pr_list_review_projection(&ui, &tasks);
+        let row = rows.row_data(0).unwrap();
+        assert_eq!(row.ai_review_status, "completed");
+        assert_eq!(row.ai_review_task_id, "fixture-task");
+        assert_eq!(row.ai_review_finding_count, 3);
+        assert_eq!(ui.get_workflow_pr_list_items(), rows);
+    }
 
     fn chat_test_input() -> ReviewInput {
         ReviewInput {

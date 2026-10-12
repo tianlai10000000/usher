@@ -798,6 +798,7 @@ export component MainWindow inherits Window {
     in property <bool> workflow-pr-can-approve: false;
     in property <bool> workflow-pr-can-request-changes: false;
     in property <string> workflow-pr-remote-review-state: "";
+    in property <int> workflow-pr-comment-submission-revision: 0;
     in property <bool> workflow-pr-can-merge: false;
     in property <bool> workflow-pr-can-revert: false;
     in property <string> workflow-pr-merge-readiness-kind: "";
@@ -857,6 +858,7 @@ export component MainWindow inherits Window {
     callback job-run-stop();
     callback job-run-load-step-log(int);
     callback workflow-pr-list-state-change(string);
+    callback workflow-pr-list-resume();
     callback workflow-pr-list-query-change(string);
     callback workflow-pr-list-page-change(int);
     callback workflow-pr-list-review-filter-change(string);
@@ -1083,6 +1085,9 @@ export component MainWindow inherits Window {
         if root.current-route == Route.Workflow {
             page-scroll-view.viewport_y = 0px;
             root.page-scroll-reset-pending = true;
+            if root.workflow-selected-flow == 2 {
+                root.workflow-pr-list-resume();
+            }
         }
     }
 
@@ -2417,6 +2422,7 @@ export component MainWindow inherits Window {
         can-approve: root.workflow-pr-can-approve;
         can-request-changes: root.workflow-pr-can-request-changes;
         remote-review-state: root.workflow-pr-remote-review-state;
+        comment-submission-revision: root.workflow-pr-comment-submission-revision;
         can-merge: root.workflow-pr-can-merge;
         can-revert: root.workflow-pr-can-revert;
         merge-readiness-kind: root.workflow-pr-merge-readiness-kind;

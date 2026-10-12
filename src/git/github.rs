@@ -41,6 +41,10 @@ pub(super) async fn conflict_detail(
     .map_err(super::conflicts::http_error)
 }
 const GITHUB_SEARCH_RESULT_LIMIT: u32 = 1_000;
+const GITHUB_COLLECTION_PAGE_SIZE: usize = 100;
+const GITHUB_COLLECTION_MAX_PAGES: u32 = 30;
+const GITHUB_COLLECTION_ITEM_LIMIT: usize =
+    GITHUB_COLLECTION_PAGE_SIZE * GITHUB_COLLECTION_MAX_PAGES as usize;
 const GITHUB_USER_AGENT: &str = concat!("usher/", env!("CARGO_PKG_VERSION"));
 
 #[derive(Deserialize)]
@@ -291,20 +295,27 @@ async fn load_pull_request_summary(
             .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
             .retry_transient(3),
     );
-    let reviews_future = http::send_json::<Vec<Value>>(
-        authenticated_request(locator, reviews_endpoint).query(&[("per_page", "100")]),
-        RequestOptions::new("Load GitHub pull request list reviews")
-            .response_byte_limit(MAX_METADATA_RESPONSE_BYTES)
-            .retry_transient(3),
+    let reviews_future = load_github_pages(
+        locator,
+        reviews_endpoint,
+        "Load GitHub pull request list reviews",
     );
     let (detail, reviews) = tokio::join!(detail_future, reviews_future);
     let detail: Value = detail.ok()?;
-    let reviews = reviews.unwrap_or_default();
+    match &reviews {
+        Err(error) => log::debug!(
+            "[CodeReview][GitHub] List review state unavailable for PR #{pull_request_number}: {error}"
+        ),
+        Ok(reviews) if reviews.len() >= GITHUB_COLLECTION_ITEM_LIMIT => log::debug!(
+            "[CodeReview][GitHub] List review history reached the pagination limit for PR #{pull_request_number}"
+        ),
+        _ => {}
+    }
     pull_request_branches(&detail).map(|(source_branch, target_branch)| {
         (
             source_branch,
             target_branch,
-            github_list_review_status(&detail, reviews.as_slice()),
+            github_list_review_status(&detail, reviews.as_deref().ok()),
             conversation_count_from_detail(&detail),
             super::conflicts::status_from_payload("github", &detail),
         )
@@ -527,7 +538,7 @@ pub(super) async fn get_pull_request_action_state(
     let detail = detail.map_err(|error| error.to_string())?;
     let repository = repository.map_err(|error| error.to_string())?;
     let reviews = reviews.map_err(|error| error.to_string())?;
-    if reviews.len() >= 3_000 {
+    if reviews.len() >= GITHUB_COLLECTION_ITEM_LIMIT {
         return Err(
             "GitHub review history reached the safe pagination limit; merge remains disabled until the complete review state can be confirmed."
                 .to_string(),
@@ -1084,7 +1095,7 @@ async fn load_github_pages(
     operation: &'static str,
 ) -> http::HttpResult<Vec<Value>> {
     let mut values = Vec::new();
-    for page in 1..=30u32 {
+    for page in 1..=GITHUB_COLLECTION_MAX_PAGES {
         let batch: Vec<Value> = http::send_json(
             authenticated_request(locator, endpoint.clone())
                 .query(&[("page", page.to_string()), ("per_page", "100".to_string())]),
@@ -1093,7 +1104,7 @@ async fn load_github_pages(
                 .retry_transient(3),
         )
         .await?;
-        let complete = batch.len() < 100;
+        let complete = batch.len() < GITHUB_COLLECTION_PAGE_SIZE;
         values.extend(batch);
         if complete {
             break;
@@ -1470,7 +1481,11 @@ fn aggregate_review_state(reviews: &[Value]) -> String {
     }
 }
 
-fn github_list_review_status(detail: &Value, reviews: &[Value]) -> PullRequestReviewStatus {
+fn github_list_review_status(detail: &Value, reviews: Option<&[Value]>) -> PullRequestReviewStatus {
+    let Some(reviews) = reviews.filter(|reviews| reviews.len() < GITHUB_COLLECTION_ITEM_LIMIT)
+    else {
+        return PullRequestReviewStatus::None;
+    };
     match aggregate_review_state(reviews).as_str() {
         "approved" => PullRequestReviewStatus::Approved,
         "rejected" => PullRequestReviewStatus::ChangesRequested,
@@ -1783,23 +1798,52 @@ mod tests {
         assert_eq!(
             github_list_review_status(
                 &json!({ "requested_reviewers": [{ "login": "alice" }] }),
-                &[]
+                Some(&[])
             ),
             PullRequestReviewStatus::ReviewRequired
         );
         assert_eq!(
             github_list_review_status(
                 &json!({ "requested_reviewers": [{ "login": "alice" }] }),
-                &[json!({ "user": { "login": "alice" }, "state": "APPROVED" })]
+                Some(&[json!({ "user": { "login": "alice" }, "state": "APPROVED" })])
             ),
             PullRequestReviewStatus::Approved
         );
         assert_eq!(
             github_list_review_status(
                 &json!({}),
-                &[json!({ "user": { "login": "alice" }, "state": "CHANGES_REQUESTED" })]
+                Some(&[json!({ "user": { "login": "alice" }, "state": "CHANGES_REQUESTED" })])
             ),
             PullRequestReviewStatus::ChangesRequested
+        );
+    }
+
+    #[test]
+    fn github_list_review_status_uses_latest_decision_beyond_the_first_page() {
+        let mut reviews =
+            vec![json!({ "user": { "login": "alice" }, "state": "CHANGES_REQUESTED" }); 100];
+        reviews.push(json!({ "user": { "login": "alice" }, "state": "APPROVED" }));
+
+        assert_eq!(
+            github_list_review_status(&json!({}), Some(&reviews)),
+            PullRequestReviewStatus::Approved
+        );
+    }
+
+    #[test]
+    fn github_list_review_status_omits_decisions_from_incomplete_history() {
+        let detail = json!({ "requested_reviewers": [{ "login": "alice" }] });
+        assert_eq!(
+            github_list_review_status(&detail, None),
+            PullRequestReviewStatus::None
+        );
+        let reviews = vec![
+            json!({ "user": { "login": "alice" }, "state": "APPROVED" });
+            super::GITHUB_COLLECTION_ITEM_LIMIT
+        ];
+        assert_eq!(
+            github_list_review_status(&detail, Some(&reviews)),
+            PullRequestReviewStatus::None
         );
     }
 

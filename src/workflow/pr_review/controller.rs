@@ -58,7 +58,7 @@ const LARGE_DIFF_LINE_THRESHOLD: usize = 400;
 const LARGE_DIFF_BYTE_THRESHOLD: usize = 64 * 1024;
 mod actions;
 mod diff_bindings;
-use actions::{apply_action_state, readiness_label_key, reset_action_ui};
+use actions::{readiness_label_key, reset_action_ui, retranslate_action_state};
 mod diagnostics;
 mod highlight_benchmark;
 mod highlight_completion;
@@ -932,10 +932,17 @@ impl WorkflowPrReviewController {
         self.log_memory_diagnostics("review_close.before_clear");
         self.clear_owned_state(ui);
         ui.invoke_router_back();
-        if self.pr_list_refresh_pending.swap(false, Ordering::SeqCst) {
+        self.refresh_list_on_return(ui);
+        self.log_memory_diagnostics("review_close.after_clear");
+    }
+
+    pub(crate) fn refresh_list_on_return(&self, ui: &MainWindow) {
+        if ui.get_current_route() == crate::Route::Workflow
+            && ui.get_workflow_selected_flow() == 2
+            && self.pr_list_refresh_pending.swap(false, Ordering::SeqCst)
+        {
             self.pr_list_controller.refresh_after_remote_mutation(ui);
         }
-        self.log_memory_diagnostics("review_close.after_clear");
     }
 
     pub(crate) fn select_project(&self, ui: &MainWindow, project_alias: String) {
@@ -1010,7 +1017,7 @@ impl WorkflowPrReviewController {
             .ok()
             .and_then(|state| state.clone());
         if let Some(state) = state {
-            apply_action_state(ui, &state);
+            retranslate_action_state(ui, &state);
         } else if !ui.get_workflow_pr_merge_readiness_kind().is_empty() {
             let label_key = readiness_label_key(ui.get_workflow_pr_merge_readiness_kind().as_str());
             ui.set_workflow_pr_merge_readiness_label(
