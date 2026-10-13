@@ -709,6 +709,7 @@ export component MainWindow inherits Window {
     in property <int> workflow-pr-list-closed-total: -1;
     in property <int> workflow-pr-list-page: 1;
     in property <int> workflow-pr-list-page-count: 1;
+    in property <[int]> workflow-pr-list-page-links: [];
     in property <string> workflow-pr-list-state: "open";
     in property <string> workflow-pr-list-query: "is:pr is:open";
     in property <string> workflow-pr-list-review-filter: "all";
@@ -1416,6 +1417,7 @@ export component MainWindow inherits Window {
                             pr-list-closed-total: root.workflow-pr-list-closed-total;
                             pr-list-page: root.workflow-pr-list-page;
                             pr-list-page-count: root.workflow-pr-list-page-count;
+                            pr-list-page-links: root.workflow-pr-list-page-links;
                             pr-list-state: root.workflow-pr-list-state;
                             pr-list-query: root.workflow-pr-list-query;
                             pr-list-review-filter: root.workflow-pr-list-review-filter;

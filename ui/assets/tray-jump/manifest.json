@@ -1,0 +1,444 @@
+{
+  "source": "logo.png",
+  "source_sha256": "f9d5086b7b3cc293eb8c7e95e61554cb1bc3a6c83978639664519b5a47c4d960",
+  "source_canvas": [
+    256,
+    256
+  ],
+  "canvas": [
+    64,
+    64
+  ],
+  "interval_ms": 30,
+  "duration_ms": 720,
+  "runtime_frames": 24,
+  "restore_resource": "logo.png",
+  "endpoints_match_static_pixels": true,
+  "frames": [
+    {
+      "file": "jump-00.png",
+      "time_ms": 0,
+      "pose": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+      ],
+      "alpha_bounds": [
+        7,
+        12,
+        57,
+        52
+      ],
+      "sha256": "f98f27f86709306a9ac7b4d52009d631ce6259edcbc07cd7d1936a6618c99329"
+    },
+    {
+      "file": "jump-01.png",
+      "time_ms": 30,
+      "pose": [
+        1.389827,
+        0.833896,
+        1.006949,
+        0.993051
+      ],
+      "alpha_bounds": [
+        7,
+        12,
+        57,
+        52
+      ],
+      "sha256": "95e975df9431420685ce2863fcc8ad0d0abf64b331a3cf2e785ed935f177bdc2"
+    },
+    {
+      "file": "jump-02.png",
+      "time_ms": 60,
+      "pose": [
+        3.884817,
+        2.33089,
+        1.019424,
+        0.980576
+      ],
+      "alpha_bounds": [
+        6,
+        13,
+        57,
+        52
+      ],
+      "sha256": "68ff91974c64f56723a36137de87acaa8b2947e35a6e7ea294a175fc10cf7a12"
+    },
+    {
+      "file": "jump-03.png",
+      "time_ms": 90,
+      "pose": [
+        4.934114,
+        2.952289,
+        1.024943,
+        0.975057
+      ],
+      "alpha_bounds": [
+        6,
+        13,
+        58,
+        52
+      ],
+      "sha256": "dc3ad5efe21cbfe16482591d5fb07b2b0cc83cd0b744a6e393ec7c9a4e6c6170"
+    },
+    {
+      "file": "jump-04.png",
+      "time_ms": 120,
+      "pose": [
+        0.162983,
+        -0.502667,
+        1.02083,
+        0.97917
+      ],
+      "alpha_bounds": [
+        7,
+        13,
+        57,
+        52
+      ],
+      "sha256": "efb88d03d916db4b23803dec5af89212572947a3b5d91b40c461ac204f306883"
+    },
+    {
+      "file": "jump-05.png",
+      "time_ms": 150,
+      "pose": [
+        -9.097268,
+        -7.208367,
+        1.012847,
+        0.987153
+      ],
+      "alpha_bounds": [
+        9,
+        11,
+        57,
+        52
+      ],
+      "sha256": "f529c2452b132955b84027ff43a82050ae1a6bb5849457045bc59fbbc872ffb0"
+    },
+    {
+      "file": "jump-06.png",
+      "time_ms": 180,
+      "pose": [
+        -18.530178,
+        -14.039095,
+        1.004715,
+        0.995285
+      ],
+      "alpha_bounds": [
+        12,
+        9,
+        56,
+        52
+      ],
+      "sha256": "6d8761d5a5afbee4193a6d997a46cb968aea32b84f56a3402b03777add2dc09a"
+    },
+    {
+      "file": "jump-07.png",
+      "time_ms": 210,
+      "pose": [
+        -23.819284,
+        -17.869137,
+        1.000156,
+        0.999844
+      ],
+      "alpha_bounds": [
+        13,
+        9,
+        55,
+        52
+      ],
+      "sha256": "18df80a160bc563ddebf702cc2d0f7ddfdabc5532281ef728ff0f6a5dbd399d4"
+    },
+    {
+      "file": "jump-08.png",
+      "time_ms": 240,
+      "pose": [
+        -25.121238,
+        -16.878762,
+        1.0,
+        1.0
+      ],
+      "alpha_bounds": [
+        13,
+        8,
+        55,
+        52
+      ],
+      "sha256": "387a908a7c881e8290c3609d4fdd851dec336cfa2d0990336727d1c085c6fdfb"
+    },
+    {
+      "file": "jump-09.png",
+      "time_ms": 270,
+      "pose": [
+        -28.53186,
+        -13.46814,
+        1.0,
+        1.0
+      ],
+      "alpha_bounds": [
+        12,
+        7,
+        56,
+        50
+      ],
+      "sha256": "5234c5eedc2b46057e06739c70e67a714d2f0e11ca2bd639cba6b4f79c3d95e5"
+    },
+    {
+      "file": "jump-10.png",
+      "time_ms": 300,
+      "pose": [
+        -32.196795,
+        -9.803205,
+        1.0,
+        1.0
+      ],
+      "alpha_bounds": [
+        10,
+        5,
+        56,
+        48
+      ],
+      "sha256": "74027cc1ea39779a43a032e7a9de596ac4973e1b2046713a385e395d68a48757"
+    },
+    {
+      "file": "jump-11.png",
+      "time_ms": 330,
+      "pose": [
+        -33.996767,
+        -8.003233,
+        1.0,
+        1.0
+      ],
+      "alpha_bounds": [
+        10,
+        4,
+        56,
+        47
+      ],
+      "sha256": "54888b7b65bc039b6a9ead88342ea91e4f6c6cbde044f51f7024d635b0c1b9b7"
+    },
+    {
+      "file": "jump-12.png",
+      "time_ms": 360,
+      "pose": [
+        -31.036814,
+        -6.692712,
+        1.0,
+        1.0
+      ],
+      "alpha_bounds": [
+        9,
+        5,
+        56,
+        47
+      ],
+      "sha256": "c2ffea495348bd82cce1e3fc66a8c3b2603b0d0dfe42f401c6006be9c845f31e"
+    },
+    {
+      "file": "jump-13.png",
+      "time_ms": 390,
+      "pose": [
+        -23.422926,
+        -3.333644,
+        1.0,
+        1.0
+      ],
+      "alpha_bounds": [
+        8,
+        6,
+        57,
+        47
+      ],
+      "sha256": "fd69284902d7742c215c27469d0a038eb4d9470e1d8f7747f30e96d5f546ab90"
+    },
+    {
+      "file": "jump-14.png",
+      "time_ms": 420,
+      "pose": [
+        -13.924229,
+        0.856958,
+        1.0,
+        1.0
+      ],
+      "alpha_bounds": [
+        7,
+        8,
+        57,
+        48
+      ],
+      "sha256": "58d7bfd4e98fd002e065fd25a97974f29f513b8779d41f5f163b85b1bb962edf"
+    },
+    {
+      "file": "jump-15.png",
+      "time_ms": 450,
+      "pose": [
+        -5.3125,
+        4.65625,
+        1.0,
+        1.0
+      ],
+      "alpha_bounds": [
+        6,
+        10,
+        57,
+        49
+      ],
+      "sha256": "88fdb77480325735137a8691d84fc1c21fe360583e660e3b0a90e5845518af1e"
+    },
+    {
+      "file": "jump-16.png",
+      "time_ms": 480,
+      "pose": [
+        -0.359518,
+        6.841389,
+        1.0,
+        1.0
+      ],
+      "alpha_bounds": [
+        5,
+        11,
+        57,
+        49
+      ],
+      "sha256": "55d794afa098419a46d0ba5f28893c8b566c7b742dcea78f83cc50bbeb913cb8"
+    },
+    {
+      "file": "jump-17.png",
+      "time_ms": 510,
+      "pose": [
+        0.78137,
+        5.827944,
+        1.004884,
+        0.995116
+      ],
+      "alpha_bounds": [
+        5,
+        12,
+        57,
+        50
+      ],
+      "sha256": "a9be283765efcae3a8f4b62cc264cc161a122e06f2ec3ddafd8256510c977eaa"
+    },
+    {
+      "file": "jump-18.png",
+      "time_ms": 540,
+      "pose": [
+        3.136,
+        2.296,
+        1.0196,
+        0.9804
+      ],
+      "alpha_bounds": [
+        6,
+        13,
+        57,
+        51
+      ],
+      "sha256": "030772156645106235c5919e4ef64c8c5d23c9abc4fe95d89f9f0a2a720086e9"
+    },
+    {
+      "file": "jump-19.png",
+      "time_ms": 570,
+      "pose": [
+        3.787852,
+        0.920444,
+        1.024337,
+        0.975663
+      ],
+      "alpha_bounds": [
+        6,
+        13,
+        58,
+        52
+      ],
+      "sha256": "a01582188c795c7b20f0bd9c72985ec2b2cdded6889975968d4642b694446d03"
+    },
+    {
+      "file": "jump-20.png",
+      "time_ms": 600,
+      "pose": [
+        0.663923,
+        -0.251029,
+        1.014575,
+        0.985425
+      ],
+      "alpha_bounds": [
+        7,
+        12,
+        57,
+        52
+      ],
+      "sha256": "d58303b698e4fc0c57830ad828edba65d27ecaf835095611c66dd2a6e0542d00"
+    },
+    {
+      "file": "jump-21.png",
+      "time_ms": 630,
+      "pose": [
+        -3.103009,
+        -1.663628,
+        1.002803,
+        0.997197
+      ],
+      "alpha_bounds": [
+        7,
+        11,
+        57,
+        52
+      ],
+      "sha256": "ae76ef36866ba37470dba767d71b560bc1828845ce2ff9d04020b569ced77fe2"
+    },
+    {
+      "file": "jump-22.png",
+      "time_ms": 660,
+      "pose": [
+        -3.703704,
+        -1.851852,
+        1.0,
+        1.0
+      ],
+      "alpha_bounds": [
+        8,
+        11,
+        57,
+        52
+      ],
+      "sha256": "edecf068ddb69e2c4be5d1107fc232170d5e3aea9419c90ebf0d56a6adcb5a00"
+    },
+    {
+      "file": "jump-23.png",
+      "time_ms": 690,
+      "pose": [
+        -1.50463,
+        -0.752315,
+        1.0,
+        1.0
+      ],
+      "alpha_bounds": [
+        7,
+        12,
+        57,
+        52
+      ],
+      "sha256": "864dba5018939ae7a95c25e4db8e88d3a05c176f792ca0f1f5539b2be224cfe8"
+    },
+    {
+      "file": "jump-24.png",
+      "time_ms": 720,
+      "pose": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+      ],
+      "alpha_bounds": [
+        7,
+        12,
+        57,
+        52
+      ],
+      "sha256": "f98f27f86709306a9ac7b4d52009d631ce6259edcbc07cd7d1936a6618c99329"
+    }
+  ]
+}

@@ -111,12 +111,21 @@ export component GitHubPagination inherits Rectangle {
     // Zero is a noninteractive truncation indicator; the bridge bounds the set.
     in property <[int]> pages: [];
     callback page-selected(int);
+    // Account for multi-digit last pages as well as translated direction labels.
+    private property <length> maximum-page-width: max(GitHubMetrics.control-medium-size,
+        page-width-measure.preferred-width + GitHubMetrics.size-12);
     private property <bool> show-pages: root.width >= previous-link.width + next-link.width
-        + root.pages.length * (GitHubMetrics.control-medium-size + GitHubMetrics.size-4)
+        + root.pages.length * (root.maximum-page-width + GitHubMetrics.size-4)
         + GitHubMetrics.size-8;
 
     height: GitHubMetrics.control-medium-size;
     background: transparent;
+
+    page-width-measure := Text {
+        visible: false;
+        text: "" + root.page-count;
+        font-size: GitHubMetrics.text-medium;
+    }
 
     HorizontalLayout {
         spacing: GitHubMetrics.size-4;

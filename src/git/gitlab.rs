@@ -300,17 +300,17 @@ async fn get_gitlab_closed_pull_requests(
     }
     let total_exact = closed_exact && merged_exact;
     let page_count = if total_exact {
-        total.div_ceil(per_page).max(1)
-    } else if items.len() == per_page as usize {
-        requested_page.saturating_add(1)
+        Some(total.div_ceil(per_page).max(1))
+    } else if items.len() < per_page as usize {
+        Some(requested_page)
     } else {
-        requested_page.max(1)
+        None
     };
     Ok(PullRequestPage {
         items,
         total,
         total_exact,
-        page_count: Some(page_count),
+        page_count,
     })
 }
 

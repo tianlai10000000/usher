@@ -4,6 +4,7 @@ import { GitHubPrMenuState, GitHubPrMenuProjection, GitHubPrMenuAnchor } from ".
 import { GitHubCenteredLoadingState } from "../github_spinner.slint";
 import { GitHubButton } from "../settings/github_settings_controls.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
+import { GitHubPagination } from "../navigation/github_pagination.slint";
 import { GitHubFilterMenuButton } from "../github_filter_menu.slint";
 import { GitHubMetrics, GitHubTheme } from "../../theme/github_theme.slint";
 import { AiReviewRuleChoice } from "@ai-review";
@@ -45,6 +46,7 @@ export component GitHubPullRequestFlow {
     in property <int> pr-closed-total: -1;
     in property <int> pr-page: 1;
     in property <int> pr-page-count: 1;
+    in property <[int]> pr-page-links: [];
     in property <string> pr-state: "open";
     in property <string> pr-query: "is:pr is:open";
     in property <string> pr-review-filter: "all";
@@ -1174,43 +1176,14 @@ export component GitHubPullRequestFlow {
         }
         }
 
-        // Pagination is a full-width footer sibling. The compact control group
-        // is centered inside it instead of positioning the footer itself.
-        if root.show-pagination: Rectangle {
+        // Shared Primer links stay centered below, outside the bordered list.
+        if root.show-pagination: GitHubPagination {
             width: parent.width;
-            height: 32px;
             vertical-stretch: 0;
-
-            pager-controls := Rectangle {
-                x: max(0px, (parent.width - self.width) / 2);
-                width: min(parent.width, 284px);
-                height: parent.height;
-
-                GitHubButton {
-                    x: 0px;
-                    width: 84px;
-                    text: I18n.common-previous;
-                    disabled: !(root.pr-page > 1 && !root.pr-loading);
-                    clicked => { root.change-page(root.pr-page - 1); }
-                }
-                Text {
-                    x: 96px;
-                    width: max(0px, parent.width - 192px);
-                    height: parent.height;
-                    text: I18n.common-page + " " + root.pr-page + " / " + root.pr-page-count;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                    font-size: 12px;
-                    color: root.fg-muted;
-                }
-                GitHubButton {
-                    x: parent.width - self.width;
-                    width: 84px;
-                    text: I18n.common-next;
-                    disabled: !(root.pr-page < root.pr-page-count && !root.pr-loading);
-                    clicked => { root.change-page(root.pr-page + 1); }
-                }
-            }
+            current-page: root.pr-page;
+            page-count: root.pr-page-count;
+            pages: root.pr-page-links;
+            page-selected(page) => { root.change-page(page); }
         }
     }
 

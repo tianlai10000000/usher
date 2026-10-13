@@ -26,10 +26,12 @@ review task does not own a route or require a visible page.
   projection.
 - `src/ai_review/session_transactions.rs`: production Review/PR Chat read-modify-write
   transactions, operation/attempt identity, owned blocking I/O receipts, and file
-  reconciliation coordinated with those transactions.
+  reconciliation coordinated with those transactions. Aggregate drain receipts,
+  admission-close/retry/drain helpers and retained-owner inspection compile only
+  under `#[cfg(test)]` for acceptance; they are not production shutdown APIs.
 - `src/ai_review/sessions.rs`: lightweight PR Chat schema and corruption-preserving
-  interrupted-task hydration. Whole-session load/save helpers are test-only legacy
-  baseline seams, compiled under `test` or `test-fixtures`.
+  interrupted-task hydration. The only legacy whole-session helper is
+  `load_chat_session`, compiled under `#[cfg(test)]` for corruption-preservation tests.
 - `src/agent_response/`: width-independent, bounded projection of agent-authored
   Markdown, content-identity caching, and opaque repository-file actions. It
   performs no file I/O and owns no Preview host.
@@ -52,9 +54,11 @@ review task does not own a route or require a visible page.
   Session I/O 调度、通知和按需 UI 投影。
 - `src/ai_review/session_transactions.rs`：生产环境的 Review/PR Chat 读改写事务、
   operation/attempt 身份、实际 blocking IO receipt，以及与事务协调的文件对账。
+  聚合 drain receipt、关闭准入/重试/drain helper 与 retained-owner 检查仅在
+  `#[cfg(test)]` 下编译用于验收，不是生产关闭 API。
 - `src/ai_review/sessions.rs`：轻量 PR Chat schema 和保留损坏文件的中断任务恢复。
-  整份会话 load/save helper 仅作为旧版基线测试接缝，在 `test` 或 `test-fixtures`
-  下编译。
+  唯一的旧版整份会话 helper 是 `load_chat_session`，仅在 `#[cfg(test)]`
+  下编译，用于损坏文件保留测试。
 - `src/agent_response/`：Agent Markdown 的宽度无关有界投影、内容身份缓存和不透明
   仓库文件 action；不执行文件 I/O，也不拥有 Preview Host。
 - `src/artifact_preview/`：由 Worker 解析并读取用户显式激活的仓库 Markdown，再经
@@ -95,12 +99,17 @@ review task does not own a route or require a visible page.
    temporary file and recreation of a retired session by a delayed accepted
    user. Later retries and Review/context/assistant effects require a live task.
    Corrupt backups survive; directory, entry, and removal failures propagate to
-   the task writer and the Session I/O failure receipt.
-5. `close_admission` rejects new user acceptance while allowing accepted work to
-   settle. `drain` waits for owned Session I/O, including checked reconciliation,
-   and returns completion counts or bounded failure samples. It is not a receipt
-   for the controller's final Task actions, Message Center publications, or Hook
-   emits; those producers need their own lifecycle barrier.
+   the task writer and Session I/O completion accounting.
+5. `close_admission`, `retry_user`, `drain`, `retained_task_owners`, and the
+   `SessionDrainReceipt`/`SessionDrainError` types compile only under `#[cfg(test)]`.
+   In that acceptance boundary, closing admission rejects new user acceptance
+   while accepted work settles; drain waits for owned Session I/O, including
+   checked reconciliation, and returns completion counts or bounded failures.
+   This test receipt does not represent the current production exit drain or
+   cover the controller's final Task actions, Message Center publications, or
+   Hook emits. Production shutdown cancels Review/Ask work, stops task
+   persistence, then stops configuration persistence without invoking global
+   Session drain. Production operation receipts and per-attempt waits remain active.
 6. The event-loop delivery boundary checks both mount/task identity and the Ask
    delivery generation. Semantic status keys check that generation under their
    mutex. Old terminal callbacks and initial reads cannot overwrite a newer
@@ -130,11 +139,15 @@ review task does not own a route or require a visible page.
    task catalog。这样既不会删除活跃原子写入的临时文件，也不会让迟到的已接收
    用户写入在清理后重建退役 Session。后续重试与 Review/context/assistant 副作用
    仍要求任务存在。Corrupt 备份保留；目录、entry 读取与删除失败返回任务 Writer
-   及 Session IO 失败 receipt。
-5. `close_admission` 拒绝新用户消息准入，允许已接收工作完成。`drain` 等待实际
-   持有的 Session IO（包括 checked 对账），返回完成计数或有界失败样本。它不代表
-   controller 最后的 Task Action、Message Center 发布或 Hook emit 完成；这些
-   producer 需要自己的生命周期屏障。
+   及 Session IO 完成记账。
+5. `close_admission`、`retry_user`、`drain`、`retained_task_owners` 及
+   `SessionDrainReceipt`/`SessionDrainError` 类型仅在 `#[cfg(test)]` 下编译。
+   在此验收边界内，关闭准入会拒绝新用户消息、允许已接收工作完成；drain 等待实际
+   持有的 Session IO（包括 checked 对账），返回完成计数或有界失败样本。
+   此测试 receipt 不代表当前生产退出 drain，也不覆盖 controller 最后的 Task Action、
+   Message Center 发布或 Hook emit。生产关闭仍先取消 Review/Ask，再停止任务
+   持久化，最后停止配置持久化，不调用全局 Session drain。生产操作 receipt 与
+   按 attempt 的等待继续生效。
 6. Event-loop 投递边界同时核验 mount/task 身份与 Ask delivery generation；语义
    状态 key 在自己的 mutex 内核验 generation。旧终态回调与首次读取不能覆盖新
    Ask 的对话、action 或 sending 状态。新 Ask 已启动时，合法 Review 完成仍可

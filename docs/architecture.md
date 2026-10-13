@@ -52,6 +52,14 @@ use native Slint `Text`, with one line-height factor shared by painting and
 preferred-height measurement. Branch chips use a smaller regular monospace face
 and share the metadata line's visual center. The existing test-fixtures launcher
 opens the production list offline with temporary state.
+PR and Inbox pagination share `ui/components/navigation/github_pagination.slint`
+and the bounded numeric-link projection in `crates/usher-ui/src/pagination.rs`.
+The PR bridge supplies numbered links only for a confirmed page count; unknown
+page counts retain sequential navigation. The footer remains centered outside the
+list card, hides for loading/error/empty/single-page states, and drops numbered
+links when the available width cannot accommodate them. It has no page-number input.
+If an empty numbered-page jump reveals a smaller confirmed last page, the worker
+reloads that page once under the same generation; cache and projection use the effective page.
 PR Review commit identity prose and its relative timestamp are painted by one
 native `Text` shaping node. This keeps mixed CJK/Latin fallback-font metrics on
 one baseline without locale-specific pixel corrections. A measured trailing
@@ -247,7 +255,7 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | --- | --- |
 | `src/main.rs` | Minimal binary entry point. Delegates to the library entry point. |
 | `src/lib.rs` | Imports and re-exports the generated UI API, creates `MainWindow`, initializes modules, wires cross-cutting callbacks, and manages window lifecycle and shutdown. |
-| `crates/usher-ui/` | Owns the Slint build script and generated Rust API. Compiles the repository-level `ui/main.slint` tree and exports its window, globals, models, structs, and enums. |
+| `crates/usher-ui/` | Owns the Slint build script and generated Rust API. Compiles the repository-level `ui/main.slint` tree and exports its window, globals, models, structs, and enums; `src/pagination.rs` owns shared bounded Primer page-link projection. |
 | `crates/usher-i18n/` | Framework-neutral locale registry and compiled message catalogs. Its build validates the root `i18n/` manifest/PO assets, generates the typed Slint `I18n` global, and stages one index-identical translation bundle for every independently compiled UI root. Runtime locale resolution and Rust copy lookup do not depend on a generated UI engine. |
 | `crates/usher-messages/` | Independently compiled message-center package: durable domain/storage service, snapshot subscriptions, background persistence/native-delivery worker, `notify-rust` OS adapter, and generated Inbox page API. Its embeddable Slint page is compiled in library-module mode rather than through the deprecated non-Window root fallback. |
 | `crates/usher-search/` | Framework-neutral shared Find engine: Unicode-safe non-overlapping text matches, wrapped adjacent-result navigation, and Chromium/Blink `CenterIfNeeded` viewport policy. Features supply only domain/model and visual-wrap adapters. |
@@ -258,12 +266,12 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | `src/ai/` | OpenAI-compatible transport, the feature-owned typed/persistent AI Agent settings Store, plus the sole source-controlled built-in prompt catalog in `prompts.toml`; `prompts.rs` strictly renders typed, bounded AI Chat, AI Review, and Review Ask message envelopes and metadata-only provenance. |
 | `src/app_runtime.rs` | Process-wide Tokio runtime with two production worker threads. Runtime threads install the tracing dispatch; an explicit environment override exists for controlled benchmarks. |
 | `src/memory_diagnostics.rs` | Process-wide RSS/footprint snapshots and lifetime high-water marks, startup/run metadata, bounded Slint-model accounting, UI-size correlation, and the cancellable periodic memory sampler. |
-| `src/diagnostics.rs` | Crash-run sentinel, retention workers, log-directory reveal, and privacy-bounded diagnostic archive export. |
+| `src/diagnostics.rs` | Crash-run sentinel, retention workers, log-directory reveal, and privacy-bounded diagnostic archive export. The shared logging severity contract distinguishes normal lifecycle records from failure/fallback diagnostics; `src/logger/debug_logger.rs::flush_application_log` directly flushes the real application file sink after the final cleanup summary and `MainWindow`-drop record. See [Diagnostic logging](specs/diagnostics.md). |
 | `src/startup.rs` | Elapsed/delta startup timeline plus the one-shot post-first-frame queue used to defer disk hydration and expensive image projection. |
 | `src/platform/` | Cross-platform native integration boundary. `macos.rs` owns AppKit appearance (forced Light/Dark or follow-system for Auto), title-bar accessories, window-interaction notifications, the native-title-bar click bridge for dismissible transient overlays, macOS PR-review font registration, the `NSSound` click, and live Auto theme updates. It also owns paired shutdown removal for its event monitor, window/theme observers, and detached-preview resize observers. `windows.rs` owns Windows theme detection and `MessageBeep`; `linux.rs` owns XDG Portal theme detection and non-blocking desktop sound playback. `mod.rs` exposes the shared API, Auto theme watch enablement with a 1s poll fallback on all platforms, plus opening a directory in the OS file manager (Finder/Explorer/`xdg-open`). |
 | `src/shutdown.rs` | Ordered shutdown coordination. Normal cleanup runs UI/AppKit tasks on the event loop; a dispatch-failure fallback skips those tasks and runs only thread-safe pre/post cleanup before process exit. |
 | `src/single_instance.rs` | Process lock plus a bounded file-signal activation channel that reveals and focuses the existing window when a second launch is attempted. |
-| `src/tray.rs` | Desktop tray integration and tray-driven lifecycle actions. |
+| `src/tray.rs` | Desktop tray integration and tray-driven lifecycle actions. `src/tray/animation.rs` owns the event-loop timer and elapsed-time frame selection for the click-triggered orca jump; platform adapters preload original-colour native images (non-template on macOS), preserve existing click actions, restore the selected static icon and stop playback before tray teardown. See [Tray behavior](specs/tray.md). |
 
 `src/lib.rs` is a composition root, not the preferred home for feature logic. Native-window behavior belongs in `src/platform/`, diagnostics accounting belongs in `src/memory_diagnostics.rs`, and new business behavior belongs in a feature module that exposes a small setup or service API.
 
@@ -313,8 +321,9 @@ Chat's `interactive.rs` retains route/request orchestration and timers;
 `session_transactions.rs` owns production Review/PR Chat reads, fresh-read
 updates, Review completion merges, blocking I/O drivers, and coordinated file
 reconciliation. `sessions.rs` owns the lightweight schema and interrupted-task
-hydration; its whole-session load/save helpers compile only for tests or
-`test-fixtures`. `controller.rs` owns request and presentation orchestration;
+hydration; its only legacy whole-session helper is `load_chat_session`, compiled
+under `#[cfg(test)]` for corruption-preservation coverage. `controller.rs` owns
+request and presentation orchestration;
 `task_persistence.rs` owns automatic task snapshot persistence and invokes the
 same Session transaction owner after successful writes. Production leaf owners
 do not import their controllers.
@@ -333,10 +342,13 @@ cancellable context/model work. Stop cancels that network work but retains the
 duplicate-start guard and the localized stopping state until that Ask's admitted
 I/O settles. Context/assistant effects check the live task, attempt version, and
 cancellation before admission; an atomic write already admitted may finish.
-`close_admission` rejects new user acceptance without discarding accepted work.
-`drain` reports Session I/O completion and bounded failures only: it does not
-prove completion of controller terminal Task actions, Message Center publishes,
-or Hook events.
+`close_admission`, `retry_user`, `drain`, `retained_task_owners`, and
+`SessionDrainReceipt`/`SessionDrainError` are `#[cfg(test)]` acceptance interfaces.
+The test drain reports owned Session I/O completion and bounded failures; it
+does not represent the current production exit drain or prove completion of
+controller terminal Task actions, Message Center publishes, or Hook events.
+Production shutdown still cancels Review/Ask work, stops task persistence, then
+stops configuration persistence; it does not invoke a global Session drain.
 
 The architecture gate retains the original controller/root budgets and also
 checks extracted owners and reverse controller dependencies. CI is manual-only;
@@ -373,7 +385,7 @@ bounds or replace manual input/paint validation.
 | `ui/components/artifact_preview/` | Shared application-level preview shell, width-independent Markdown/text/image surfaces, docked panel, and detached native window. It owns no parsing or I/O. |
 | `ui/components/agent_response/` | Compact native block renderer for agent responses. It consumes prepared structure and emits link/action callbacks; it owns no Markdown parsing, repository resolution, or file I/O. |
 | `ui/components/about/`, `ai_review/`, `chat/`, `project/`, `workflow/` | Feature-owned GitHub/Primer visual building blocks extracted from route views; they own no I/O or route transitions. |
-| `ui/components/showcase/` | Interactive GitHub/Primer property matrices grouped by foundations, actions, containment, communication, navigation, selection, text input, then scenarios; a localized directory and return links scroll the existing page host. Muted Primer Box-header bands mark sections; example copy binds to the shared catalog, and Agent response feedback stores action identity so it follows runtime locale changes. The registry links model-dependent feature composites to their live routes. Bordered and borderless PR menus are adjacent in Selection's Select Menu section; the bordered menu uses a live window anchor and the shared Floating UI adapter in the root overlay, keeping section height fixed. Select samples share a constrained column width, stack below the shared small breakpoint, and derive section height from the controls. PR menu samples reuse the production toolbar and `GitHubPullRequestRuleMenu` with local 2/14-rule models, visible viewport bounds, and no persisted selection. Its opt-in Preview fixtures emit fixture ids rather than bypassing providers or hosts. New or materially changed visual components must be registered here. |
+| `ui/components/showcase/` | Interactive GitHub/Primer property matrices grouped by foundations, actions, containment, communication, navigation, selection, text input, then scenarios; a localized directory and return links scroll the existing page host. Muted Primer Box-header bands mark sections; example copy binds to the shared catalog, and Agent response feedback stores action identity so it follows runtime locale changes. The registry links model-dependent feature composites to their live routes. Bordered and borderless PR menus are adjacent in Selection's Select Menu section; the bordered menu uses a live window anchor and the shared Floating UI adapter in the root overlay, keeping section height fixed. Select samples share a constrained column width, stack below the shared small breakpoint, and derive section height from the controls. Pagination samples align a shared measured label column and real `GitHubPagination` controls at the vertical center of wide rows; when space is insufficient, the same mounted nodes stack with centered alignment. Their section height follows actual sample geometry, preserving interactive state and runtime translation. PR menu samples reuse the production toolbar and `GitHubPullRequestRuleMenu` with local 2/14-rule models, visible viewport bounds, and no persisted selection. Its opt-in Preview fixtures emit fixture ids rather than bypassing providers or hosts. New or materially changed visual components must be registered here. |
 | `ui/components/button/github_icon_button.slint` | Shared `GitHubIconButton` foundation for icon-only, floating, terminal, project-card, and copy actions, including keyboard focus, Tooltip, loading, and semantic variants. |
 | `ui/components/label/github_counter_label.slint` | Shared typed Primer CounterLabel with default/primary/secondary schemes, optional upper limit, compact overlay geometry, and zero-count hiding; status notification badges and future navigation/action counts reuse it. |
 | `ui/components/github_metadata_label.slint` | Shared small Primer Label: transparent background, border-inclusive padding, centered content and typed Default/Primary/Secondary variants; Hook status metadata uses Secondary. |
@@ -941,6 +953,12 @@ The effective startup sequence in `src/lib.rs` is intentionally ordered:
 9. After the first render completes, schedule one next-turn handoff that loads Project JSON, decodes projected logos, hydrates durable messages, and hydrates AI Review task state on blocking workers. Typed hydration Actions merge any data created during startup before automatic persistence resumes.
 10. Install tray integration and run the Slint event loop. A second process writes only a nonce to the activation channel; the primary process reveals and focuses its existing window on the event loop.
 11. On close/quit, coordinate terminal, updater, tray, runtime, and process cleanup through shutdown priorities. Main-window creation, `show()`, native-input installation, and event-loop failures use a native startup alert and terminate with a nonzero status instead of panicking.
+
+Expected macOS native-handle readiness retries are `DEBUG`; if Chrome is still
+unready at the 1200 ms reveal deadline, showing the visible fallback emits one
+`WARN`. Ordinary shutdown lifecycle records are `INFO`; actual AppKit failures,
+shutdown fallbacks and timeouts retain `WARN`, and failed shutdown dispatch is
+`ERROR`. These classifications leave initialization, reveal and cleanup order intact.
 
 Do not move modules earlier if they depend on generated Slint globals or on callbacks installed by a preceding module.
 

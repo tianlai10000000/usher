@@ -32,7 +32,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 /// Logger configuration
@@ -66,6 +66,7 @@ impl Default for DebugLogConfig {
 static LOGGER_INITIALIZED: OnceLock<bool> = OnceLock::new();
 static CONSOLE_OUTPUT_ENABLED: AtomicBool = AtomicBool::new(true);
 static FILE_OUTPUT_ENABLED: AtomicBool = AtomicBool::new(false);
+static APPLICATION_LOG_FILE: OnceLock<Weak<Mutex<LazyLogFile>>> = OnceLock::new();
 
 /// Buffer capacity for the log file writer. Records are flushed eagerly for
 /// warn/error levels and on process shutdown, so the buffer only defers the
@@ -115,6 +116,16 @@ impl Write for LazyLogFile {
             return Ok(());
         }
         self.writer()?.flush()
+    }
+}
+
+/// Flush the real sink, including INFO records written after shutdown tasks.
+/// fern's callback output does not forward `log::Log::flush` to this writer.
+pub(crate) fn flush_application_log() {
+    if let Some(log_file) = APPLICATION_LOG_FILE.get().and_then(Weak::upgrade)
+        && let Ok(mut file) = log_file.lock()
+    {
+        let _ = file.flush();
     }
 }
 
@@ -235,6 +246,7 @@ pub fn setup_debug_logger(config: DebugLogConfig) -> Result<(), String> {
         writer: None,
         last_flush: Instant::now(),
     }));
+    let log_file_handle = Arc::downgrade(&log_file);
     let shutdown_log_file = log_file.clone();
     crate::shutdown::register_post_shutdown_task("flush_debug_log_file", move || {
         if let Ok(mut file) = shutdown_log_file.lock() {
@@ -287,6 +299,7 @@ pub fn setup_debug_logger(config: DebugLogConfig) -> Result<(), String> {
     main_dispatch
         .apply()
         .map_err(|e| format!("Failed to apply logger configuration: {}", e))?;
+    let _ = APPLICATION_LOG_FILE.set(log_file_handle);
 
     // Mark as initialized
     LOGGER_INITIALIZED.set(true).ok();

@@ -38,6 +38,11 @@ PR 列表遵循 GitHub 紧凑的行内元信息排布：评审/冲突按本地�
 绘制与 preferred-height 测量共享同一个行高因子。分支胶囊使用更小的 regular
 等宽字，并与元信息行共享视觉中线。已有 test-fixtures 列表命令使用隔离临时状态，
 离线自动打开正式列表组件。
+PR 与 Inbox 分页共用 `ui/components/navigation/github_pagination.slint` 和
+`crates/usher-ui/src/pagination.rs` 的有界数字链接投影。PR bridge 仅在总页数确认后
+提供编号链接，未知页数保留顺序翻页。分页栏在列表卡片外居中；加载、错误、空列表及
+单页状态隐藏，可用宽度不足以容纳页码时隐藏编号链接。组件不提供页码输入框。
+编号跳转返回空页且确认末页已缩小时，Worker 在同一代际下只补读一次有效末页，缓存与投影使用实际页码。
 PR Review 的 Commit 身份文案与相对时间由同一个原生 `Text` shaping 节点绘制，
 使中英文混排的 fallback 字体指标共用一条基线，无需按 locale 做像素补偿。
 仅覆盖尾部时间的实测 overlay 保留 Tooltip 命中范围，并且不改变整行几何。
@@ -189,7 +194,7 @@ Hook UI bridge 统一负责开始/结束通知、
 | --- | --- |
 | `src/main.rs` | 最小二进制入口，转发到库入口。 |
 | `src/lib.rs` | 导入并重新导出生成的 UI API，创建 `MainWindow`、初始化模块、绑定跨模块 callback，并管理窗口和关闭流程。 |
-| `crates/usher-ui/` | 负责 Slint build script 和生成的 Rust API；编译仓库根目录的 `ui/main.slint` 树，并导出窗口、global、model、struct 和 enum。 |
+| `crates/usher-ui/` | 负责 Slint build script 和生成的 Rust API；编译仓库根目录的 `ui/main.slint` 树，并导出窗口、global、model、struct 和 enum；`src/pagination.rs` 负责共享的有界 Primer 页码链接投影。 |
 | `crates/usher-i18n/` | 与框架无关的 locale 注册表和编译后消息 catalog。构建阶段校验根 `i18n/` manifest/PO 资产、生成强类型 Slint `I18n` global，并为每个独立编译的 UI 根准备索引完全一致的翻译 bundle；运行时 locale 解析与 Rust 文案查询不依赖具体 UI 引擎。 |
 | `crates/usher-messages/` | 独立编译的消息中心包：持久领域/存储服务、快照订阅、后台持久化/原生投递 Worker、`notify-rust` OS 适配器及生成的 Inbox 页面 API。可嵌入 Slint 页面使用 library-module 模式编译，不再依赖已废弃的非 Window 根组件兼容路径。 |
 | `crates/usher-search/` | 与框架无关的通用 Find 引擎：Unicode 安全的非重叠文本命中、首尾循环的相邻结果导航，以及 Chromium/Blink `CenterIfNeeded` 视口策略。Feature 只提供领域/model 与视觉换行适配。 |
@@ -200,12 +205,12 @@ Hook UI bridge 统一负责开始/结束通知、
 | `src/ai/` | OpenAI-compatible transport、Feature 自有的强类型/持久化 AI Agent 配置 Store，以及位于 `prompts.toml` 的唯一受版本控制内置 Prompt catalog；`prompts.rs` 以 strict 模式渲染强类型、有界的 AI Chat、AI Review、Review Ask 消息 envelope 与纯元数据 provenance。 |
 | `src/app_runtime.rs` | 进程级 Tokio runtime，生产默认使用 2 个 worker；runtime 线程安装 tracing dispatch，并保留显式环境覆盖用于受控基准。 |
 | `src/memory_diagnostics.rs` | 统一采集进程 RSS/footprint 与生命周期高水位、启动/运行元数据、有界 Slint model 占用、UI 尺寸关联，以及可取消的周期内存采样。 |
-| `src/diagnostics.rs` | 崩溃运行哨兵、保留策略 Worker、日志目录打开与隐私有界的诊断归档导出。 |
+| `src/diagnostics.rs` | 崩溃运行哨兵、保留策略 Worker、日志目录打开与隐私有界的诊断归档导出。共享日志级别契约区分正常生命周期记录与失败/fallback 诊断；`src/logger/debug_logger.rs::flush_application_log` 在最终清理总结与 `MainWindow` 释放记录之后直接 flush 实际应用文件 sink。详见[诊断日志](specs/diagnostics.md)。 |
 | `src/startup.rs` | 启动 elapsed/delta 时间轴，以及把磁盘 hydration 和高开销图片投影延后到首帧后的单次任务队列。 |
 | `src/platform/` | 跨平台原生集成边界。`macos.rs` 负责 AppKit 外观、标题栏附件、窗口交互通知、原生标题栏点击桥接、PR Review 字体注册、`NSSound` 点击音和 Auto 主题实时跟随；同时成对管理并在正常关闭时注销 NSEvent monitor、窗口/主题 observer 与独立 Preview resize observer。`windows.rs` 负责 Windows 主题检测与 `MessageBeep`；`linux.rs` 负责 XDG Portal 主题检测和不阻塞 UI 的桌面音效播放。`mod.rs` 提供统一 API、Auto 主题监听开关（全平台 1 秒轮询兜底），以及用操作系统文件管理器打开目录（Finder / Explorer / `xdg-open`）。 |
 | `src/shutdown.rs` | 按优先级协调关闭。正常关闭在 event loop 执行 UI/AppKit 清理；若 event-loop dispatch 失败，后台兜底只执行线程安全的 pre/post 清理并跳过 UI/AppKit。 |
 | `src/single_instance.rs` | 进程锁与有界文件信号唤起通道；第二次启动时让已有窗口重新显示并获得焦点。 |
-| `src/tray.rs` | 桌面托盘和托盘触发的生命周期操作。 |
+| `src/tray.rs` | 桌面托盘和托盘触发的生命周期操作。`src/tray/animation.rs` 负责点击触发的虎鲸跳跃动画、event-loop Timer 及按实际 elapsed 选帧；平台 adapter 预载原色原生图片（macOS 使用非 template 图片）、保留现有点击动作、恢复启动时选定的静止图，并在托盘清理前停止播放。详见[托盘行为](specs/tray.md)。 |
 
 `src/lib.rs` 是 composition root，不应继续堆积功能逻辑。原生窗口行为归 `src/platform/`，诊断统计归 `src/memory_diagnostics.rs`；新业务应放入对应模块，只向装配层暴露精简的 setup 或 service API。
 
@@ -252,8 +257,9 @@ Chat 的 `interactive.rs` 保留路由/请求编排和计时器；`viewport_poli
 负责覆盖、窗口移动和锚点收敛策略，`message_model.rs` 负责稳定增量 Slint 行
 model。AI Review 的 `session_transactions.rs` 负责生产环境的 Review/PR Chat
 读取、基于当前文件的读改写、Review 完成合并、blocking IO driver 和协调文件对账。
-`sessions.rs` 负责轻量 schema 与中断任务恢复；整份会话 load/save helper 仅在测试
-或 `test-fixtures` 中编译。`controller.rs` 负责请求与展示编排；
+`sessions.rs` 负责轻量 schema 与中断任务恢复；唯一的旧版整份会话 helper 是
+`load_chat_session`，仅在 `#[cfg(test)]` 下编译，用于损坏文件保留测试。
+`controller.rs` 负责请求与展示编排；
 `task_persistence.rs` 负责自动任务快照持久化，并在成功写入后调用同一 Session
 事务 owner。生产叶子模块不反向导入 controller。
 
@@ -267,9 +273,12 @@ conversation `message_id` 字段兼容旧 JSON：新操作按 ID 合并，重试
 已接收的用户消息必须等待实际 blocking 写入 receipt，再开始可取消的上下文/模型
 工作。Stop 取消网络工作，但在该 Ask 已准入的 IO 完成前保留防重入保护与本地化的
 正在停止状态。Context/assistant 副作用在准入前核验任务仍存在、attempt version
-与取消标记；已经准入的原子写入可以完成。`close_admission` 拒绝新用户消息准入，
-不会丢弃已接收工作。`drain` 只报告 Session IO 完成及有界失败信息，不证明
-controller 的终态 Task Action、Message Center 发布或 Hook 事件已经完成。
+与取消标记；已经准入的原子写入可以完成。`close_admission`、`retry_user`、`drain`、
+`retained_task_owners` 及 `SessionDrainReceipt`/`SessionDrainError` 是仅在
+`#[cfg(test)]` 下编译的验收接口。测试 drain 只报告持有的 Session IO 完成与有界
+失败信息，不代表当前生产退出 drain，也不证明 controller 的终态 Task Action、
+Message Center 发布或 Hook 事件已经完成。生产关闭仍先取消 Review/Ask，再停止
+任务持久化，最后停止配置持久化；不调用全局 Session drain。
 
 结构门禁保留原 controller/根窗口预算，并增加提取模块规模与反向 controller
 依赖检查。CI 仅支持手工触发；直接 push `main` 或创建 PR 都不会启动第二个
@@ -302,7 +311,7 @@ callback 耗时和夹具效果预算避免相对比较掩盖回归。显式 `--b
 | `ui/components/artifact_preview/` | 应用级通用预览外壳、基于 Primer token 的原生 Markdown/文本/图片 Surface、右侧固定面板与独立原生窗口；不承担解析或 I/O，也不引入 WebView。 |
 | `ui/components/agent_response/` | Agent 回复的紧凑原生 block renderer；只消费准备好的结构并上报 link/action callback，不承担 Markdown 解析、仓库路径解析或文件 I/O。 |
 | `ui/components/about/`、`ai_review/`、`chat/`、`project/`、`workflow/` | 从路由页面抽出的功能级 GitHub/Primer 视觉积木，不负责 I/O 或路由跳转。 |
-| `ui/components/showcase/` | GitHub/Primer 属性对比矩阵按基础、操作、容器、反馈、导航、选择、文本输入、场景排序；本地化目录与返回入口复用页面滚动宿主；浅色 Primer Box-header 通栏明确章节边界，示例文案绑定共享 catalog，AI Agent 回复反馈保存操作标识并随语言即时刷新；登记表把依赖业务 model 的组合组件链接到真实路由；带边框与无边框 PR 菜单相邻放在“选择”的 Select Menu 分区；带边框菜单通过实时窗口锚点与共享 Floating UI adapter 挂到根浮层，分区高度保持固定；Select 示例共用受约束的列宽，在共享 small 断点以下单列排列，分区高度从控件几何计算；PR 菜单直接复用生产工具栏和 `GitHubPullRequestRuleMenu`，使用本地 2/14 条规则 model 和可见视口边界，不持久化选择；可选 Preview 样例只发出 fixture id，不得绕过 Provider 或 Host；新增或实质变更的视觉组件必须同步登记。 |
+| `ui/components/showcase/` | GitHub/Primer 属性对比矩阵按基础、操作、容器、反馈、导航、选择、文本输入、场景排序；本地化目录与返回入口复用页面滚动宿主；浅色 Primer Box-header 通栏明确章节边界，示例文案绑定共享 catalog，AI Agent 回复反馈保存操作标识并随语言即时刷新；登记表把依赖业务 model 的组合组件链接到真实路由；带边框与无边框 PR 菜单相邻放在“选择”的 Select Menu 分区；带边框菜单通过实时窗口锚点与共享 Floating UI adapter 挂到根浮层，分区高度保持固定；Select 示例共用受约束的列宽，在共享 small 断点以下单列排列，分区高度从控件几何计算；分页样例在宽屏以共同测量的说明列与真实 `GitHubPagination` 垂直居中对齐，空间不足时同一已挂载节点上下居中堆叠，章节高度从实际样例几何计算，并保留交互状态与运行时翻译；PR 菜单直接复用生产工具栏和 `GitHubPullRequestRuleMenu`，使用本地 2/14 条规则 model 和可见视口边界，不持久化选择；可选 Preview 样例只发出 fixture id，不得绕过 Provider 或 Host；新增或实质变更的视觉组件必须同步登记。 |
 | `ui/components/button/github_icon_button.slint` | 图标按钮、浮动按钮、Terminal、项目卡片和复制操作共用的 `GitHubIconButton` 基础，统一键盘焦点、Tooltip、加载态和语义变体。 |
 | `ui/components/label/github_counter_label.slint` | 共用的强类型 Primer CounterLabel，提供 Default/Primary/Secondary Scheme、可选上限、紧凑叠加几何与零值隐藏；状态栏通知徽标及后续导航/操作计数统一复用。 |
 | `ui/components/github_metadata_label.slint` | 共享的 Primer small Label：透明背景、包含边框的留白计算、内容居中与强类型 Default/Primary/Secondary 变体；Hook 状态元数据采用 Secondary。 |
@@ -721,6 +730,11 @@ unpacked 策略升级后，开发者应执行一次完整 `cargo clean`；后续
 9. 首帧渲染完成后，在下一次 event-loop turn 统一调度：由 blocking worker 读取 Project JSON、投影并解码 Logo、hydration 持久消息与 AI Review Task State。强类型 Hydrate Action 会合并启动期间新增的数据，随后才恢复自动持久化。
 10. 安装托盘并进入 Slint event loop。第二个进程只向唤起通道写入 nonce；主进程在 event loop 重新显示已有窗口并置前。
 11. 关闭时通过优先级清理 Terminal、Updater、Tray、Runtime 和子进程。创建主窗口、`show()`、原生输入桥和 event loop 失败时显示平台原生启动告警并以非零状态退出，不再 panic。
+
+macOS 原生句柄暂未就绪的预期重试使用 `DEBUG`；到达 1200 ms 显示截止时间时，
+若 Chrome 仍未就绪，显示可见 fallback 时记录一次 `WARN`。普通关闭生命周期
+记录使用 `INFO`；真实 AppKit 失败、关闭 fallback 与超时保留 `WARN`，关闭
+dispatch 失败为 `ERROR`。这些分类不改变初始化、显示与清理顺序。
 
 如果模块依赖生成的 Slint global 或前一个模块安装的 callback，不要随意提前初始化。
 

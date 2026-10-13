@@ -220,7 +220,7 @@ pub fn init_signal_handlers() {
 
         log::info!("[Shutdown] Signal handlers are active");
         if let Some(signal) = signals.forever().next() {
-            log::warn!("[Shutdown] Received OS signal: {}", signal);
+            log::info!("[Shutdown] Received OS signal: {}", signal);
             request_shutdown(&format!("signal({})", signal));
         }
     });
@@ -274,6 +274,7 @@ fn run_cleanup_once_with_mode(trigger: &str, mode: CleanupMode) {
         "[Shutdown] Cleanup pipeline finished in {} ms",
         total_start.elapsed().as_millis()
     );
+    crate::logger::debug_logger::flush_application_log();
 }
 
 fn run_stage_tasks(stage: ShutdownStage, tasks: &mut Vec<CleanupTask>) {
@@ -343,7 +344,7 @@ pub fn request_shutdown(trigger: &str) {
         return;
     }
 
-    log::warn!(
+    log::info!(
         "[Shutdown] Shutdown requested (trigger: {}), dispatching to UI loop",
         trigger
     );
@@ -360,14 +361,14 @@ pub fn request_shutdown(trigger: &str) {
 }
 
 fn perform_shutdown(trigger: &str) {
-    log::warn!("[Shutdown] perform_shutdown started (trigger: {})", trigger);
+    log::info!("[Shutdown] perform_shutdown started (trigger: {})", trigger);
     run_cleanup_once(trigger);
-    log::warn!("[Shutdown] Calling platform termination API");
+    log::info!("[Shutdown] Calling platform termination API");
     terminate_application();
 }
 
 fn terminate_application() {
-    log::warn!("[Shutdown] Requesting event loop exit for clean teardown");
+    log::info!("[Shutdown] Requesting event loop exit for clean teardown");
     if slint::quit_event_loop().is_err() {
         log::warn!("[Shutdown] quit_event_loop failed, force exiting");
         std::process::exit(0);

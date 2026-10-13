@@ -2,6 +2,7 @@ use super::*;
 use slint::platform::WindowEvent;
 use std::time::Duration;
 use usher_messages::{MessageDraft, NoopDesktopNotifier};
+use usher_ui::pagination_links;
 
 #[test]
 fn pagination_links_are_bounded_ordered_and_include_current_and_endpoints() {

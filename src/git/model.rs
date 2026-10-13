@@ -79,8 +79,9 @@ pub(crate) struct PullRequestPage {
     pub(crate) items: Vec<PullRequestItem>,
     pub(crate) total: u32,
     pub(crate) total_exact: bool,
-    /// Provider-supplied page count when it is available separately from the
-    /// total-item header (common on GitLab-shaped internal APIs).
+    /// Confirmed page count, including provider metadata available separately
+    /// from the total-item header. Unknown totals must not use a next-page
+    /// probe as a last-page number.
     pub(crate) page_count: Option<u32>,
 }
 

@@ -3,14 +3,36 @@ use slint::Weak;
 
 use crate::MainWindow;
 
+mod animation;
+
 // ==================== macOS Native Implementation ====================
 #[cfg(target_os = "macos")]
 mod macos {
     use super::*;
-    use objc::runtime::{BOOL, Class, Object, Sel, YES};
+    use objc::runtime::{BOOL, Class, NO, Object, Sel, YES};
     use objc::{msg_send, sel, sel_impl};
+    use std::cell::RefCell;
     use std::ffi::CString;
+    use std::rc::Rc;
     use std::sync::OnceLock;
+
+    const STATUS_ICON_SIZE: f64 = 22.0;
+
+    thread_local! {
+        // AppKit images and the Slint timer remain on the event-loop thread.
+        static JUMP: RefCell<Option<Rc<animation::Player<NativeImage>>>> = const { RefCell::new(None) };
+    }
+
+    /// Own the +1 reference returned by NSImage's init methods.
+    struct NativeImage(*mut Object);
+
+    impl Drop for NativeImage {
+        fn drop(&mut self) {
+            unsafe {
+                let _: () = msg_send![self.0, release];
+            }
+        }
+    }
 
     // Store the UI weak reference globally for callbacks
     static UI_WEAK: OnceLock<Weak<MainWindow>> = OnceLock::new();
@@ -71,8 +93,21 @@ mod macos {
 
                 // Try to load icon
                 if let Some(image) = load_status_bar_icon() {
-                    let _: () = msg_send![button, setImage: image];
+                    let still = NativeImage(image);
+                    apply_image(&still);
                     let _: () = msg_send![button, setTitle: create_nsstring("")];
+                    let frames: Option<Vec<_>> = animation::FRAME_PNGS
+                        .iter()
+                        .map(|bytes| load_jump_image(bytes))
+                        .collect();
+                    if let Some(frames) = frames {
+                        JUMP.with(|jump| {
+                            *jump.borrow_mut() =
+                                Some(animation::Player::new(still, frames, apply_image));
+                        });
+                    } else {
+                        log::warn!("[Tray] Failed to load jump frames; keeping the static icon");
+                    }
                 } else {
                     log::warn!("Failed to load tray icon, using text fallback 'U'");
                 }
@@ -183,18 +218,56 @@ mod macos {
             return None;
         }
 
-        // Resize to appropriate size for menu bar (18x18 is standard)
-        let size = NSSize {
-            width: 18.0,
-            height: 18.0,
-        };
-        let _: () = msg_send![image, setSize: size];
-
-        // Do not force template rendering to preserve logo shape/colors
-        let _: () = msg_send![image, setTemplate: YES];
+        unsafe { configure_status_bar_image(image) };
 
         log::info!("Successfully loaded tray icon from: {}", path_str);
         Some(image)
+    }
+
+    /// Frames are bundled with the executable; clicks never perform image I/O.
+    unsafe fn load_jump_image(bytes: &[u8]) -> Option<NativeImage> {
+        unsafe {
+            let data: *mut Object = msg_send![Class::get("NSData")?,
+                dataWithBytes: bytes.as_ptr() length: bytes.len()];
+            let image: *mut Object = msg_send![Class::get("NSImage")?, alloc];
+            let image: *mut Object = msg_send![image, initWithData: data];
+            if image.is_null() {
+                return None;
+            }
+            configure_status_bar_image(image);
+            Some(NativeImage(image))
+        }
+    }
+
+    /// Keep the orca's original colours and one size during playback and at rest.
+    unsafe fn configure_status_bar_image(image: *mut Object) {
+        unsafe {
+            let size = NSSize {
+                width: STATUS_ICON_SIZE,
+                height: STATUS_ICON_SIZE,
+            };
+            let _: () = msg_send![image, setSize: size];
+            let _: () = msg_send![image, setTemplate: NO];
+        }
+    }
+
+    fn apply_image(image: &NativeImage) {
+        unsafe {
+            if !STATUS_ITEM.is_null() {
+                let button: *mut Object = msg_send![STATUS_ITEM, button];
+                if !button.is_null() {
+                    let _: () = msg_send![button, setImage: image.0];
+                }
+            }
+        }
+    }
+
+    fn play_jump() {
+        JUMP.with(|jump| {
+            if let Some(player) = jump.borrow().as_ref() {
+                player.play();
+            }
+        });
     }
 
     /// Create simple quit menu (only Quit option)
@@ -331,6 +404,7 @@ mod macos {
                         show_tray_menu();
                     } else {
                         // Left click: show window
+                        play_jump();
                         show_main_window();
                     }
                 }
@@ -472,6 +546,11 @@ mod macos {
     /// Remove tray icon
     #[allow(dead_code)]
     pub fn remove_tray_macos() {
+        JUMP.with(|jump| {
+            if let Some(player) = jump.borrow_mut().take() {
+                player.stop();
+            }
+        });
         unsafe {
             if !REOPEN_OBSERVER.is_null() {
                 if let Some(center_class) = Class::get("NSNotificationCenter") {
@@ -533,24 +612,26 @@ mod other {
     use super::*;
     use anyhow::Context;
     use slint::ComponentHandle;
+    use std::rc::Rc;
     use std::thread;
     use tray_icon::{
-        TrayIcon, TrayIconBuilder, TrayIconEvent,
+        MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
         menu::{Menu, MenuEvent, MenuId, MenuItem},
     };
 
     // Global tray icon reference
     thread_local! {
         static TRAY_ICON: std::cell::RefCell<Option<TrayIcon>> = std::cell::RefCell::new(None);
+        static JUMP: std::cell::RefCell<Option<Rc<animation::Player<tray_icon::Icon>>>> = const { std::cell::RefCell::new(None) };
     }
 
     /// Setup system tray icon on other platforms
     pub fn setup_tray_other(ui_weak: Weak<MainWindow>) -> Result<()> {
-        let icon = load_tray_icon()?;
+        let (icon, has_logo) = load_tray_icon()?;
         let (menu, show_hide_id, quit_id) = create_tray_menu()?;
 
         let tray_icon = TrayIconBuilder::new()
-            .with_icon(icon)
+            .with_icon(icon.clone())
             .with_tooltip("Usher")
             .with_menu(Box::new(menu))
             .build()
@@ -559,6 +640,14 @@ mod other {
         TRAY_ICON.with(|tray| {
             *tray.borrow_mut() = Some(tray_icon);
         });
+        if has_logo {
+            match load_jump_frames() {
+                Ok(frames) => JUMP.with(|jump| {
+                    *jump.borrow_mut() = Some(animation::Player::new(icon, frames, apply_image));
+                }),
+                Err(error) => log::warn!("[Tray] Failed to load jump frames: {error}"),
+            }
+        }
 
         let ui_weak_clone = ui_weak.clone();
         thread::spawn(move || {
@@ -606,7 +695,7 @@ mod other {
         None
     }
 
-    fn load_tray_icon() -> Result<tray_icon::Icon> {
+    fn load_tray_icon() -> Result<(tray_icon::Icon, bool)> {
         // Try to find logo.png in various locations
         if let Some(logo_path) = find_logo_path() {
             if let Ok(img) = image::open(&logo_path) {
@@ -614,7 +703,10 @@ mod other {
                 let resized = img.resize_exact(32, 32, image::imageops::FilterType::Lanczos3);
                 let rgba = resized.to_rgba8();
                 let (width, height) = rgba.dimensions();
-                return Ok(tray_icon::Icon::from_rgba(rgba.into_raw(), width, height)?);
+                return Ok((
+                    tray_icon::Icon::from_rgba(rgba.into_raw(), width, height)?,
+                    true,
+                ));
             } else {
                 log::error!("Failed to open logo.png from: {:?}", logo_path);
             }
@@ -630,7 +722,7 @@ mod other {
                 rgba_data.extend_from_slice(&[100, 150, 255, 255]);
             }
         }
-        Ok(tray_icon::Icon::from_rgba(rgba_data, 32, 32)?)
+        Ok((tray_icon::Icon::from_rgba(rgba_data, 32, 32)?, false))
     }
 
     fn create_tray_menu() -> Result<(Menu, MenuId, MenuId)> {
@@ -643,6 +735,28 @@ mod other {
         let quit_id = quit_item.id().clone();
         menu.append(&quit_item)?;
         Ok((menu, show_hide_id, quit_id))
+    }
+
+    fn load_jump_frames() -> Result<Vec<tray_icon::Icon>> {
+        animation::FRAME_PNGS
+            .iter()
+            .map(|bytes| {
+                let image = image::load_from_memory(bytes)?
+                    .resize_exact(32, 32, image::imageops::FilterType::Lanczos3)
+                    .to_rgba8();
+                Ok(tray_icon::Icon::from_rgba(image.into_raw(), 32, 32)?)
+            })
+            .collect()
+    }
+
+    fn apply_image(image: &tray_icon::Icon) {
+        TRAY_ICON.with(|tray| {
+            if let Some(icon) = tray.borrow().as_ref()
+                && let Err(error) = icon.set_icon(Some(image.clone()))
+            {
+                log::warn!("[Tray] Failed to set jump frame: {error}");
+            }
+        });
     }
 
     fn handle_tray_events(ui_weak: Weak<MainWindow>, show_hide_id: MenuId, quit_id: MenuId) {
@@ -661,10 +775,28 @@ mod other {
                 }
             }
 
-            if let Ok(_event) = TrayIconEvent::receiver().try_recv() {
+            if let Ok(event) = TrayIconEvent::receiver().try_recv() {
+                let animate = matches!(
+                    event,
+                    TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Down,
+                        ..
+                    } | TrayIconEvent::DoubleClick {
+                        button: MouseButton::Left,
+                        ..
+                    }
+                );
                 let ui_weak_clone = ui_weak.clone();
                 slint::invoke_from_event_loop(move || {
                     if let Some(ui) = ui_weak_clone.upgrade() {
+                        if animate {
+                            JUMP.with(|jump| {
+                                if let Some(player) = jump.borrow().as_ref() {
+                                    player.play();
+                                }
+                            });
+                        }
                         toggle_window_visibility(&ui);
                     }
                 })
@@ -688,6 +820,11 @@ mod other {
     }
 
     pub fn remove_tray_other() {
+        JUMP.with(|jump| {
+            if let Some(player) = jump.borrow_mut().take() {
+                player.stop();
+            }
+        });
         TRAY_ICON.with(|tray| {
             *tray.borrow_mut() = None;
         });

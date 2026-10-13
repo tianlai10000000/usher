@@ -1,13 +1,11 @@
 //! Chat-session schema and interrupted-task recovery. No UI ownership.
-//! Production Session IO is owned by `SessionTransactions`. Legacy whole-session
-//! read/write seams below exist only for tests and controlled baseline fixtures.
+//! Production Session IO is owned by `SessionTransactions`. The legacy Chat
+//! loader below exists only for corruption-preservation tests.
 use super::storage::{JsonLoad, load_json_preserving_corrupt};
 use std::path::Path;
-#[cfg(any(test, feature = "test-fixtures"))]
+#[cfg(test)]
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
-#[cfg(any(test, feature = "test-fixtures"))]
-use usher_ai_review::ReviewSession;
 use usher_ai_review::{
     ReviewConversationMessage, ReviewInput, ReviewTaskState, ReviewTaskStatus, ReviewTaskSummary,
 };
@@ -21,50 +19,7 @@ pub(super) struct PullRequestChatSession {
 }
 
 // Test-only legacy baseline seam; normal builds cannot bypass SessionTransactions.
-#[cfg(any(test, feature = "test-fixtures"))]
-pub(super) async fn persist_session(path: PathBuf, session: ReviewSession) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || {
-        let data = serde_json::to_vec(&session).map_err(|error| error.to_string())?;
-        usher_fs::atomic_write(&path, &data).map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("AI review persistence worker failed: {error}"))?
-}
-
-// Test-only legacy baseline seam; normal builds cannot bypass SessionTransactions.
-#[cfg(any(test, feature = "test-fixtures"))]
-pub(super) async fn load_session(path: PathBuf) -> Result<ReviewSession, String> {
-    tokio::task::spawn_blocking(move || match load_json_preserving_corrupt(&path)? {
-        JsonLoad::Loaded(session) => Ok(session),
-        JsonLoad::Missing => Err(format!(
-            "AI review session {} does not exist.",
-            path.display()
-        )),
-        JsonLoad::CorruptPreserved { backup, error } => Err(format!(
-            "AI review session was invalid ({error}) and was preserved at {}.",
-            backup.display()
-        )),
-    })
-    .await
-    .map_err(|error| format!("AI review session loader failed: {error}"))?
-}
-
-// Test-only legacy baseline seam; normal builds cannot bypass SessionTransactions.
-#[cfg(any(test, feature = "test-fixtures"))]
-pub(super) async fn persist_chat_session(
-    path: PathBuf,
-    session: PullRequestChatSession,
-) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || {
-        let data = serde_json::to_vec(&session).map_err(|error| error.to_string())?;
-        usher_fs::atomic_write(&path, &data).map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("AI review chat persistence worker failed: {error}"))?
-}
-
-// Test-only legacy baseline seam; normal builds cannot bypass SessionTransactions.
-#[cfg(any(test, feature = "test-fixtures"))]
+#[cfg(test)]
 pub(super) async fn load_chat_session(
     path: PathBuf,
 ) -> Result<Option<PullRequestChatSession>, String> {

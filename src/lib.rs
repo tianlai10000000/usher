@@ -991,6 +991,9 @@ pub fn main() {
             prepare_startup_reveal(&win);
             set_startup_presentation_hidden(&win, false);
             reveal_timer_handle.stop();
+            if !startup_native_chrome_ready() {
+                log::warn!("[Startup] Native chrome was not ready at the deadline; revealing the window with fallback chrome");
+            }
             log::info!(
                 "[Startup] Window revealed (native chrome ready: {})",
                 startup_native_chrome_ready()
@@ -1041,6 +1044,7 @@ pub fn main() {
     shutdown::run_cleanup_once("event-loop-exit");
     drop(ui);
     log::info!("[Shutdown] MainWindow dropped, native resources released");
+    logger::debug_logger::flush_application_log();
 }
 
 // #[cfg(target_os = "android")]

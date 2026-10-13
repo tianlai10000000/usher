@@ -32,6 +32,28 @@ with the same migration rules.
 - Memory diagnostics 控制周期进程内存、UI model 与 feature 内存记录。
 - Settings 独立展示每项状态，并提供 GitHub 风格的 `Enable all` / `Disable all` 批量操作，不用父开关隐藏子项真实状态。
 
+## Severity / 日志级别
+
+Expected macOS native-view/window readiness retries use `DEBUG`; ordinary shutdown
+signals, requests, cleanup, termination and event-loop exit use `INFO`. A successful
+native startup and orderly exit must not emit `WARN` solely for those lifecycle steps.
+
+Real AppKit installation failures and degraded fallbacks retain `WARN`. If native
+Chrome is still unavailable at the 1200 ms startup reveal deadline, revealing the
+visible fallback emits one warning. Shutdown dispatch failure retains `ERROR`;
+quit-event-loop failure, skipped UI/AppKit cleanup and forced-exit timeout retain
+`WARN`. Severity changes must not change installation, reveal or shutdown ordering,
+and all ordinary records still respect the existing destination switches.
+
+macOS 原生 View/Window 暂未就绪的预期重试使用 `DEBUG`；普通关闭信号、请求、清理、
+终止及 event-loop 退出使用 `INFO`。成功的原生启动与有序退出不得仅因这些正常
+生命周期步骤产生 `WARN`。
+
+真实 AppKit 安装失败与降级 fallback 保留 `WARN`。1200 ms 启动显示截止时间到达后，
+若原生 Chrome 仍未就绪，显示可见 fallback 时记录一次警告。关闭 dispatch 失败保留
+`ERROR`；quit-event-loop 失败、跳过 UI/AppKit 清理及强制退出超时保留 `WARN`。
+调整级别不得改变安装、显示或关闭顺序，普通记录仍遵循既有输出目标开关。
+
 ## Invariants / 不变量
 
 1. Turning off console and both file destinations stops ordinary application log output immediately without restarting.
@@ -44,8 +66,11 @@ with the same migration rules.
 8. The global panic hook always appends one valid JSON panic record to the configured tracing path, or its default path when tracing was never initialized, even when structured tracing is disabled. It then requests shutdown; ordinary tracing emission still respects the runtime switch.
 9. The application file sink uses a 64 KiB `BufWriter`. Warn/error records flush
    immediately; ordinary write activity flushes at least once per second, and
-   registered shutdown flushes the remaining buffer. No long-lived background
-   flush thread is created.
+   registered shutdown flushes the remaining buffer. The logger's
+   `flush_application_log` directly flushes the real application sink after the
+   cleanup-pipeline summary and final `MainWindow`-drop record, including the
+   cleanup tail on background fallback. The existing post-shutdown flush task
+   and its priority remain intact. No long-lived background flush thread is created.
 10. Startup writes a crash sentinel under application data before UI setup. An
     orderly shutdown removes it; finding it on the next launch produces one
     bounded warning and never includes user content.
@@ -71,7 +96,10 @@ with the same migration rules.
 7. Logger 初始化前的启动失败与显式环境变量控制的基准工具可以直接写进程控制台；它们不属于普通应用日志输出目标。
 8. 全局 panic hook 无论 structured tracing 是否关闭，都必须向已配置 tracing 路径追加一条有效 JSON panic 记录；tracing 尚未初始化时使用默认路径。落盘后请求关闭；普通 tracing 事件仍遵循运行时开关。
 9. 应用文件 sink 使用 64 KiB `BufWriter`；warn/error 立即 flush，普通写入活动至少每秒
-   flush 一次，注册的 shutdown 任务负责冲刷剩余缓冲。不得为此新增常驻 flush 线程。
+   flush 一次，注册的 shutdown 任务负责冲刷剩余缓冲。Logger 的 `flush_application_log`
+   在清理管线总结及最后的 `MainWindow` 释放记录之后直接 flush 实际应用 sink，
+   也覆盖后台 fallback 的清理日志尾部。既有 post-shutdown flush 任务与优先级保留，
+   不得为此新增常驻 flush 线程。
 10. UI 装配前在应用数据目录写入崩溃哨兵；正常关闭时删除。下次启动发现哨兵时只显示一条
     有界警告，且哨兵不包含用户内容。
 11. 在 Worker 上删除早于 14 天的日期日志目录；诊断归档按时间保留最新文件，最多 5 个。
@@ -116,10 +144,18 @@ Record the reproduction start time, actions, affected project/route, and expecte
 - Exercise Tooltip and update-dialog interactions while all outputs are disabled; verify Slint diagnostics do not bypass the logger and write directly to standard output.
 - Use `Enable all`; verify every row is on and output resumes without restart.
 - Restart and verify all five values restore from `settings.toml`.
+- With valid configuration and no independent failure, verify normal native
+  startup and orderly signal/menu shutdown emit no lifecycle `WARN`; expected
+  native-handle retries remain `DEBUG` and shutdown steps remain `INFO`.
+- Exercise native-Chrome reveal deadline and shutdown failure/fallback paths;
+  verify the deadline emits one warning, fallback/timeout warnings remain visible,
+  and dispatch failure remains an error when its destination is enabled.
 - Load a legacy settings file without the five granular fields and verify defaults.
 - Confirm Settings works in both regular and compact layouts.
 - Write ordinary, warn, and error records; verify urgent records are flushed
-  immediately and shutdown leaves no buffered tail behind.
+  immediately and shutdown leaves no buffered tail behind. With application-file
+  logging enabled, verify the final INFO cleanup summary and `MainWindow`-drop
+  record reach the file; background fallback must retain its final cleanup summary.
 - Simulate one unclean run and verify the next launch warns once; complete a
   clean shutdown and verify the following launch does not warn.
 - Export diagnostics with unrelated files and symlinks present under the log
@@ -136,8 +172,15 @@ Record the reproduction start time, actions, affected project/route, and expecte
 - 全部关闭时触发 Tooltip 与更新弹窗交互，确认 Slint 诊断不会绕过 logger 直接写标准输出。
 - 使用 `Enable all`，确认所有行开启且无需重启即可恢复输出。
 - 重启后确认五项值从 `settings.toml` 恢复。
+- 在配置有效且没有其他失败时，确认正常原生启动与信号/菜单有序关闭不产生生命周期
+  `WARN`；原生句柄预期重试仍为 `DEBUG`，关闭步骤仍为 `INFO`。
+- 验证原生 Chrome 显示截止时间及关闭失败/fallback 路径：截止时间只警告一次，
+  fallback/超时警告保留，dispatch 失败在输出目标开启时仍记录为 error。
 - 加载不含五项细分字段的旧配置并确认默认值。
 - 确认 Settings 在普通与紧凑布局下均可用。
+- 写入普通、warn 与 error 记录，确认紧急记录立即 flush；应用文件输出开启时，
+  关闭后的文件必须保留最后的 INFO 清理总结及 `MainWindow` 释放记录，后台
+  fallback 也必须保留最后的清理总结，不得留下未冲刷的日志尾部。
 - 模拟一次异常退出，确认下次启动只警告一次；随后正常关闭，确认再启动时不再警告。
 - 在日志树中放入无关文件和符号链接后导出，检查归档仅含有界 `.log` 与 manifest；连续创建
   超过 5 个归档，确认只保留最新 5 个。

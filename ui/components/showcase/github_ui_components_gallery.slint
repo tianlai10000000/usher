@@ -1719,7 +1719,7 @@ export component GitHubUiComponentsGallery inherits Rectangle {
         GitHubShowcaseSection {
             title: I18n.ui-components-demo-notification-inbox-rows;
             description: I18n.ui-components-demo-github-inbox-unread-hierarchy-canvas-subtle-fill-accent;
-            content-height: 224px;
+            content-height: pagination-examples.y + pagination-examples.height;
 
             GitHubShowcaseSampleSurface {
                 x: 0px;
@@ -1767,13 +1767,88 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 }
             }
 
-            GitHubPagination {
+            pagination-label-measure := GitHubShowcaseLabel {
+                visible: false;
+                label: I18n.common-page + " 20 / 20";
+            }
+            pagination-total-measure := GitHubShowcaseLabel {
+                visible: false;
+                label: I18n.pr-list-total + ": ?";
+            }
+
+            pagination-examples := VerticalLayout {
+                private property <length> label-width: max(
+                    pagination-label-measure.preferred-width,
+                    pagination-total-measure.preferred-width);
+                // Reserve enough room for the real pagination's numbered links.
+                private property <bool> stacked: self.width < GitHubMetrics.breakpoint-small
+                    + self.label-width + GitHubMetrics.size-24;
+                private property <length> row-height: self.stacked ? 72px : 48px;
                 y: 184px;
                 width: parent.width;
-                current-page: 1;
-                page-count: 4;
-                pages: [1, 2, 3, 4];
-                page-selected(number) => { self.current-page = number; }
+                height: 4 * self.row-height + 3 * GitHubMetrics.size-16;
+                spacing: GitHubMetrics.size-16;
+                alignment: start;
+
+                // Exercise first/middle/last windows of the same 20-page set.
+                for initial-page in [2, 10, 20]: Rectangle {
+                    height: pagination-examples.row-height;
+                    vertical-stretch: 0;
+                    background: transparent;
+                    GitHubShowcaseLabel {
+                        x: 0px;
+                        y: pagination-examples.stacked ? GitHubMetrics.size-4
+                            : (parent.height - self.height) / 2;
+                        width: pagination-examples.stacked ? parent.width
+                            : pagination-examples.label-width;
+                        height: GitHubMetrics.size-20;
+                        horizontal-alignment: pagination-examples.stacked ? center : left;
+                        label: I18n.common-page + " " + pagination.current-page + " / 20";
+                    }
+                    pagination := GitHubPagination {
+                        x: pagination-examples.stacked ? 0px
+                            : pagination-examples.label-width + GitHubMetrics.size-24;
+                        y: pagination-examples.stacked ? GitHubMetrics.size-32
+                            : (parent.height - self.height) / 2;
+                        width: max(0px, parent.width - self.x);
+                        current-page: initial-page;
+                        page-count: 20;
+                        pages: self.current-page <= 5
+                            ? [1, 2, 3, 4, 5, 6, 7, 0, 20]
+                            : self.current-page >= 16
+                                ? [1, 0, 14, 15, 16, 17, 18, 19, 20]
+                                : [1, 0, self.current-page - 2, self.current-page - 1,
+                                    self.current-page, self.current-page + 1,
+                                    self.current-page + 2, 0, 20];
+                        page-selected(number) => { self.current-page = number; }
+                    }
+                }
+                Rectangle {
+                    height: pagination-examples.row-height;
+                    vertical-stretch: 0;
+                    background: transparent;
+                    GitHubShowcaseLabel {
+                        x: 0px;
+                        y: pagination-examples.stacked ? GitHubMetrics.size-4
+                            : (parent.height - self.height) / 2;
+                        width: pagination-examples.stacked ? parent.width
+                            : pagination-examples.label-width;
+                        height: GitHubMetrics.size-20;
+                        horizontal-alignment: pagination-examples.stacked ? center : left;
+                        label: I18n.pr-list-total + ": ?";
+                    }
+                    GitHubPagination {
+                        x: pagination-examples.stacked ? 0px
+                            : pagination-examples.label-width + GitHubMetrics.size-24;
+                        y: pagination-examples.stacked ? GitHubMetrics.size-32
+                            : (parent.height - self.height) / 2;
+                        width: max(0px, parent.width - self.x);
+                        current-page: 2;
+                        page-count: self.current-page + 1;
+                        pages: [];
+                        page-selected(number) => { self.current-page = number; }
+                    }
+                }
             }
         }
 

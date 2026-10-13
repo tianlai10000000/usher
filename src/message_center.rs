@@ -304,7 +304,7 @@ fn apply_page_snapshot(page: &GitHubMessagesPage, snapshot: MessageSnapshot) {
     let page_changed = page.get_current_page() != saturating_i32(result.number);
     page.set_current_page(saturating_i32(result.number));
     page.set_page_count(saturating_i32(result.page_count));
-    let links = pagination_links(result.number, result.page_count);
+    let links = usher_ui::pagination_links(result.number, result.page_count);
     let current_links = page.get_page_links();
     if current_links.iter().ne(links.iter().copied()) {
         page.set_page_links(ModelRc::new(VecModel::from(links)));
@@ -400,29 +400,6 @@ fn update_page_rows(page: &GitHubMessagesPage, mut rows: Vec<MessageListItem>) {
         page.set_messages(ModelRc::new(VecModel::from(rows)));
     }
     page.set_page_row_count(saturating_i32(visible_count));
-}
-
-/// Primer's first/last links and two neighbors, with edge windows expanded.
-fn pagination_links(current: usize, total: usize) -> Vec<i32> {
-    if total <= 9 {
-        return (1..=total).map(saturating_i32).collect();
-    }
-    let start = current.saturating_sub(2).clamp(1, total - 6);
-    let end = (current + 2).max(7).min(total);
-    let mut links = vec![1];
-    if start > 3 {
-        links.push(0);
-    } else if start == 3 {
-        links.push(2);
-    }
-    links.extend((start.max(2)..=end.min(total - 1)).map(saturating_i32));
-    if end < total - 2 {
-        links.push(0);
-    } else if end == total - 2 {
-        links.push(saturating_i32(total - 1));
-    }
-    links.push(saturating_i32(total));
-    links
 }
 
 const DIAGNOSTIC_TITLE_KEYS: &[&str] = &["diagnostics.previous_run_title"];

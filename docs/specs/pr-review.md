@@ -83,6 +83,24 @@ ActionMenu，操作复用 Button/IconButton，空白与错误状态使用 Blanks
 作为可替换的虚拟化/滚动行为；排版、颜色、控件、TreeView 式层级、diff
 外壳及 Dialog 均由 GitHub 前缀的应用组件负责。vendored Material 源码只读。
 
+PR pagination reuses `GitHubPagination`, following [Primer Pagination](https://primer.style/product/components/pagination/)
+and its [guidelines](https://primer.style/product/components/pagination/guidelines/).
+Confirmed page counts show the first/last page and two neighbors on either side of
+the current page, expanding to seven consecutive pages near an edge and using
+noninteractive ellipses for skipped ranges. The current page uses the accent
+emphasis fill; Previous/Next are transparent links with chevrons. The footer is
+centered 16 px below the card, hides while loading or showing error/empty/single
+page content, and keeps only directional links when its width cannot fit the
+numbered links. It has no page-number input. Unknown page counts also use only
+directional links; a lower bound must never be presented as a last-page target.
+
+PR 分页复用 `GitHubPagination`，遵循上方 Primer Pagination 及 guidelines。
+总页数确认后显示首末页、当前页两侧各两页，靠近边缘时扩展为七个连续页码，
+跳过区间使用不可交互的省略号。当前页使用 accent emphasis 底色，Previous/Next
+为带 chevron 的透明链接。分页栏在卡片外间隔 16px 居中；加载、错误、空列表和
+单页状态隐藏，宽度不足时只保留方向链接。组件不提供页码输入框。未知总页数同样
+仅提供方向链接；下界不得伪装成末页跳转目标。
+
 ## Controller ownership / 控制器职责
 
 Highlight completions may clear loading or apply results only when their request
@@ -238,7 +256,7 @@ Close/reopen, inline draft reviews, merge queues, and auto-merge are not part of
 - `src/git/model.rs`, `locator.rs`, and `diff.rs` own provider-neutral models, remote location, and unified-diff parsing. Provider modules own request/response handling; Gitee authentication/endpoints, decoding, Conversation/Commit normalization, readiness, and revert capability are isolated under `src/git/gitee/`.
 - `src/codereview/api/` owns provider endpoint URL templates only.
 - `ui/features/pr_review/` owns the stable page-package entry and public protocol. Default/release builds map `@pr-review` to the complete `ui/views/workflow/pr_review_workspace.slint` implementation; the explicit `dev-shell` build maps the whole package to a protocol-compatible empty implementation and makes the route unavailable. The complete implementation owns cross-region state, review layout, and user interaction. `ui/components/pr_review/shell.slint` owns public structs and shell controls; `content.slint` owns reusable file-tree and diff content controls. Routes and future entry points consume the package rather than own it.
-- `src/workflow/pr_list.rs` owns list-page selection, pagination presentation, and UTC+08:00 timestamp formatting; `pr_list_state.rs` owns independent typed generations for Page and Totals requests.
+- `src/workflow/pr_list.rs` owns list-page selection, confirmed-count pagination projection, and UTC+08:00 timestamp formatting; `pr_list_state.rs` owns independent typed generations for Page and Totals requests. `crates/usher-ui/src/pagination.rs` supplies the shared bounded Primer page-link algorithm used by PR and Inbox bridges.
 - `src/workflow/bindings.rs` supplies the selected project context, remote-URL copy, local-folder reveal via `src/platform/`, and the optional `fat`/`uat`/`prod` count refresh.
 - `src/ai_review/` owns optional AI task execution and result projection; PR list/detail only emit actions and consume task/result models.
 - `src/git/overview.rs` owns provider-neutral `fat`/`uat`/`prod` count aggregation; Provider selection, authentication, requests, and response normalization remain in the Git façade and adapters.
@@ -256,7 +274,7 @@ Close/reopen, inline draft reviews, merge queues, and auto-merge are not part of
 - `src/git/model.rs`、`locator.rs`、`diff.rs` 分别负责 Provider-neutral 模型、remote 定位和 unified diff 解析。Provider 模块负责请求/响应；Gitee 的鉴权/endpoint、解码、Conversation/Commit 归一化、readiness 和 revert capability 分别隔离在 `src/git/gitee/` 下。
 - `src/codereview/api/` 只负责 Provider endpoint URL 模板。
 - `ui/features/pr_review/` 负责稳定的页面包入口和公开协议。默认/Release 构建把 `@pr-review` 映射到完整的 `ui/views/workflow/pr_review_workspace.slint` 实现；显式 `dev-shell` 构建把整个包映射到协议兼容的空实现，并让该路由不可用。完整实现负责跨区域状态、审核布局和交互；`ui/components/pr_review/shell.slint` 负责公开 struct 与外壳控件，`content.slint` 负责可复用文件树和 Diff 内容控件。路由及后续入口只消费该包，不拥有它。
-- `src/workflow/pr_list.rs` 负责列表页选择、分页展示和东八区时间格式化；`pr_list_state.rs` 负责 Page 与 Totals 请求相互独立的强类型代际。
+- `src/workflow/pr_list.rs` 负责列表页选择、已确认页数的分页投影和东八区时间格式化；`pr_list_state.rs` 负责 Page 与 Totals 请求相互独立的强类型代际。`crates/usher-ui/src/pagination.rs` 提供 PR 与 Inbox bridge 共用的有界 Primer 页码链接算法。
 - `src/workflow/bindings.rs` 提供当前项目上下文、远程 URL 复制、经 `src/platform/` 打开本地目录，以及可选的 `fat`/`uat`/`prod` 数量刷新。
 - `src/ai_review/` 负责可选 AI 任务执行和结果投影；PR 列表/详情只发出动作并消费任务/结果 model。
 - `src/git/overview.rs` 负责 Provider-neutral 的 `fat`/`uat`/`prod` 计数聚合；Provider 选择、鉴权、请求和响应归一化继续由 Git façade 与 adapter 负责。
@@ -268,7 +286,7 @@ An implementation in another stack should preserve these provider-neutral record
 | Record | Required fields | Notes |
 | --- | --- | --- |
 | `RepositoryContext` | project key, provider type, provider project id, remote URL | The persisted provider type must agree with the remote URL before any request is made. |
-| `PullRequestPage` | items, total, `total_exact`, optional page count | The UI distinguishes an exact total from a lower bound. Page size is 10. |
+| `PullRequestPage` | items, total, `total_exact`, optional page count | The UI distinguishes an exact total from a lower bound. `page_count` is only a confirmed total page count; an inferred next-page lower bound stays `None`. Page size is 10. |
 | `PullRequestItem` | number, title, author, source branch, target branch, updated time, web URL | A missing branch is shown as `—`; parseable timestamps are rendered as `YYYY-MM-DD HH:MM:SS +08:00`. |
 | `PullRequestDiffDetail` | files, added/removed totals, commit count, optional conversation count, base SHA, head SHA, start SHA, too-many-commits flag | The summary commit and conversation counts keep the lazy Commits/Conversation tab badges accurate before those tab payloads load. Commit-range compares leave `conversation_count` unset so they cannot wipe the PR-level badge. The SHA values are immutable source references for later context expansion. |
 | `PullRequestDiffFile` | path, old path, change type, added/removed counts, lines | Rust uses `DiffChangeType`; provider aliases normalize at decode time and Slint receives `new_file`, `deleted_file`, `renamed_file`, or `edit_file`. |
@@ -285,7 +303,7 @@ An implementation in another stack should preserve these provider-neutral record
 | 记录 | 必需字段 | 说明 |
 | --- | --- | --- |
 | `RepositoryContext` | 项目 key、Provider 类型、Provider 项目 ID、remote URL | 每次请求前，已持久化的 Provider 类型必须与 remote URL 一致。 |
-| `PullRequestPage` | items、total、`total_exact`、可选 page count | UI 区分准确总数和下界；每页固定 10 条。 |
+| `PullRequestPage` | items、total、`total_exact`、可选 page count | UI 区分准确总数和下界；`page_count` 仅表示确认的总页数，推断存在下一页的下界必须保持 `None`；每页固定 10 条。 |
 | `PullRequestItem` | 编号、标题、作者、源分支、目标分支、更新时间、网页 URL | 缺失分支显示 `—`；可解析时间显示为 `YYYY-MM-DD HH:MM:SS +08:00`。 |
 | `PullRequestDiffDetail` | 文件、增删总数、提交总数、可选会话计数、base SHA、head SHA、start SHA、过多提交标记 | 摘要提交数与会话数让 Commits/Conversation 列表尚未懒加载时也能显示准确徽标；commit-range 比较不设置 `conversation_count`，避免覆盖 PR 级徽标；SHA 是后续展开上下文所用的固定源码引用。 |
 | `PullRequestDiffFile` | 路径、旧路径、变更类型、增删统计、行 | 变更类型归一为 `new_file`、`deleted_file`、`renamed_file`、`edit_file`。 |
@@ -326,7 +344,7 @@ PR 文件、diff 与 commit 比较响应声明 64 MiB 上限。这是通过统�
 
 Merge actor identity remains provider-owned. GitHub uses the timeline `actor.login`, matching GitHub's own UI. GitLab uses only `merged_by` display/login fields and never substitutes the PR author. Gitee uses the merge operation actor or dedicated `merged_by`/`merge_user` identity; when those contain only an email/account label, Enterprise resolves an exact account match through the documented project-member directory (with the documented user directory as a silent fallback) and prefers that user's `name` and avatar. Merge-commit `committer_name` remains a lower-priority fallback because it is Git identity rather than guaranteed enterprise profile data. No fuzzy directory result or PR author may be substituted, and no provider renders a full email address as the merger label.
 
-GitHub list search provides an exact total but not `head.ref`/`base.ref`. Its extra detail requests are limited to the visible page; a failed row enrichment must not discard the page. GitLab and Gitee may report totals through headers or provider contracts; when an exact total is absent, the paginator shows a lower bound and permits the next page after a full response.
+GitHub list search provides an exact total but not `head.ref`/`base.ref`. Its extra detail requests are limited to the visible page; a failed row enrichment must not discard the page. GitLab and Gitee may report totals through headers or provider contracts. Without a confirmed page count or exact total, a full response permits Next but shows no numbered links. A short or empty terminal response confirms the last page; an empty sequential probe restores the previous cached page rather than creating a phantom page. If an empty numbered jump is beyond the newly confirmed last page, the worker reloads that last page at most once under the same Page generation. Publication, page cache and hidden-route deferred delivery use the effective page; superseded reads are discarded. Recovery failures or another confirmed shrink beyond the recovery page use the existing retryable error panel, without a third request. Cached pages beyond the confirmed range must not be restored.
 
 Revert is a separate capability from merge. GitHub uses the GraphQL `revertPullRequest` mutation and returns the new reverse PR. Gitee Enterprise first reloads the MR, then calls the documented commit `/refs` endpoint; only its `merge_commit_by_pr` plus `can_revert` pair permits `POST /projects/:id/repository/commits/:sha/revert` with the target `branch_name`. The latter mutates the target branch immediately and therefore uses different confirmation text. No adapter reconstructs a commit range locally.
 
@@ -341,7 +359,7 @@ Provider 适配层接收已验证的 `RepositoryContext`，只返回上述领域
 
 合并人身份解析归各 Provider adapter 所有。GitHub 使用 timeline `actor.login`，与 GitHub 自身 UI 一致；GitLab 只读取 `merged_by` 的显示名/登录名，绝不能以 PR 作者冒充合并人。Gitee 从合并操作日志或 `merged_by`/`merge_user` 等专用身份取值；若这些字段只有邮箱/账号标签，企业版通过文档定义的项目成员目录做账号精确匹配（用户目录作为静默 fallback），并优先采用匹配用户的 `name` 与头像。合并 commit 的 `committer_name` 只是低优先级 Git 身份回退，不保证等于企业用户资料。不得接受模糊目录结果、不得回退为 PR 作者，任何 Provider 都不得把完整邮箱显示为合并人标签。
 
-GitHub 搜索列表提供准确总数，但不含 `head.ref`/`base.ref`。额外详情请求只限于当前可见页；单行补全失败不得丢弃整页。GitLab 和 Gitee 可通过 header 或 Provider 契约给出总数；没有准确总数时，分页器显示下界，并在满页响应后允许进入下一页。
+GitHub 搜索列表提供准确总数，但不含 `head.ref`/`base.ref`。额外详情请求只限于当前可见页；单行补全失败不得丢弃整页。GitLab 和 Gitee 可通过 header 或 Provider 契约给出总数。没有确认页数或准确总数时，满页响应允许 Next，但不显示编号链接。末尾短页或空响应确认末页；顺序翻页的空探测回退到前一缓存页，不能创造不存在的页面。编号跳转返回空页且超出新确认末页时，Worker 在同一 Page 代际下至多补读一次该末页；发布、页缓存与隐藏路由的延后投递均使用实际页码，过期读取丢弃。恢复读取失败，或确认末页再次缩到恢复页之前时，沿用可重试错误面板，不发起第三次请求。确认范围之外的缓存页不得被恢复。
 
 回退是独立于合并的能力。GitHub 使用 GraphQL `revertPullRequest` mutation，并返回新建的反向 PR。Gitee 企业版先重新读取 MR，再调用文档定义的 commit `/refs` endpoint；只有其 `merge_commit_by_pr` 与 `can_revert` 同时为 true，才允许携带目标 `branch_name` 调用 `POST /projects/:id/repository/commits/:sha/revert`。后者会立即修改目标分支，因此确认说明必须与 GitHub 不同。任何 adapter 都不得在客户端自行重建 commit 范围。
 

@@ -928,6 +928,15 @@ expanded/collapsed, and success confirmation.
   remains outside the bordered collection. Small known option sets use
   `GitHubActionMenu`; searchable provider/user lists use a SelectPanel-style
   composition.
+- Numbered collection navigation reuses `GitHubPagination` and
+  `crates/usher-ui/src/pagination.rs`, following
+  [Primer Pagination](https://primer.style/product/components/pagination/).
+  Keep first/last pages, two neighbors per side, expanded seven-page edge
+  windows, noninteractive truncation indicators, an accent-filled current page,
+  and transparent Previous/Next links with chevrons. Do not add a page-number
+  input. Insufficient width or an unknown total page count uses directional
+  links only. PR pagination stays centered 16 px outside the collection and is
+  absent for loading, error, empty or single-page content.
 - Review navigation uses `GitHubPullRequestTabButton` as the counted
   UnderlineNav variant. The Files changed hierarchy uses TreeView semantics
   (indent guides, expandable directories, current file), while icon-only file
@@ -1073,6 +1082,11 @@ Project 网格
 必须按受约束内容区计算列数，新增一列前保证每张卡片至少 280px 可读宽度。Chat
 历史分页入口必须位于 virtual top spacer 之前的真正历史顶部并占据真实高度，禁止覆盖
 消息或跟随虚拟窗口出现在会话中间；用户可见错误统一使用应用语言，HTTP 技术详情仅写有界日志。
+集合页码导航统一复用 `GitHubPagination` 与 `crates/usher-ui/src/pagination.rs`，
+遵循 Primer Pagination：首末页、当前页两侧各两页、边缘七页窗口、不可交互的省略号、
+强调色当前页和带 chevron 的透明 Previous/Next 链接，不增加页码输入框。宽度不足或
+总页数未知时只保留方向链接。PR 分页在集合外间隔 16px 居中，加载、错误、空列表及
+单页状态不显示。
 PR 审核摘要是 Open/Closed/Merged 的唯一可见状态来源，页头操作条不得重复状态；
 三个带计数 Tab 与 Conflicts 入口在所有宽度下都按共享 Primer UnderlineNav 规范左对齐并按内容定宽，
 保留 16px 容器内边距与 4px Tab 间距，禁止拉伸均分；尾部 diff 统计必须先让位。

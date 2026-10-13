@@ -208,6 +208,15 @@ Its final acceptance is grouped with Batch 4 below.
   `GitHubTheme` semantic roles.
 - [x] Route PR pagination and compact overflow controls through shared
   `GitHubButton` and `GitHubIconButton` foundations.
+- [x] 2026-10-13 pagination correction: use shared `GitHubPagination` and bounded
+  Primer page-link projection for PR and Inbox. Confirmed page counts expose page
+  links/ellipses; unknown page counts and compact widths retain directional links.
+  Do not add a page-number input. See [UI-149](../bug-history.md).
+- [x] Complete the correction's root compilation, page/state/locale regressions
+  and native wide/narrow English/zh-CN PR-list acceptance: 779 library tests,
+  five shared-algorithm tests and one production pagination UI regression passed;
+  1280x900/light/en, 800x600/dark/zh-CN and 1000x760/dark/en inspected.
+  Live provider APIs and the pre-existing logger doctest were not run.
 - [x] Route provider-list illustrated empty/error panels through the shared
   `GitHubBlankslate` contract and retry action while preserving the established
   teamwork/connection visuals.

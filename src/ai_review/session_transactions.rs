@@ -1,5 +1,5 @@
 //! Session transactions and owned blocking completion; no UI or task Store mutation.
-//! Drain receipts cover Session IO only. Controller terminal publishers have separate owners.
+//! Test-only drain receipts cover Session IO; controller terminal publishers have separate owners.
 use super::sessions::PullRequestChatSession;
 use super::storage::{
     JsonLoad, load_json_preserving_corrupt, reconcile_session_files_checked, session_paths,
@@ -74,13 +74,16 @@ struct Completion {
     samples: Vec<String>,
 }
 #[derive(Debug, Clone)]
+#[cfg(test)]
 pub(super) struct SessionDrainReceipt {
     pub(super) completed_io: u64,
     pub(super) failure_count: u64,
     pub(super) failure_samples: Vec<String>,
 }
 #[derive(Debug)]
+#[cfg(test)]
 pub(super) struct SessionDrainError(pub(super) SessionDrainReceipt);
+#[cfg(test)]
 impl std::fmt::Display for SessionDrainError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -90,6 +93,7 @@ impl std::fmt::Display for SessionDrainError {
         )
     }
 }
+#[cfg(test)]
 impl std::error::Error for SessionDrainError {}
 
 pub(super) struct SessionTransactions {
@@ -129,6 +133,7 @@ impl SessionTransactions {
             user_probe: Mutex::new(None),
         })
     }
+    #[cfg(test)]
     pub(super) fn close_admission(&self) {
         let _completion = self.completion.lock().unwrap_or_else(|p| p.into_inner());
         self.closed.store(true, Ordering::Release);
@@ -200,6 +205,7 @@ impl SessionTransactions {
         });
         Ok((attempt, receipt))
     }
+    #[cfg(test)]
     pub(super) async fn retry_user(
         self: &Arc<Self>,
         attempt: AskAttempt,
@@ -485,6 +491,7 @@ impl SessionTransactions {
             settled.await;
         }
     }
+    #[cfg(test)]
     pub(super) async fn drain(&self) -> Result<SessionDrainReceipt, SessionDrainError> {
         loop {
             let settled = self.settled.notified();
@@ -509,6 +516,7 @@ impl SessionTransactions {
             settled.await;
         }
     }
+    #[cfg(test)]
     pub(super) fn retained_task_owners(&self) -> usize {
         self.owners
             .lock()

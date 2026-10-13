@@ -98,7 +98,7 @@ mod tests {
     use super::*;
     #[test]
     fn running_job_refreshes_locale_without_rebuilding_log_models() {
-        use slint::{ComponentHandle, Model};
+        use slint::Model;
         let _locale = crate::i18n::test_locale_guard();
         i_slint_backend_testing::init_no_event_loop();
         let ui = crate::MainWindow::new().unwrap();

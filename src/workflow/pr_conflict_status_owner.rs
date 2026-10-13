@@ -217,7 +217,7 @@ impl Owner {
             .unwrap_or_else(|p| p.into_inner())
             .is_some()
     }
-    #[cfg(any(test, feature = "test-fixtures"))]
+    #[cfg(test)]
     pub(super) fn statistics(&self) -> (usize, usize, usize, bool) {
         let c = self.lock();
         (

@@ -78,6 +78,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
     in property <int> pr-list-closed-total: -1;
     in property <int> pr-list-page: 1;
     in property <int> pr-list-page-count: 1;
+    in property <[int]> pr-list-page-links: [];
     in property <string> pr-list-state: "open";
     in property <string> pr-list-query: "is:pr is:open";
     in property <string> pr-list-review-filter: "all";
@@ -250,6 +251,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
                 pr-closed-total: root.pr-list-closed-total;
                 pr-page: root.pr-list-page;
                 pr-page-count: root.pr-list-page-count;
+                pr-page-links: root.pr-list-page-links;
                 pr-state: root.pr-list-state;
                 pr-query: root.pr-list-query;
                 pr-review-filter: root.pr-list-review-filter;

@@ -8,3 +8,6 @@ slint::include_modules!();
 
 mod floating_overlay;
 pub use floating_overlay::install_floating_overlay_positioning;
+
+mod pagination;
+pub use pagination::pagination_links;

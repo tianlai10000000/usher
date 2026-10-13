@@ -2354,18 +2354,12 @@ async fn get_filtered_public_pull_requests(
         .skip(start)
         .take(per_page as usize)
         .collect::<Vec<_>>();
-    let page_count = if entry.exhausted {
-        total.div_ceil(per_page).max(1)
-    } else if items.len() == per_page as usize {
-        requested_page.saturating_add(1)
-    } else {
-        requested_page.max(1)
-    };
+    let page_count = entry.exhausted.then(|| total.div_ceil(per_page).max(1));
     Ok(PullRequestPage {
         items,
         total,
         total_exact: entry.exhausted,
-        page_count: Some(page_count),
+        page_count,
     })
 }
 

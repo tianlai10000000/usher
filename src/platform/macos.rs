@@ -1755,11 +1755,11 @@ pub(crate) fn install_titlebar_settings_button(window: &MainWindow) {
     }
 
     let Some(render_view) = native_view(window) else {
-        log::warn!("[TitleBar] native render view is unavailable, skip install this round");
+        log::debug!("[TitleBar] native render view is unavailable, skip install this round");
         return;
     };
     let Some(window) = native_window(window) else {
-        log::warn!("[TitleBar] native window is unavailable, skip install this round");
+        log::debug!("[TitleBar] native window is unavailable, skip install this round");
         return;
     };
     unsafe { sync_native_window_fullscreen(window) };

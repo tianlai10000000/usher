@@ -6,7 +6,7 @@ use crate::git::{
 };
 use crate::project::{ProjectRepositoryMetadata, load_repository_metadata};
 use crate::{MainWindow, WorkflowPullRequestItem};
-use slint::{ComponentHandle, ModelRc, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use usher_state_store::Subscription;
@@ -267,6 +267,9 @@ impl WorkflowPrListController {
                 items,
                 ui.get_workflow_pr_list_page_count().max(1) as u32,
                 ui.get_workflow_pr_list_total_exact(),
+                // Even a one-page known collection has a numbered link. Keep
+                // independently known provider page counts across locale refresh.
+                ui.get_workflow_pr_list_page_links().row_count() > 0,
             );
         }
     }
@@ -437,6 +440,7 @@ impl WorkflowPrListController {
         ui.set_workflow_pr_list_total_exact(false);
         ui.set_workflow_pr_list_page(1);
         ui.set_workflow_pr_list_page_count(1);
+        ui.set_workflow_pr_list_page_links(ModelRc::new(VecModel::from(Vec::<i32>::new())));
         self.load_page(ui, state, page);
     }
 
@@ -546,16 +550,25 @@ impl WorkflowPrListController {
         crate::app_runtime::shared_runtime().spawn(async move {
             let conflict_identity = super::pr_conflict_status::Key::new(&context, "");
             let conflict_scope = super::pr_conflict_status::shared().scope();
-            let result = get_pull_requests(
-                context.repo_type.as_str(),
-                context.repo_project_id.as_str(),
-                context.remote_repo.as_str(),
-                Some(state),
-                &filters,
+            let Some((page, result)) = load_page_with_recovery(
                 page,
-                PAGE_SIZE,
+                |page| {
+                    get_pull_requests(
+                        context.repo_type.as_str(),
+                        context.repo_project_id.as_str(),
+                        context.remote_repo.as_str(),
+                        Some(state),
+                        &filters,
+                        page,
+                        PAGE_SIZE,
+                    )
+                },
+                || generations.is_current(PrListRequestKind::Page, request),
             )
-            .await;
+            .await
+            else {
+                return;
+            };
             if generations.is_current(PrListRequestKind::Page, request)
                 && conflict_identity == super::pr_conflict_status::Key::new(&context, "")
             {
@@ -630,7 +643,7 @@ impl WorkflowPrListController {
         ui.set_workflow_pr_list_loading(false);
         ui.set_workflow_pr_list_error("".into());
         ui.set_workflow_pr_list_state(state.as_str().into());
-        apply_page_to_ui(ui, requested_page, visible_items, page_count, true);
+        apply_page_to_ui(ui, requested_page, visible_items, page_count, true, true);
         ui.set_workflow_pr_list_total(total as i32);
         set_state_total(ui, state, total);
     }
@@ -775,6 +788,61 @@ fn filtered_review_status_fixture(
     }
 }
 
+/// Recover one out-of-range jump when the remote collection shrinks between
+/// pagination projection and the user's request. The same generation fences
+/// both reads; only the effective page and its result reach publication.
+async fn load_page_with_recovery<Load, LoadFuture, IsCurrent>(
+    requested_page: u32,
+    mut load: Load,
+    is_current: IsCurrent,
+) -> Option<(u32, GitResult<PullRequestPage>)>
+where
+    Load: FnMut(u32) -> LoadFuture,
+    LoadFuture: std::future::Future<Output = GitResult<PullRequestPage>>,
+    IsCurrent: Fn() -> bool,
+{
+    if !is_current() {
+        return None;
+    }
+    let result = load(requested_page).await;
+    if !is_current() {
+        return None;
+    }
+    let recovery_page = result.as_ref().ok().and_then(|response| {
+        if !response.items.is_empty() {
+            return None;
+        }
+        confirmed_page_count(response.total, response.total_exact, response.page_count)
+            .filter(|&last_page| requested_page > last_page)
+    });
+    if let Some(page) = recovery_page {
+        let result = load(page).await;
+        if !is_current() {
+            return None;
+        }
+        let result = result.and_then(|response| {
+            if response.items.is_empty()
+                && confirmed_page_count(response.total, response.total_exact, response.page_count)
+                    .is_some_and(|last_page| page > last_page)
+            {
+                return Err(crate::git::GitError::provider(
+                    "load pull requests",
+                    "Pull request pagination changed again before recovery completed.",
+                ));
+            }
+            Ok(response)
+        });
+        return Some((page, result));
+    }
+    Some((requested_page, result))
+}
+
+fn confirmed_page_count(total: u32, total_exact: bool, page_count: Option<u32>) -> Option<u32> {
+    page_count
+        .or_else(|| total_exact.then(|| total.div_ceil(PAGE_SIZE)))
+        .map(|count| count.max(1))
+}
+
 // Arguments correspond to the remote-page response and its pagination metadata.
 #[allow(clippy::too_many_arguments)]
 fn render_remote_page(
@@ -798,8 +866,11 @@ fn render_remote_page(
             .ok()
             .and_then(|pages| pages.get(&previous_page).cloned())
             .unwrap_or_default();
-        if !previous_items.is_empty() {
-            apply_page_to_ui(ui, previous_page, previous_items, previous_page, true);
+        let previous_page_is_valid =
+            confirmed_page_count(response_total, total_exact, response_page_count)
+                .is_none_or(|last_page| previous_page <= last_page);
+        if !previous_items.is_empty() && previous_page_is_valid {
+            apply_page_to_ui(ui, previous_page, previous_items, previous_page, true, true);
             let total = previous_page * PAGE_SIZE;
             ui.set_workflow_pr_list_total(total as i32);
             set_state_total(ui, state, total);
@@ -831,6 +902,7 @@ fn render_remote_page(
         items,
         visible_page_count,
         total_exact || is_final_page,
+        response_page_count.is_some() || total_exact || is_final_page,
     );
     ui.set_workflow_pr_list_total(total as i32);
     set_state_total(ui, state, total);
@@ -852,14 +924,23 @@ fn apply_page_to_ui(
     items: Vec<PullRequestItem>,
     page_count: u32,
     total_is_exact: bool,
+    page_count_is_known: bool,
 ) {
+    let page_count = page_count.clamp(1, i32::MAX as u32);
+    let page = page.clamp(1, page_count);
     let items = items.iter().map(to_slint_item).collect::<Vec<_>>();
     ui.set_workflow_pr_list_items(ModelRc::new(VecModel::from(items)));
     ui.global::<crate::PrConflictsBridge>()
         .invoke_refresh_list();
     ui.invoke_ai_review_refresh_pr_rows();
     ui.set_workflow_pr_list_page(page as i32);
-    ui.set_workflow_pr_list_page_count(page_count.max(1) as i32);
+    ui.set_workflow_pr_list_page_count(page_count as i32);
+    let links = if page_count_is_known {
+        usher_ui::pagination_links(page as usize, page_count as usize)
+    } else {
+        Vec::new()
+    };
+    ui.set_workflow_pr_list_page_links(ModelRc::new(VecModel::from(links)));
     ui.set_workflow_pr_list_total_exact(total_is_exact);
 }
 
@@ -1137,6 +1218,7 @@ fn reset_ui(ui: &MainWindow) {
     ui.set_workflow_pr_list_total_exact(false);
     ui.set_workflow_pr_list_page(1);
     ui.set_workflow_pr_list_page_count(1);
+    ui.set_workflow_pr_list_page_links(ModelRc::new(VecModel::from(Vec::<i32>::new())));
     ui.set_workflow_pr_list_state("open".into());
     ui.set_workflow_pr_list_query("is:pr is:open".into());
     ui.set_workflow_pr_list_review_filter("all".into());
@@ -1149,12 +1231,406 @@ fn reset_ui(ui: &MainWindow) {
 #[cfg(test)]
 mod tests {
     use chrono::{TimeZone, Utc};
+    use slint::Model;
 
     use super::{
         format_github_absolute_tooltip_for_locale, format_github_relative_time_at_for_locale,
         format_pull_request_query, format_updated_at_in_utc_plus_eight, parse_pull_request_query,
     };
-    use crate::git::PullRequestState;
+    use crate::git::{PullRequestItem, PullRequestPage, PullRequestReviewStatus, PullRequestState};
+
+    fn pagination_test_items(count: usize) -> Vec<PullRequestItem> {
+        (1..=count)
+            .map(|number| PullRequestItem {
+                number: number.to_string(),
+                title: "Pagination fixture".into(),
+                state: "open".into(),
+                author: "reviewer".into(),
+                source_branch: "feature".into(),
+                target_branch: "main".into(),
+                review_status: PullRequestReviewStatus::None,
+                conflict_status: crate::git::conflicts::ConflictStatus::Unknown,
+                conversation_count: None,
+                created_at: String::new(),
+                updated_at: String::new(),
+                web_url: String::new(),
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn pagination_shrink_reloads_confirmed_last_page_and_returns_its_items() {
+        for (page_count, total_exact, total, expected_page) in [
+            (Some(18), false, 173, 18),
+            (None, true, 173, 18),
+            (Some(0), true, 0, 1),
+        ] {
+            let mut requested = Vec::new();
+            let (page, result) = super::load_page_with_recovery(
+                20,
+                |page| {
+                    requested.push(page);
+                    std::future::ready(Ok(PullRequestPage {
+                        items: if page == 20 || total == 0 {
+                            Vec::new()
+                        } else {
+                            pagination_test_items(3)
+                        },
+                        total,
+                        total_exact,
+                        page_count,
+                    }))
+                },
+                || true,
+            )
+            .await
+            .unwrap();
+            assert_eq!(requested, [20, expected_page]);
+            assert_eq!(page, expected_page);
+            assert_eq!(result.unwrap().items.len(), if total == 0 { 0 } else { 3 });
+        }
+    }
+
+    #[tokio::test]
+    async fn pagination_recovery_propagates_failure_and_never_chases_a_second_shrink() {
+        let error = crate::git::GitError::provider("load pull requests", "Network request failed.");
+        for (index, second_result) in [
+            Err(error.clone()),
+            Ok(PullRequestPage {
+                items: Vec::new(),
+                total: 160,
+                total_exact: true,
+                page_count: Some(16),
+            }),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut requested = Vec::new();
+            let mut second_result = Some(second_result);
+            let (page, result) = super::load_page_with_recovery(
+                20,
+                |page| {
+                    requested.push(page);
+                    std::future::ready(if page == 20 {
+                        Ok(PullRequestPage {
+                            items: Vec::new(),
+                            total: 173,
+                            total_exact: true,
+                            page_count: Some(18),
+                        })
+                    } else {
+                        second_result.take().expect("only one recovery request")
+                    })
+                },
+                || true,
+            )
+            .await
+            .unwrap();
+            assert_eq!(requested, [20, 18]);
+            assert_eq!(page, 18);
+            assert!(result.is_err());
+            if index == 0 {
+                assert_eq!(result, Err(error.clone()));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn pagination_recovery_keeps_unknown_empty_pages_and_nonempty_responses() {
+        for (items, total_exact, page_count) in [
+            (Vec::new(), false, None),
+            (pagination_test_items(3), true, Some(20)),
+            (Vec::new(), false, Some(20)),
+        ] {
+            let response = PullRequestPage {
+                items,
+                total: 173,
+                total_exact,
+                page_count,
+            };
+            let mut requested = Vec::new();
+            let result = super::load_page_with_recovery(
+                20,
+                |page| {
+                    requested.push(page);
+                    std::future::ready(Ok(response.clone()))
+                },
+                || true,
+            )
+            .await
+            .unwrap();
+            assert_eq!(requested, [20]);
+            assert_eq!(result, (20, Ok(response)));
+        }
+    }
+
+    #[tokio::test]
+    async fn pagination_recovery_stops_obsolete_generations_before_reload_or_delivery() {
+        use super::{PrListGenerationFacade, PrListRequestKind};
+
+        for invalidate_on_page in [0, 20, 18] {
+            let generations = PrListGenerationFacade::new();
+            let request = generations.begin(PrListRequestKind::Page);
+            if invalidate_on_page == 0 {
+                generations.invalidate(PrListRequestKind::Page);
+            }
+            let mut requested = Vec::new();
+            let result = super::load_page_with_recovery(
+                20,
+                |page| {
+                    requested.push(page);
+                    if page == invalidate_on_page {
+                        generations.invalidate(PrListRequestKind::Page);
+                    }
+                    std::future::ready(Ok(PullRequestPage {
+                        items: if page == 20 {
+                            Vec::new()
+                        } else {
+                            pagination_test_items(3)
+                        },
+                        total: 173,
+                        total_exact: true,
+                        page_count: Some(18),
+                    }))
+                },
+                || generations.is_current(PrListRequestKind::Page, request),
+            )
+            .await;
+            assert!(result.is_none());
+            assert_eq!(
+                requested,
+                match invalidate_on_page {
+                    0 => vec![],
+                    20 => vec![20],
+                    _ => vec![20, 18],
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn pagination_projection_distinguishes_known_pages_from_a_next_page_probe() {
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = crate::MainWindow::new().unwrap();
+        let visited_pages =
+            std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        let scenarios = [
+            (
+                10,
+                193,
+                true,
+                None,
+                false,
+                20,
+                true,
+                vec![1, 2, 3, 4, 5, 6, 7, 0, 20],
+            ),
+            (
+                10,
+                20,
+                false,
+                Some(20),
+                false,
+                20,
+                false,
+                vec![1, 2, 3, 4, 5, 6, 7, 0, 20],
+            ),
+            (10, 20, false, None, false, 3, false, vec![]),
+            (3, 13, false, None, true, 2, true, vec![1, 2]),
+        ];
+        for (
+            count,
+            total,
+            exact,
+            provider_pages,
+            final_page,
+            expected_pages,
+            expected_exact,
+            expected_links,
+        ) in scenarios
+        {
+            super::render_remote_page(
+                &ui,
+                &visited_pages,
+                PullRequestState::Open,
+                2,
+                pagination_test_items(count),
+                total,
+                exact,
+                provider_pages,
+                final_page,
+            );
+            assert_eq!(ui.get_workflow_pr_list_page(), 2);
+            assert_eq!(ui.get_workflow_pr_list_page_count(), expected_pages);
+            assert_eq!(ui.get_workflow_pr_list_total_exact(), expected_exact);
+            assert_eq!(
+                ui.get_workflow_pr_list_page_links()
+                    .iter()
+                    .collect::<Vec<_>>(),
+                expected_links
+            );
+        }
+    }
+
+    #[test]
+    fn pagination_empty_next_page_restores_cached_last_page_and_known_links() {
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = crate::MainWindow::new().unwrap();
+        let visited_pages = std::sync::Arc::new(std::sync::Mutex::new(
+            std::collections::HashMap::from([(2, pagination_test_items(10))]),
+        ));
+        super::render_remote_page(
+            &ui,
+            &visited_pages,
+            PullRequestState::Open,
+            3,
+            Vec::new(),
+            20,
+            false,
+            None,
+            true,
+        );
+        assert_eq!(ui.get_workflow_pr_list_page(), 2);
+        assert_eq!(ui.get_workflow_pr_list_page_count(), 2);
+        assert_eq!(ui.get_workflow_pr_list_total(), 20);
+        assert!(ui.get_workflow_pr_list_total_exact());
+        assert_eq!(ui.get_workflow_pr_list_items().row_count(), 10);
+        assert_eq!(
+            ui.get_workflow_pr_list_page_links()
+                .iter()
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
+    }
+
+    #[test]
+    fn pagination_empty_response_never_restores_a_cache_page_beyond_the_confirmed_end() {
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = crate::MainWindow::new().unwrap();
+        let visited_pages = std::sync::Arc::new(std::sync::Mutex::new(
+            std::collections::HashMap::from([(19, pagination_test_items(10))]),
+        ));
+        super::render_remote_page(
+            &ui,
+            &visited_pages,
+            PullRequestState::Open,
+            20,
+            Vec::new(),
+            173,
+            true,
+            Some(18),
+            true,
+        );
+        assert_eq!(ui.get_workflow_pr_list_page(), 18);
+        assert_eq!(ui.get_workflow_pr_list_items().row_count(), 0);
+        assert_eq!(ui.get_workflow_pr_list_total(), 173);
+    }
+
+    #[test]
+    fn pagination_locale_refresh_and_hidden_reentry_preserve_provider_page_knowledge() {
+        use crate::project::ProjectRepositoryMetadata;
+        use std::collections::HashMap;
+        use std::sync::{Arc, Mutex};
+
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = crate::MainWindow::new().unwrap();
+        let previous_locale = usher_i18n::active_locale().id;
+        crate::i18n::apply_preference("en").unwrap();
+        let metadata = ProjectRepositoryMetadata {
+            repo_project_id: "pagination-reentry".into(),
+            repo_type: "gitlab".into(),
+            remote_repo: "https://example.invalid/pagination-reentry".into(),
+        };
+        let controller = super::WorkflowPrListController {
+            context: Arc::new(Mutex::new(Some(metadata.clone()))),
+            visited_pages: Arc::new(Mutex::new(HashMap::new())),
+            filters: Arc::new(Mutex::new(super::default_pull_request_filters())),
+            generations: super::PrListGenerationFacade::new(),
+            fixture_enabled: false,
+            deferred_page: Arc::new(Mutex::new(None)),
+            data_subscription: None,
+        };
+        ui.set_current_route(crate::Route::PrReview);
+        controller.project_page(
+            &ui,
+            super::DeferredPage {
+                metadata: metadata.clone(),
+                state: PullRequestState::Open,
+                page: 2,
+                result: Ok(PullRequestPage {
+                    items: pagination_test_items(10),
+                    total: 20,
+                    total_exact: false,
+                    page_count: Some(20),
+                }),
+            },
+        );
+        assert_eq!(ui.get_workflow_pr_list_page_links().row_count(), 0);
+        ui.set_current_route(crate::Route::Workflow);
+        ui.set_workflow_selected_flow(2);
+        controller.resume(&ui);
+        let expected_links = vec![1, 2, 3, 4, 5, 6, 7, 0, 20];
+        assert_eq!(
+            ui.get_workflow_pr_list_page_links()
+                .iter()
+                .collect::<Vec<_>>(),
+            expected_links
+        );
+        assert!(!ui.get_workflow_pr_list_total_exact());
+        crate::i18n::apply_preference("zh-CN").unwrap();
+        controller.sync_language(&ui);
+        assert_eq!(
+            ui.get_workflow_pr_list_page_links()
+                .iter()
+                .collect::<Vec<_>>(),
+            expected_links
+        );
+        assert!(!ui.get_workflow_pr_list_total_exact());
+
+        controller.project_page(
+            &ui,
+            super::DeferredPage {
+                metadata,
+                state: PullRequestState::Open,
+                page: 2,
+                result: Ok(PullRequestPage {
+                    items: pagination_test_items(10),
+                    total: 20,
+                    total_exact: false,
+                    page_count: None,
+                }),
+            },
+        );
+        assert_eq!(ui.get_workflow_pr_list_page_count(), 3);
+        assert_eq!(ui.get_workflow_pr_list_page_links().row_count(), 0);
+        crate::i18n::apply_preference("en").unwrap();
+        controller.sync_language(&ui);
+        assert_eq!(ui.get_workflow_pr_list_page_links().row_count(), 0);
+        crate::i18n::apply_preference(previous_locale).unwrap();
+    }
+
+    #[test]
+    fn pagination_projection_clamps_slint_targets_and_reset_clears_links() {
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = crate::MainWindow::new().unwrap();
+        super::apply_page_to_ui(&ui, u32::MAX, Vec::new(), u32::MAX, false, true);
+        assert_eq!(ui.get_workflow_pr_list_page(), i32::MAX);
+        assert_eq!(ui.get_workflow_pr_list_page_count(), i32::MAX);
+        assert_eq!(
+            ui.get_workflow_pr_list_page_links().row_data(8),
+            Some(i32::MAX)
+        );
+        super::reset_ui(&ui);
+        assert_eq!(ui.get_workflow_pr_list_page(), 1);
+        assert_eq!(ui.get_workflow_pr_list_page_count(), 1);
+        assert_eq!(ui.get_workflow_pr_list_page_links().row_count(), 0);
+    }
 
     #[test]
     fn hidden_list_defers_projection_and_hydrates_latest_data_on_return() {
@@ -1163,7 +1639,7 @@ mod tests {
         };
         use crate::project::ProjectRepositoryMetadata;
         use crate::workflow::pr_data::{PrKey, shared};
-        use slint::{ComponentHandle, Model, ModelRc, VecModel};
+        use slint::{Model, ModelRc, VecModel};
 
         let _locale = crate::i18n::test_locale_guard();
         i_slint_backend_testing::init_no_event_loop();
