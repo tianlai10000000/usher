@@ -813,6 +813,7 @@ export component MainWindow inherits Window {
     in property <bool> workflow-pr-merge-method-squash: false;
     in property <bool> workflow-pr-merge-method-rebase: false;
     in property <bool> workflow-pr-merge-method-fast-forward: false;
+    in-out property <string> workflow-pr-selected-merge-method: "";
     in property <bool> workflow-pr-count-auto-update: false;
     in property <bool> workflow-pr-count-loading: false;
     in property <bool> workflow-pr-count-failed: false;
@@ -889,6 +890,7 @@ export component MainWindow inherits Window {
     callback workflow-pr-review-copy-file-path(string) -> bool;
     callback workflow-pr-review-copy-commit-sha(string) -> bool;
     callback workflow-pr-review-copy-source-branch(string) -> bool;
+    callback workflow-pr-default-merge-method() -> string;
     callback workflow-pr-review-copy-diff-selection(int, int, int, int, string);
     callback workflow-pr-review-view-file();
     callback workflow-pr-review-reveal-location(string, int, string, string);
@@ -1104,6 +1106,11 @@ export component MainWindow inherits Window {
         GitHubSelectState.close(false);
         root.settings-select-dismiss();
         TransientOverlayState.dismiss-all();
+    }
+
+    // Presentation fixtures have no Settings controller; keep their default.
+    workflow-pr-default-merge-method => {
+        return root.workflow-pr-merge-method-merge ? "merge" : (root.workflow-pr-merge-method-squash ? "squash" : (root.workflow-pr-merge-method-rebase ? "rebase" : (root.workflow-pr-merge-method-fast-forward ? "fast_forward" : "")));
     }
 
     dismiss-transient-popovers => {
@@ -2438,6 +2445,8 @@ export component MainWindow inherits Window {
         merge-method-squash: root.workflow-pr-merge-method-squash;
         merge-method-rebase: root.workflow-pr-merge-method-rebase;
         merge-method-fast-forward: root.workflow-pr-merge-method-fast-forward;
+        selected-merge-method <=> root.workflow-pr-selected-merge-method;
+        default-merge-method => { return root.workflow-pr-default-merge-method(); }
         ai-review-status: root.ai-review-status;
         ai-review-finding-count: root.ai-review-findings.length;
         ai-review-panel-visible: root.ai-review-panel-visible;

@@ -13,6 +13,7 @@ import {
     GitHubSettingsSectionMenuButton
 } from "../components/settings/github_settings_controls.slint";
 import { GitHubSettingsPane } from "../components/settings/github_settings_layout.slint";
+import { GitHubDefaultPrMergeSettingsOverlay } from "../components/settings/github_request_settings.slint";
 import { ManifestInterfaceLanguagePickerOverlay, ManifestReplyLanguagePickerOverlay } from "@language-picker";
 import { GitHubSelectState, GitHubSelectPopup, GitHubSelectOption } from "../components/input/github_select.slint";
 export { GitHubSelectState } from "../components/input/github_select.slint";
@@ -86,6 +87,25 @@ export component GitHubSettingsPage inherits Window {
     in-out property <bool> ai-agent-testing: false;
     in-out property <bool> update-checking: false;
     in-out property <int> route-entry-revision: 0;
+    // Page-owned drafts survive regular/compact layout changes. Worker commits
+    // may update AppState after the user has already typed a newer draft.
+    private property <string> http-request-timeout-committed: AppState.http-request-timeout-ms;
+    private property <string> http-request-timeout-previous-committed: "30000";
+    private property <string> http-request-timeout-submitted: "";
+    private property <string> http-request-timeout-draft: root.http-request-timeout-committed;
+    private property <bool> http-request-timeout-validation-error: false;
+    changed http-request-timeout-committed => {
+        if root.http-request-timeout-draft == root.http-request-timeout-previous-committed
+            || (root.http-request-timeout-draft == root.http-request-timeout-submitted
+                && root.http-request-timeout-committed == root.http-request-timeout-submitted) {
+            root.http-request-timeout-draft = root.http-request-timeout-committed;
+            root.http-request-timeout-validation-error = false;
+        }
+        root.http-request-timeout-previous-committed = root.http-request-timeout-committed;
+        if root.http-request-timeout-committed == root.http-request-timeout-submitted {
+            root.http-request-timeout-submitted = "";
+        }
+    }
     in property <[AiReviewRuleItem]> ai-review-rules: [];
     in property <int> ai-review-max-concurrent-tasks: 3;
     in-out property <bool> ai-review-rule-add-pending: false;
@@ -128,6 +148,10 @@ export component GitHubSettingsPage inherits Window {
         root.simulate-crash-active = false;
         root.reveal-git-tokens = false;
         root.reveal-ai-agent-api-key = false;
+        root.http-request-timeout-draft = root.http-request-timeout-committed;
+        root.http-request-timeout-previous-committed = root.http-request-timeout-committed;
+        root.http-request-timeout-submitted = "";
+        root.http-request-timeout-validation-error = false;
     }
 
     // The Settings factory stays mounted between routes. Move focus away from
@@ -246,6 +270,9 @@ export component GitHubSettingsPage inherits Window {
                                 width: root.page-width - root.nav-width - root.nav-content-gap;
                                 selected-section: root.selected-section;
                                 route-entry-revision: root.route-entry-revision;
+                                http-request-timeout-draft <=> root.http-request-timeout-draft;
+                                http-request-timeout-validation-error <=> root.http-request-timeout-validation-error;
+                                http-request-timeout-submitted(value) => { root.http-request-timeout-submitted = value; }
                                 simulate-crash-active <=> root.simulate-crash-active;
                                 reveal-git-tokens <=> root.reveal-git-tokens;
                                 git-tokens-saved <=> root.git-tokens-saved;
@@ -374,6 +401,9 @@ export component GitHubSettingsPage inherits Window {
                                 width: root.page-width;
                                 selected-section: root.selected-section;
                                 route-entry-revision: root.route-entry-revision;
+                                http-request-timeout-draft <=> root.http-request-timeout-draft;
+                                http-request-timeout-validation-error <=> root.http-request-timeout-validation-error;
+                                http-request-timeout-submitted(value) => { root.http-request-timeout-submitted = value; }
                                 simulate-crash-active <=> root.simulate-crash-active;
                                 reveal-git-tokens <=> root.reveal-git-tokens;
                                 git-tokens-saved <=> root.git-tokens-saved;
@@ -461,6 +491,13 @@ export component GitHubSettingsPage inherits Window {
     GitHubHookDialog {
         x: 0px; y: 0px; width: root.width; height: root.height; z: 8000;
         route-active: root.route-active;
+    }
+    GitHubDefaultPrMergeSettingsOverlay {
+        z: 9000;
+        viewport-x: root.content-origin-x;
+        viewport-y: root.content-origin-y;
+        viewport-width: root.viewport-width;
+        viewport-height: root.viewport-height;
     }
     ManifestInterfaceLanguagePickerOverlay {
         z: 9000;

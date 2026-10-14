@@ -81,15 +81,28 @@ downloads after a rejected oversized response.
 
 1. Application code must not construct a reusable reqwest client outside `src/http/mod.rs`.
 2. Every application-owned call uses the single module-owned async client with
-   one user agent and a 10-second connect timeout. `RequestOptions.timeout` owns the total
-   request deadline: 30 seconds by default, any custom duration when supplied,
-   and no total deadline when set to zero. `RequestOptions.read_idle_timeout`
-   independently limits the interval without body progress: 30 seconds by
-   default, any custom duration when supplied, and disabled when set to zero.
+   one user agent and a 10-second connect timeout. Settings General owns the
+   application default timeout in decimal milliseconds (30,000 initially).
+   Each new `RequestOptions` reads the latest committed value for both its
+   total operation budget and body-idle budget; requests already created retain
+   their snapshot. Zero disables both default deadlines, matching
+   [Axios's `timeout: 0` behavior](https://github.com/axios/axios-docs/blob/master/posts/en/req_config.md).
+   Explicit `RequestOptions.timeout` and `RequestOptions.read_idle_timeout`
+   overrides remain independent. The idle budget limits the interval without
+   body progress and may independently be disabled by an explicit zero.
+   Arbitrarily large validated decimal values remain accepted in Settings;
+   conversion saturates at `Duration::MAX`, and budgets beyond the platform's
+   representable `Instant` range are effectively unbounded without overflowing
+   or introducing a shorter substitute deadline. The fixed connect timeout
+   and feature-owned protocol limits remain independent of the global setting.
    Every received transport chunk resets the body-idle deadline for buffered
    and streaming callers. Protocol-specific wall-clock limits and heartbeat
    semantics remain the caller's responsibility and never depend on provider
    host or model name.
+   The General input restores `30000` when an empty edit loses focus. Save
+   performs the same empty-value normalization and validates the live draft
+   before submitting; blur alone does not persist. Zero and other nonempty
+   values remain unchanged, and invalid nonempty input prevents submission.
 3. Every call has a non-empty operation label.
 4. Non-2xx responses fail by default and include only a bounded response-body excerpt.
 5. Request, response, and error interceptors execute in registration order.
@@ -127,11 +140,19 @@ downloads after a rejected oversized response.
 
 1. 应用代码不得在 `src/http/mod.rs` 外创建可复用 reqwest client。
 2. 所有应用自有请求使用模块内唯一的异步 client，并统一 User-Agent 与 10 秒连接超时。
-   总请求截止时间由 `RequestOptions.timeout` 管理：默认 30 秒，可传入任意自定义时长，
-   传零则不设置总截止时间。`RequestOptions.read_idle_timeout` 独立限制未产生正文进度的
-   等待：默认 30 秒，可自定义，传零则关闭空闲检测。缓冲与流式调用中收到的每个传输
+   General 设置持有应用默认超时，以十进制毫秒保存，初值为 30,000。每次创建
+   `RequestOptions` 都读取最新已提交设置，同时作为总操作预算与正文空闲预算；
+   已创建的请求保留自己的快照。零同时关闭这两个默认截止时间，遵循
+   [Axios 的 `timeout: 0` 行为](https://github.com/axios/axios-docs/blob/master/posts/en/req_config.md)。
+   显式 `RequestOptions.timeout` 与 `RequestOptions.read_idle_timeout` 覆盖仍相互独立；
+   空闲预算限制未产生正文进度的等待，可通过显式零单独关闭。设置接受经过校验的任意
+   大十进制值；转换最多饱和到 `Duration::MAX`，超出平台 `Instant` 可表示范围的预算
+   视为实际上不可到达，不溢出，也不替换成更短的截止时间。固定连接超时及 Feature 自有
+   协议上限仍独立于全局设置。缓冲与流式调用中收到的每个传输
    chunk 都会重置正文空闲截止时间；协议级墙钟上限与心跳语义仍由调用方负责，且禁止按
    Provider host 或模型名称选择行为。
+   General 输入框空值失焦时回填 `30000`。Save 使用同一空值归一化并校验即时草稿
+   后再提交；单纯失焦不持久化。0 和其他非空值保持原样，非法非空值阻止提交。
 3. 每个请求必须提供非空 operation 名称。
 4. 非 2xx 默认失败，响应正文只保留受限摘要。
 5. Request/Response/Error interceptor 按注册顺序执行。
@@ -249,12 +270,14 @@ Only the shared HTTP module should contain client creation or raw execution.
   pages and extends only missing provider pages; expiry and merge invalidate it.
 - A 5xx response includes status but does not expose an unbounded body.
 - Timeout and connect failures remain distinct.
-- Request timeout configuration maps the 30-second default and custom durations
-  onto the reqwest request; zero maps to no total deadline without removing the
-  connect timeout.
-- Body-idle timeout configuration defaults to 30 seconds, uses every received
-  transport chunk as progress, supports custom values, and treats zero as
-  disabled.
+- The General timeout defaults to 30,000 ms; changing it applies to the total
+  and idle budgets of newly created requests. Existing requests retain their
+  snapshot, and feature overrides continue to take precedence independently.
+  Zero disables both default deadlines without removing the 10-second connect
+  timeout. Values above the platform clock's range cannot overflow or produce
+  a shorter substitute deadline.
+- Body-idle timeout uses every received transport chunk as progress, supports
+  custom values, and treats an explicit zero as disabled.
 - Buffered and streaming responses share the same any-chunk idle semantics;
   protocol-specific wall-clock limits remain caller-owned.
 - A stalled JSON, text, bytes, streamed, or non-2xx error body becomes `Timeout`

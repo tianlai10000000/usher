@@ -837,6 +837,7 @@ expanded/collapsed, and success confirmation.
   continuous animation cannot destabilize text antialiasing on non-Retina
   60 Hz displays. / 单行编辑器在裁剪框内保留完整内容宽度；鼠标拖选越过左右边界时
   必须自动横向滚动，使拖动端点始终可见。
+
 - `GitHubToggle`: immediate-save boolean setting only; permanently visible
   external label/caption supplied by its owner, 24 px minimum target, loading
   and disabled protection, Enter/Space activation, and keyboard-visible focus.
@@ -1110,6 +1111,37 @@ UI Components 演练场中的无边框 ActionMenu 使用固定 48px 触发器行
 按钮时在同一次交互中切换已打开菜单的位置；锚点持续绑定选中触发器的实时几何
 信息，窗口缩放与响应式重排不能让已打开菜单脱离触发器；Close 控件仅在菜单打开时可用。
 同一示例还提供共享输入框，验证聚焦输入框会关闭根层 ActionMenu 而不会丢失输入事件。
+
+### Text-input Escape contract / 文本输入 Escape 契约
+
+Ordinary single-line, password, and multiline text editors follow the native
+input behavior used by [Primer TextInput](https://github.com/primer/react/blob/main/packages/react/src/TextInput/TextInput.tsx)
+and [Textarea](https://github.com/primer/react/blob/main/packages/react/src/Textarea/Textarea.tsx):
+the field itself does not clear, reset, submit, blur, or change selection and
+validation on Escape. Do not add a shared/global Escape-to-blur handler.
+Escape continues to the enclosing interaction owner instead of being swallowed
+by a plain input. A dismissible [Dialog](https://primer.style/product/components/dialog/accessibility/)
+retains its shared close lifecycle; a [selection panel](https://primer.style/product/components/select-panel/accessibility/)
+closes its popup and returns trigger focus. Existing nested-popup priority,
+busy/non-dismissible protection, Find-bar close, and Terminal-specific key
+ownership remain explicit contextual behavior. Plain project/PR search fields
+without suggestions are ordinary text inputs, not autocomplete controls.
+Empty timeout recovery is triggered by actual blur or Save, never by Escape
+alone in the ordinary General field.
+
+普通单行、密码和多行文本输入沿用 Primer 原生 input/textarea 行为：字段自身
+收到 Escape 不清空、不还原、不提交、不失焦，也不改变选区或校验状态。禁止在
+共享组件或应用层新增通用 Escape 失焦；普通输入不得吞键，应继续交给外层交互
+拥有者。可关闭 Dialog 继续走共享关闭流程，选择浮层关闭并返回触发按钮；已有内层
+浮层优先级、忙碌/不可关闭保护、Find 关闭及 Terminal 按键归属按上下文保留。
+无建议列表的 Project/PR 搜索框仍属于普通输入，而非 autocomplete。General
+超时字段仅在实际失焦或 Save 时处理空值，单独 Escape 不触发默认值回填。
+
+Regression must cover native single-line/multiline/password text, focused
+factory fields, text/selection preservation, continued typing, contextual
+Escape propagation, and mounted timeout validation in English and Chinese.
+回归须覆盖单行/多行/密码、factory 内焦点输入、文本/选区保留、继续输入、上下文
+Escape 传递，以及中英文已挂载超时字段的校验状态。
 
 ## 9. Material dependency boundary / Material 依赖边界
 

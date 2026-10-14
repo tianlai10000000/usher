@@ -86,6 +86,9 @@ Command/Ctrl+, 打开设置。
    require Router history; Settings rejects on Settings itself.
 7. Unmatched events return to the focused child. Standard text editing and
    accessibility keyboard behavior must continue to work unchanged.
+   Escape is not a generic text-field blur command: plain fields preserve their
+   text, focus, selection, and validation; dismissible Dialog/Select/Find owners
+   retain contextual handling. See the UI design text-input Escape contract.
 8. Tooltips and future menu accelerators obtain display labels from the same
    registry as execution. A literal shortcut may not be appended separately.
 9. A new application or route command extends `CommandId`, the declarative
@@ -118,6 +121,8 @@ Command/Ctrl+, 打开设置。
 6. 不可用命令必须拒绝而不是吞键；Back/Forward 依赖 Router 历史，Settings 页面
    自身不重复执行 Open Settings。
 7. 未匹配事件返回当前焦点控件，文本编辑与无障碍键盘行为必须保持不变。
+   Escape 不是通用输入框失焦命令：普通字段保留文字、焦点、选区和校验，由可关闭
+   Dialog/Select/Find 等上下文拥有者继续处理；详见 UI 设计的文本输入 Escape 契约。
 8. Tooltip 与未来菜单 accelerator 必须从执行注册表读取展示标签，不得另写字面量。
 9. 新增应用级或路由级命令时，必须在同一改动中扩展 `CommandId`、声明式绑定表、
    dispatcher 和 resolver 测试；Feature 命令应复用既有根 callback，或新增命名一致的

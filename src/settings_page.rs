@@ -66,6 +66,16 @@ pub(crate) fn register_route_lifecycle(
 }
 
 impl SettingsPageBridge {
+    pub(crate) fn sync_request_preferences(
+        &self,
+        state: &crate::settings::request_preferences::RequestPreferences,
+    ) {
+        self.with_page(|page| {
+            let target = SettingsAppState::get(page);
+            target.set_http_request_timeout_ms(state.http_request_timeout_ms.clone().into());
+            target.set_default_pr_merge_method(state.default_pr_merge_method.as_str().into());
+        });
+    }
     pub(crate) fn apply_hooks(&self, state: &crate::hooks::HookState) {
         self.with_page(|page| crate::hooks::apply_settings(page, state));
     }
@@ -514,6 +524,8 @@ fn sync_state_from_window(window: &MainWindow, page: &GitHubSettingsPage) {
     target.set_terminal_verbose_logging(source.get_terminal_verbose_logging());
     target.set_memory_diagnostics_logging(source.get_memory_diagnostics_logging());
     target.set_ui_sound_effects(source.get_ui_sound_effects());
+    target.set_http_request_timeout_ms(source.get_http_request_timeout_ms());
+    target.set_default_pr_merge_method(source.get_default_pr_merge_method());
     target.set_artifact_preview_presentation_mode(source.get_artifact_preview_presentation_mode());
     target.set_artifact_preview_markdown_enabled(source.get_artifact_preview_markdown_enabled());
     target.set_artifact_preview_image_enabled(source.get_artifact_preview_image_enabled());
@@ -708,6 +720,21 @@ fn bind_callbacks(
             let state = AppState::get(&window);
             state.set_auto_update(enabled);
             state.invoke_toggle_auto_update(enabled);
+        }
+    });
+
+    state.on_validate_http_request_timeout(|value| {
+        crate::settings::request_preferences::normalize_timeout_ms(value.as_str()).is_some()
+    });
+    let weak = window.as_weak();
+    state.on_save_http_request_timeout(move |value| {
+        weak.upgrade()
+            .is_some_and(|window| AppState::get(&window).invoke_save_http_request_timeout(value))
+    });
+    let weak = window.as_weak();
+    state.on_save_default_pr_merge_method(move |method| {
+        if let Some(window) = weak.upgrade() {
+            AppState::get(&window).invoke_save_default_pr_merge_method(method);
         }
     });
 
@@ -1201,6 +1228,274 @@ mod tests {
             .find_map(|element| element.accessible_value())
             .map(|value| value.to_string())
             .unwrap_or_else(|| panic!("Settings field {label:?}"))
+    }
+
+    #[test]
+    fn request_preferences_validate_preserve_newer_drafts_and_refresh_mounted_locales() {
+        let _locale_guard = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let window = MainWindow::new().unwrap();
+        window
+            .window()
+            .set_size(slint::LogicalSize::new(1200.0, 2200.0));
+        crate::i18n::apply_preference("en").unwrap();
+        let bridge = SettingsPageBridge::default();
+        let saves = Rc::new(RefCell::new(Vec::new()));
+        let recorded = saves.clone();
+        AppState::get(&window).on_save_http_request_timeout(move |value| {
+            recorded.borrow_mut().push(value.to_string());
+            true
+        });
+        let methods = Rc::new(RefCell::new(Vec::new()));
+        let recorded = methods.clone();
+        AppState::get(&window).on_save_default_pr_merge_method(move |value| {
+            recorded.borrow_mut().push(value.to_string());
+        });
+        bridge.install(&window);
+        window.set_current_route(Route::Settings);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(2));
+        let page = mounted_page(&bridge);
+        page.set_viewport_width(1200.0);
+        // Exercise controls at the bottom of both General and Code hosting.
+        page.set_viewport_height(2000.0);
+        page.set_window_height(2000.0);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        let edit = |label: &str, value: &str| {
+            ElementHandle::find_by_accessible_label(&page, label)
+                .find(|element| element.accessible_value().is_some())
+                .unwrap()
+                .set_accessible_value(value);
+        };
+        let save = || {
+            ElementHandle::find_by_accessible_label(&page, "Save")
+                .next()
+                .unwrap()
+                .mock_single_click(PointerEventButton::Left);
+        };
+        assert_eq!(
+            settings_field_value(&page, "Timeout (milliseconds)"),
+            "30000"
+        );
+        for invalid in ["-1", "1.5", "abc"] {
+            edit("Timeout (milliseconds)", invalid);
+            save();
+        }
+        assert!(saves.borrow().is_empty());
+        edit("Timeout (milliseconds)", "0");
+        save();
+        edit("Timeout (milliseconds)", "1000");
+        save();
+        edit("Timeout (milliseconds)", "2000");
+        assert_eq!(saves.borrow().as_slice(), ["0", "1000"]);
+        assert_eq!(
+            AppState::get(&window).get_http_request_timeout_ms(),
+            "30000"
+        );
+        let committed = crate::settings::request_preferences::RequestPreferences {
+            http_request_timeout_ms: "1000".into(),
+            default_pr_merge_method: crate::git::PullRequestMergeMethod::Rebase,
+        };
+        bridge.sync_request_preferences(&committed);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        assert_eq!(
+            settings_field_value(&page, "Timeout (milliseconds)"),
+            "2000"
+        );
+        page.set_viewport_width(550.0);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        assert_eq!(
+            settings_field_value(&page, "Timeout (milliseconds)"),
+            "2000"
+        );
+        crate::i18n::apply_preference("zh-CN").unwrap();
+        bridge.sync_language("zh-CN");
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        assert_eq!(settings_field_value(&page, "超时时间（毫秒）"), "2000");
+        AppState::get(&window).set_http_request_timeout_ms("1000".into());
+        AppState::get(&window).set_default_pr_merge_method("rebase".into());
+        bridge.reset_drafts_from_committed(&window);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        assert_eq!(settings_field_value(&page, "超时时间（毫秒）"), "1000");
+
+        page.set_viewport_width(1200.0);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        select_settings_section(&page, "代码托管");
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        let rebase = crate::i18n::tr("pr_review.rebase_merge");
+        ElementHandle::find_by_accessible_label(&page, rebase.as_ref())
+            .find(|element| element.accessible_checked().is_none())
+            .unwrap()
+            .mock_single_click(PointerEventButton::Left);
+        assert!(usher_ui_settings::GitHubSelectState::get(&page).get_open());
+        crate::i18n::apply_preference("en").unwrap();
+        bridge.sync_language("en");
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        let squash = crate::i18n::tr("pr_review.squash_merge");
+        ElementHandle::find_by_accessible_label(&page, squash.as_ref())
+            .find(|element| element.accessible_checked().is_some())
+            .unwrap()
+            .mock_single_click(PointerEventButton::Left);
+        assert_eq!(methods.borrow().as_slice(), ["squash"]);
+        assert_eq!(
+            SettingsAppState::get(&page).get_default_pr_merge_method(),
+            "rebase"
+        );
+        crate::i18n::apply_preference(usher_i18n::fallback_locale().id).unwrap();
+    }
+
+    #[test]
+    fn request_preferences_timeout_focus_blur_and_direct_save_refresh_validation() {
+        use slint::platform::{Key, WindowEvent};
+
+        let _locale_guard = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let window = MainWindow::new().unwrap();
+        window
+            .window()
+            .set_size(slint::LogicalSize::new(1200.0, 2200.0));
+        AppState::get(&window).set_http_request_timeout_ms("17500".into());
+        let bridge = SettingsPageBridge::default();
+        let saves = Rc::new(RefCell::new(Vec::new()));
+        let recorded = saves.clone();
+        AppState::get(&window).on_save_http_request_timeout(move |value| {
+            recorded.borrow_mut().push(value.to_string());
+            true
+        });
+        bridge.install(&window);
+        window.set_current_route(Route::Settings);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(2));
+        let page = mounted_page(&bridge);
+        page.set_viewport_width(1200.0);
+        page.set_viewport_height(2000.0);
+        page.set_window_height(2000.0);
+
+        let press = |text: slint::SharedString| {
+            page.window()
+                .dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
+            page.window()
+                .dispatch_event(WindowEvent::KeyReleased { text });
+        };
+        for locale in ["en", "zh-CN"] {
+            crate::i18n::apply_preference(locale).unwrap();
+            bridge.sync_language(locale);
+            i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+            let label = crate::i18n::tr("settings.general.request_timeout_milliseconds");
+            let invalid_message = crate::i18n::tr("settings.general.request_timeout_invalid");
+            let save_label = crate::i18n::tr("common.save");
+            let field = || {
+                ElementHandle::find_by_accessible_label(&page, label.as_ref())
+                    .find(|element| element.accessible_value().is_some())
+                    .expect("timeout input")
+            };
+            let input_focused = || {
+                let position = field().absolute_position();
+                crate::transient_input::focused_text_input_contains_pointer(
+                    page.window(),
+                    slint::LogicalPosition::new(position.x + 1.0, position.y + 1.0),
+                )
+            };
+            let edit = |value: &str| {
+                let input = field();
+                input.mock_single_click(PointerEventButton::Left);
+                i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+                assert!(input_focused(), "editing must exercise native input focus");
+                let current = input.accessible_value().unwrap();
+                input.set_accessible_selection_offsets(0, current.len() as i32);
+                press(Key::Backspace.into());
+                if !value.is_empty() {
+                    press(value.into());
+                }
+                i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+                assert_eq!(settings_field_value(&page, label.as_ref()), value);
+            };
+            let validation_visible = || {
+                ElementHandle::find_by_accessible_label(&page, invalid_message.as_ref())
+                    .next()
+                    .is_some()
+            };
+            let blur = || {
+                press(Key::Tab.into());
+                i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+                assert!(!input_focused(), "Tab must move focus away from the editor");
+            };
+            let save = || {
+                let button = ElementHandle::find_by_accessible_label(&page, save_label.as_ref())
+                    .next()
+                    .unwrap();
+                let origin = button.absolute_position();
+                let size = button.size();
+                let position = slint::LogicalPosition::new(
+                    origin.x + size.width / 2.0,
+                    origin.y + size.height / 2.0,
+                );
+                page.window()
+                    .dispatch_event(WindowEvent::PointerMoved { position });
+                page.window().dispatch_event(WindowEvent::PointerPressed {
+                    position,
+                    button: PointerEventButton::Left,
+                });
+                // The production window observer blurs the editor on press.
+                // Keep the release at the same point even if validation relayouts.
+                crate::transient_input::clear_text_input_focus_outside(page.window(), position);
+                i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+                page.window().dispatch_event(WindowEvent::PointerReleased {
+                    position,
+                    button: PointerEventButton::Left,
+                });
+            };
+            let initial_saves = saves.borrow().len();
+
+            edit("");
+            assert!(validation_visible());
+            press(Key::Escape.into());
+            i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+            assert!(input_focused(), "plain input Escape must preserve focus");
+            assert_eq!(settings_field_value(&page, label.as_ref()), "");
+            assert!(
+                validation_visible(),
+                "Escape must not normalize or revalidate the draft"
+            );
+            assert_eq!(saves.borrow().len(), initial_saves, "Escape must not save");
+            blur();
+            assert_eq!(settings_field_value(&page, label.as_ref()), "30000");
+            assert!(!validation_visible(), "default refill must clear the error");
+            assert_eq!(saves.borrow().len(), initial_saves, "blur must not save");
+            for (value, invalid) in [("0", false), ("4500", false), ("-1", true)] {
+                edit(value);
+                blur();
+                assert_eq!(settings_field_value(&page, label.as_ref()), value);
+                assert_eq!(validation_visible(), invalid);
+            }
+            assert_eq!(saves.borrow().len(), initial_saves);
+
+            edit("invalid");
+            save();
+            assert!(validation_visible());
+            assert_eq!(saves.borrow().len(), initial_saves);
+            edit("");
+            save();
+            assert_eq!(settings_field_value(&page, label.as_ref()), "30000");
+            assert!(!validation_visible());
+            assert_eq!(&saves.borrow()[initial_saves..], ["30000"]);
+            edit("0");
+            save();
+            assert!(!validation_visible());
+            assert_eq!(&saves.borrow()[initial_saves..], ["30000", "0"]);
+
+            // Route-entry reset must win over the input's queued blur handler.
+            edit("");
+            bridge.reset_drafts_from_committed(&window);
+            i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+            assert_eq!(settings_field_value(&page, label.as_ref()), "17500");
+            assert!(!validation_visible());
+            assert_eq!(saves.borrow().len(), initial_saves + 2);
+            assert_eq!(
+                AppState::get(&window).get_http_request_timeout_ms(),
+                "17500",
+                "editing and blur must not change the committed preference"
+            );
+        }
+        crate::i18n::apply_preference(usher_i18n::fallback_locale().id).unwrap();
     }
 
     fn save_ai_agent_draft(page: &GitHubSettingsPage) {

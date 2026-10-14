@@ -99,6 +99,7 @@ export component PullRequestReviewPageContract inherits FocusScope {
     in property <bool> merge-method-squash: false;
     in property <bool> merge-method-rebase: false;
     in property <bool> merge-method-fast-forward: false;
+    in-out property <string> selected-merge-method: "";
     in property <string> ai-review-status: "";
     in property <int> ai-review-finding-count: 0;
     in property <bool> ai-review-panel-visible: false;
@@ -119,6 +120,7 @@ export component PullRequestReviewPageContract inherits FocusScope {
     callback load-large-diff();
     callback submit-review(string, string);
     callback dismiss-review(string, string);
+    callback default-merge-method() -> string;
     callback merge(string, bool);
     callback revert();
     callback filter-files(string);
@@ -151,4 +153,9 @@ export component PullRequestReviewPageContract inherits FocusScope {
     callback open-settings();
     callback toggle-commit-message(string);
     callback toggle-ai-review();
+
+    // Offline hosts without Rust callbacks retain the established display order.
+    default-merge-method => {
+        return root.merge-method-merge ? "merge" : (root.merge-method-squash ? "squash" : (root.merge-method-rebase ? "rebase" : (root.merge-method-fast-forward ? "fast_forward" : "")));
+    }
 }

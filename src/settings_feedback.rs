@@ -7,6 +7,7 @@ pub(crate) enum SettingsSaveTarget {
     GitTokens,
     GitHosting,
     AiAgent,
+    RequestPreferences,
 }
 
 fn set_settings_saved(
@@ -16,6 +17,7 @@ fn set_settings_saved(
     saved: bool,
 ) {
     match target {
+        SettingsSaveTarget::RequestPreferences => {}
         SettingsSaveTarget::GitTokens => {
             ui.set_settings_git_tokens_saved(saved);
             page.set_git_tokens_saved(saved);

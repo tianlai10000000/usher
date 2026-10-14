@@ -1020,6 +1020,39 @@ lossless delivery semantics.
 
 ### Settings
 
+General exposes `[http].request_timeout_ms` (default `30000`) as nonnegative
+decimal milliseconds. The canonical decimal is persisted as a string without
+an input ceiling; runtime conversion saturates at `Duration::MAX`, and deadlines
+beyond the platform timer range are effectively unbounded. Zero follows Axios
+and disables the default total and body-idle timeouts. New `RequestOptions`
+snapshot the live preference; explicit feature overrides remain independent,
+and the shared 10-second connect timeout remains in effect.
+Code hosting stores `[git].default_pr_merge_method` as `merge` (default),
+`squash`, `rebase`, or `fast_forward`. Every PR merge-dialog opening reads this
+preference and falls back to its first permitted method when unsupported.
+`settings/request_preferences.rs` owns a typed automatically persisted StateStore
+facade for both preferences. UI callbacks synchronously admit commands to one
+64-entry FIFO; its worker reduces in click order and waits for durable receipts.
+Shutdown drains accepted commands before closing persistence. The UI bridge
+subscribes to changed snapshots on the event loop, and success feedback follows
+durable completion. Failed writes retain the committed in-memory preference;
+an explicit same-value save retries the dirty state. Timeout edits remain local
+across regular/compact layout changes and reset on route re-entry.
+An empty timeout edit restores `30000` on focus loss. Save applies the same
+normalization and validates the current draft before admission, so clicking Save
+while typing immediately refreshes the field error. Ordinary blur updates only
+the draft; persistence still requires Save. Zero and other nonempty values are
+never replaced by the default.
+The timeout field reserves its validation row so clearing a blur error cannot
+move Save between pointer press and release.
+Plain single-line, password, and multiline fields keep native Primer-compatible
+Escape behavior: no text/selection/validation change, blur, reset, or submit.
+The window input bridge handles outside-pointer blur only; application shortcuts
+reject unmatched Escape so Dialog, Select, Find, and other context owners can
+handle it. No generic Escape-to-blur interceptor is installed. General timeout
+defaulting therefore runs only on actual blur or Save. See the shared
+[text-input Escape contract](specs/ui-design.md#text-input-escape-contract--文本输入-escape-契约).
+
 `[diagnostics]` owns `application_console_logging`, `application_file_logging`,
 `tracing_logger_active`, `terminal_verbose_logging`, and `memory_diagnostics_logging`.
 `[update]` owns `auto_update` and `update_channel`. Loading migrates legacy root
@@ -1678,8 +1711,8 @@ Every request supplies `RequestOptions`:
 - `operation` provides stable logs and user-facing context.
 - `reject_http_errors` defaults to true and converts non-2xx responses into `HttpError` with a bounded body excerpt.
 - `feedback` defaults to `Silent`; user actions may opt into toast, notification, or both.
-- `timeout` defaults to 30 seconds, accepts a custom duration, and treats zero as no total deadline; the 10-second connect timeout remains independent.
-- `read_idle_timeout` defaults to 30 seconds, accepts a custom duration, and
+- `timeout` snapshots the General request-timeout preference (initially 30 seconds), accepts an explicit feature override, and treats zero as no total deadline; the 10-second connect timeout remains independent.
+- `read_idle_timeout` starts from the same General preference, accepts an independent explicit feature override, and
   treats zero as disabled. Every received response-body transport chunk resets
   the deadline. Incremental consumers use `HttpResponse::for_each_chunk`, which
   retains the same diagnostics and error interception as buffered reads.

@@ -141,6 +141,9 @@ fn ui(
     app.set_sidebar_motion_display_linked(sidebar_motion_mode.is_display_linked());
     app.on_advance_sidebar_motion(sidebar_motion::advance);
     let settings_page = SettingsPageBridge::default();
+    let request_preferences =
+        settings::request_preferences::RequestPreferencesFacade::open(&loaded_settings)
+            .context("Failed to start request preferences state")?;
     let ai_agent_settings =
         ai::settings_state::AiAgentSettingsFacade::open(loaded_settings.ai.agent.clone())
             .context("Failed to start AI Agent settings state")?;
@@ -181,6 +184,9 @@ fn ui(
     // ========= Settings ========= //
     // Apply loaded settings to AppState
     setup_settings(&app, &loaded_settings);
+    let request_preferences_subscription = std::sync::Mutex::new(Some(
+        settings::request_preferences_ui::install(&app, &settings_page, &request_preferences),
+    ));
     let _artifact_preview_handle = artifact_preview::setup(&app, &loaded_settings.preview);
     #[cfg(feature = "test-fixtures")]
     artifact_preview::setup_fixtures(&app, _artifact_preview_handle.clone());
@@ -807,6 +813,16 @@ fn ui(
     shutdown::register_pre_shutdown_task_with_priority("shutdown_terminal", PRIORITY_HIGH, || {
         shutdown_terminal();
     });
+    shutdown::register_pre_shutdown_task_with_priority(
+        "shutdown_request_preferences",
+        PRIORITY_HIGH,
+        move || {
+            request_preferences.shutdown();
+            if let Ok(mut subscription) = request_preferences_subscription.lock() {
+                subscription.take();
+            }
+        },
+    );
     shutdown::register_pre_shutdown_task_with_priority(
         "shutdown_ai_agent_settings",
         PRIORITY_HIGH,

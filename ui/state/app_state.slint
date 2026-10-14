@@ -53,6 +53,8 @@ export global AppState {
     
     // network
     in-out property <bool> network-online: true;
+    // Committed request timeout in milliseconds; zero disables the default deadline.
+    in-out property <string> http-request-timeout-ms: "30000";
 
     // auto-update
     in-out property <bool> auto-update: true; // default enabled
@@ -87,6 +89,7 @@ export global AppState {
     in-out property <string> git-gitlab-enterprise: "";
     in-out property <string> git-gitee-api-base-url: "";
     in-out property <string> git-gitee-enterprise: "";
+    in-out property <string> default-pr-merge-method: "merge";
 
     // OpenAI-compatible AI Agent connection
     in-out property <string> ai-agent-base-url: "";
@@ -124,6 +127,10 @@ export global AppState {
 
     callback set-artifact-preview-presentation-mode(mode: int);
     callback set-artifact-preview-provider-enabled(provider-id: string, enabled: bool);
+
+    callback validate-http-request-timeout(milliseconds: string) -> bool;
+    callback save-http-request-timeout(milliseconds: string) -> bool;
+    callback save-default-pr-merge-method(method: string);
 
     // git token settings
     callback save-git-tokens(github-token: string, gitlab-token: string, gitee-token: string, gitee-enterprise-token: string);

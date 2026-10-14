@@ -1,0 +1,181 @@
+import { AppState } from "../../state/app_state.slint";
+import { I18n } from "@i18n";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { GitHubButton, GitHubTextField, GitHubSettingsSectionMenuButton } from "./github_settings_controls.slint";
+import { GitHubSelectState, GitHubSelectPopup, GitHubSelectOption } from "../input/github_select.slint";
+
+export component GitHubHttpTimeoutSettings inherits VerticalLayout {
+    in-out property <string> timeout-draft: AppState.http-request-timeout-ms;
+    in-out property <bool> validation-error: false;
+    callback timeout-submitted(string);
+    private property <bool> timeout-input-had-focus: false;
+
+    function finish-timeout-edit() {
+        if root.timeout-draft == "" {
+            root.timeout-draft = "30000";
+        }
+        root.validation-error = !AppState.validate-http-request-timeout(root.timeout-draft);
+    }
+
+    width: 100%;
+    spacing: GitHubMetrics.size-12;
+    alignment: start;
+
+    Text {
+        text: I18n.settings-general-request-timeout;
+        font-size: GitHubMetrics.text-large;
+        font-weight: 600;
+        color: GitHubTheme.fg-default;
+    }
+    Text {
+        width: parent.width;
+        text: I18n.settings-general-request-timeout-description;
+        font-size: GitHubMetrics.text-medium;
+        color: GitHubTheme.fg-muted;
+        wrap: word-wrap;
+        line-height-factor: 1.2;
+    }
+    GitHubTextField {
+        // Clearing a blur error must not move Save between pointer press and
+        // release, otherwise the same click can miss the button.
+        height: 78px;
+        label: I18n.settings-general-request-timeout-milliseconds;
+        text <=> root.timeout-draft;
+        validation-error: root.validation-error;
+        validation-message: root.validation-error
+            ? I18n.settings-general-request-timeout-invalid : "";
+        edited(value) => {
+            root.validation-error = !AppState.validate-http-request-timeout(value);
+        }
+        changed input-has-focus => {
+            if self.input-has-focus {
+                root.timeout-input-had-focus = true;
+            } else if root.timeout-input-had-focus {
+                root.timeout-input-had-focus = false;
+                root.finish-timeout-edit();
+            }
+        }
+    }
+    HorizontalLayout {
+        width: parent.width;
+        alignment: start;
+        GitHubButton {
+            text: I18n.common-save;
+            primary: true;
+            clicked => {
+                root.finish-timeout-edit();
+                if !root.validation-error {
+                    if AppState.save-http-request-timeout(root.timeout-draft) {
+                        root.timeout-submitted(root.timeout-draft);
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Each method owns a fixed trigger leaf so the Settings factory never reuses
+// another method's translated label while switching sections or locales.
+export component GitHubDefaultPrMergeSettings inherits VerticalLayout {
+    private property <bool> menu-open:
+        GitHubSelectState.open && GitHubSelectState.owner == "settings-pr-merge-method";
+    width: 100%;
+    spacing: GitHubMetrics.size-12;
+    alignment: start;
+
+    Text {
+        text: I18n.settings-code-hosting-default-pr-merge-method;
+        font-size: GitHubMetrics.text-large;
+        font-weight: 600;
+        color: GitHubTheme.fg-default;
+    }
+    Text {
+        width: parent.width;
+        text: I18n.settings-code-hosting-default-pr-merge-method-description;
+        font-size: GitHubMetrics.text-medium;
+        color: GitHubTheme.fg-muted;
+        wrap: word-wrap;
+        line-height-factor: 1.2;
+    }
+    trigger := Rectangle {
+        width: parent.width;
+        height: GitHubMetrics.size-40;
+        background: transparent;
+        GitHubSettingsSectionMenuButton {
+            x: 0px; y: 0px; width: parent.width;
+            visible: AppState.default-pr-merge-method == "merge";
+            text: I18n.pr-review-create-merge-commit;
+            open: root.menu-open;
+            restore-focus-on-close: GitHubSelectState.restore-focus;
+            clicked => { GitHubSelectState.toggle("settings-pr-merge-method", "merge", 0,
+                trigger.absolute-position.x, trigger.absolute-position.y, trigger.width, trigger.height); }
+        }
+        GitHubSettingsSectionMenuButton {
+            x: 0px; y: 0px; width: parent.width;
+            visible: AppState.default-pr-merge-method == "squash";
+            text: I18n.pr-review-squash-merge;
+            open: root.menu-open;
+            restore-focus-on-close: GitHubSelectState.restore-focus;
+            clicked => { GitHubSelectState.toggle("settings-pr-merge-method", "squash", 1,
+                trigger.absolute-position.x, trigger.absolute-position.y, trigger.width, trigger.height); }
+        }
+        GitHubSettingsSectionMenuButton {
+            x: 0px; y: 0px; width: parent.width;
+            visible: AppState.default-pr-merge-method == "rebase";
+            text: I18n.pr-review-rebase-merge;
+            open: root.menu-open;
+            restore-focus-on-close: GitHubSelectState.restore-focus;
+            clicked => { GitHubSelectState.toggle("settings-pr-merge-method", "rebase", 2,
+                trigger.absolute-position.x, trigger.absolute-position.y, trigger.width, trigger.height); }
+        }
+        GitHubSettingsSectionMenuButton {
+            x: 0px; y: 0px; width: parent.width;
+            visible: AppState.default-pr-merge-method == "fast_forward";
+            text: I18n.pr-review-fast-forward-merge;
+            open: root.menu-open;
+            restore-focus-on-close: GitHubSelectState.restore-focus;
+            clicked => { GitHubSelectState.toggle("settings-pr-merge-method", "fast_forward", 3,
+                trigger.absolute-position.x, trigger.absolute-position.y, trigger.width, trigger.height); }
+        }
+    }
+}
+
+export component GitHubDefaultPrMergeSettingsOverlay inherits GitHubSelectPopup {
+    owner: "settings-pr-merge-method";
+    option-count: 4;
+    private property <bool> menu-open:
+        GitHubSelectState.open && GitHubSelectState.owner == root.owner;
+    selected(index) => {
+        AppState.save-default-pr-merge-method(index == 0 ? "merge"
+            : index == 1 ? "squash" : index == 2 ? "rebase" : "fast_forward");
+        GitHubSelectState.close(true);
+    }
+    GitHubSelectOption {
+        x: 0px; y: 0px; width: root.option-width;
+        text: I18n.pr-review-create-merge-commit;
+        selected: GitHubSelectState.selected-value == "merge";
+        active: root.menu-open && GitHubSelectState.active-index == 0;
+        activated => { root.selected(0); }
+    }
+    GitHubSelectOption {
+        x: 0px; y: GitHubMetrics.size-32; width: root.option-width;
+        text: I18n.pr-review-squash-merge;
+        selected: GitHubSelectState.selected-value == "squash";
+        active: root.menu-open && GitHubSelectState.active-index == 1;
+        activated => { root.selected(1); }
+    }
+    GitHubSelectOption {
+        x: 0px; y: GitHubMetrics.size-32 * 2; width: root.option-width;
+        text: I18n.pr-review-rebase-merge;
+        selected: GitHubSelectState.selected-value == "rebase";
+        active: root.menu-open && GitHubSelectState.active-index == 2;
+        activated => { root.selected(2); }
+    }
+    GitHubSelectOption {
+        x: 0px; y: GitHubMetrics.size-32 * 3; width: root.option-width;
+        text: I18n.pr-review-fast-forward-merge;
+        selected: GitHubSelectState.selected-value == "fast_forward";
+        active: root.menu-open && GitHubSelectState.active-index == 3;
+        activated => { root.selected(3); }
+    }
+}

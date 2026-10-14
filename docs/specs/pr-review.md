@@ -298,6 +298,16 @@ An implementation in another stack should preserve these provider-neutral record
 | `PullRequestReviewAction` | Comment, Approve, Request changes | A provider may disable unsupported actions but labels remain consistent. |
 | `PullRequestMergeMethod` | Merge, Squash, Rebase, Fast-forward | Only methods returned by the active adapter are selectable. |
 
+Settings → Code hosting persists the default PR merge method as a semantic id
+(`merge`, `squash`, `rebase`, or `fast_forward`), with Merge as the default.
+Every merge-dialog opening reads the current preference. If the adapter does
+not allow it, selection falls back to the first permitted method in the existing
+Merge → Squash → Rebase → Fast-forward display order. A capability refresh
+preserves a supported explicit selection while the dialog remains open; if it
+becomes unsupported, the same preference/fallback policy applies. No permitted
+method means no selection and a disabled confirmation. The preference never
+adds a provider capability or starts a merge without explicit confirmation.
+
 其他技术栈应保留这些 Provider-neutral 记录，而不是向 UI 暴露 Provider JSON：
 
 | 记录 | 必需字段 | 说明 |
@@ -313,6 +323,13 @@ An implementation in another stack should preserve these provider-neutral record
 | `PullRequestActionState` | 评审/回退能力、归一化就绪类型/详情、评审状态、可合并标记、合并/回退阻塞原因、回退标签/确认说明、允许的合并策略 | UI 只渲染归一化能力和 Provider 专属效果说明，不得根据 Provider 名称自行推断合并语义或回退安全性。 |
 | `PullRequestReviewAction` | Comment、Approve、Request changes | Provider 可禁用不支持的动作，但显示标签保持一致。 |
 | `PullRequestMergeMethod` | Merge、Squash、Rebase、Fast-forward | 只能选择当前 adapter 返回的方法。 |
+
+Settings → Code hosting 将 PR 默认合并策略保存为语义 id（`merge`、`squash`、
+`rebase` 或 `fast_forward`），默认是 Merge。每次打开合并弹窗都读取当前偏好；
+当前 adapter 不支持该策略时，按既有 Merge → Squash → Rebase → Fast-forward
+展示顺序选择第一个允许项。弹窗保持打开时，能力刷新保留仍被支持的用户选择；
+若策略失去支持，则重新应用偏好与回退规则。没有允许项时清空选择并禁用确认。
+默认偏好不会新增 Provider 能力，合并仍须显式确认。
 
 ## Provider adapter contract / Provider 适配契约
 

@@ -583,6 +583,14 @@ pub(crate) fn bind_pr_review(
         dismiss_controller.dismiss_review(&ui, review_id.as_str(), reason.as_str());
     });
 
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_default_merge_method(move || {
+        ui_weak
+            .upgrade()
+            .map(|ui| actions::default_merge_method(&ui))
+            .unwrap_or_default()
+    });
+
     let merge_controller = controller.clone();
     let ui_weak = ui.as_weak();
     ui.on_workflow_pr_merge(move |method, remove_source_branch| {

@@ -22,8 +22,6 @@ use crate::{
     NotificationOptions, ToastManager, ToastOptions,
 };
 
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
-const DEFAULT_READ_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_ERROR_BODY_CHARS: usize = 2_000;
 const RETRY_BASE_DELAY: Duration = Duration::from_millis(500);
@@ -394,12 +392,16 @@ pub(crate) struct RequestOptions {
 
 impl RequestOptions {
     pub(crate) fn new(operation: impl Into<String>) -> Self {
+        Self::with_default_timeout(operation, crate::settings::load_http_request_timeout())
+    }
+
+    fn with_default_timeout(operation: impl Into<String>, timeout: Duration) -> Self {
         Self {
             operation: operation.into(),
             feedback: ErrorFeedback::Silent,
             reject_http_errors: true,
-            timeout: DEFAULT_TIMEOUT,
-            read_idle_timeout: DEFAULT_READ_IDLE_TIMEOUT,
+            timeout,
+            read_idle_timeout: timeout,
             body_diagnostic_context: None,
             response_byte_limit: None,
             retry: None,
@@ -484,6 +486,17 @@ fn retry_policy_for(method: &Method, options: &RequestOptions) -> Option<RetryPo
 
 fn remaining_operation_budget(deadline: Option<Instant>) -> Option<Duration> {
     deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()))
+}
+
+fn timeout_deadline(now: Instant, timeout: Duration) -> Option<Instant> {
+    // Settings accepts arbitrarily large decimal millisecond values. Beyond
+    // the platform clock's range, the deadline is effectively unreachable;
+    // avoid both overflowing Instant and substituting a shorter timer.
+    // Tokio rounds deadlines up to a millisecond when registering timers.
+    (!timeout.is_zero())
+        .then(|| now.checked_add(timeout))
+        .flatten()
+        .filter(|deadline| deadline.checked_add(Duration::from_millis(1)).is_some())
 }
 
 fn request_attempt_timeout(
@@ -729,7 +742,7 @@ fn handle_error(error: HttpError, feedback: ErrorFeedback) -> HttpError {
 
 #[cfg(test)]
 fn request_total_timeout(timeout: Duration) -> Option<Duration> {
-    (!timeout.is_zero()).then_some(timeout)
+    timeout_deadline(Instant::now(), timeout).map(|_| timeout)
 }
 
 fn diagnostic_header_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
@@ -740,10 +753,11 @@ async fn await_with_read_idle_timeout<T>(
     timeout: Duration,
     future: impl Future<Output = T>,
 ) -> Result<T, ()> {
-    if timeout.is_zero() {
-        Ok(future.await)
-    } else {
-        tokio::time::timeout(timeout, future).await.map_err(|_| ())
+    match timeout_deadline(Instant::now(), timeout) {
+        Some(deadline) => tokio::time::timeout_at(deadline.into(), future)
+            .await
+            .map_err(|_| ()),
+        None => Ok(future.await),
     }
 }
 
@@ -1150,7 +1164,7 @@ pub(crate) async fn send(
             options.feedback,
         )
     })?;
-    let operation_deadline = (!options.timeout.is_zero()).then(|| Instant::now() + options.timeout);
+    let operation_deadline = timeout_deadline(Instant::now(), options.timeout);
     let retry = retry_policy_for(request.method(), &options);
     let max_attempts = retry.map(|policy| policy.max_attempts).unwrap_or(1);
     let mut attempt = 1_u32;
@@ -1364,14 +1378,92 @@ mod tests {
 
     #[test]
     fn request_options_are_silent_and_strict_by_default() {
-        let options = RequestOptions::new("Test");
+        let default_timeout = Duration::from_millis(30_000);
+        let options = RequestOptions::with_default_timeout("Test", default_timeout);
         assert_eq!(options.feedback, ErrorFeedback::Silent);
         assert!(options.reject_http_errors);
-        assert_eq!(options.timeout, DEFAULT_TIMEOUT);
-        assert_eq!(options.read_idle_timeout, DEFAULT_READ_IDLE_TIMEOUT);
+        assert_eq!(options.timeout, default_timeout);
+        assert_eq!(options.read_idle_timeout, default_timeout);
         assert_eq!(options.body_diagnostic_context, None);
         assert_eq!(options.retry, None);
         assert!(!options.retry_disabled);
+    }
+
+    #[test]
+    fn configured_defaults_apply_to_new_requests_and_both_timeout_guards() {
+        let existing = RequestOptions::with_default_timeout("Existing", Duration::from_secs(30));
+        let custom = RequestOptions::with_default_timeout("Custom", Duration::from_millis(90_001));
+        let disabled = RequestOptions::with_default_timeout("No deadline", Duration::ZERO);
+
+        assert_eq!(existing.timeout, Duration::from_secs(30));
+        assert_eq!(existing.read_idle_timeout, Duration::from_secs(30));
+        assert_eq!(custom.timeout, Duration::from_millis(90_001));
+        assert_eq!(custom.read_idle_timeout, custom.timeout);
+        assert_eq!(disabled.timeout, Duration::ZERO);
+        assert_eq!(disabled.read_idle_timeout, Duration::ZERO);
+        assert_eq!(request_total_timeout(disabled.timeout), None);
+    }
+
+    #[test]
+    fn feature_timeout_overrides_remain_independent_of_configured_defaults() {
+        let custom = RequestOptions::with_default_timeout("Download", Duration::from_secs(90))
+            .timeout(Duration::from_secs(600));
+        assert_eq!(custom.timeout, Duration::from_secs(600));
+        assert_eq!(custom.read_idle_timeout, Duration::from_secs(90));
+
+        let review = RequestOptions::with_default_timeout("Review", Duration::ZERO)
+            .timeout(Duration::ZERO)
+            .read_idle_timeout(Duration::from_secs(300));
+        assert_eq!(review.timeout, Duration::ZERO);
+        assert_eq!(review.read_idle_timeout, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn very_large_timeouts_do_not_overflow_deadlines_or_shorten_the_budget() {
+        assert_eq!(timeout_deadline(Instant::now(), Duration::MAX), None);
+        assert_eq!(request_total_timeout(Duration::MAX), None);
+        let configured = RequestOptions::with_default_timeout("Large", Duration::MAX);
+        let deadline = timeout_deadline(Instant::now(), configured.timeout);
+        assert!(retry_delay_fits_budget(Duration::from_secs(600), deadline));
+        assert_eq!(
+            request_attempt_timeout(false, remaining_operation_budget(deadline)),
+            None
+        );
+
+        let timeout = Duration::from_millis(73_001);
+        let started = Instant::now();
+        assert_eq!(
+            timeout_deadline(started, timeout),
+            started.checked_add(timeout)
+        );
+        assert_eq!(request_total_timeout(timeout), Some(timeout));
+    }
+
+    #[test]
+    fn timeout_deadlines_leave_room_for_timer_rounding_at_the_clock_boundary() {
+        let started = Instant::now();
+        let mut lower_ms = 0_u128;
+        let mut upper_ms = Duration::MAX.as_millis();
+        while lower_ms < upper_ms {
+            let candidate_ms = lower_ms + (upper_ms - lower_ms).div_ceil(2);
+            let candidate = Duration::new(
+                (candidate_ms / 1000) as u64,
+                ((candidate_ms % 1000) * 1_000_000) as u32,
+            );
+            if started.checked_add(candidate).is_some() {
+                lower_ms = candidate_ms;
+            } else {
+                upper_ms = candidate_ms - 1;
+            }
+        }
+        let clock_boundary = Duration::new(
+            (lower_ms / 1000) as u64,
+            ((lower_ms % 1000) * 1_000_000) as u32,
+        );
+        let deadline = started.checked_add(clock_boundary).unwrap();
+        assert!(deadline.checked_add(Duration::from_millis(1)).is_none());
+        assert_eq!(timeout_deadline(started, clock_boundary), None);
+        assert!(timeout_deadline(started, clock_boundary - Duration::from_millis(1)).is_some());
     }
 
     #[test]
@@ -1584,6 +1676,9 @@ mod tests {
 
         let completed = await_with_read_idle_timeout(Duration::ZERO, async { 7_u8 }).await;
         assert_eq!(completed, Ok(7));
+
+        let very_large = await_with_read_idle_timeout(Duration::MAX, async { 9_u8 }).await;
+        assert_eq!(very_large, Ok(9));
     }
 
     #[test]

@@ -178,7 +178,6 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
     private property <length> review-menu-anchor-y: 0px;
     private property <string> conversation-comment-body: "";
     private property <string> pending-conversation-comment: "";
-    private property <string> selected-merge-method: "merge";
     private property <bool> remove-source-branch: false;
     private property <int> draft-range-start: -1;
     private property <int> draft-range-end: -1;
@@ -551,7 +550,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
     changed merge-dialog-open => {
         if (root.merge-dialog-open) {
             root.active-popover = "";
-            root.selected-merge-method = root.merge-method-merge ? "merge" : (root.merge-method-squash ? "squash" : (root.merge-method-rebase ? "rebase" : "fast_forward"));
+            root.selected-merge-method = root.default-merge-method();
         }
     }
     changed revert-dialog-open => {
@@ -4343,7 +4342,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
         close-enabled: !root.action-loading;
         primary-label: root.action-loading ? I18n.pr-review-merging : I18n.pr-review-confirm-merge;
         primary-success: true;
-        primary-enabled: !root.action-loading && root.can-merge;
+        primary-enabled: !root.action-loading && root.can-merge && root.selected-merge-method != "";
         primary-busy: root.action-loading;
         close-requested => { root.merge-dialog-open = false; }
         cancel-clicked => { root.merge-dialog-open = false; }

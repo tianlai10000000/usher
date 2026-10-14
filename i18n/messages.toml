@@ -693,6 +693,14 @@ key = "settings.code_hosting.description"
 text = "Configure credentials and enterprise API endpoints."
 
 [[messages]]
+key = "settings.code_hosting.default_pr_merge_method"
+text = "Default PR merge method"
+
+[[messages]]
+key = "settings.code_hosting.default_pr_merge_method_description"
+text = "Preselect this method when merging a PR. If unavailable, use a method supported by the repository."
+
+[[messages]]
 key = "settings.code_hosting.enterprise"
 text = "Enterprise"
 
@@ -885,6 +893,22 @@ key = "settings.general.release_channel"
 text = "Release channel"
 
 [[messages]]
+key = "settings.general.request_timeout"
+text = "Request timeout"
+
+[[messages]]
+key = "settings.general.request_timeout_description"
+text = "Set the default API request timeout in milliseconds. The default is 30000 ms; 0 disables the timeout."
+
+[[messages]]
+key = "settings.general.request_timeout_milliseconds"
+text = "Timeout (milliseconds)"
+
+[[messages]]
+key = "settings.general.request_timeout_invalid"
+text = "Enter 0 or a positive integer."
+
+[[messages]]
 key = "settings.general.right_panel"
 text = "Three-column layout"
 
@@ -951,6 +975,26 @@ text = "Code hosting tokens could not be saved."
 [[messages]]
 key = "settings.feedback.tokens_saved"
 text = "Code hosting tokens saved."
+
+[[messages]]
+key = "settings.feedback.http_request_timeout_saved"
+text = "Request timeout saved."
+slint = false
+
+[[messages]]
+key = "settings.feedback.http_request_timeout_save_failed"
+text = "Request timeout could not be saved."
+slint = false
+
+[[messages]]
+key = "settings.feedback.default_pr_merge_method_saved"
+text = "Default PR merge method saved."
+slint = false
+
+[[messages]]
+key = "settings.feedback.default_pr_merge_method_save_failed"
+text = "Default PR merge method could not be saved."
+slint = false
 
 [[messages]]
 key = "settings.release.alpha"

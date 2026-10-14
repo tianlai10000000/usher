@@ -15,6 +15,7 @@ import {
 } from "@language-picker";
 import { GitHubAiReviewSettingsSection, AiReviewRuleItem } from "@ai-review-settings";
 import { GitHubHookSettingsSection } from "./github_hook_settings.slint";
+import { GitHubHttpTimeoutSettings, GitHubDefaultPrMergeSettings } from "./github_request_settings.slint";
 
 export component GitHubSettingsSectionHeader inherits Rectangle {
     in property <string> title;
@@ -136,6 +137,9 @@ export component GitHubSettingsPane inherits Rectangle {
     in property <length> viewport-origin-y;
     in property <int> selected-section: 0;
     in property <int> route-entry-revision: 0;
+    in-out property <string> http-request-timeout-draft: AppState.http-request-timeout-ms;
+    in-out property <bool> http-request-timeout-validation-error: false;
+    callback http-request-timeout-submitted(string);
     in-out property <bool> simulate-crash-active: false;
     in-out property <bool> reveal-git-tokens: false;
     in-out property <bool> git-tokens-saved: false;
@@ -447,6 +451,19 @@ export component GitHubSettingsPane inherits Rectangle {
                 background: GitHubTheme.border-default;
             }
 
+            GitHubHttpTimeoutSettings {
+                width: parent.width;
+                timeout-draft <=> root.http-request-timeout-draft;
+                validation-error <=> root.http-request-timeout-validation-error;
+                timeout-submitted(value) => { root.http-request-timeout-submitted(value); }
+            }
+
+            Rectangle {
+                width: parent.width;
+                height: 1px;
+                background: GitHubTheme.border-default;
+            }
+
             VerticalLayout {
                 width: parent.width;
                 spacing: 8px;
@@ -726,6 +743,14 @@ export component GitHubSettingsPane inherits Rectangle {
                     }
                 }
             }
+
+            Rectangle {
+                width: parent.width;
+                height: 1px;
+                background: GitHubTheme.border-default;
+            }
+
+            GitHubDefaultPrMergeSettings { width: parent.width; }
         }
 
         ai-agent-section := VerticalLayout {

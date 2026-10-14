@@ -5445,3 +5445,43 @@ msgstr "复制文件内容失败，请重试。"
 msgctxt "navigation.more_tabs"
 msgid "More"
 msgstr "更多"
+
+msgctxt "settings.code_hosting.default_pr_merge_method"
+msgid "Default PR merge method"
+msgstr "默认 PR 合并方式"
+
+msgctxt "settings.code_hosting.default_pr_merge_method_description"
+msgid "Preselect this method when merging a PR. If unavailable, use a method supported by the repository."
+msgstr "合并 PR 时默认选择此方式。如果不可用，将使用仓库支持的合并方式。"
+
+msgctxt "settings.general.request_timeout"
+msgid "Request timeout"
+msgstr "接口请求超时"
+
+msgctxt "settings.general.request_timeout_description"
+msgid "Set the default API request timeout in milliseconds. The default is 30000 ms; 0 disables the timeout."
+msgstr "设置默认 API 请求超时时间，单位为毫秒。默认为 30000 ms；设为 0 时不限制超时。"
+
+msgctxt "settings.general.request_timeout_milliseconds"
+msgid "Timeout (milliseconds)"
+msgstr "超时时间（毫秒）"
+
+msgctxt "settings.general.request_timeout_invalid"
+msgid "Enter 0 or a positive integer."
+msgstr "请输入 0 或正整数。"
+
+msgctxt "settings.feedback.http_request_timeout_saved"
+msgid "Request timeout saved."
+msgstr "请求超时时间已保存。"
+
+msgctxt "settings.feedback.http_request_timeout_save_failed"
+msgid "Request timeout could not be saved."
+msgstr "无法保存请求超时时间。"
+
+msgctxt "settings.feedback.default_pr_merge_method_saved"
+msgid "Default PR merge method saved."
+msgstr "默认 PR 合并方式已保存。"
+
+msgctxt "settings.feedback.default_pr_merge_method_save_failed"
+msgid "Default PR merge method could not be saved."
+msgstr "无法保存默认 PR 合并方式。"

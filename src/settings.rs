@@ -1,4 +1,6 @@
 // Settings module - Responsible for configuration read/write
+pub(crate) mod request_preferences;
+pub(crate) mod request_preferences_ui;
 mod save_worker;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -20,6 +22,9 @@ pub struct AppSettings {
     /// UI language preference: `auto` or a locale id from i18n/manifest.toml.
     #[serde(default = "default_language")]
     pub language: String,
+
+    #[serde(default)]
+    pub http: HttpSettings,
 
     #[serde(default)]
     pub update: UpdateSettings,
@@ -57,6 +62,47 @@ pub struct UpdateSettings {
     /// Update release channel: `stable` or `alpha`.
     #[serde(default = "default_update_channel")]
     pub update_channel: String,
+}
+
+/// Decimal milliseconds are stored as text to preserve arbitrarily large
+/// nonnegative integer input without a TOML/i32 numeric ceiling.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HttpSettings {
+    #[serde(
+        default = "default_http_request_timeout_ms",
+        deserialize_with = "deserialize_http_timeout"
+    )]
+    pub request_timeout_ms: String,
+}
+
+impl Default for HttpSettings {
+    fn default() -> Self {
+        Self {
+            request_timeout_ms: default_http_request_timeout_ms(),
+        }
+    }
+}
+
+fn default_http_request_timeout_ms() -> String {
+    "30000".into()
+}
+
+fn deserialize_http_timeout<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<String, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Milliseconds {
+        Text(String),
+        Integer(u64),
+    }
+    let input = match Milliseconds::deserialize(deserializer)? {
+        Milliseconds::Text(value) => value,
+        Milliseconds::Integer(value) => value.to_string(),
+    };
+    request_preferences::normalize_timeout_ms(&input).ok_or_else(|| {
+        serde::de::Error::custom("request timeout must be nonnegative integer milliseconds")
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -186,10 +232,38 @@ impl Default for AiAgentSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GitSettings {
+    #[serde(
+        default = "default_pr_merge_method",
+        deserialize_with = "deserialize_pr_merge_method"
+    )]
+    pub default_pr_merge_method: String,
     #[serde(default)]
     pub platform: GitPlatformSettings,
+}
+
+fn default_pr_merge_method() -> String {
+    "merge".into()
+}
+
+fn deserialize_pr_merge_method<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<String, D::Error> {
+    let value = String::deserialize(deserializer)?;
+    Ok(crate::git::PullRequestMergeMethod::parse(&value)
+        .unwrap_or(crate::git::PullRequestMergeMethod::Merge)
+        .as_str()
+        .into())
+}
+
+impl Default for GitSettings {
+    fn default() -> Self {
+        Self {
+            default_pr_merge_method: default_pr_merge_method(),
+            platform: GitPlatformSettings::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -290,6 +364,7 @@ impl Default for AppSettings {
         Self {
             theme_mode: default_theme_mode(),
             language: default_language(),
+            http: HttpSettings::default(),
             update: UpdateSettings::default(),
             diagnostics: DiagnosticsSettings::default(),
             ui_sound_effects: default_ui_sound_effects(),
@@ -513,6 +588,13 @@ impl SettingsManager {
     /// Convenience wrapper over [`Self::with_settings`] for the Git subtree.
     pub fn with_git<R>(&self, f: impl FnOnce(&GitSettings) -> R) -> R {
         self.with_settings(|settings| f(&settings.git))
+    }
+
+    fn set_request_preferences(&self, state: &request_preferences::RequestPreferences) {
+        if let Ok(mut settings) = self.settings.write() {
+            settings.http.request_timeout_ms = state.http_request_timeout_ms.clone();
+            settings.git.default_pr_merge_method = state.default_pr_merge_method.as_str().into();
+        }
     }
 
     /// Update theme mode and save
@@ -744,6 +826,14 @@ pub fn get_settings_manager() -> &'static SettingsManager {
     &SETTINGS_MANAGER
 }
 
+pub(crate) fn load_http_request_timeout() -> std::time::Duration {
+    request_preferences::current_timeout()
+}
+
+pub(crate) fn load_default_pr_merge_method() -> crate::git::PullRequestMergeMethod {
+    request_preferences::current_merge_method()
+}
+
 /// Save theme mode setting asynchronously
 pub fn save_theme_mode(mode: i32) {
     get_settings_manager().set_theme_mode(mode);
@@ -914,6 +1004,8 @@ pub fn setup_settings(app: &MainWindow, settings: &AppSettings) {
     // Apply loaded settings to AppState
     let app_state = AppState::get(app);
     app_state.set_theme_mode(settings.theme_mode);
+    app_state.set_http_request_timeout_ms(settings.http.request_timeout_ms.clone().into());
+    app_state.set_default_pr_merge_method(settings.git.default_pr_merge_method.clone().into());
     crate::i18n::sync_main_window(app, &settings.language);
     app_state.set_auto_update(settings.update.auto_update);
     app_state.set_update_channel(settings.update.update_channel.clone().into());
@@ -1045,6 +1137,35 @@ pub(crate) fn normalize_ai_agent_settings(mut settings: AiAgentSettings) -> AiAg
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn request_preferences_round_trip_and_accept_legacy_absence_or_numeric_milliseconds() {
+        let defaults: super::AppSettings = toml::from_str("").unwrap();
+        assert_eq!(defaults.http.request_timeout_ms, "30000");
+        assert_eq!(defaults.git.default_pr_merge_method, "merge");
+        let numeric: super::AppSettings = toml::from_str(
+            "[http]\nrequest_timeout_ms = 0\n[git]\ndefault_pr_merge_method = 'fast-forward'",
+        )
+        .unwrap();
+        assert_eq!(numeric.http.request_timeout_ms, "0");
+        assert_eq!(numeric.git.default_pr_merge_method, "fast_forward");
+        for method in ["merge", "squash", "rebase", "fast_forward"] {
+            let mut settings = defaults.clone();
+            settings.http.request_timeout_ms = "9".repeat(1000);
+            settings.git.default_pr_merge_method = method.into();
+            let restored: super::AppSettings =
+                toml::from_str(&toml::to_string(&settings).unwrap()).unwrap();
+            assert_eq!(restored.http, settings.http);
+            assert_eq!(restored.git.default_pr_merge_method, method);
+        }
+        for invalid in ["-1", "1.5", "'abc'", "'-1'", "''"] {
+            assert!(
+                toml::from_str::<super::AppSettings>(&format!(
+                    "[http]\nrequest_timeout_ms = {invalid}"
+                ))
+                .is_err()
+            );
+        }
+    }
     use super::*;
 
     #[test]

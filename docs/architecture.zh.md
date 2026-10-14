@@ -783,6 +783,28 @@ entry 读取或删除失败返回到任务 Writer 与 Session IO receipt。禁�
 
 ### 设置
 
+General 提供 `[http].request_timeout_ms`，默认 `30000`，单位毫秒，只接受非负
+十进制整数。规范化后的十进制文本以字符串持久化，输入不设人为上限；运行时转换
+仅在超出 `Duration` 表示范围时饱和，超出平台计时器范围的截止时间视为实际不可达。
+0 遵循 Axios，关闭默认总超时与正文空闲超时。新建 `RequestOptions` 读取即时偏好，
+Feature 显式覆盖保持独立，统一的 10 秒连接超时仍然生效。
+Code hosting 以 `[git].default_pr_merge_method` 保存 `merge`（默认）、`squash`、
+`rebase` 或 `fast_forward`。每次打开 PR 合并弹窗读取最新偏好；仓库不支持时回退
+到首个允许方式。`settings/request_preferences.rs` 通过强类型、自动持久化
+StateStore 门面拥有两项共享偏好。UI 同步向一个 64 项 FIFO 准入命令，Worker 按
+点击顺序归约并等待持久化 receipt；退出先排空已接受命令，再关闭持久化 Worker。
+UI bridge 在 event loop 订阅最新快照，成功反馈等待实际写盘。写盘失败保留内存
+提交，显式保存同值重试 dirty 状态。超时草稿跨宽窄布局切换保留，重新进入路由时重置。
+超时输入失焦时若为空则回填 `30000`。Save 先执行同一归一化并校验当前草稿，
+确保正在输入时直接点击 Save 也即时刷新字段错误。普通失焦仅更新草稿，持久化
+仍需 Save；0 和其他非空值不得被默认值覆盖。
+超时字段保留校验行的布局高度，清除失焦错误时不得在按下与释放鼠标之间移动 Save。
+普通单行、密码和多行输入保留与 Primer 一致的原生 Escape 行为：不改变文字、
+选区或校验，不失焦、不还原、不提交。窗口输入 bridge 只处理外部指针失焦，
+应用快捷键拒绝未匹配 Escape，继续交给 Dialog、Select、Find 等上下文拥有者。
+不安装通用 Escape 失焦拦截；General 超时回填仅由实际失焦或 Save 触发。详见
+[文本输入 Escape 契约](specs/ui-design.md#text-input-escape-contract--文本输入-escape-契约)。
+
 `[diagnostics]` 保存 `application_console_logging`、`application_file_logging`、
 `tracing_logger_active`、`terminal_verbose_logging` 和 `memory_diagnostics_logging`。
 `[update]` 保存 `auto_update` 和 `update_channel`。加载时逐字段兼容旧顶层键，
@@ -1315,8 +1337,8 @@ Toast、Dialog demo 路由已删除。关闭 feature 时，两个侧边栏都不
 - `operation` 用于稳定日志和用户提示上下文。
 - `reject_http_errors` 默认开启，把非 2xx 响应转换为 `HttpError`，并保留受长度限制的响应正文摘要。
 - `feedback` 默认 `Silent`；用户操作可以选择 Toast、Notification 或两者。
-- `timeout` 默认 30 秒，可传入自定义时长；零表示无总截止时间，独立的 10 秒连接超时仍然生效。
-- `read_idle_timeout` 默认 30 秒，可自定义，零表示关闭空闲检测；每个收到的响应体传输
+- `timeout` 读取 General 即时请求超时偏好（初始 30 秒），可由 Feature 显式覆盖；零表示无总截止时间，独立的 10 秒连接超时仍然生效。
+- `read_idle_timeout` 初始使用同一 General 偏好，可由 Feature 独立显式覆盖，零表示关闭空闲检测；每个收到的响应体传输
   chunk 都会重新计时。增量调用方使用 `HttpResponse::for_each_chunk`，与缓冲读取共享同一套
   诊断、错误拦截和 idle 语义。
 - `retry_transient(3)` 为幂等 Provider 读取启用带 jitter 的有上限指数退避，覆盖连接/
