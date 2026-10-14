@@ -80,8 +80,12 @@ downloads after a rejected oversized response.
 ## Invariants / 不变量
 
 1. Application code must not construct a reusable reqwest client outside `src/http/mod.rs`.
-2. Every application-owned call uses the single module-owned async client with
-   one user agent and a 10-second connect timeout. Settings General owns the
+2. Every application-owned call uses the module-owned async clients with
+   one user agent and a 10-second connect timeout. A normal redirect client serves
+   anonymous traffic; a same-origin-only redirect client serves recognized
+   credentials and sensitive headers after request interceptors run. Both retain
+   reqwest's bounded redirect limit. See [security boundaries](security-boundaries.md).
+   Settings General owns the
    application default timeout in decimal milliseconds (30,000 initially).
    Each new `RequestOptions` reads the latest committed value for both its
    total operation budget and body-idle budget; requests already created retain
@@ -139,7 +143,10 @@ downloads after a rejected oversized response.
     30 seconds, at most 32 filter keys, and invalidates the project after merge.
 
 1. 应用代码不得在 `src/http/mod.rs` 外创建可复用 reqwest client。
-2. 所有应用自有请求使用模块内唯一的异步 client，并统一 User-Agent 与 10 秒连接超时。
+2. 所有应用自有请求使用模块内统一管理的异步 client，共用 User-Agent 与 10 秒连接超时。
+   匿名请求使用普通重定向 client；请求拦截器执行后，已知凭据和敏感 Header 选择
+   仅允许同 origin 重定向的 client。二者保留 reqwest 的跳转次数上限，详见
+   [安全边界](security-boundaries.md)。
    General 设置持有应用默认超时，以十进制毫秒保存，初值为 30,000。每次创建
    `RequestOptions` 都读取最新已提交设置，同时作为总操作预算与正文空闲预算；
    已创建的请求保留自己的快照。零同时关闭这两个默认截止时间，遵循
@@ -211,9 +218,21 @@ impl HttpInterceptor for MyInterceptor {
 }
 ```
 
-Interceptors must be thread-safe, fast, and deterministic. Authentication interceptors should scope credentials by host and must never attach one provider's token to another host.
+Interceptors must be thread-safe, fast, and deterministic. Authentication interceptors must scope credentials by trusted origin (scheme, host and effective port) and never attach a provider's token to an untrusted origin.
 
-Interceptor 必须线程安全、快速、确定性。鉴权拦截器必须按 host 限定 Token，禁止把某个平台凭据附加到其他 host。
+Interceptor 必须线程安全、快速、确定性。鉴权拦截器必须按可信 origin（协议、主机和有效端口）限定 Token，禁止把平台凭据附加到不可信 origin。
+
+Credential redirects compare the complete origin, including scheme and effective
+port. Custom credential headers must be marked sensitive or registered in the
+shared request classifier. URL diagnostics omit userinfo, the entire query and
+fragment; nested reqwest errors omit their URL, and JSON decode errors keep only
+category/location. `HttpError::Debug` excludes response excerpts and arbitrary
+message prose. Endpoint paths and operation labels must remain non-secret.
+
+携带凭据的重定向比较完整 origin（含协议和有效端口）。自定义鉴权 Header 必须
+标为敏感或登记到统一分类器。URL 诊断去除用户信息、完整 query 和 fragment；
+底层 reqwest 错误移除 URL，JSON 解码错误只保留类别/位置；`HttpError::Debug`
+不输出响应摘要及任意 message。endpoint 路径与 operation 标签自身不得包含秘密。
 
 ## Error model / 错误模型
 
@@ -254,6 +273,11 @@ Only the shared HTTP module should contain client creation or raw execution.
 
 ## Regression checklist / 回归检查
 
+- Run origin/redirect and diagnostic negative fixtures from
+  [security boundaries](security-boundaries.md), including real cross-port listeners
+  and same-origin/anonymous controls.
+- 按[安全边界](security-boundaries.md)执行 origin、重定向及诊断负例，包含真实
+  跨端口监听、同 origin 鉴权和匿名跳转对照。
 - A successful JSON request decodes normally.
 - A 401/403 maps to a credential/permission message.
 - A 429 maps to rate-limit feedback.

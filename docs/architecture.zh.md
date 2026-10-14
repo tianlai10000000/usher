@@ -236,7 +236,7 @@ Hook UI bridge 统一负责开始/结束通知、
 | `src/settings_feedback.rs` | 共用的设置保存 Worker 完成回写、saved 状态复位计时器及本地化 Toast；装配根只绑定动作。 |
 | `src/ai/` | 共用 OpenAI-compatible AI Agent transport、Feature 自有的强类型/持久化配置 Store 与内置 Prompt catalog；`agent.rs` 负责连通性测试及 AI Chat/AI Code Review 使用的 chat completion，不负责 RAG transport。 |
 | `src/network.rs` | 网络可达性与 `AppState.network-online`：macOS 使用 SystemConfiguration 回调，其它平台使用不发包的路由检查与离线退避。 |
-| `src/http/mod.rs` | 唯一共享 reqwest client、单请求总超时/响应体空闲超时策略、统一响应体读取、拦截器、统一错误和可选 UI 反馈。 |
+| `src/http/mod.rs` | 集中管理共享 reqwest client 与凭据重定向策略、单请求总超时/响应体空闲超时、统一响应体读取、拦截器、统一错误和可选 UI 反馈。 |
 | `src/logger/` | Debug 日志、tracing 和 panic/error 支持；panic hook 自有直接 JSON 兜底写入，即使普通 tracing 已关闭仍保持生效。 |
 | `src/toast.rs` | 单条短时 Toast 管理器绑定。 |
 | `src/notification.rs` | 通知队列、计时器、Hover 暂停、操作按钮和图标。 |
@@ -1315,9 +1315,24 @@ Toast、Dialog demo 路由已删除。关闭 feature 时，两个侧边栏都不
 4. 取消时删除未完成文件。
 5. Update UI 已管理成功/失败通知，因此 HTTP 层保持静默。
 
+`update/download_archive.rs` 从下载到安装持续拥有随机、原子创建的临时文件。
+流式写入和解包复用已打开句柄，禁止按路径重新打开；读取前 flush 并关闭 writer，
+所有成功、失败和取消路径都由 owner 清理。无调用的旧安装入口已删除。Windows
+重启直接启动 executable，以 `OsString` 保留参数，单实例锁交接顺序不变；外部
+预览文件也以一个绝对路径传给 Explorer，避免 `cmd` 解释。发布签名验证及既有
+Windows ZIP 与 tar 安装器不匹配仍待解决，详见[安全边界](specs/security-boundaries.md)。
+
 ## HTTP 边界
 
 `src/http/mod.rs` 是唯一允许创建应用自有 reqwest client 的位置。它返回 reqwest request builder，不隐藏 query、JSON 和 header 配置；执行后返回项目自有 `HttpResponse`，JSON、文本、字节和流式 chunk 读取都留在统一超时与错误管线内。
+
+模块集中持有普通重定向 client 与仅同 origin 重定向 client，共用配置。请求拦截器
+执行后，已知凭据及敏感 Header 选择受限 client；匿名 CDN 下载保留正常跳转。
+GitLab 在唯一 adapter 入口核对实际 API origin，只有公共 HTTPS 或显式 API
+配置允许附加 Token，不能把 Provider 名称识别当作授权。HTTP 诊断去除 URL
+用户信息/query/fragment 和底层 reqwest 消息 URL；JSON 错误只保留类别与行列。
+`HttpError::Debug` 只暴露元数据和响应长度。endpoint 路径及 operation 标签
+自身仍须避免承载秘密。
 
 每个请求都提供 `RequestOptions`：
 
@@ -1371,20 +1386,26 @@ Interceptor 按注册顺序执行。Request hook 可修改 header；Response hoo
 ## 验证要求
 
 `scripts/check-quality.sh` 是不改写源码的本地统一检查入口。默认/`--quick` 快速层
-保留 fmt、结构/UI/i18n、脚本回归、默认 root check、root 库测试与 diff 检查。
+保留 fmt、结构/UI/i18n、脚本回归、默认 root check、root 库测试、根包 doctest 与 diff 检查。
 `--full` 完整层把两项 root Cargo 检查替换为 workspace all-targets check、workspace
-单元/集成测试（`--tests`，不执行另行跟踪的 logger doctest）、workspace all-targets
+单元/集成测试（`--tests`）、workspace all-targets
 Clippy（警告视为错误），以及仅选择根包的
 `-p usher --no-default-features --features renderer-femtovg` all-targets check。
 最后一项验证排除可选 AI core 和 UI/Settings bridge 的应用图；选择整个 workspace
 仍会包含 AI core 成员。完整层固定 `CARGO_INCREMENTAL=0`，并为 workspace 测试
 注入 `SLINT_EMIT_DEBUG_INFO=1`。
+两层均独立运行 `cargo test --doc --locked`，修复后的 logger 示例不再豁免。
+架构门禁通过正反例检查直接 HTTP 构造/快捷调用及常见别名/导入；该检查是词法
+门禁，宏、依赖重命名和间接 re-export 仍须代码审查。
+`cfg(test)` 下全局 SettingsManager 在独立、持续持有的临时目录使用默认值，
+测试不继承或覆盖工作站设置；自定义配置测试显式构造夹具 manager。生产仍从
+平台配置目录加载。
 
 两层都串行执行，保留每项普通失败的原退出码并继续采集后续结果，最终汇总返回
 失败；中断立即停止。macOS 手动 CI 复用同一完整入口，Windows 保留独立的默认
 workspace all-targets 编译检查。触发频率和已暂停的托管 Nightly schedule 保持
 原状。既有结构/lint 失败不得豁免；该入口不替代功能专项 UI/Release A/B 验收，
-也不宣称另行跟踪的 logger doctest 已通过。
+不得通过调高结构预算掩盖既有失败。
 
 Rust 或 Slint 改动至少运行：
 
@@ -1396,11 +1417,10 @@ cargo test --lib --locked
 git diff --check
 ```
 
-Terminal viewport/session、更新取消、托盘关闭和路由布局需要做针对性手工验证。完整测试目前包含一个无关的 logger doctest 失败，不能用这个已知问题掩盖新增失败。
+Terminal viewport/session、更新取消、托盘关闭和路由布局需要做针对性手工验证。所有未执行检查和新增失败必须单独报告。
 
 ## 已知技术债
 
-- `src/logger/debug_logger.rs` 有一个无法编译的 doctest。
 - `Route.UiComponents` 是由 `ui-components` 控制的长期维护开发演练场；旧
   Login/Tools/List/Detail/Notification/Toast/Dialog demo 路由已删除。
 - 应用为专有/非开源软件，见根目录 `LICENSE.txt`；第三方 vendored 组件仍保留各自许可证。

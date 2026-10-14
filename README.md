@@ -68,8 +68,8 @@ checks. Quick adds the default root check and root library tests. Full instead r
 workspace all-targets check, workspace unit/integration tests, workspace all-targets
 Clippy with warnings denied, and an all-targets check of the `usher` application
 without its optional AI core and UI/Settings bridges. Full sets `CARGO_INCREMENTAL=0`
-and enables Slint debug metadata for workspace tests, matching manual CI. Workspace
-tests deliberately exclude the separately tracked logger doctest.
+and enables Slint debug metadata for workspace tests, matching manual CI. Both
+layers also run root-package doctests as an independent blocking check.
 
 Every ordinary failure is reported with its original exit code; later checks still
 run and the aggregate exit status remains nonzero. Interrupts stop the sequence.
@@ -211,7 +211,8 @@ contacts no provider. Library regressions separately verify shared data and
 worker ordering.
 
 
-The full `cargo test --locked` command currently exposes a pre-existing failing doctest in `src/logger/debug_logger.rs`; the library unit tests pass.
+Run `cargo test --doc --locked` to check root-package documentation examples.
+The obsolete logger example has been repaired; it no longer has a test exemption.
 
 To inspect the optional Skia path:
 

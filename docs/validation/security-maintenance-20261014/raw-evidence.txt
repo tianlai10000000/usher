@@ -1,0 +1,498 @@
+Security maintenance evidence — 2026-10-14
+Baseline: ad6e701071a6695370f9228eb5626218b7f63cff
+Only synthetic fixtures and build/test diagnostics are included. No user settings file, real credentials, or complete library-test transcript is archived.
+Sections marked excerpt contain original selected lines without rewriting their text. Other sections reproduce the entire named file.
+Final library rerun after test-only SettingsManager isolation: 828 passed, 0 failed, 2 existing ignored; 34.40s. Final compile/check output appended below.
+
+===== BEGIN http-privacy-baseline.log =====
+   Compiling usher v0.0.9-alpha.4 (/Users/yuankai/yuankai/Demo/rust/usher)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.17s
+     Running unittests src/lib.rs (target/debug/deps/usher_lib-b43ac1d90a0c0674)
+
+running 7 tests
+test http::privacy_tests::ordinary_endpoint_diagnostics_keep_scheme_host_port_and_path ... ok
+test http::privacy_tests::unsupported_url_diagnostics_fail_closed ... FAILED
+test http::privacy_tests::url_diagnostics_remove_credentials_all_queries_and_fragments ... FAILED
+test http::privacy_tests::status_error_display_preserves_context_without_private_data ... FAILED
+test http::privacy_tests::error_debug_preserves_metadata_without_dumping_url_or_response ... FAILED
+test http::privacy_tests::json_decode_diagnostics_keep_location_without_echoing_payload ... FAILED
+test http::privacy_tests::reqwest_error_message_does_not_reintroduce_the_original_url ... FAILED
+
+failures:
+
+---- http::privacy_tests::unsupported_url_diagnostics_fail_closed stdout ----
+
+thread 'http::privacy_tests::unsupported_url_diagnostics_fail_closed' (11227676) panicked at src/http/privacy_tests.rs:15:9:
+diagnostic disclosed private-response: data:text/plain,private-response
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- http::privacy_tests::url_diagnostics_remove_credentials_all_queries_and_fragments stdout ----
+
+thread 'http::privacy_tests::url_diagnostics_remove_credentials_all_queries_and_fragments' (11227677) panicked at src/http/privacy_tests.rs:15:9:
+diagnostic disclosed private-user: https://private-user:private-password@example.com:8443/api/projects?access_token=***&signature=private-signature&arbitrary=private-value#private-fragment
+
+---- http::privacy_tests::status_error_display_preserves_context_without_private_data stdout ----
+
+thread 'http::privacy_tests::status_error_display_preserves_context_without_private_data' (11227675) panicked at src/http/privacy_tests.rs:15:9:
+diagnostic disclosed private-user: GET https://private-user:private-password@example.com:8443/api/projects?access_token=***&signature=private-signature&arbitrary=private-value#private-fragment Load projects: 401 Unauthorized
+
+---- http::privacy_tests::error_debug_preserves_metadata_without_dumping_url_or_response stdout ----
+
+thread 'http::privacy_tests::error_debug_preserves_metadata_without_dumping_url_or_response' (11227671) panicked at src/http/privacy_tests.rs:15:9:
+diagnostic disclosed private-user: HttpError { kind: Status, operation: "Load projects", method: Some(GET), url: Some(Url { scheme: "https", cannot_be_a_base: false, username: "private-user", password: Some("private-password"), host: Some(Domain("example.com")), port: Some(8443), path: "/api/projects", query: Some("access_token=private-token&signature=private-signature&arbitrary=private-value"), fragment: Some("private-fragment") }), status: Some(401), message: "HTTP request returned status 401", response_body: Some("private-response") }
+
+---- http::privacy_tests::json_decode_diagnostics_keep_location_without_echoing_payload stdout ----
+
+thread 'http::privacy_tests::json_decode_diagnostics_keep_location_without_echoing_payload' (11227672) panicked at src/http/privacy_tests.rs:15:9:
+diagnostic disclosed private-response: invalid type: string "private-response", expected u64 at line 1 column 18
+
+---- http::privacy_tests::reqwest_error_message_does_not_reintroduce_the_original_url stdout ----
+
+thread 'http::privacy_tests::reqwest_error_message_does_not_reintroduce_the_original_url' (11227674) panicked at src/http/privacy_tests.rs:99:5:
+assertion `left == right` failed
+  left: "builder error for url (https://private-user:private-password@example.com:8443/api/projects?access_token=private-token&signature=private-signature&arbitrary=private-value#private-fragment)"
+ right: "builder error"
+
+
+failures:
+    http::privacy_tests::error_debug_preserves_metadata_without_dumping_url_or_response
+    http::privacy_tests::json_decode_diagnostics_keep_location_without_echoing_payload
+    http::privacy_tests::reqwest_error_message_does_not_reintroduce_the_original_url
+    http::privacy_tests::status_error_display_preserves_context_without_private_data
+    http::privacy_tests::unsupported_url_diagnostics_fail_closed
+    http::privacy_tests::url_diagnostics_remove_credentials_all_queries_and_fragments
+
+test result: FAILED. 1 passed; 6 failed; 0 ignored; 0 measured; 808 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `--lib`
+===== END http-privacy-baseline.log =====
+
+===== BEGIN http-privacy-candidate.log =====
+   Compiling usher v0.0.9-alpha.4 (/Users/yuankai/yuankai/Demo/rust/usher)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 16.56s
+     Running unittests src/lib.rs (target/debug/deps/usher_lib-b43ac1d90a0c0674)
+
+running 7 tests
+test http::privacy_tests::unsupported_url_diagnostics_fail_closed ... ok
+test http::privacy_tests::ordinary_endpoint_diagnostics_keep_scheme_host_port_and_path ... ok
+test http::privacy_tests::url_diagnostics_remove_credentials_all_queries_and_fragments ... ok
+test http::privacy_tests::status_error_display_preserves_context_without_private_data ... ok
+test http::privacy_tests::json_decode_diagnostics_keep_location_without_echoing_payload ... ok
+test http::privacy_tests::error_debug_preserves_metadata_without_dumping_url_or_response ... ok
+test http::privacy_tests::reqwest_error_message_does_not_reintroduce_the_original_url ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 809 filtered out; finished in 0.01s
+
+===== END http-privacy-candidate.log =====
+
+===== BEGIN http-redirect-baseline-local-network.log =====
+   Compiling usher v0.0.9-alpha.4 (/Users/yuankai/yuankai/Demo/rust/usher)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.08s
+     Running unittests src/lib.rs (target/debug/deps/usher_lib-b43ac1d90a0c0674)
+
+running 3 tests
+test http::redirect_policy_tests::anonymous_download_preserves_cross_origin_redirects ... ok
+test http::redirect_policy_tests::credential_redirect_never_contacts_a_different_origin ... FAILED
+test http::redirect_policy_tests::credential_redirect_preserves_same_origin_authentication ... ok
+
+failures:
+
+---- http::redirect_policy_tests::credential_redirect_never_contacts_a_different_origin stdout ----
+
+thread 'http::redirect_policy_tests::credential_redirect_never_contacts_a_different_origin' (11247201) panicked at src/http/redirect_policy_tests.rs:72:9:
+credential source: PRIVATE-TOKEN
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    http::redirect_policy_tests::credential_redirect_never_contacts_a_different_origin
+
+test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 824 filtered out; finished in 0.03s
+
+error: test failed, to rerun pass `--lib`
+===== END http-redirect-baseline-local-network.log =====
+
+===== BEGIN http-redirect-candidate.log =====
+   Compiling usher v0.0.9-alpha.4 (/Users/yuankai/yuankai/Demo/rust/usher)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.20s
+     Running unittests src/lib.rs (target/debug/deps/usher_lib-b43ac1d90a0c0674)
+
+running 5 tests
+test http::redirect_policy_tests::anonymous_download_preserves_cross_origin_redirects ... ok
+test http::redirect_policy_tests::credential_client_selection_covers_headers_and_known_query_credentials ... ok
+test http::redirect_policy_tests::credential_redirect_loops_retain_reqwest_limit ... ok
+test http::redirect_policy_tests::credential_redirect_never_contacts_a_different_origin ... ok
+test http::redirect_policy_tests::credential_redirect_preserves_same_origin_authentication ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 824 filtered out; finished in 0.34s
+
+===== END http-redirect-candidate.log =====
+
+===== BEGIN gitlab-origin-candidate.log =====
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.33s
+     Running unittests src/lib.rs (target/debug/deps/usher_lib-b43ac1d90a0c0674)
+
+running 3 tests
+test git::locator::tests::gitlab_token_preserves_explicit_self_hosted_origins ... ok
+test git::locator::tests::gitlab_token_requires_the_actual_trusted_api_origin ... ok
+test git::locator::tests::locator_debug_never_exposes_remote_url_credentials ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 826 filtered out; finished in 0.00s
+
+===== END gitlab-origin-candidate.log =====
+
+===== BEGIN updater-temp-baseline.log =====
+Baseline commit: ad6e701071a6695370f9228eb5626218b7f63cff
+Compiler: rustc 1.98.1 (48a229cea 2026-09-01)
+
+HEAD source excerpt:
+    // Create temporary file to save downloaded content
+    let temp_dir = std::env::temp_dir();
+    let temp_file_path = temp_dir.join(format!("usher_update_{}.tar.gz", version));
+    let mut temp_file = tokio::fs::File::create(&temp_file_path)
+        .await
+        .context("Failed to create temp file")?;
+
+
+Scope: isolated macOS/Unix reproduction, actual Tokio File::create; only fixture files affected.
+Difference from production: injected private fixture parent instead of system temp; no HTTP or install executed.
+compile argv: ['rustc', '--edition', '2024', '/tmp/usher-maintenance-audit/baseline-updater-symlink.rs', '-o', '/tmp/usher-maintenance-audit/baseline-updater-symlink', '-L', 'dependency=/Users/yuankai/yuankai/Demo/rust/usher/target/debug/deps', '--extern', 'tokio=/Users/yuankai/yuankai/Demo/rust/usher/target/debug/deps/libtokio-9ccfeadab69032f3.rlib']
+compile exit: 0
+run exit: 0
+isolated fixture root: /tmp/usher-maintenance-audit/isolated-update-baseline-fx62qgga
+victim bytes before File::create: 38
+victim bytes after File::create: 0
+PASS: baseline vulnerability reproduced with actual Tokio File::create, inside fixture only
+Fixture directory removed by TemporaryDirectory after run.
+===== END updater-temp-baseline.log =====
+
+===== BEGIN windows-command-shapes.log =====
+Baseline commit: ad6e701071a6695370f9228eb5626218b7f63cff
+Compiler: rustc 1.98.1 (48a229cea 2026-09-01)
+Scope: macOS command-object inspection only. NOT Windows process execution, quoting, association, or native UI validation.
+Baseline builder shapes are asserted against HEAD source; candidate helper functions are copied verbatim from workspace source.
+compile argv: ['rustc', '--edition', '2024', '/tmp/usher-maintenance-audit/windows-command-shapes.rs', '-o', '/tmp/usher-maintenance-audit/windows-command-shapes']
+compile exit: 0
+run exit: 0
+HEAD Windows file open: program="cmd"; args=["/C", "start", "", "fixture/reports/notes & literal.md"]
+candidate Windows file open: program="explorer.exe"; args=["/Users/yuankai/yuankai/Demo/rust/usher/fixture/reports/notes & literal.md"]
+HEAD Windows restart: program="cmd"; args=["/c", "start", "", "fixture/application dir/usher & literal.exe", "literal argument"]
+candidate Windows restart: program="fixture/application dir/usher & literal.exe"; args=["literal argument"]
+PASS: source-verified command construction comparison; no command was spawned
+
+Candidate file-open helper:
+fn windows_file_open_command(path: &Path) -> std::io::Result<Command> {
+    // Explorer resolves the file association without interpreting the path as
+    // a cmd.exe program (including & operators and %variable% expansion).
+    let mut command = Command::new("explorer.exe");
+    // Callers may supply relative paths. Resolve against Usher's working
+    // directory instead of leaving that interpretation to Explorer.
+    command.arg(std::path::absolute(path)?);
+    Ok(command)
+}
+
+Candidate restart helper:
+fn executable_restart_command(
+    executable: &std::path::Path,
+    args: &[std::ffi::OsString],
+) -> std::process::Command {
+    // Keep executable paths and arguments out of a command interpreter on
+    // every platform, including Windows paths containing shell metacharacters.
+    let mut command = std::process::Command::new(executable);
+    command.args(args);
+    command
+}
+===== END windows-command-shapes.log =====
+
+===== BEGIN http-redirect-baseline.log (verbatim excerpt) =====
+test http::redirect_policy_tests::anonymous_download_preserves_cross_origin_redirects ... FAILED
+test http::redirect_policy_tests::credential_redirect_never_contacts_a_different_origin ... FAILED
+test http::redirect_policy_tests::credential_redirect_preserves_same_origin_authentication ... FAILED
+called `Result::unwrap()` on an `Err` value: Os { code: 1, kind: PermissionDenied, message: "Operation not permitted" }
+called `Result::unwrap()` on an `Err` value: Os { code: 1, kind: PermissionDenied, message: "Operation not permitted" }
+called `Result::unwrap()` on an `Err` value: Os { code: 1, kind: PermissionDenied, message: "Operation not permitted" }
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 821 filtered out; finished in 0.00s
+===== END http-redirect-baseline.log =====
+
+===== BEGIN architecture-gate-baseline.log (verbatim excerpt) =====
+FAIL: test_direct_http_shortcuts_and_constructors_are_rejected (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_direct_http_shortcuts_and_constructors_are_rejected) (call='reqwest::get(ENDPOINT)')
+AssertionError: 0 != 1 : Architecture structure checks passed.
+FAIL: test_direct_http_shortcuts_and_constructors_are_rejected (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_direct_http_shortcuts_and_constructors_are_rejected) (call='reqwest::Client::default()')
+AssertionError: 0 != 1 : Architecture structure checks passed.
+FAIL: test_direct_http_shortcuts_and_constructors_are_rejected (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_direct_http_shortcuts_and_constructors_are_rejected) (call='reqwest::ClientBuilder::new()')
+AssertionError: 0 != 1 : Architecture structure checks passed.
+FAIL: test_direct_http_shortcuts_and_constructors_are_rejected (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_direct_http_shortcuts_and_constructors_are_rejected) (call='reqwest :: Client :: default()')
+AssertionError: 0 != 1 : Architecture structure checks passed.
+FAIL: test_direct_http_shortcuts_and_constructors_are_rejected (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_direct_http_shortcuts_and_constructors_are_rejected) (call='reqwest\n    ::Client\n    ::new()')
+AssertionError: 0 != 1 : Architecture structure checks passed.
+FAIL: test_imported_constructors_shortcuts_and_namespace_aliases_are_rejected (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_imported_constructors_shortcuts_and_namespace_aliases_are_rejected) (source='use reqwest::Client;\nfn fixture() { let _ = Client::new(); }')
+AssertionError: 0 != 1 : Architecture structure checks passed.
+FAIL: test_imported_constructors_shortcuts_and_namespace_aliases_are_rejected (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_imported_constructors_shortcuts_and_namespace_aliases_are_rejected) (source='use reqwest::Client as Transport;\nfn fixture() { let _ = Transport::default(); }')
+AssertionError: 0 != 1 : Architecture structure checks passed.
+FAIL: test_imported_constructors_shortcuts_and_namespace_aliases_are_rejected (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_imported_constructors_shortcuts_and_namespace_aliases_are_rejected) (source='use reqwest::{\n    Method,\n    Client as Transport,\n};')
+AssertionError: 0 != 1 : Architecture structure checks passed.
+FAIL: test_imported_constructors_shortcuts_and_namespace_aliases_are_rejected (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_imported_constructors_shortcuts_and_namespace_aliases_are_rejected) (source='use reqwest::{Method, get as fetch};')
+AssertionError: 0 != 1 : Architecture structure checks passed.
+FAIL: test_imported_constructors_shortcuts_and_namespace_aliases_are_rejected (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_imported_constructors_shortcuts_and_namespace_aliases_are_rejected) (source='use reqwest::blocking::{Client as Transport};')
+AssertionError: 0 != 1 : Architecture structure checks passed.
+FAIL: test_imported_constructors_shortcuts_and_namespace_aliases_are_rejected (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_imported_constructors_shortcuts_and_namespace_aliases_are_rejected) (source='use reqwest::*;')
+AssertionError: 0 != 1 : Architecture structure checks passed.
+FAIL: test_imported_constructors_shortcuts_and_namespace_aliases_are_rejected (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_imported_constructors_shortcuts_and_namespace_aliases_are_rejected) (source='use reqwest::{self as transport, Method};')
+AssertionError: 0 != 1 : Architecture structure checks passed.
+FAIL: test_imported_constructors_shortcuts_and_namespace_aliases_are_rejected (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_imported_constructors_shortcuts_and_namespace_aliases_are_rejected) (source='use reqwest as transport;')
+AssertionError: 0 != 1 : Architecture structure checks passed.
+FAIL: test_imported_constructors_shortcuts_and_namespace_aliases_are_rejected (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_imported_constructors_shortcuts_and_namespace_aliases_are_rejected) (source='use {reqwest as transport};')
+AssertionError: 0 != 1 : Architecture structure checks passed.
+FAIL: test_imported_constructors_shortcuts_and_namespace_aliases_are_rejected (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_imported_constructors_shortcuts_and_namespace_aliases_are_rejected) (source='extern crate reqwest as transport;')
+AssertionError: 0 != 1 : Architecture structure checks passed.
+Ran 7 tests in 2.438s
+FAILED (failures=15)
+===== END architecture-gate-baseline.log =====
+
+===== BEGIN quality-runner-baseline.log (verbatim excerpt) =====
+FAIL: test_architecture_failure_is_preserved_and_later_tests_run (scripts.tests.test_quality_checks.QualityRunnerTests.test_architecture_failure_is_preserved_and_later_tests_run)
+AssertionError: '8 checks passed' not found in '[Quality] Mode: quick\n\n[Quality] fmt\n[PASS] fmt\n\n[Quality] architecture\n\n[Quality] ui-policy\n[PASS] ui-policy\n\n[Quality] i18n\n[PASS] i18n\n\n[Quality] script-tests\n[PASS] script-tests\n\n[Quality] cargo-check\n[PASS] cargo-check\n\n[Quality] library-tests\n[PASS] library-tests\n\n[Quality] diff\n[PASS] diff\n\n[Quality] 7 checks passed.\n'
+FAIL: test_doctest_failure_remains_blocking_in_both_modes (scripts.tests.test_quality_checks.QualityRunnerTests.test_doctest_failure_remains_blocking_in_both_modes) (mode='--quick')
+AssertionError: 0 != 1 : [Quality] Mode: quick
+FAIL: test_doctest_failure_remains_blocking_in_both_modes (scripts.tests.test_quality_checks.QualityRunnerTests.test_doctest_failure_remains_blocking_in_both_modes) (mode='--full')
+AssertionError: 0 != 1 : [Quality] Mode: full
+FAIL: test_explicit_quick_keeps_root_scope_and_caller_environment (scripts.tests.test_quality_checks.QualityRunnerTests.test_explicit_quick_keeps_root_scope_and_caller_environment)
+AssertionError: 8 != 9
+FAIL: test_full_retains_multiple_failures_and_runs_every_later_contract (scripts.tests.test_quality_checks.QualityRunnerTests.test_full_retains_multiple_failures_and_runs_every_later_contract)
+AssertionError: '9 checks passed' not found in '[Quality] Mode: full\n\n[Quality] fmt\n[PASS] fmt\n\n[Quality] architecture\n\n[Quality] ui-policy\n[PASS] ui-policy\n\n[Quality] i18n\n[PASS] i18n\n\n[Quality] script-tests\n[PASS] script-tests\n\n[Quality] workspace-check\n[PASS] workspace-check\n\n[Quality] workspace-tests\n[PASS] workspace-tests\n\n[Quality] workspace-lint\n\n[Quality] no-ai-check\n[PASS] no-ai-check\n\n[Quality] diff\n[PASS] diff\n\n[Quality] 8 checks passed.\n'
+FAIL: test_full_runs_workspace_and_no_ai_application_contracts (scripts.tests.test_quality_checks.QualityRunnerTests.test_full_runs_workspace_and_no_ai_application_contracts)
+AssertionError: Lists differ: ['car[379 chars]ovg --locked', 'git diff --check'] != ['car[379 chars]ovg --locked', 'cargo test --doc --locked', 'git diff --check']
+FAIL: test_success_runs_all_checks_without_reformatting (scripts.tests.test_quality_checks.QualityRunnerTests.test_success_runs_all_checks_without_reformatting)
+AssertionError: 8 != 9
+Ran 10 tests in 6.942s
+FAILED (failures=7)
+===== END quality-runner-baseline.log =====
+
+===== BEGIN architecture-gate-candidate.log =====
+.......
+----------------------------------------------------------------------
+Ran 7 tests in 2.382s
+
+OK
+===== END architecture-gate-candidate.log =====
+
+===== BEGIN quality-runner-candidate.log =====
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 7.474s
+
+OK
+===== END quality-runner-candidate.log =====
+
+===== BEGIN script-tests-candidate.log =====
+...............Running project (repeatability)
+{"project": {"passed": false, "error": "runner exited 7; see project.log"}}
+Running job (repeatability)
+{"job": {"passed": false, "error": "runner exited 7; see job.log"}}
+Running preview-code (repeatability)
+{"preview-code": {"passed": false, "error": "runner exited 7; see preview-code.log"}}
+Running preview-paragraphs (repeatability)
+{"preview-paragraphs": {"passed": false, "error": "runner exited 7; see preview-paragraphs.log"}}
+Running find (repeatability)
+{"find": {"passed": false, "error": "runner exited 7; see find.log"}}
+........batch=65 paired_exit=7
+batch=69 paired_exit=7
+batch=70 soak_errors=[]
+..............................................................
+----------------------------------------------------------------------
+Ran 85 tests in 21.092s
+
+OK
+===== END script-tests-candidate.log =====
+
+===== BEGIN cargo-check.log =====
+    Checking usher v0.0.9-alpha.4 (/Users/yuankai/yuankai/Demo/rust/usher)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.13s
+===== END cargo-check.log =====
+
+===== BEGIN cargo-test-doc.log =====
+   Compiling usher v0.0.9-alpha.4 (/Users/yuankai/yuankai/Demo/rust/usher)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 17.00s
+   Doc-tests usher_lib
+
+running 2 tests
+test src/constants/shutdown_priority.rs - constants::shutdown_priority::PRIORITY_CRITICAL (line 31) ... ignored
+test src/logger/debug_logger.rs - logger::debug_logger (line 15) ... ok
+
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+all doctests ran in 1.54s; merged doctests compilation took 0.20s
+===== END cargo-test-doc.log =====
+
+===== BEGIN architecture-final.log =====
+Architecture structure: AI Review controller lines is 3884 (budget 3850).
+Architecture structure: root Slint lines is 3101 (budget 3000).
+Architecture structure: root Slint callbacks is 142 (budget 140).
+Architecture structure: root Slint properties is 425 (budget 410).
+Architecture structure: PR Review remote actions lines is 1150 (budget 580).
+===== END architecture-final.log =====
+
+===== BEGIN ui-policy.log =====
+UI policy checks passed.
+===== END ui-policy.log =====
+
+===== BEGIN i18n.log =====
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.12s
+i18n catalog checks passed.
+===== END i18n.log =====
+
+===== BEGIN cargo-test-lib.log (verbatim excerpt) =====
+running 829 tests
+test platform::tests::windows_file_open_preserves_literal_path_without_a_command_interpreter ... ok
+test update::download_archive::tests::archive_keeps_download_for_multiple_reads_and_cleans_up_on_completion ... ok
+test update::download_archive::tests::invalid_archive_is_removed_on_installation_error ... ok
+test update::download_archive::tests::legacy_symlink_cannot_redirect_download_or_extraction ... ok
+test update::download_archive::tests::partial_download_is_removed_on_early_error ... ok
+test update::updater::tests::restart_passes_executable_and_arguments_without_a_shell ... ok
+test update::updater::tests::restarted_process_receives_shell_metacharacters_literally ... ok
+
+failures:
+
+---- project::logo_loader::tests::stalled_http_times_out_then_shutdown_cancels_the_next_attempt stdout ----
+
+thread 'project::logo_loader::tests::stalled_http_times_out_then_shutdown_cancels_the_next_attempt' (11275904) panicked at src/project/logo_loader.rs:230:65:
+called `Result::unwrap()` on an `Err` value: Timeout
+
+thread '<unnamed>' (11275905) panicked at src/project/logo_loader.rs:217:39:
+client did not close stalled request: Resource temporarily unavailable (os error 35)
+
+
+failures:
+    project::logo_loader::tests::stalled_http_times_out_then_shutdown_cancels_the_next_attempt
+
+test result: FAILED. 826 passed; 1 failed; 2 ignored; 0 measured; 0 filtered out; finished in 37.42s
+
+error: test failed, to rerun pass `--lib`
+===== END cargo-test-lib.log =====
+
+===== BEGIN logo-timeout-isolated.log =====
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.31s
+     Running unittests src/lib.rs (target/debug/deps/usher_lib-b43ac1d90a0c0674)
+
+running 1 test
+test project::logo_loader::tests::stalled_http_times_out_then_shutdown_cancels_the_next_attempt ... FAILED
+
+failures:
+
+---- project::logo_loader::tests::stalled_http_times_out_then_shutdown_cancels_the_next_attempt stdout ----
+
+thread '<unnamed>' (11278045) panicked at src/project/logo_loader.rs:217:39:
+client did not close stalled request: Resource temporarily unavailable (os error 35)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'project::logo_loader::tests::stalled_http_times_out_then_shutdown_cancels_the_next_attempt' (11278043) panicked at src/project/logo_loader.rs:230:65:
+called `Result::unwrap()` on an `Err` value: Timeout
+
+
+failures:
+    project::logo_loader::tests::stalled_http_times_out_then_shutdown_cancels_the_next_attempt
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 828 filtered out; finished in 35.01s
+
+error: test failed, to rerun pass `--lib`
+===== END logo-timeout-isolated.log =====
+
+===== BEGIN baseline-updater-symlink.rs =====
+
+use std::os::unix::fs::symlink;
+
+fn main() {
+    let temp_dir = std::path::PathBuf::from(std::env::args_os().nth(1).expect("fixture root"));
+    assert!(temp_dir.is_dir());
+    let version = "fixture-1.2.3";
+    let victim = temp_dir.join("fixture-victim.txt");
+    let original = b"isolated fixture contents must survive";
+    std::fs::write(&victim, original).unwrap();
+    let temp_file_path = temp_dir.join(format!("usher_update_{}.tar.gz", version));
+    symlink(&victim, &temp_file_path).unwrap();
+    let before = std::fs::metadata(&victim).unwrap().len();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all().build().unwrap().block_on(async {
+            // Source-verified HEAD logic. Only the temporary root is injected;
+            // expect replaces anyhow context, retaining Tokio's actual create.
+            let temp_file_path = temp_dir.join(format!("usher_update_{}.tar.gz", version));
+            let temp_file = tokio::fs::File::create(&temp_file_path).await.unwrap();
+            drop(temp_file);
+        });
+    let after = std::fs::metadata(&victim).unwrap().len();
+    println!("isolated fixture root: {}", temp_dir.display());
+    println!("victim bytes before File::create: {before}");
+    println!("victim bytes after File::create: {after}");
+    assert_eq!(before, original.len() as u64);
+    assert_eq!(after, 0, "baseline must reproduce symlink-following truncation");
+    println!("PASS: baseline vulnerability reproduced with actual Tokio File::create, inside fixture only");
+}
+===== END baseline-updater-symlink.rs =====
+
+===== BEGIN windows-command-shapes.rs =====
+use std::process::Command;
+use std::path::Path;
+fn windows_file_open_command(path: &Path) -> std::io::Result<Command> {
+    // Explorer resolves the file association without interpreting the path as
+    // a cmd.exe program (including & operators and %variable% expansion).
+    let mut command = Command::new("explorer.exe");
+    // Callers may supply relative paths. Resolve against Usher's working
+    // directory instead of leaving that interpretation to Explorer.
+    command.arg(std::path::absolute(path)?);
+    Ok(command)
+}
+fn executable_restart_command(
+    executable: &std::path::Path,
+    args: &[std::ffi::OsString],
+) -> std::process::Command {
+    // Keep executable paths and arguments out of a command interpreter on
+    // every platform, including Windows paths containing shell metacharacters.
+    let mut command = std::process::Command::new(executable);
+    command.args(args);
+    command
+}
+fn describe(label: &str, command: &Command) {
+    println!("{label}: program={:?}; args={:?}", command.get_program(), command.get_args().collect::<Vec<_>>());
+}
+fn main() {
+    let path = Path::new("fixture/reports/notes & literal.md");
+    let executable = Path::new("fixture/application dir/usher & literal.exe");
+    let args: Vec<std::ffi::OsString> = vec!["literal argument".into()];
+    let mut before_file = Command::new("cmd");
+    before_file.args(["/C", "start", ""]).arg(path);
+    describe("HEAD Windows file open", &before_file);
+    let after_file = windows_file_open_command(path).unwrap();
+    describe("candidate Windows file open", &after_file);
+    assert_eq!(before_file.get_program(), "cmd");
+    assert_eq!(after_file.get_program(), "explorer.exe");
+    assert_eq!(after_file.get_args().count(), 1);
+    assert!(Path::new(after_file.get_args().next().unwrap()).is_absolute());
+    let mut before_restart = Command::new("cmd");
+    before_restart.args(["/c", "start", "", &executable.to_string_lossy()]).args(&args);
+    describe("HEAD Windows restart", &before_restart);
+    let after_restart = executable_restart_command(executable, &args);
+    describe("candidate Windows restart", &after_restart);
+    assert_eq!(after_restart.get_program(), executable.as_os_str());
+    assert_eq!(after_restart.get_args().collect::<Vec<_>>(), args);
+    println!("PASS: source-verified command construction comparison; no command was spawned");
+}
+===== END windows-command-shapes.rs =====
+
+===== BEGIN cargo-check-final.log =====
+    Checking usher v0.0.9-alpha.4 (/Users/yuankai/yuankai/Demo/rust/usher)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.12s
+===== END cargo-check-final.log =====
+
+===== BEGIN cargo-test-build-final.log =====
+   Compiling usher v0.0.9-alpha.4 (/Users/yuankai/yuankai/Demo/rust/usher)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.64s
+  Executable unittests src/lib.rs (target/debug/deps/usher_lib-b43ac1d90a0c0674)
+===== END cargo-test-build-final.log =====
+
+===== BEGIN cargo-test-lib-isolated-settings.log (verbatim excerpt) =====
+test ai::prompts::tests::live_provider_honors_auto_and_explicit_reply_languages ... ignored, requires an explicitly enabled, configured real AI provider
+test settings::tests::global_test_settings_use_an_isolated_directory_and_default_http_timeout ... ok
+test workflow::pr_review::controller::tests::selected_file_memory_ab_sample ... ignored, run through scripts/measure-pr-review-memory-ab.sh
+test project::logo_loader::tests::stalled_http_times_out_then_shutdown_cancels_the_next_attempt ... ok
+test result: ok. 828 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 34.40s
+===== END cargo-test-lib-isolated-settings.log =====

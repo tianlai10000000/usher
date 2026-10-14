@@ -38,6 +38,7 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 
 | Spec | Status | Code owners |
 | --- | --- | --- |
+| [Security boundaries](security-boundaries.md) | Credential origin/redirect guards, private HTTP diagnostics, owned update files and shell-free path launching / 凭据 origin/重定向、HTTP 隐私、更新文件所有权及无 shell 路径启动 | `src/git/locator.rs`, `src/git/gitlab.rs`, `src/http/`, `src/update/`, `src/platform/mod.rs` |
 | [Multiline text layout](text-layout.md) | Mandatory native line-height, documented fallback and measurement/extent synchronization / 强制原生行高、例外记录与测量/extent 同步契约 | `ui/`, feature text-layout adapters, worker measurement and exact virtual extents |
 | [Exact virtual scrolling](virtual-scrolling.md) | Shared contract for variable-height documents, stable thumb geometry and soft retained-owner eviction targets / 可变行高文档、稳定滑块几何与 retained-owner 软淘汰目标通用契约 | `crates/usher-virtual-list/`, `src/app_runtime/latest_compute.rs`, `ui/components/github_scroll_view.slint`, feature layout adapters |
 | [HTTP pipeline](http.md) | Live configurable millisecond timeout with Axios zero semantics and empty-input recovery; explicit response budgets and bounded error reads / 即时可配置毫秒超时、Axios 零值语义与空值恢复；显式响应预算与有界错误读取 | `src/http/mod.rs`, `src/settings/request_preferences.rs`, all HTTP callers |
@@ -140,6 +141,8 @@ button, with a 6 px gap, using the shared Floating UI adapter. / 通知队列菜
 
 Documents that are not specs:
 
+- `docs/security-maintenance-20261014.md`: dated batches 1–5 findings, regression
+  evidence, unresolved platform/release issues and lessons for future agents.
 - `docs/architecture.md`, `docs/architecture.zh.md`: canonical architecture.
 - `docs/architecture-structure-audit.md`: dated structure audit and refactoring roadmap.
 - `docs/ARCHITECTURE_FOR_AI.md`: compatibility entry point for older agent prompts.

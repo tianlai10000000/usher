@@ -7,22 +7,15 @@
 //! - Thread-safe global configuration
 //!
 //! # Usage Example
+//!
+//! Application startup configures this private module with
+//! [`setup_debug_logger`] and [`DebugLogConfig`]. Feature code uses the standard
+//! log macros after startup; it must not initialize another logger.
+//!
 //! ```rust
-//! use crate::debug_logger::{init_logger, LogConfig};
-//!
-//! // Initialize the logger
-//! init_logger(LogConfig {
-//!     level: log::LevelFilter::Debug,
-//!     console_output: true,
-//!     file_output: true,
-//!     log_file_path: Some("/path/to/app.log".into()),
-//!     log_per_day: false,
-//! }).expect("Failed to init logger");
-//!
-//! // Use standard log macros
 //! log::info!("Application started");
-//! log::debug!("Debug info: {}", some_value);
-//! log::error!("Error occurred: {}", error);
+//! let project_count = 3;
+//! log::debug!("Loaded {} projects", project_count);
 //! ```
 
 use chrono::Local;

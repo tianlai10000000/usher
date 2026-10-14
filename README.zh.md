@@ -66,8 +66,8 @@ git diff --check
 和 root 库测试；完整层改为 workspace all-targets check、workspace 单元/集成测试、
 所有 target 的 workspace Clippy（警告视为错误），以及排除可选 AI core 和
 UI/Settings bridge 的根应用 all-targets check。完整层固定 `CARGO_INCREMENTAL=0`，
-并为 workspace 测试启用 Slint debug metadata，与手动 CI 一致。workspace 测试
-显式不执行另行跟踪的 logger doctest。
+并为 workspace 测试启用 Slint debug metadata，与手动 CI 一致。两层均另行执行
+根包 doctest，并将失败作为阻断项。
 
 普通失败保留原退出码并继续后续检查，最终汇总返回非零；中断立即停止。需要
 `cargo`、`rg`、`python3`、`git`；HTTP 夹具需要本地监听权限。已知结构和 lint
@@ -189,7 +189,7 @@ mock 数据立即更新，隐藏列表保持原 model；两秒后返回列表显
 配置，也不调用 Provider；共享数据及 Worker 顺序另由库回归测试验证。
 
 
-完整的 `cargo test --locked` 当前会暴露 `src/logger/debug_logger.rs` 中已有的 doctest 问题；库单元测试本身可以通过。
+使用 `cargo test --doc --locked` 验证根包文档示例。旧 logger 示例已修复，不再保留测试豁免。
 
 验证可选的 Skia 渲染路径：
 

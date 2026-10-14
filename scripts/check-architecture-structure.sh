@@ -67,11 +67,19 @@ if [ -n "$reverse_controller_dependencies" ]; then
     failed=1
 fi
 
-unexpected_http_clients=$(rg -n \
-    'reqwest::Client::new|reqwest::blocking::get|reqwest::Client::builder|Client::builder' \
-    src crates --glob '*.rs' | rg -v '^src/http/mod\.rs:' || true)
+# A lexical tripwire, not Rust name/type resolution. Require explicit safe
+# reqwest imports outside the HTTP owner: rejecting client/shortcut imports,
+# namespace aliases and globs prevents the common alias constructor escapes.
+# Comments/strings can match; macro expansion, dependency renaming and indirect
+# re-exports still require review. Keep every client in the one owner file.
+unexpected_http_clients=$(rg -n -U \
+    -e '\breqwest\s*::\s*(Client|ClientBuilder|blocking|get)\b' \
+    -e '\b(use|extern\s+crate)\s+(::\s*)?reqwest\s*(as\s+\w+)?\s*;' \
+    -e '\breqwest\s+as\s+\w+' \
+    -e '\breqwest\s*::\s*(\*|\{[^;]*(\b(Client|ClientBuilder|blocking|get|self)\b|\*))' \
+    src crates --glob '*.rs' --glob '!src/http/mod.rs' || true)
 if [ -n "$unexpected_http_clients" ]; then
-    echo "Architecture structure: HTTP client creation escaped src/http/mod.rs:" >&2
+    echo "Architecture structure: HTTP client/shortcut access escaped src/http/mod.rs:" >&2
     echo "$unexpected_http_clients" >&2
     failed=1
 fi

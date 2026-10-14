@@ -23,7 +23,7 @@ use super::{
     PullRequestMergeBlockKind, PullRequestMergeMethod, PullRequestPage, PullRequestReadiness,
     PullRequestReadinessKind, PullRequestRevertResult, PullRequestRevertStrategy,
     PullRequestReviewAction, PullRequestReviewStatus, PullRequestState, RepoLocator, RepoType,
-    commit_count_from_detail, configured_api_base_url, configured_token,
+    commit_count_from_detail, configured_api_base_url, configured_token_for_api_origin,
     conversation_body_to_plain_text, conversation_commit_batch_items,
     conversation_commit_batch_items_for_actor, conversation_count_from_detail,
     conversation_merged_item, finalize_conversation_timeline, is_configured_enterprise_host,
@@ -119,10 +119,7 @@ pub(super) async fn get_repo_detail(locator: &RepoLocator) -> Result<String, Str
             "{project_id_or_path}",
             percent_encode_path(full_path.as_str()).as_str(),
         );
-    let mut request = http::get(endpoint).header(ACCEPT, "application/json");
-    if let Some(token) = configured_token(RepoType::GitLab) {
-        request = request.header("PRIVATE-TOKEN", token);
-    }
+    let request = gitlab_request(endpoint);
 
     let response: GitLabProject = http::send_json(
         request,
@@ -182,15 +179,13 @@ async fn get_gitlab_pull_request_server_page(
     let (order_by, sort) = gitlab_list_sort(filters.sort.as_str());
     let per_page_query = per_page.to_string();
     let page_query = page.max(1).to_string();
-    let mut request = http::get(endpoint)
-        .header(ACCEPT, "application/json")
-        .query(&[
-            ("per_page", per_page_query.as_str()),
-            ("page", page_query.as_str()),
-            ("order_by", order_by),
-            ("sort", sort),
-            ("with_merge_status_recheck", "true"),
-        ]);
+    let mut request = gitlab_request(endpoint).query(&[
+        ("per_page", per_page_query.as_str()),
+        ("page", page_query.as_str()),
+        ("order_by", order_by),
+        ("sort", sort),
+        ("with_merge_status_recheck", "true"),
+    ]);
     if let Some(state) = state {
         request = request.query(&[("state", state.gitlab_query())]);
     }
@@ -204,9 +199,6 @@ async fn get_gitlab_pull_request_server_page(
         "me" => request.query(&[("scope", "assigned_to_me")]),
         _ => request.query(&[("scope", "all")]),
     };
-    if let Some(token) = configured_token(RepoType::GitLab) {
-        request = request.header("PRIVATE-TOKEN", token);
-    }
 
     let response = http::send(
         request,
@@ -532,10 +524,7 @@ pub(super) async fn get_pull_request_diff(
         .replace("{api_base_url}", api_base_url(locator).as_str())
         .replace("{project_id}", project_id.as_str())
         .replace("{merge_request_iid}", merge_request_iid.as_str());
-    let mut detail_request = http::get(detail_endpoint).header(ACCEPT, "application/json");
-    if let Some(token) = configured_token(RepoType::GitLab) {
-        detail_request = detail_request.header("PRIVATE-TOKEN", token);
-    }
+    let detail_request = gitlab_request(detail_endpoint);
     let detail: Value = http::send_json(
         detail_request,
         RequestOptions::new("Load GitLab merge request details")
@@ -551,12 +540,10 @@ pub(super) async fn get_pull_request_diff(
         .replace("{merge_request_iid}", merge_request_iid.as_str());
     let mut pages = PageCollector::new(100, 30);
     loop {
-        let mut request = http::get(endpoint.as_str())
-            .header(ACCEPT, "application/json")
-            .query(&[
-                ("page", pages.page().to_string()),
-                ("per_page", "100".to_string()),
-            ]);
+        let request = gitlab_request(endpoint.clone()).query(&[
+            ("page", pages.page().to_string()),
+            ("per_page", "100".to_string()),
+        ]);
         if ignore_whitespace_change {
             // Standard GitLab does not currently expose a whitespace query on
             // this endpoint. Keep the option provider-neutral without sending
@@ -564,9 +551,6 @@ pub(super) async fn get_pull_request_diff(
             log::debug!(
                 "[CodeReview][GitLab] Ignore-whitespace is not supported by the diff endpoint"
             );
-        }
-        if let Some(token) = configured_token(RepoType::GitLab) {
-            request = request.header("PRIVATE-TOKEN", token);
         }
         let batch: Vec<Value> = http::send_json(
             request,
@@ -687,13 +671,9 @@ pub(super) async fn get_pull_request_action_state(
             "{merge_request_iid}",
             percent_encode_path(pull_request_iid.trim()).as_str(),
         );
-    let mut request = http::get(endpoint)
-        .header(ACCEPT, "application/json")
-        .query(&[("with_merge_status_recheck", "true")]);
-    if let Some(token) = configured_token(RepoType::GitLab) {
-        request = request.header("PRIVATE-TOKEN", token);
-    }
-    let has_token = configured_token(RepoType::GitLab).is_some();
+    let request = gitlab_request(endpoint).query(&[("with_merge_status_recheck", "true")]);
+    let has_token =
+        configured_token_for_api_origin(RepoType::GitLab, &api_base_url(locator)).is_some();
     // Review decisions are independent of mergeability: an approved request
     // can still have pending CI or other merge requirements.
     let detail_future = http::send_json::<Value>(
@@ -738,7 +718,7 @@ pub(super) async fn submit_pull_request_review(
     action: PullRequestReviewAction,
     body: &str,
 ) -> Result<(), String> {
-    if configured_token(RepoType::GitLab).is_none() {
+    if configured_token_for_api_origin(RepoType::GitLab, &api_base_url(locator)).is_none() {
         return Err("Configure a GitLab Token in Settings before submitting a review.".into());
     }
     if action != PullRequestReviewAction::Approve && body.trim().is_empty() {
@@ -771,7 +751,7 @@ pub(super) async fn submit_pull_request_review(
         repo_project_id,
         pull_request_iid,
     );
-    let request = gitlab_authenticated(http::post(endpoint)).json(&serde_json::json!({
+    let request = gitlab_authenticated(http::post(&endpoint), &endpoint).json(&serde_json::json!({
         "sha": sha,
     }));
     let result: Result<Value, String> = http::send_json(
@@ -796,7 +776,7 @@ pub(super) async fn dismiss_pull_request_review(
     pull_request_iid: &str,
     reason: &str,
 ) -> Result<(), String> {
-    if configured_token(RepoType::GitLab).is_none() {
+    if configured_token_for_api_origin(RepoType::GitLab, &api_base_url(locator)).is_none() {
         return Err("Configure a GitLab Token in Settings before dismissing a review.".into());
     }
     if reason.trim().is_empty() {
@@ -813,7 +793,7 @@ pub(super) async fn dismiss_pull_request_review(
         pull_request_iid,
     );
     let result: Result<Value, String> = http::send_json(
-        gitlab_authenticated(http::post(endpoint)),
+        gitlab_authenticated(http::post(&endpoint), &endpoint),
         RequestOptions::new("Unapprove GitLab merge request")
             .response_byte_limit(MAX_METADATA_RESPONSE_BYTES),
     )
@@ -831,7 +811,7 @@ pub(super) async fn merge_pull_request(
     method: PullRequestMergeMethod,
     remove_source_branch: bool,
 ) -> Result<(), String> {
-    if configured_token(RepoType::GitLab).is_none() {
+    if configured_token_for_api_origin(RepoType::GitLab, &api_base_url(locator)).is_none() {
         return Err("Configure a GitLab Token in Settings before merging.".into());
     }
     if !matches!(
@@ -864,11 +844,9 @@ pub(super) async fn merge_pull_request(
         repo_project_id,
         pull_request_iid,
     );
-    let request = gitlab_authenticated(http::put(endpoint)).json(&gitlab_merge_payload(
-        method,
-        remove_source_branch,
-        sha.as_str(),
-    ));
+    let request = gitlab_authenticated(http::put(&endpoint), &endpoint).json(
+        &gitlab_merge_payload(method, remove_source_branch, sha.as_str()),
+    );
     let payload: Value = http::send_json(
         request,
         RequestOptions::new("Merge GitLab merge request")
@@ -1463,8 +1441,8 @@ async fn post_merge_request_note(
         repo_project_id,
         pull_request_iid,
     );
-    let request =
-        gitlab_authenticated(http::post(endpoint)).json(&serde_json::json!({ "body": body }));
+    let request = gitlab_authenticated(http::post(&endpoint), &endpoint)
+        .json(&serde_json::json!({ "body": body }));
     let _: Value = http::send_json(
         request,
         RequestOptions::new("Submit GitLab merge request comment")
@@ -1494,12 +1472,15 @@ fn merge_request_endpoint(
 }
 
 fn gitlab_request(endpoint: String) -> reqwest::RequestBuilder {
-    gitlab_authenticated(http::get(endpoint))
+    gitlab_authenticated(http::get(&endpoint), &endpoint)
 }
 
-fn gitlab_authenticated(request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+fn gitlab_authenticated(
+    request: reqwest::RequestBuilder,
+    endpoint: &str,
+) -> reqwest::RequestBuilder {
     let mut request = request.header(ACCEPT, "application/json");
-    if let Some(token) = configured_token(RepoType::GitLab) {
+    if let Some(token) = configured_token_for_api_origin(RepoType::GitLab, endpoint) {
         request = request.header("PRIVATE-TOKEN", token);
     }
     request
@@ -1785,12 +1766,9 @@ pub(super) async fn get_repository_file_text(
             percent_encode_path(repo_project_id.trim()).as_str(),
         )
         .replace("{file_path}", percent_encode_path(path).as_str());
-    let mut request = http::get(endpoint)
+    let request = gitlab_request(endpoint)
         .header(ACCEPT, "text/plain")
         .query(&[("ref", reference)]);
-    if let Some(token) = configured_token(RepoType::GitLab) {
-        request = request.header("PRIVATE-TOKEN", token);
-    }
     let response = http::send(
         request,
         RequestOptions::new("Load GitLab repository file")

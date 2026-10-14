@@ -505,8 +505,17 @@ class QualityRunnerTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         (self.root / "scripts").mkdir()
         (self.root / "bin").mkdir()
-        source = Path(os.environ.get("USHER_TEST_QUALITY_BASE_SCRIPT", ROOT / "scripts/check-quality.sh"))
-        shutil.copy(source, self.root / "scripts/check-quality.sh")
+        baseline = os.environ.get("USHER_TEST_QUALITY_BASE_REF")
+        if baseline:
+            source = subprocess.check_output(
+                ["git", "show", f"{baseline}:scripts/check-quality.sh"],
+                cwd=ROOT,
+                text=True,
+            )
+            (self.root / "scripts/check-quality.sh").write_text(source)
+        else:
+            source = Path(os.environ.get("USHER_TEST_QUALITY_BASE_SCRIPT", ROOT / "scripts/check-quality.sh"))
+            shutil.copy(source, self.root / "scripts/check-quality.sh")
         self.calls = self.root / "calls.txt"
         self.environment_calls = self.root / "environment.txt"
         self.source_file = self.root / "unchanged.rs"
@@ -546,12 +555,13 @@ class QualityRunnerTests(unittest.TestCase):
         result = self.run_checks()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         calls = self.calls.read_text().splitlines()
-        self.assertEqual(len(calls), 8)
+        self.assertEqual(len(calls), 9)
         self.assertEqual(calls[0], "cargo fmt --all -- --check")
         self.assertIn("cargo check --locked", calls)
         self.assertIn("cargo test --lib --locked", calls)
+        self.assertIn("cargo test --doc --locked", calls)
         self.assertEqual(calls[-1], "git diff --check")
-        self.assertIn("8 checks passed", result.stdout)
+        self.assertIn("9 checks passed", result.stdout)
         self.assertEqual(self.source_file.read_text(), "fn main( ) { }\n")
 
     def test_explicit_quick_keeps_root_scope_and_caller_environment(self):
@@ -560,9 +570,10 @@ class QualityRunnerTests(unittest.TestCase):
         result = self.run_checks("--quick")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         calls = self.calls.read_text().splitlines()
-        self.assertEqual(len(calls), 8)
+        self.assertEqual(len(calls), 9)
         self.assertIn("cargo check --locked", calls)
         self.assertIn("cargo test --lib --locked", calls)
+        self.assertIn("cargo test --doc --locked", calls)
         self.assertFalse(any("--workspace" in call for call in calls))
         self.assertTrue(all(line.endswith("|caller-setting|caller-debug")
                             for line in self.environment_calls.read_text().splitlines()))
@@ -580,13 +591,14 @@ class QualityRunnerTests(unittest.TestCase):
             "cargo test --workspace --tests --locked",
             "cargo clippy --workspace --all-targets --locked -- -D warnings",
             "cargo check -p usher --all-targets --no-default-features --features renderer-femtovg --locked",
+            "cargo test --doc --locked",
             "git diff --check",
         ])
         environment = self.environment_calls.read_text().splitlines()
         self.assertIn("cargo test --workspace --tests --locked|0|1", environment)
         self.assertTrue(all(line.endswith("|0|caller-debug") for line in environment
                             if not line.startswith("cargo test --workspace ")))
-        self.assertIn("10 checks passed", result.stdout)
+        self.assertIn("11 checks passed", result.stdout)
         self.assertEqual(self.source_file.read_text(), "fn main( ) { }\n")
 
     def test_full_retains_multiple_failures_and_runs_every_later_contract(self):
@@ -597,9 +609,9 @@ class QualityRunnerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("architecture(4)", result.stderr)
         self.assertIn("workspace-lint(17)", result.stderr)
-        self.assertIn("8 checks passed", result.stdout)
+        self.assertIn("9 checks passed", result.stdout)
         calls = self.calls.read_text().splitlines()
-        self.assertEqual(len(calls), 10)
+        self.assertEqual(len(calls), 11)
         self.assertIn("cargo test --workspace --tests --locked", calls)
         self.assertIn("cargo check -p usher --all-targets --no-default-features --features renderer-femtovg --locked", calls)
         self.assertEqual(calls[-1], "git diff --check")
@@ -609,10 +621,24 @@ class QualityRunnerTests(unittest.TestCase):
         result = self.run_checks()
         self.assertEqual(result.returncode, 1)
         self.assertIn("architecture(1)", result.stderr)
-        self.assertIn("7 checks passed", result.stdout)
+        self.assertIn("8 checks passed", result.stdout)
         calls = self.calls.read_text().splitlines()
         self.assertIn("cargo test --lib --locked", calls)
         self.assertEqual(calls[-1], "git diff --check")
+
+    def test_doctest_failure_remains_blocking_in_both_modes(self):
+        self.env.update(USHER_TEST_FAIL="cargo test --doc --locked", USHER_TEST_FAIL_CODE="101")
+        for mode, passed in [("--quick", 8), ("--full", 10)]:
+            with self.subTest(mode=mode):
+                if self.calls.exists():
+                    self.calls.unlink()
+                result = self.run_checks(mode)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("doctests(101)", result.stderr)
+                self.assertIn(f"{passed} checks passed", result.stdout)
+                calls = self.calls.read_text().splitlines()
+                self.assertEqual(calls.count("cargo test --doc --locked"), 1)
+                self.assertEqual(calls[-1], "git diff --check")
 
     def test_interruption_does_not_start_more_checks(self):
         self.env["USHER_TEST_INTERRUPT"] = "cargo fmt --all -- --check"

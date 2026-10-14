@@ -219,7 +219,19 @@ the control so it describes preloading rather than automatic refresh.
 
 The enterprise Gitee search result is selected by exact namespace/path where available; a single-result response is accepted as a fallback. GitLab and GitHub use their configured API root only for a remote with the same host.
 
+GitLab provider detection does not authorize token use. The actual API endpoint
+must match `https://gitlab.com` at its default port or the explicitly configured
+GitLab API origin (scheme, host, effective port). Unknown self-hosted instances
+can be read anonymously; configure their API origin to authorize the token.
+Reads and mutation availability use this same boundary; credentialed redirects
+must remain within the original origin. See [security boundaries](security-boundaries.md).
+
 企业版 Gitee 搜索结果优先按精确 namespace/path 选择；仅当响应只有一个项目时才接受单结果回退。GitLab 和 GitHub 也只有在 remote 主机匹配时才使用其配置的 API 根地址。
+
+GitLab Provider 识别不能授权发送 Token。实际 API 必须匹配默认端口的
+`https://gitlab.com` 或显式配置的 GitLab API origin（协议、主机、有效端口）。
+未知自建实例可匿名读取，配置其 API origin 后才允许使用 Token。读取、变更
+可用性判断共用此边界，带凭据跳转也必须留在初始 origin，详见[安全边界](security-boundaries.md)。
 
 ## Regression checklist / 回归清单
 

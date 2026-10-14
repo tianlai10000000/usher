@@ -547,6 +547,11 @@ fixture id，在启动时经生产 facade 自动打开对应 payload，用于可
   it is not interpreted by a fallback provider.
 - Remote URLs embedded in Markdown and images are never fetched automatically.
 - File paths are opened only from an explicit application/user action.
+- Windows system-open passes one absolute file path to `explorer.exe`, without a
+  command interpreter or environment-variable expansion. Argument tests cover
+  spaces, CJK, `&` and `%`; native file-association acceptance is still required.
+- Windows 系统打开把一个绝对文件路径传给 `explorer.exe`，不得经过命令解释器或
+  环境变量展开；参数测试覆盖空格、中文、`&`、`%`，仍须原生文件关联验收。
 - Parser/decode errors are bounded and user-safe; logs never dump full content.
 - Disabling the provider used by the active session closes it and clears its cache entries.
 

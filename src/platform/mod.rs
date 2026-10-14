@@ -316,10 +316,7 @@ pub(crate) fn open_file_with_system_application(path: &Path) -> Result<(), Strin
     let result = Command::new("open").arg(path).spawn();
 
     #[cfg(target_os = "windows")]
-    let result = Command::new("cmd")
-        .args(["/C", "start", ""])
-        .arg(path)
-        .spawn();
+    let result = windows_file_open_command(path).and_then(|mut command| command.spawn());
 
     #[cfg(target_os = "linux")]
     let result = Command::new("xdg-open").arg(path).spawn();
@@ -335,11 +332,40 @@ pub(crate) fn open_file_with_system_application(path: &Path) -> Result<(), Strin
         .map_err(|error| format!("Failed to open file: {error}"))
 }
 
+#[cfg(any(target_os = "windows", test))]
+fn windows_file_open_command(path: &Path) -> std::io::Result<Command> {
+    // Explorer resolves the file association without interpreting the path as
+    // a cmd.exe program (including & operators and %variable% expansion).
+    let mut command = Command::new("explorer.exe");
+    // Callers may supply relative paths. Resolve against Usher's working
+    // directory instead of leaving that interpretation to Explorer.
+    command.arg(std::path::absolute(path)?);
+    Ok(command)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         THEME_MODE_DARK, THEME_MODE_LIGHT, effective_dark_mode, open_directory_tooltip_key,
     };
+
+    #[test]
+    fn windows_file_open_preserves_literal_path_without_a_command_interpreter() {
+        for path in [
+            "reports/ordinary.md",
+            "reports/中文 notes.md",
+            "reports/notes&calc.exe&.md",
+            "reports/%USERNAME%.md",
+        ] {
+            let expected = std::path::absolute(path).unwrap();
+            let command = super::windows_file_open_command(std::path::Path::new(path)).unwrap();
+            assert_eq!(command.get_program(), "explorer.exe");
+            assert_eq!(
+                command.get_args().collect::<Vec<_>>(),
+                [expected.as_os_str()]
+            );
+        }
+    }
 
     #[test]
     fn resolves_explicit_theme_modes_without_platform_state() {

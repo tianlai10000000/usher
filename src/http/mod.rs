@@ -52,7 +52,7 @@ pub(crate) enum HttpErrorKind {
 }
 
 /// Normalized error returned by all HTTP entry points.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct HttpError {
     pub kind: HttpErrorKind,
     pub operation: String,
@@ -82,7 +82,9 @@ impl HttpError {
             method: None,
             url: error.url().cloned(),
             status: error.status(),
-            message: error.to_string(),
+            // reqwest Display embeds the original URL, bypassing our URL
+            // diagnostic policy unless it is removed before formatting.
+            message: error.without_url().to_string(),
             response_body: None,
         }
     }
@@ -142,7 +144,14 @@ impl HttpError {
             method: Some(method),
             url: Some(url),
             status: None,
-            message: error.to_string(),
+            // Serde data errors can quote arbitrary response values. Keep
+            // their category and location, never the payload-derived prose.
+            message: format!(
+                "JSON response decode failed ({:?}) at line {} column {}",
+                error.classify(),
+                error.line(),
+                error.column()
+            ),
             response_body: None,
         }
     }
@@ -221,6 +230,29 @@ impl fmt::Display for HttpError {
             write!(formatter, "{}: {}", self.operation, self.message)?;
         }
         Ok(())
+    }
+}
+
+impl fmt::Debug for HttpError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Debug is also a logging boundary: callers may format an entire
+        // Result. Neither the response excerpt nor arbitrary error prose is
+        // safe to dump, even when normal Display has already been sanitized.
+        formatter
+            .debug_struct("HttpError")
+            .field("kind", &self.kind)
+            .field("operation", &self.operation)
+            .field("method", &self.method)
+            .field("url", &self.url.as_ref().map(redacted_url))
+            .field("status", &self.status)
+            .field(
+                "response_body_chars",
+                &self
+                    .response_body
+                    .as_deref()
+                    .map(|body| body.chars().count()),
+            )
+            .finish_non_exhaustive()
     }
 }
 
@@ -601,46 +633,62 @@ impl HttpInterceptor for LoggingInterceptor {
 }
 
 fn redacted_url(url: &Url) -> String {
-    let mut result = url.clone();
-    let pairs = url
-        .query_pairs()
-        .map(|(key, value)| {
-            let sensitive = matches!(
-                key.to_ascii_lowercase().as_str(),
-                "access_token" | "token" | "api_key" | "apikey" | "key"
-            );
-            (
-                key.into_owned(),
-                if sensitive {
-                    "***".to_string()
-                } else {
-                    value.into_owned()
-                },
-            )
-        })
-        .collect::<Vec<_>>();
-    if !pairs.is_empty() {
-        result.query_pairs_mut().clear().extend_pairs(pairs);
+    // Diagnostic URLs retain endpoint identity, not credentials or request
+    // data. A query-key denylist cannot cover provider-specific signatures or
+    // secrets supplied under an unexpected name, so omit the complete query.
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return "<redacted-url>".into();
     }
+    let mut result = url.clone();
+    if result.set_username("").is_err() || result.set_password(None).is_err() {
+        return "<redacted-url>".into();
+    }
+    result.set_query(None);
+    result.set_fragment(None);
     result.to_string()
 }
 
 struct HttpClient {
     asynchronous: reqwest::Client,
+    credentialed: reqwest::Client,
     interceptors: RwLock<Vec<Arc<dyn HttpInterceptor>>>,
 }
 
 impl HttpClient {
     fn new() -> Result<Self, reqwest::Error> {
         let user_agent = format!("usher/{}", env!("CARGO_PKG_VERSION"));
-        let asynchronous = reqwest::Client::builder()
-            .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
-            .user_agent(user_agent)
-            .build()?;
+        let build_client = |redirect| {
+            reqwest::Client::builder()
+                .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
+                .user_agent(&user_agent)
+                .redirect(redirect)
+                .build()
+        };
+        let asynchronous = build_client(reqwest::redirect::Policy::default())?;
+        let credentialed = build_client(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt
+                .previous()
+                .first()
+                .is_some_and(|source| source.origin() != attempt.url().origin())
+            {
+                return attempt.error("credentialed request cannot redirect to another origin");
+            }
+            // Reuse reqwest's bounded redirect behavior, including loop errors.
+            reqwest::redirect::Policy::default().redirect(attempt)
+        }))?;
         Ok(Self {
             asynchronous,
+            credentialed,
             interceptors: RwLock::new(vec![Arc::new(LoggingInterceptor)]),
         })
+    }
+
+    fn client_for_request(&self, request: &reqwest::Request) -> &reqwest::Client {
+        if request_has_credentials(request) {
+            &self.credentialed
+        } else {
+            &self.asynchronous
+        }
     }
 
     fn interceptors(&self) -> Vec<Arc<dyn HttpInterceptor>> {
@@ -649,6 +697,28 @@ impl HttpClient {
             .map(|items| items.clone())
             .unwrap_or_default()
     }
+}
+
+fn request_has_credentials(request: &reqwest::Request) -> bool {
+    request.headers().iter().any(|(name, value)| {
+        value.is_sensitive()
+            || matches!(
+                name.as_str(),
+                "authorization"
+                    | "proxy-authorization"
+                    | "private-token"
+                    | "cookie"
+                    | "x-api-key"
+                    | "api-key"
+            )
+    }) || !request.url().username().is_empty()
+        || request.url().password().is_some()
+        || request.url().query_pairs().any(|(name, _)| {
+            matches!(
+                name.to_ascii_lowercase().as_str(),
+                "access_token" | "token" | "api_key" | "apikey" | "key"
+            )
+        })
 }
 
 /// Register an application-wide interceptor. Registration order is execution order.
@@ -1110,7 +1180,7 @@ async fn send_attempt(
     }
     let started = Instant::now();
     let response = HTTP
-        .asynchronous
+        .client_for_request(&request)
         .execute(request)
         .await
         .map_err(|error| HttpError::from_reqwest(error, &options.operation))?;
@@ -1356,6 +1426,12 @@ fn present_error(error: &HttpError, feedback: ErrorFeedback) {
 
 #[cfg(test)]
 pub(crate) mod budget_tests;
+
+#[cfg(test)]
+mod privacy_tests;
+
+#[cfg(test)]
+mod redirect_policy_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1682,11 +1758,9 @@ mod tests {
     }
 
     #[test]
-    fn sensitive_query_values_are_redacted() {
+    fn all_query_values_are_excluded_from_diagnostics() {
         let url = Url::parse("https://example.com/api?page=1&access_token=secret").unwrap();
-        let redacted = redacted_url(&url);
-        assert!(redacted.contains("page=1"));
-        assert!(!redacted.contains("secret"));
+        assert_eq!(redacted_url(&url), "https://example.com/api");
     }
 
     #[test]

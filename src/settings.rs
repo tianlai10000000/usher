@@ -457,6 +457,7 @@ struct SettingsLoad {
 
 impl SettingsManager {
     /// Create a new settings manager and load settings from file
+    #[cfg(not(test))]
     pub fn new() -> Self {
         let config_path = Self::get_config_path();
         Self::with_config_path(config_path)
@@ -817,8 +818,22 @@ fn parent_directory(path: &Path) -> &Path {
 }
 
 // Global settings manager instance
+#[cfg(not(test))]
 lazy_static::lazy_static! {
     static ref SETTINGS_MANAGER: SettingsManager = SettingsManager::new();
+}
+
+#[cfg(test)]
+lazy_static::lazy_static! {
+    // Keep the directory alive as long as the global manager. Unit tests must
+    // neither inherit workstation settings nor persist into the user's file.
+    static ref TEST_SETTINGS_DIR: tempfile::TempDir = tempfile::Builder::new()
+        .prefix("usher-unit-test-settings-")
+        .tempdir()
+        .expect("create isolated unit-test settings directory");
+    static ref SETTINGS_MANAGER: SettingsManager = SettingsManager::with_config_path(
+        TEST_SETTINGS_DIR.path().join("settings.toml"),
+    );
 }
 
 /// Get the global settings manager
@@ -1167,6 +1182,20 @@ mod tests {
         }
     }
     use super::*;
+
+    #[test]
+    fn global_test_settings_use_an_isolated_directory_and_default_http_timeout() {
+        let manager = get_settings_manager();
+        assert_eq!(
+            manager.config_path,
+            TEST_SETTINGS_DIR.path().join("settings.toml")
+        );
+        assert_ne!(manager.config_path, SettingsManager::get_config_path());
+        assert!(TEST_SETTINGS_DIR.path().is_dir());
+        manager.with_settings(|settings| {
+            assert_eq!(settings.http, HttpSettings::default());
+        });
+    }
 
     #[test]
     fn navigation_drawer_is_expanded_by_default() {

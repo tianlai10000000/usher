@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::runtime::Runtime;
 
+use super::download_archive::DownloadArchive;
 use crate::http::{self, RequestOptions};
 use crate::settings_page::{SettingsPageBridge, mirror_update_checking};
 use crate::{
@@ -393,12 +394,14 @@ pub async fn perform_update_with_progress(
     let total_size = response.content_length().unwrap_or(0);
     log::debug!(" File size: {} bytes", total_size);
 
-    // Create temporary file to save downloaded content
-    let temp_dir = std::env::temp_dir();
-    let temp_file_path = temp_dir.join(format!("usher_update_{}.tar.gz", version));
-    let mut temp_file = tokio::fs::File::create(&temp_file_path)
-        .await
-        .context("Failed to create temp file")?;
+    // Keep the atomically created file owner through installation. A version
+    // must never select a predictable shared-temp pathname or a symlink target.
+    let (mut download_archive, writer) =
+        tokio::task::spawn_blocking(|| DownloadArchive::create_in(&std::env::temp_dir()))
+            .await
+            .context("Download file worker stopped")?
+            .context("Failed to create secure download file")?;
+    let mut temp_file = tokio::fs::File::from_std(writer);
 
     // Stream download and report progress
     let mut downloaded: u64 = 0;
@@ -412,8 +415,6 @@ pub async fn perform_update_with_progress(
         // Check if cancelled
         if cancel_flag.load(Ordering::Relaxed) {
             log::debug!(" Download cancelled");
-            // Clean up temporary file
-            let _ = tokio::fs::remove_file(&temp_file_path).await;
             return Err(anyhow::anyhow!("Download cancelled"));
         }
 
@@ -476,12 +477,10 @@ pub async fn perform_update_with_progress(
 
     // Check if cancelled
     if cancel_flag.load(Ordering::Relaxed) {
-        let _ = tokio::fs::remove_file(&temp_file_path).await;
         return Err(anyhow::anyhow!("Download cancelled"));
     }
 
     // Execute installation in blocking thread
-    let temp_file_path_clone = temp_file_path.clone();
     let progress_callback_for_install = progress_callback.clone();
     let state_for_install = state_clone.clone();
 
@@ -508,7 +507,7 @@ pub async fn perform_update_with_progress(
         // Use downloaded file for installation, instead of re-downloading
         log::debug!(
             "Installing update from local file: {:?}",
-            temp_file_path_clone
+            download_archive.path()
         );
 
         let extract_dir = tempfile::Builder::new()
@@ -519,22 +518,10 @@ pub async fn perform_update_with_progress(
 
         log::debug!("Extracting to temporary directory: {:?}", extract_path);
 
-        // Use tar and flate2 to manually extract tar.gz
-        use flate2::read::GzDecoder;
-        use std::fs::File;
-        use tar::Archive;
-
-        // Open tar.gz file
-        let tar_gz_file =
-            File::open(&temp_file_path_clone).context("Failed to open tar.gz file")?;
-        let decompressor = GzDecoder::new(tar_gz_file);
-        let mut archive = Archive::new(decompressor);
-
         // First list all files in tar.gz (for debugging)
-        let tar_gz_file_list =
-            File::open(&temp_file_path_clone).context("Failed to open tar.gz file for listing")?;
-        let decompressor_list = GzDecoder::new(tar_gz_file_list);
-        let mut archive_list = Archive::new(decompressor_list);
+        let mut archive_list = download_archive
+            .reader()
+            .context("Failed to read downloaded archive for listing")?;
 
         log::debug!(" File list in tar.gz:");
         let mut found_usher = false;
@@ -555,18 +542,21 @@ pub async fn perform_update_with_progress(
                 }
             }
         }
+        drop(archive_list);
 
         if !found_usher {
             return Err(anyhow::anyhow!(
                 "Could not find 'usher' in tar.gz archive. Archive path: {:?}",
-                temp_file_path_clone
+                download_archive.path()
             ));
         }
 
         log::debug!(" Found usher in tar.gz: {}", usher_path_in_archive);
 
         // Extract all files to temporary directory
-        archive
+        download_archive
+            .reader()
+            .context("Failed to read downloaded archive")?
             .unpack(extract_path)
             .context("Failed to extract tar.gz archive")?;
 
@@ -611,7 +601,7 @@ pub async fn perform_update_with_progress(
                 }
                 return Err(anyhow::anyhow!(
                     "Could not find 'usher' after extracting archive. Archive path: {:?}",
-                    temp_file_path_clone
+                    download_archive.path()
                 ));
             }
         };
@@ -660,8 +650,9 @@ pub async fn perform_update_with_progress(
             s.download_status = crate::i18n::tr("update.complete_restarting").into_owned();
         }
 
+        // Download ownership also cleans up every cancellation/error path.
         // TempDir removes the extraction directory when this worker exits.
-        let _ = std::fs::remove_file(&temp_file_path_clone);
+        drop(download_archive);
 
         // Brief delay to let user see completion status
         std::thread::sleep(std::time::Duration::from_millis(800));
@@ -681,9 +672,6 @@ pub async fn perform_update_with_progress(
     .await
     .map_err(|e| anyhow::anyhow!("Task join error: {}", e))?;
 
-    // Clean up temporary file (if still exists)
-    let _ = tokio::fs::remove_file(&temp_file_path).await;
-
     // Reset download status
     {
         let mut s = state
@@ -695,24 +683,15 @@ pub async fn perform_update_with_progress(
     install_result
 }
 
-/// Perform update (original method, kept for compatibility)
-#[allow(dead_code)]
-pub async fn perform_update(_state: &Arc<Mutex<UpdateState>>) -> Result<()> {
-    // Execute synchronous operations in blocking thread pool
-    tokio::task::spawn_blocking(move || -> Result<(), anyhow::Error> {
-        let updater = create_updater()?;
-        updater.update()?;
-
-        // Restart program after update completes
-        restart_application()?;
-
-        Ok(())
-    })
-    .await
-    .map_err(|e| anyhow::anyhow!("Task join error: {}", e))?
-    .map_err(|e| anyhow::anyhow!("Update error: {}", e))?;
-
-    Ok(())
+fn executable_restart_command(
+    executable: &std::path::Path,
+    args: &[std::ffi::OsString],
+) -> std::process::Command {
+    // Keep executable paths and arguments out of a command interpreter on
+    // every platform, including Windows paths containing shell metacharacters.
+    let mut command = std::process::Command::new(executable);
+    command.args(args);
+    command
 }
 
 /// Restart application
@@ -724,7 +703,7 @@ fn restart_application() -> Result<()> {
     log::debug!(" Current executable file: {:?}", current_exe);
 
     // Get command line arguments (excluding first argument, which is program name)
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
 
     // The replacement process performs the same single-instance check during
     // startup. Release our lock before spawning it, otherwise it exits before
@@ -735,11 +714,7 @@ fn restart_application() -> Result<()> {
     let spawn_result = (|| -> std::io::Result<()> {
         #[cfg(target_os = "windows")]
         {
-            use std::process::Command;
-            Command::new("cmd")
-                .args(["/c", "start", "", &current_exe.to_string_lossy()])
-                .args(&args)
-                .spawn()?;
+            executable_restart_command(&current_exe, &args).spawn()?;
         }
 
         #[cfg(target_os = "macos")]
@@ -758,15 +733,13 @@ fn restart_application() -> Result<()> {
             } else {
                 // Directly run executable file
                 log::debug!(" Directly running executable file: {}", exe_path);
-                Command::new(&*exe_path).args(&args).spawn()?;
+                executable_restart_command(&current_exe, &args).spawn()?;
             }
         }
 
         #[cfg(target_os = "linux")]
         {
-            use std::process::Command;
-            // Linux: Directly launch new process
-            Command::new(&current_exe).args(&args).spawn()?;
+            executable_restart_command(&current_exe, &args).spawn()?;
         }
 
         Ok(())
@@ -1203,7 +1176,7 @@ pub fn setup_updater(
 
 #[cfg(test)]
 mod tests {
-    use super::{UpdateChannel, select_release};
+    use super::{UpdateChannel, executable_restart_command, select_release};
     use self_update::update::Release;
 
     fn release(version: &str) -> Release {
@@ -1250,5 +1223,44 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn restart_passes_executable_and_arguments_without_a_shell() {
+        let executable = std::path::Path::new("application dir/usher & literal.exe");
+        let args: Vec<std::ffi::OsString> = ["two words", "& echo altered", "%PATH%", "\"quoted\""]
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        let command = executable_restart_command(executable, &args);
+        assert_eq!(command.get_program(), executable.as_os_str());
+        assert_eq!(command.get_args().collect::<Vec<_>>(), args);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restarted_process_receives_shell_metacharacters_literally() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("usher & literal");
+        std::fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let values = [
+            "two words",
+            "& echo altered",
+            "$(echo altered)",
+            "%PATH%",
+            "\"quoted\"",
+        ];
+        let args = values
+            .iter()
+            .map(std::ffi::OsString::from)
+            .collect::<Vec<_>>();
+        let output = executable_restart_command(&executable, &args)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout, format!("{}\n", values.join("\n")).as_bytes());
     }
 }

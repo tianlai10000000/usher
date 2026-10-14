@@ -21,6 +21,7 @@ Keep Usher a responsive desktop application with explicit module ownership, even
 7. Before any UI change, read [Internationalization](docs/specs/i18n.md). Every new or changed user-facing string must use the shared semantic catalog, and dynamic Rust projections must refresh immediately when the runtime locale changes.
 8. For variable-height lists or unstable scrollbars, read [Exact virtual scrolling](docs/specs/virtual-scrolling.md). Reuse exact extents, shared virtualization and the worker/layout acceptance matrix; do not patch estimated ranges by freezing the thumb.
 9. Before changing multiline `Text`, direct `TextInput`, `StyledText`, `TextEdit`, or any wrap/line-height measurement, read [Multiline text layout](docs/specs/text-layout.md). Use the supported native line-height API and keep every fallback, worker measurement and virtual extent on the same layout contract.
+10. Before changing credentials, redirects, diagnostic formatting, update files or process launching, read [Security boundaries](docs/specs/security-boundaries.md). Verify the trust boundary with negative fixtures, not only a successful request.
 
 1. 阅读对应语言的 README 和架构文档。
 2. 阅读 `docs/specs/README.md` 以及对应功能 spec。
@@ -31,6 +32,7 @@ Keep Usher a responsive desktop application with explicit module ownership, even
 7. **任何 UI 改动前都必须阅读 [国际化规范](docs/specs/i18n.md)**。所有新增或修改的用户可见文案必须进入共享语义 catalog；Rust 动态投影必须在运行时切换语言后立即刷新。
 8. 可变行高列表或滚动条不稳定问题先读 [精确虚拟滚动](docs/specs/virtual-scrolling.md)，复用精确 extent、共享虚拟化及 Worker/布局验收矩阵，禁止仅冻结滑块来掩盖估算范围问题。
 9. 修改多行 `Text`、直接 `TextInput`、`StyledText`、`TextEdit` 或任何换行/行高测量前，先读 [多行文本排版规范](docs/specs/text-layout.md)。优先使用已支持的原生行高 API，并保证所有 fallback、Worker 测量和虚拟 extent 遵循同一布局契约。
+10. 修改凭据、重定向、诊断格式、更新文件或进程启动前，先读 [安全边界](docs/specs/security-boundaries.md)。必须用负例验证信任边界，不能只测试成功请求。
 
 ## Canonical references / 主文档
 
@@ -87,6 +89,24 @@ Keep Usher a responsive desktop application with explicit module ownership, even
 - 后台轮询、探测、预取、重试和 fallback 必须静默。
 - 用户主动操作可以启用 Toast/Notification，但不要与 feature 自有错误 UI 重复提示。
 - 不得记录鉴权 header、Token、完整敏感 payload 或无限长响应正文。
+
+### Security and maintenance / 安全与维护
+
+- Provider detection does not authorize credential disclosure. Check the actual destination origin (scheme, host and effective port) against explicit configuration or the provider's canonical origin, including redirects.
+- Treat `Display`, `Debug`, nested transport errors and JSON decode errors as separate diagnostic exits. Never assume truncation removes secrets; use synthetic secret markers in regression tests.
+- Own update downloads with atomically created temporary-file handles through installation. Do not reopen predictable temporary paths or scatter cleanup across success-only branches.
+- Pass file paths and executable arguments as data. Never launch them through `cmd /C start` or interpolated shell code; explicitly configured user Hook scripts remain a separate feature contract.
+- Remove compatibility paths only after inspecting callers and feature gates. Repair broken examples instead of adding test exemptions. Do not raise structure budgets merely to make a gate green.
+- Every security fix needs a failing/before case, a passing/after case and a legitimate-use control. Record untested platforms and remaining weaknesses; a clean scan does not prove absence of malicious code.
+- Unit tests use the isolated test SettingsManager or explicit temporary fixtures. Never read or rewrite workstation settings to satisfy a test, or silently depend on the user's timeout/credentials.
+
+- Provider 识别不等于允许发送凭据。按实际目标 origin（协议、主机、有效端口）核对显式配置或平台固定地址，重定向同样受约束。
+- `Display`、`Debug`、底层传输错误与 JSON 解码错误是独立诊断出口。截断不等于脱敏；回归测试使用合成秘密标记。
+- 更新下载从原子创建到安装结束持续持有临时文件句柄；禁止重新打开可预测临时路径，也不得只在成功分支清理。
+- 文件路径与进程参数按数据传递，禁止通过 `cmd /C start` 或拼接 shell 解释；用户显式配置的 Hook 脚本仍遵循独立功能契约。
+- 删除兼容路径前核对调用方和 feature gate。修复失效示例，不新增测试豁免；不得仅为通过门禁调高结构预算。
+- 安全修复必须有修复前失败、修复后通过及正常用途对照。记录未测平台与残留问题；扫描未发现问题不等于证明没有恶意代码。
+- 单元测试使用隔离的测试 SettingsManager 或显式临时夹具。禁止为通过测试读取/改写工作站设置，或暗中依赖用户的超时与凭据。
 
 ### State and lifecycle / 状态与生命周期
 
@@ -158,6 +178,7 @@ Run the smallest relevant checks during iteration, then before handoff run:
 cargo fmt --all
 cargo check --locked
 cargo test --lib --locked
+cargo test --doc --locked
 git diff --check
 ```
 
@@ -170,9 +191,9 @@ Additional expectations:
 - Terminal changes: follow the regression matrix in `docs/specs/terminal.md`.
 - Release changes: run the relevant script under `scripts/` or explain why it was not run.
 
-Known baseline: full `cargo test --locked` currently fails one doctest in `src/logger/debug_logger.rs`. Unit tests must still pass, and new failures must be reported separately.
+The logger example now uses the supported logging macros. Root doctests are blocking in both quality tiers; the former logger-doctest exemption must not be restored. Existing structural failures are recorded separately and remain blocking until their approved cleanup.
 
-已知基线：完整 `cargo test --locked` 当前会失败于 `src/logger/debug_logger.rs` 的一个 doctest。单元测试仍必须通过，新增失败必须单独说明。
+Logger 示例使用受支持的日志宏。两档质量入口都将根包 doctest 作为阻断检查，禁止恢复旧 logger doctest 豁免。既有结构失败另行记录，在获批清理完成前仍保持阻断。
 
 ## Handoff checklist / 交付清单
 

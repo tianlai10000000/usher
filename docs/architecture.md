@@ -297,7 +297,7 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | `src/settings_feedback.rs` | Shared settings-save worker completion, saved-state reset timer, and localized toast feedback; the composition root only binds actions. |
 | `src/ai/` | Shared OpenAI-compatible AI Agent transport and settings state; `agent.rs` owns connection tests and chat completions used by AI Chat and AI Code Review, while `settings_state.rs` owns the typed automatically persisted configuration facade. It does not own RAG transport. |
 | `src/network.rs` | Connectivity ownership and `AppState.network-online`: macOS uses SystemConfiguration reachability callbacks; other platforms use a no-packet route check with offline backoff. |
-| `src/http/mod.rs` | The single shared reqwest client, per-request total/body-idle timeout policy, centralized response-body reads, interceptors, error normalization, and optional UI feedback. |
+| `src/http/mod.rs` | Shared reqwest clients with centralized credential redirect policy, per-request total/body-idle timeouts, response-body reads, interceptors, error normalization, and optional UI feedback. |
 | `src/logger/` | Debug logging, tracing, and panic/error support. The panic hook owns a direct JSON fallback write that remains active when ordinary tracing is disabled. |
 | `src/toast.rs` | Transient single-toast manager binding. |
 | `src/notification.rs` | Stable queued-notification model, generation-guarded timers, hover pause, actions, durable-message reconciliation, and icons. |
@@ -1685,9 +1685,29 @@ The persisted release channel defaults from the running build: stable builds use
 4. Cancellation deletes the partial file.
 5. Existing update UI owns success/error notifications, so HTTP feedback remains silent.
 
+`update/download_archive.rs` owns a randomly named, atomically created file from
+download through installation. Streaming writes and extraction share the opened
+file rather than reopening its pathname; the writer is flushed/closed before
+reading and the owner cleans every completion/error/cancellation path. The unused
+legacy installer was removed. Windows restart now launches the executable directly
+with `OsString` arguments, retaining the single-instance lock handoff. External
+preview files similarly go to Explorer as one absolute path, without `cmd` parsing.
+Signature verification and the existing Windows ZIP-versus-tar installer gap remain
+open; see [security boundaries](specs/security-boundaries.md).
+
 ## HTTP boundary
 
 `src/http/mod.rs` is the only place allowed to construct the application-owned reqwest client. It offers request builders rather than hiding reqwest query, JSON, and header configuration. Execution returns the project-owned `HttpResponse`; JSON, text, bytes, and streaming chunk reads stay inside the shared timeout and error pipeline.
+
+The module owns a normal redirect client and a same-origin redirect client with
+common settings. Selection occurs after request interceptors: recognized credentials
+and sensitive headers use the restricted client, while anonymous CDN downloads
+retain normal redirects. GitLab attaches its token through one adapter entry after
+checking the actual API origin against public HTTPS or explicit API configuration;
+provider-name detection alone never grants this authority. HTTP diagnostics omit URL
+userinfo/query/fragment, strip nested reqwest URLs and retain JSON error category and
+location without payload values. `HttpError::Debug` exposes metadata and response
+length only. Endpoint paths and operation labels must themselves remain non-secret.
 
 Every request supplies `RequestOptions`:
 
@@ -1752,14 +1772,22 @@ Interceptors execute in registration order. Request hooks may mutate headers; re
 
 `scripts/check-quality.sh` is the local validation entry point that does not rewrite
 source. Its default/`--quick` layer retains fmt, structure/UI/i18n gates, script
-regressions, the default root check, root library tests and diff checks. `--full`
+regressions, the default root check, root library tests, root doctests and diff checks. `--full`
 replaces the two root Cargo checks with workspace all-targets check, workspace
-unit/integration tests (`--tests`, excluding the separately tracked logger doctest),
+unit/integration tests (`--tests`),
 workspace all-targets Clippy with warnings denied, and an all-targets check selecting
 only `-p usher --no-default-features --features renderer-femtovg`. That last check
 verifies the application graph without its optional AI core or UI/Settings bridges;
 selecting the entire workspace would still include the AI core member. Full sets
 `CARGO_INCREMENTAL=0` and supplies `SLINT_EMIT_DEBUG_INFO=1` to workspace tests.
+Both layers run `cargo test --doc --locked` separately; repaired logger examples
+have no exemption. The architecture gate checks direct HTTP constructors/shortcuts
+and common client aliases/imports with positive and negative fixtures. It is lexical,
+so macros, renamed dependencies and indirect re-exports still require review.
+Under `cfg(test)`, the global SettingsManager uses defaults in its own retained
+temporary directory; tests do not inherit or overwrite workstation settings.
+Tests for custom configuration construct explicit fixture managers. Production
+continues to load the platform configuration directory.
 
 Both layers execute sequentially, preserve each ordinary failure's exit code,
 continue collecting later results and return a failing aggregate status. Interrupts
@@ -1767,7 +1795,7 @@ stop the sequence. The manual macOS CI job invokes this same full entry; the Win
 job retains its separate default workspace all-targets check. Trigger frequency and
 the paused hosted Nightly schedule remain unchanged. Known structure/lint failures
 remain blocking, and these checks do not replace feature-specific UI/Release A/B
-acceptance or claim that the separate logger doctest passed.
+acceptance. Existing structural failures remain visible rather than raising budgets.
 
 Minimum validation for Rust or Slint changes:
 
@@ -1779,11 +1807,10 @@ cargo test --lib --locked
 git diff --check
 ```
 
-Run targeted manual checks for terminal viewport/session changes, update cancellation, tray shutdown, and route-specific layouts. The complete test command currently includes one unrelated failing logger doctest; do not hide a new failure behind that known issue.
+Run targeted manual checks for terminal viewport/session changes, update cancellation, tray shutdown, and route-specific layouts. Report every unexecuted check and new failure separately.
 
 ## Known technical debt
 
-- `src/logger/debug_logger.rs` contains a doctest that does not compile.
 - `Route.UiComponents` is the maintained, `ui-components`-gated development
   playground; obsolete Login/Tools/List/Detail/Notification/Toast/Dialog demo
   routes are removed.

@@ -230,6 +230,45 @@ pub(super) fn configured_token(repo_type: RepoType) -> Option<String> {
     })
 }
 
+/// Provider-name detection is not authority to disclose a configured token.
+/// Check the actual API origin, using the token and enterprise origin from one
+/// settings snapshot so a concurrent settings edit cannot mix their owners.
+pub(super) fn configured_token_for_api_origin(
+    repo_type: RepoType,
+    api_url: &str,
+) -> Option<String> {
+    crate::settings::get_settings_manager().with_git(|git| {
+        let settings = match repo_type {
+            RepoType::GitHub => &git.platform.github,
+            RepoType::GitLab => &git.platform.gitlab,
+            RepoType::Gitee => &git.platform.gitee,
+        };
+        token_for_api_origin(repo_type, api_url, settings)
+    })
+}
+
+fn token_for_api_origin(
+    repo_type: RepoType,
+    api_url: &str,
+    settings: &crate::settings::GitTokenSettings,
+) -> Option<String> {
+    let endpoint = reqwest::Url::parse(api_url).ok()?;
+    if !matches!(endpoint.scheme(), "http" | "https") || endpoint.host_str().is_none() {
+        return None;
+    }
+    let public_origin = match repo_type {
+        RepoType::GitHub => "https://api.github.com",
+        RepoType::GitLab => "https://gitlab.com",
+        RepoType::Gitee => "https://gitee.com",
+    };
+    let allowed = [public_origin, settings.api_base_url.trim()]
+        .into_iter()
+        .filter_map(|value| reqwest::Url::parse(value).ok())
+        .any(|trusted| endpoint.origin() == trusted.origin());
+    let token = settings.token.trim();
+    (allowed && !token.is_empty()).then(|| token.to_string())
+}
+
 pub(super) fn gitee_api_profile(locator: &RepoLocator) -> GiteeApiProfile {
     if is_configured_enterprise_host(RepoType::Gitee, locator.host.as_str()) {
         GiteeApiProfile::EnterpriseV8
@@ -251,7 +290,75 @@ pub(super) fn configured_gitee_token(profile: GiteeApiProfile) -> Option<String>
 
 #[cfg(test)]
 mod tests {
-    use super::parse_repo_locator;
+    use super::{RepoType, parse_repo_locator, token_for_api_origin};
+    use crate::settings::GitTokenSettings;
+
+    #[test]
+    fn gitlab_token_requires_the_actual_trusted_api_origin() {
+        let settings = GitTokenSettings {
+            token: "fixture-token".into(),
+            ..Default::default()
+        };
+        for endpoint in [
+            "https://gitlab.com/api/v4/projects/1",
+            "https://GITLAB.com:443/api/v4/projects/1",
+        ] {
+            assert_eq!(
+                token_for_api_origin(RepoType::GitLab, endpoint, &settings).as_deref(),
+                Some("fixture-token"),
+                "trusted endpoint: {endpoint}"
+            );
+        }
+        for endpoint in [
+            "https://gitlab.attacker.invalid/api/v4/projects/1",
+            "https://gitlab.com.attacker.invalid/api/v4/projects/1",
+            "https://gitlab.com:444/api/v4/projects/1",
+            "http://gitlab.com/api/v4/projects/1",
+            "http://gitlab.com:443/api/v4/projects/1",
+            "ssh://gitlab.com/api/v4/projects/1",
+            "invalid",
+        ] {
+            assert!(
+                token_for_api_origin(RepoType::GitLab, endpoint, &settings).is_none(),
+                "untrusted endpoint: {endpoint}"
+            );
+        }
+        // Legacy provider recognition remains compatible; it cannot grant
+        // credential access for an unconfigured self-hosted service.
+        let detected = parse_repo_locator("https://gitlab.attacker.invalid/team/repo").unwrap();
+        assert_eq!(detected.repo_type, RepoType::GitLab);
+    }
+
+    #[test]
+    fn gitlab_token_preserves_explicit_self_hosted_origins() {
+        for configured in [
+            "https://code.example.invalid:8443/api/v4",
+            "http://127.0.0.1:9876/api/v4",
+        ] {
+            let settings = GitTokenSettings {
+                token: " fixture-token ".into(),
+                api_base_url: configured.into(),
+                ..Default::default()
+            };
+            let endpoint = format!("{configured}/projects/1");
+            assert_eq!(
+                token_for_api_origin(RepoType::GitLab, &endpoint, &settings).as_deref(),
+                Some("fixture-token")
+            );
+            let mut wrong_origin = reqwest::Url::parse(&endpoint).unwrap();
+            wrong_origin.set_port(Some(9877)).unwrap();
+            assert!(
+                token_for_api_origin(RepoType::GitLab, wrong_origin.as_str(), &settings).is_none()
+            );
+            wrong_origin = reqwest::Url::parse(&endpoint).unwrap();
+            wrong_origin
+                .set_host(Some("gitlab.attacker.invalid"))
+                .unwrap();
+            assert!(
+                token_for_api_origin(RepoType::GitLab, wrong_origin.as_str(), &settings).is_none()
+            );
+        }
+    }
 
     #[test]
     fn locator_debug_never_exposes_remote_url_credentials() {

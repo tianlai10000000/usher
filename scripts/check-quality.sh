@@ -4,8 +4,8 @@ set -eu
 
 usage() {
     echo "Usage: $0 [--quick|--full|--help]"
-    echo "Default/--quick: local gates, root check and root library tests."
-    echo "--full: local gates, workspace check/tests/lint and no-AI application check."
+    echo "Default/--quick: local gates, root check, library tests and doctests."
+    echo "--full: local gates, workspace check/tests/lint, no-AI check and root doctests."
     echo "Checks do not rewrite source; ordinary failures are collected and remain blocking."
 }
 if [ "$#" -gt 1 ]; then
@@ -68,8 +68,8 @@ run_check i18n sh scripts/check-i18n.sh
 run_check script-tests python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 if [ "$mode" = full ]; then
     run_check workspace-check cargo check --workspace --all-targets --locked
-    # Unit/integration targets are blocking; the separately tracked logger
-    # doctest is deliberately outside this command, as in the existing CI job.
+    # Workspace unit/integration tests and root doctests are separate blocking
+    # gates so either failure still allows the remaining checks to run.
     run_check workspace-tests env SLINT_EMIT_DEBUG_INFO=1 cargo test --workspace --tests --locked
     run_check workspace-lint cargo clippy --workspace --all-targets --locked -- -D warnings
     # Selecting the root package excludes its optional AI core dependency;
@@ -79,6 +79,7 @@ else
     run_check cargo-check cargo check --locked
     run_check library-tests cargo test --lib --locked
 fi
+run_check doctests cargo test --doc --locked
 run_check diff git diff --check
 
 printf '\n[Quality] %s checks passed.\n' "$passed"
