@@ -1,0 +1,10 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.77s
+   Doc-tests usher_lib
+
+running 2 tests
+test src/constants/shutdown_priority.rs - constants::shutdown_priority::PRIORITY_CRITICAL (line 31) ... ignored
+test src/logger/debug_logger.rs - logger::debug_logger (line 15) ... ok
+
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+all doctests ran in 0.93s; merged doctests compilation took 0.52s

@@ -24,6 +24,9 @@ review task does not own a route or require a visible page.
 - `src/ai_review/controller.rs`: task orchestration, Git/provider diff loading,
   AI calls, cancellation, session I/O scheduling, notifications, and on-demand UI
   projection.
+- `src/ai_review/review_input.rs`: immutable request and Provider-diff normalization,
+  UTF-8-safe 48 KiB Ask context, model validation and worker-only rule snapshots;
+  no controller/UI dependency.
 - `src/ai_review/session_transactions.rs`: production Review/PR Chat read-modify-write
   transactions, operation/attempt identity, owned blocking I/O receipts, and file
   reconciliation coordinated with those transactions. Aggregate drain receipts,
@@ -52,6 +55,8 @@ review task does not own a route or require a visible page.
   owner 执行并返回失败的写后对账。
 - `src/ai_review/controller.rs`：任务编排、Git/Provider diff 获取、AI 调用、取消、
   Session I/O 调度、通知和按需 UI 投影。
+- `src/ai_review/review_input.rs`：不可变请求、Provider diff 规范化、UTF-8 安全的
+  48 KiB Ask 上下文、模型校验及仅在 Worker 读取的规则快照，不依赖 controller/UI。
 - `src/ai_review/session_transactions.rs`：生产环境的 Review/PR Chat 读改写事务、
   operation/attempt 身份、实际 blocking IO receipt，以及与事务协调的文件对账。
   聚合 drain receipt、关闭准入/重试/drain helper 与 retained-owner 检查仅在

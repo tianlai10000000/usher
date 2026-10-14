@@ -89,7 +89,8 @@ pub(super) struct ProjectProjection {
 impl ProjectProjection {
     pub(super) fn start(ui: &MainWindow, state: ProjectStateFacade) -> Self {
         let model = Rc::new(VecModel::default());
-        ui.set_project_items(model.clone().into());
+        ui.global::<crate::ProjectBridge>()
+            .set_items(model.clone().into());
         VIEW.with(|view| {
             *view.borrow_mut() = Some(UiView {
                 model,
@@ -258,8 +259,9 @@ impl UiView {
             }
             changed += 1;
         }
-        ui.set_project_logo_preview_image(slint::Image::from_rgba8(next.preview.pixels.clone()));
-        ui.set_project_logo_preview_status(
+        ui.global::<crate::ProjectBridge>()
+            .set_logo_preview_image(slint::Image::from_rgba8(next.preview.pixels.clone()));
+        ui.global::<crate::ProjectBridge>().set_logo_preview_status(
             crate::i18n::tr(if next.preview_failed {
                 "projects.invalid_logo_default"
             } else {
@@ -273,7 +275,7 @@ impl UiView {
             .as_ref()
             .is_none_or(|old| old.selection.refresh != next.selection.refresh)
         {
-            ui.set_project_list_loading(false);
+            ui.global::<crate::ProjectBridge>().set_list_loading(false);
         }
         if std::env::var_os("USHER_P5_BENCHMARK").is_some() {
             log::info!(
@@ -338,7 +340,7 @@ pub(super) fn sync_language(ui: &MainWindow) {
             .as_ref()
             .and_then(|view| view.previous.as_ref())
         {
-            ui.set_project_logo_preview_status(
+            ui.global::<crate::ProjectBridge>().set_logo_preview_status(
                 crate::i18n::tr(if view.preview_failed {
                     "projects.invalid_logo_default"
                 } else {
@@ -403,7 +405,8 @@ mod tests {
         let state = ProjectStateFacade::memory(projects());
         let model = Rc::new(VecModel::default());
         let identity: slint::ModelRc<ProjectItem> = model.clone().into();
-        ui.set_project_items(identity.clone());
+        ui.global::<crate::ProjectBridge>()
+            .set_items(identity.clone());
         let mut view = UiView {
             model,
             previous: None,
@@ -418,7 +421,7 @@ mod tests {
             *image = logo.clone();
         }
         view.apply(&ui, next);
-        assert_eq!(ui.get_project_items(), identity);
+        assert_eq!(ui.global::<crate::ProjectBridge>().get_items(), identity);
         assert_eq!(
             view.model.row_data(0).unwrap().project_tags,
             unchanged.project_tags
@@ -432,7 +435,7 @@ mod tests {
         let mut next = prepared(state.snapshot().state(), 3);
         next.rows.remove(0);
         view.apply(&ui, next);
-        assert_eq!(ui.get_project_items(), identity);
+        assert_eq!(ui.global::<crate::ProjectBridge>().get_items(), identity);
         assert_eq!(view.model.row_count(), 1);
         assert_eq!(view.model.row_data(0).unwrap().project_alias, "b");
         state.shutdown();

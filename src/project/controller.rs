@@ -29,8 +29,12 @@ impl ProjectController {
 }
 
 pub(crate) fn sync_language(ui: &MainWindow) {
-    if !ui.get_project_list_error().is_empty() {
-        ui.set_project_list_error(
+    if !ui
+        .global::<crate::ProjectBridge>()
+        .get_list_error()
+        .is_empty()
+    {
+        ui.global::<crate::ProjectBridge>().set_list_error(
             crate::i18n::tr("projects.registry_read_failed")
                 .into_owned()
                 .into(),
@@ -74,7 +78,7 @@ pub fn setup_project(ui: &MainWindow) -> ProjectController {
     let _ = state_slot.set(state.clone());
     super::state::register(&state);
     super::hook_selection::bind(ui, state.clone());
-    ui.set_project_list_loading(true);
+    ui.global::<crate::ProjectBridge>().set_list_loading(true);
 
     let projection = Arc::new(super::projection::ProjectProjection::start(
         ui,
@@ -84,17 +88,18 @@ pub fn setup_project(ui: &MainWindow) -> ProjectController {
     let ui_weak = ui.as_weak();
     let logo_loader = Arc::new(LogoLoader::start(state.clone(), ui.as_weak()));
     let loader_preview = logo_loader.clone();
-    ui.on_project_preview_logo(move |logo| {
-        let Some(_ui) = ui_weak.upgrade() else {
-            return;
-        };
-        let url = logo.as_str().trim();
-        loader_preview.set_preview_url(Some(url.to_owned()));
-    });
+    ui.global::<crate::ProjectBridge>()
+        .on_preview_logo(move |logo| {
+            let Some(_ui) = ui_weak.upgrade() else {
+                return;
+            };
+            let url = logo.as_str().trim();
+            loader_preview.set_preview_url(Some(url.to_owned()));
+        });
 
     let ui_weak = ui.as_weak();
     let state_add = state.clone();
-    ui.on_project_add_project(
+    ui.global::<crate::ProjectBridge>().on_add_project(
         move |name, alias, local_repo, remote_repo, logo, project_tags, is_pr_auto_update| {
             let Some(ui) = ui_weak.upgrade() else {
                 return;
@@ -136,7 +141,7 @@ pub fn setup_project(ui: &MainWindow) -> ProjectController {
                     logo,
                     project_tags,
                     is_pr_auto_update,
-                    hooks_enabled: ui.get_project_hooks_enabled(),
+                    hooks_enabled: ui.global::<crate::ProjectBridge>().get_hooks_enabled(),
                     hook_ids: super::hook_selection::selected_ids(&ui),
                 },
                 ui.as_weak(),
@@ -147,7 +152,7 @@ pub fn setup_project(ui: &MainWindow) -> ProjectController {
 
     let ui_weak = ui.as_weak();
     let state_update = state.clone();
-    ui.on_project_update_project(
+    ui.global::<crate::ProjectBridge>().on_update_project(
         move |original_alias,
               name,
               alias,
@@ -211,7 +216,7 @@ pub fn setup_project(ui: &MainWindow) -> ProjectController {
                     logo,
                     project_tags,
                     is_pr_auto_update,
-                    hooks_enabled: ui.get_project_hooks_enabled(),
+                    hooks_enabled: ui.global::<crate::ProjectBridge>().get_hooks_enabled(),
                     hook_ids: super::hook_selection::selected_ids(&ui),
                 },
                 ui.as_weak(),
@@ -222,97 +227,103 @@ pub fn setup_project(ui: &MainWindow) -> ProjectController {
 
     let ui_weak = ui.as_weak();
     let state_delete = state.clone();
-    ui.on_project_delete_project(move |alias| {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
-
-        log::info!("[Project] Delete project requested: alias='{}'", alias);
-
-        let alias = alias.trim();
-        if alias.is_empty() {
-            show_error(&ui, crate::i18n::tr("projects.alias_missing").as_ref());
-            return;
-        }
-
-        let state = state_delete.clone();
-        let alias = alias.to_owned();
-        let weak = ui.as_weak();
-        crate::app_runtime::shared_runtime().spawn(async move {
-            if let Err(error) = state.delete(alias) {
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = weak.upgrade() {
-                        show_error(&ui, crate::i18n::tr(&error).as_ref());
-                    }
-                });
-            }
-        });
-    });
-
-    let ui_weak = ui.as_weak();
-    let loader_search = logo_loader.clone();
-    ui.on_project_search_projects(move |query| {
-        let Some(_ui) = ui_weak.upgrade() else {
-            return;
-        };
-
-        loader_search.set_query(query.as_str());
-    });
-
-    let ui_weak = ui.as_weak();
-    let state_reload = state.clone();
-    ui.on_project_reload_projects(move || {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
-
-        log::info!("[Project] Reload projects requested.");
-        ui.set_project_list_error("".into());
-        ui.set_project_list_loading(true);
-
-        let ui_weak_task = ui.as_weak();
-        let state_task = state_reload.clone();
-        crate::app_runtime::shared_runtime().spawn(async move {
-            let loaded = tokio::task::spawn_blocking(load_projects).await;
-            let error = match loaded {
-                Ok(projects) => {
-                    state_task.hydrate(projects);
-                    None
-                }
-                Err(error) => Some(error),
+    ui.global::<crate::ProjectBridge>()
+        .on_delete_project(move |alias| {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
             };
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(ui) = ui_weak_task.upgrade() {
-                    if let Some(error) = error {
-                        log::error!("[Project] Reload task failed: {error}");
-                        ui.set_project_list_loading(false);
-                        ui.set_project_list_error(
-                            crate::i18n::tr("projects.registry_read_failed")
-                                .into_owned()
-                                .into(),
-                        );
-                        show_error(&ui, crate::i18n::tr("projects.reload_failed").as_ref());
-                    } else {
-                        show_success(&ui, crate::i18n::tr("projects.reloaded").as_ref());
-                    }
+
+            log::info!("[Project] Delete project requested: alias='{}'", alias);
+
+            let alias = alias.trim();
+            if alias.is_empty() {
+                show_error(&ui, crate::i18n::tr("projects.alias_missing").as_ref());
+                return;
+            }
+
+            let state = state_delete.clone();
+            let alias = alias.to_owned();
+            let weak = ui.as_weak();
+            crate::app_runtime::shared_runtime().spawn(async move {
+                if let Err(error) = state.delete(alias) {
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = weak.upgrade() {
+                            show_error(&ui, crate::i18n::tr(&error).as_ref());
+                        }
+                    });
                 }
             });
         });
-    });
 
     let ui_weak = ui.as_weak();
-    ui.on_project_open_terminal(move |project_name, project_alias, local_repo| {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
+    let loader_search = logo_loader.clone();
+    ui.global::<crate::ProjectBridge>()
+        .on_search_projects(move |query| {
+            let Some(_ui) = ui_weak.upgrade() else {
+                return;
+            };
 
-        open_terminal_for_project(
-            &ui,
-            project_name.trim(),
-            project_alias.trim(),
-            local_repo.trim(),
-        );
-    });
+            loader_search.set_query(query.as_str());
+        });
+
+    let ui_weak = ui.as_weak();
+    let state_reload = state.clone();
+    ui.global::<crate::ProjectBridge>()
+        .on_reload_projects(move || {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+
+            log::info!("[Project] Reload projects requested.");
+            ui.global::<crate::ProjectBridge>()
+                .set_list_error("".into());
+            ui.global::<crate::ProjectBridge>().set_list_loading(true);
+
+            let ui_weak_task = ui.as_weak();
+            let state_task = state_reload.clone();
+            crate::app_runtime::shared_runtime().spawn(async move {
+                let loaded = tokio::task::spawn_blocking(load_projects).await;
+                let error = match loaded {
+                    Ok(projects) => {
+                        state_task.hydrate(projects);
+                        None
+                    }
+                    Err(error) => Some(error),
+                };
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_weak_task.upgrade() {
+                        if let Some(error) = error {
+                            log::error!("[Project] Reload task failed: {error}");
+                            ui.global::<crate::ProjectBridge>().set_list_loading(false);
+                            ui.global::<crate::ProjectBridge>().set_list_error(
+                                crate::i18n::tr("projects.registry_read_failed")
+                                    .into_owned()
+                                    .into(),
+                            );
+                            show_error(&ui, crate::i18n::tr("projects.reload_failed").as_ref());
+                        } else {
+                            show_success(&ui, crate::i18n::tr("projects.reloaded").as_ref());
+                        }
+                    }
+                });
+            });
+        });
+
+    let ui_weak = ui.as_weak();
+    ui.global::<crate::ProjectBridge>().on_open_terminal(
+        move |project_name, project_alias, local_repo| {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+
+            open_terminal_for_project(
+                &ui,
+                project_name.trim(),
+                project_alias.trim(),
+                local_repo.trim(),
+            );
+        },
+    );
 
     let ui_weak = ui.as_weak();
     let state_initial = state.clone();
@@ -324,8 +335,8 @@ pub fn setup_project(ui: &MainWindow) -> ProjectController {
                     let _ = slint::invoke_from_event_loop(move || {
                         log::error!("[Project] Initial load worker failed: {error}");
                         if let Some(ui) = ui_weak.upgrade() {
-                            ui.set_project_list_loading(false);
-                            ui.set_project_list_error(
+                            ui.global::<crate::ProjectBridge>().set_list_loading(false);
+                            ui.global::<crate::ProjectBridge>().set_list_error(
                                 crate::i18n::tr("projects.registry_read_failed")
                                     .into_owned()
                                     .into(),

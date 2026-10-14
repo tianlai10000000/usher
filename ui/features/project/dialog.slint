@@ -1,0 +1,61 @@
+import { GitHubProjectDialog } from "../../components/project/github_project_dialog.slint";
+import { ProjectBridge } from "./bridge.slint";
+
+// Project owns draft bindings and actions; MainWindow supplies the full-window
+// geometry/z-order so this dialog never enters the page scroll/clip subtree.
+export component ProjectDialogHost inherits GitHubProjectDialog {
+    modal-visible: ProjectBridge.show-add-modal;
+    mode: ProjectBridge.modal-mode;
+    original-alias: ProjectBridge.modal-original-alias;
+    name <=> ProjectBridge.new-name;
+    alias <=> ProjectBridge.new-alias;
+    local-repo <=> ProjectBridge.new-local-repo;
+    remote-repo <=> ProjectBridge.new-remote-repo;
+    logo <=> ProjectBridge.new-logo;
+    project-tags <=> ProjectBridge.new-tags;
+    is-pr-auto-update <=> ProjectBridge.new-pr-auto-update;
+    hook-choices: ProjectBridge.hook-choices;
+    selected-hook-count: ProjectBridge.selected-hook-count;
+    selectable-hook-count: ProjectBridge.selectable-hook-count;
+    hooks-enabled <=> ProjectBridge.hooks-enabled;
+    hooks-ready: ProjectBridge.hooks-ready;
+    hooks-status: ProjectBridge.hooks-status;
+    toggle-hook(id, value) => { ProjectBridge.toggle-hook(id, value); }
+    logo-preview-image: ProjectBridge.logo-preview-image;
+    logo-preview-status: ProjectBridge.logo-preview-status;
+    error-text <=> ProjectBridge.add-error;
+    preview-logo(logo) => {
+        ProjectBridge.preview-logo(logo);
+    }
+    submit(name, alias, local-repo, remote-repo, logo, project-tags, is-pr-auto-update) => {
+        if ProjectBridge.modal-mode == "edit" {
+            ProjectBridge.update-project(ProjectBridge.modal-original-alias, name, alias, local-repo, remote-repo, logo, project-tags, is-pr-auto-update);
+        } else {
+            ProjectBridge.add-project(name, alias, local-repo, remote-repo, logo, project-tags, is-pr-auto-update);
+        }
+        ProjectBridge.show-add-modal = false;
+        ProjectBridge.modal-mode = "add";
+        ProjectBridge.modal-original-alias = "";
+    }
+    confirm-delete(alias) => {
+        ProjectBridge.delete-project(alias);
+        ProjectBridge.show-add-modal = false;
+        ProjectBridge.modal-mode = "add";
+        ProjectBridge.modal-original-alias = "";
+    }
+    cancel => {
+        ProjectBridge.new-name = "";
+        ProjectBridge.new-alias = "";
+        ProjectBridge.new-local-repo = "";
+        ProjectBridge.new-remote-repo = "";
+        ProjectBridge.new-logo = "";
+        ProjectBridge.new-tags = "";
+        ProjectBridge.new-pr-auto-update = false;
+        ProjectBridge.hooks-enabled = false;
+        ProjectBridge.preview-logo("");
+        ProjectBridge.add-error = "";
+        ProjectBridge.show-add-modal = false;
+        ProjectBridge.modal-mode = "add";
+        ProjectBridge.modal-original-alias = "";
+    }
+}

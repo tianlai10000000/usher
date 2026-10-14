@@ -22,7 +22,7 @@ v5 修正 v4 实际漏绘的起始行括号槽背景：`<<<<<<<` 行也属于黄
 
 ![补齐起始行括号槽黄色背景的 Usher 冲突工作区 v5](conflicts-workspace-github-reference-v5.en.png)
 
-旧版[文件树与整行底色稿](conflicts-workspace-current-ui.en.png)、[括号、行号背景修正前 v3](conflicts-workspace-github-reference-v3.en.png)和[起始行括号槽漏绘的 v4](conflicts-workspace-github-reference-v4.en.png)只作历史对照，不作为实施参考。
+旧版[文件树与整行底色稿](../../archive/pr-conflicts-20261014/conflicts-workspace-current-ui.en.png)、[括号、行号背景修正前 v3](../../archive/pr-conflicts-20261014/conflicts-workspace-github-reference-v3.en.png)和[起始行括号槽漏绘的 v4](../../archive/pr-conflicts-20261014/conflicts-workspace-github-reference-v4.en.png)只作历史对照，不作为实施参考。
 
 这两张图按底图的当前 English UI 展示。PR 标题、作者与 Branch 来自底图；冲突文件数量、块数及代码是设计示例，不代表实际 PR 查询结果。图像是概念编辑结果，不是运行中的 Slint 功能截图，文字与尺寸以实施时的组件和 catalog 为准。
 

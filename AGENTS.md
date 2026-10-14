@@ -98,6 +98,7 @@ Keep Usher a responsive desktop application with explicit module ownership, even
 - Pass file paths and executable arguments as data. Never launch them through `cmd /C start` or interpolated shell code; explicitly configured user Hook scripts remain a separate feature contract.
 - Remove compatibility paths only after inspecting callers and feature gates. Repair broken examples instead of adding test exemptions. Do not raise structure budgets merely to make a gate green.
 - Every security fix needs a failing/before case, a passing/after case and a legitimate-use control. Record untested platforms and remaining weaknesses; a clean scan does not prove absence of malicious code.
+- Structural extraction must move a cohesive responsibility, not just tests or whitespace. Give new owners size/dependency gates, preserve async identity capture timing, and bind feature UI APIs directly without duplicate root proxies.
 - Unit tests use the isolated test SettingsManager or explicit temporary fixtures. Never read or rewrite workstation settings to satisfy a test, or silently depend on the user's timeout/credentials.
 
 - Provider 识别不等于允许发送凭据。按实际目标 origin（协议、主机、有效端口）核对显式配置或平台固定地址，重定向同样受约束。
@@ -106,6 +107,7 @@ Keep Usher a responsive desktop application with explicit module ownership, even
 - 文件路径与进程参数按数据传递，禁止通过 `cmd /C start` 或拼接 shell 解释；用户显式配置的 Hook 脚本仍遵循独立功能契约。
 - 删除兼容路径前核对调用方和 feature gate。修复失效示例，不新增测试豁免；不得仅为通过门禁调高结构预算。
 - 安全修复必须有修复前失败、修复后通过及正常用途对照。记录未测平台与残留问题；扫描未发现问题不等于证明没有恶意代码。
+- 结构拆分必须转移完整职责，不能只搬测试或压缩空行。新 owner 必须有规模/依赖门禁；保留异步身份捕获时点；功能 UI 直接绑定 bridge，不重复添加根代理。
 - 单元测试使用隔离的测试 SettingsManager 或显式临时夹具。禁止为通过测试读取/改写工作站设置，或暗中依赖用户的超时与凭据。
 
 ### State and lifecycle / 状态与生命周期
@@ -127,6 +129,7 @@ Keep Usher a responsive desktop application with explicit module ownership, even
 ### UI and performance / UI 与性能
 
 - Keep hover hit targets mounted; change opacity/state instead of conditionally creating interactive nodes.
+- Give row FocusScope and TouchArea explicit, matching coordinates when reserving trailing actions. A narrower child can be centered by default and consume the first press on an action; test a single pointer click from an unfocused row.
 - Do not rebuild large models during scrolling or resize interaction.
 - Mount full-window overlays at the root window layer.
 - Reuse existing FAB, card-action, modal, toast, notification, and terminal components before adding variants.
@@ -135,6 +138,7 @@ Keep Usher a responsive desktop application with explicit module ownership, even
 - For multiline native Slint `Text` and direct `TextInput`, prefer the official `line-height-factor`. Never simulate inter-line leading with padding, injected blank lines or invisible glyphs, or a fixed-height wrapper. On Slint 1.18, `StyledText` and the standard `TextEdit` wrapper require a documented exception and synchronized paint/measurement/virtual-extent metrics.
 
 - Hover 命中节点应常驻，用 opacity/state 控制。
+- 为尾部操作预留空间时，行 FocusScope 与 TouchArea 必须显式使用相同坐标。较窄子节点可能默认居中，覆盖操作并吞掉首次按下；必须验证未聚焦行上的单次指针点击。
 - 滚动和 resize 期间不要重建大型 model。
 - 全窗口遮罩必须挂在根窗口层。
 - 新建变体前先复用现有 FAB、卡片操作、Modal、Toast、Notification、Terminal 组件。
@@ -191,9 +195,9 @@ Additional expectations:
 - Terminal changes: follow the regression matrix in `docs/specs/terminal.md`.
 - Release changes: run the relevant script under `scripts/` or explain why it was not run.
 
-The logger example now uses the supported logging macros. Root doctests are blocking in both quality tiers; the former logger-doctest exemption must not be restored. Existing structural failures are recorded separately and remain blocking until their approved cleanup.
+The logger example now uses the supported logging macros. Root doctests are blocking in both quality tiers; the former logger-doctest exemption must not be restored. Structural budgets remain blocking after cleanup; extracted owners have their own size and dependency gates.
 
-Logger 示例使用受支持的日志宏。两档质量入口都将根包 doctest 作为阻断检查，禁止恢复旧 logger doctest 豁免。既有结构失败另行记录，在获批清理完成前仍保持阻断。
+Logger 示例使用受支持的日志宏。两档质量入口都将根包 doctest 作为阻断检查，禁止恢复旧 logger doctest 豁免。结构清理后预算仍保持阻断；抽取 owner 也必须受自身规模与依赖门禁约束。
 
 ## Handoff checklist / 交付清单
 

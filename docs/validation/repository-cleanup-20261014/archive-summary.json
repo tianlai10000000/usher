@@ -1,0 +1,29 @@
+[
+  {
+    "archive": "benchmark-history.manifest.json",
+    "sources": [
+      "memory-benchmark-results",
+      "sidebar-motion-benchmark-results",
+      "chat-interaction-benchmark-results",
+      "artifact-preview-interaction-benchmark-results",
+      "artifact-preview-transition-benchmark-results",
+      "artifact-preview-scroll-benchmark-results"
+    ],
+    "removed_disk_kib": 22178892,
+    "archive_bytes": 5147580497,
+    "archive_sha256": "bf162fe972d1ebff22df2511d3a686f7536bacec71d93f578a88c2397e5e9f10",
+    "entries": 114386
+  },
+  {
+    "archive": "old-release-artifacts.manifest.json",
+    "sources": [
+      "dist",
+      "workflow-dist",
+      "dist-workspace.toml"
+    ],
+    "removed_disk_kib": 116984,
+    "archive_bytes": 106919438,
+    "archive_sha256": "6927636e9199c66911e439cc4b5b494a8fe62c7125575912cc71a19814ceaa15",
+    "entries": 15
+  }
+]

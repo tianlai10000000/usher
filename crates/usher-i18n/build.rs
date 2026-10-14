@@ -54,7 +54,13 @@ struct LocaleCatalog {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let repository_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    // A shared target directory can reuse this executable across checkouts.
+    // Resolve inputs from Cargo's current invocation, not the checkout that
+    // originally compiled the build script.
+    let repository_root = PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").ok_or("Cargo did not provide CARGO_MANIFEST_DIR")?,
+    )
+    .join("../..");
     let i18n_root = repository_root.join("i18n");
     let manifest_path = i18n_root.join("manifest.toml");
     let messages_path = i18n_root.join("messages.toml");

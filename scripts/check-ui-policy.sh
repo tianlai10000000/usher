@@ -29,12 +29,9 @@ if [ -n "$unexpected_material" ]; then
     failed=1
 fi
 
-legacy_icons=$(rg -n \
+unexpected_icons=$(rg -n \
     '@image-url\("[^"]*assets/icons/(?!octicon-|github-|lucide-|provider-)[^"]+"\)' \
     ui --glob '*.slint' --pcre2 || true)
-unexpected_icons=$(echo "$legacy_icons" \
-    | rg -v '^ui/components/title_bar\.slint:[0-9]+:.*assets/icons/(settings|about)\.svg' \
-    || true)
 if [ -n "$unexpected_icons" ]; then
     echo "UI policy: unregistered application icon usage is forbidden:" >&2
     echo "$unexpected_icons" >&2
@@ -212,19 +209,185 @@ if elevation_path.exists() or dialog_path.exists():
 # shared-shell site is registered so replacing one with custom modal chrome is a
 # reviewed architecture change. The global raw-shadow rule above remains the
 # final protection even for a deliberately disguised surface.
-dialog_component_exemptions = {"GitHubDialog", "GitHubDialogElevation"}
+# Resolve inheritance by file-local bindings, never by a global component name.
+# This is a structural source check, not a Slint compiler: unsupported imports or
+# missing/ambiguous ancestors fail closed. It counts shell declarations through
+# the inheritance chain. Inherited adapters may bind properties/callbacks but
+# cannot append another visual subtree; proving arbitrary nested component graphs
+# is outside this checker. Runtime conditions still require route acceptance.
+shared_dialog = (pathlib.Path("ui/components/dialog/github_dialog.slint"), "GitHubDialog")
+dialog_component_exemptions = {
+    shared_dialog,
+    (pathlib.Path("ui/components/github_elevation.slint"), "GitHubDialogElevation"),
+}
+definitions = {}
+imports = {}
+exports = {}
 for relative, (_, tokens) in sources.items():
+    definitions[relative] = {}
+    imports[relative] = {}
+    exports[relative] = {}
     for name, open_index, close_index in component_definitions(tokens):
-        if name in dialog_component_exemptions:
+        # The declaration header ends at this opening brace. Locate its exact
+        # component token, including private/local declarations and duplicates.
+        declaration = next(
+            index for index in range(open_index - 1, -1, -1)
+            if tokens[index][0] == "component"
+        )
+        header = values(tokens[declaration + 2 : open_index])
+        base = header[1] if len(header) == 2 and header[0] == "inherits" else None
+        valid_header = not header or base is not None
+        exported = declaration > 0 and tokens[declaration - 1][0] == "export"
+        definitions[relative].setdefault(name, []).append(
+            (base, tokens[open_index + 1 : close_index], exported, valid_header)
+        )
+    for index, (value, _, is_string) in enumerate(tokens):
+        if is_string or value not in {"import", "export"}:
+            continue
+        if index + 1 >= len(tokens) or tokens[index + 1][0] != "{":
+            continue
+        end = closing_brace(tokens, index + 1)
+        if end is None:
+            continue
+        source = None
+        if end + 2 < len(tokens) and tokens[end + 1][0] == "from":
+            source = tokens[end + 2][0].strip('"')
+        # @library roots are deliberately not guessed; no Dialog ancestor may
+        # receive credit through an unknown library mapping.
+        target = None
+        if source and not source.startswith("@"):
+            absolute = (repo_root / relative.parent / source).resolve()
+            if absolute.is_relative_to(repo_root.resolve()):
+                target = absolute.relative_to(repo_root.resolve())
+        elif value == "export" and source is None:
+            target = relative
+        entries = values(tokens[index + 2 : end])
+        groups = [[]]
+        for entry in entries:
+            if entry == ",":
+                groups.append([])
+            else:
+                groups[-1].append(entry)
+        for group in groups:
+            if len(group) == 1:
+                original = alias = group[0]
+            elif len(group) == 3 and group[1] == "as":
+                original, _, alias = group
+            else:
+                continue
+            table = imports if value == "import" else exports
+            # A local export resolves its source in local scope; cross-file
+            # imports and re-exports must name an actual exported component.
+            table[relative].setdefault(alias, []).append(
+                (target, original, source is not None)
+            )
+
+
+class DialogStructureError(ValueError):
+    pass
+
+
+def resolve_component(relative, name, exported=False, trail=()):
+    key = (relative, name, exported)
+    if key in trail:
+        raise DialogStructureError(f"cyclic component binding for {relative}:{name}")
+    if relative not in definitions:
+        raise DialogStructureError(f"missing component source for {relative}:{name}")
+    candidates = [
+        ("definition", entry)
+        for entry in definitions[relative].get(name, [])
+        if not exported or entry[2]
+    ]
+    table = exports if exported else imports
+    candidates += [("binding", entry) for entry in table[relative].get(name, [])]
+    if len(candidates) != 1:
+        raise DialogStructureError(
+            f"unresolved or ambiguous component {relative}:{name} ({len(candidates)} bindings)"
+        )
+    kind, entry = candidates[0]
+    if kind == "definition":
+        return relative, name
+    target, original, require_export = entry
+    return resolve_component(target, original, require_export, trail + (key,))
+
+
+def declared_shell_count(relative, body):
+    count = 0
+    for index, (name, _, is_string) in enumerate(body[:-1]):
+        if is_string or body[index + 1][0] != "{":
+            continue
+        try:
+            component = resolve_component(relative, name)
+        except DialogStructureError:
+            # Only a direct shared shell (including an imported alias) counts
+            # here. Other child types are checked by Slint compilation.
+            if name == "GitHubDialog":
+                raise
+            continue
+        count += component == shared_dialog
+    return count
+
+
+def inherited_shell_count(component, trail=()):
+    if component in trail:
+        raise DialogStructureError(f"cyclic Dialog inheritance at {component[0]}:{component[1]}")
+    if component == shared_dialog:
+        return 1
+    relative, name = component
+    entries = definitions[relative][name]
+    if len(entries) != 1:
+        raise DialogStructureError(f"ambiguous Dialog definition {relative}:{name}")
+    base, body, _, valid_header = entries[0]
+    if not valid_header:
+        raise DialogStructureError(f"unsupported Dialog declaration {relative}:{name}")
+    count = declared_shell_count(relative, body)
+    if base is not None:
+        # Native roots cannot contribute the application-owned shared shell.
+        # Resolve any same-name local/imported binding before treating a native
+        # type as terminal, so a shadowing declaration cannot hide a second shell.
+        local_bindings = definitions[relative].get(base, []) or imports[relative].get(base, [])
+        if base not in {"Rectangle", "Window", "FocusScope", "Image", "Text", "TextInput", "TouchArea"} or local_bindings:
+            ancestor = resolve_component(relative, base)
+            inherited = inherited_shell_count(ancestor, trail + (component,))
+            count += inherited
+            if inherited and count == 1:
+                # An aliased/indirect Dialog child can contain another shell
+                # without a literal GitHubDialog here. Keep inherited adapters
+                # structural: adding any component-like instance fails closed.
+                instances = [
+                    value for index, (value, _, is_string) in enumerate(body[:-1])
+                    if not is_string and body[index + 1][0] == "{"
+                    and (
+                        re.fullmatch(r"[A-Z][A-Za-z0-9_-]*", value)
+                        or value in definitions[relative]
+                        or value in imports[relative]
+                    )
+                ]
+                if instances:
+                    raise DialogStructureError(
+                        "inherited Dialog adapter must not add component instances: "
+                        + ", ".join(instances)
+                    )
+    return count
+
+
+for relative, (_, tokens) in sources.items():
+    for name, _, _ in component_definitions(tokens):
+        component = (relative, name)
+        if component in dialog_component_exemptions:
             continue
         if "Dialog" not in name and "Modal" not in name:
             continue
-        body = tokens[open_index + 1 : close_index]
-        count = len(sequence_positions(body, ["GitHubDialog", "{"]))
+        try:
+            count = inherited_shell_count(component)
+            detail = f"found {count} across its inheritance chain"
+        except DialogStructureError as error:
+            count = None
+            detail = str(error)
         if count != 1:
             print(
                 f"{relative}: component {name} must own exactly one "
-                f"GitHubDialog instance (found {count})"
+                f"GitHubDialog instance ({detail})"
             )
 
 dialog_consumer_requirements = {

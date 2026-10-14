@@ -186,6 +186,11 @@ Hook UI bridge 统一负责开始/结束通知、
 
 当前外部集成包括 Git 命令、GitHub/GitLab/Gitee 兼容 API、用户配置的 OpenAI-compatible AI Agent Provider、基于 `self_update` 的 GitHub Release、系统托盘/窗口 API，以及平台原生应用目录。
 
+i18n catalog 构建脚本从当前 Cargo 调用定位仓库输入；共享 target 目录复用
+可执行文件时，不能把 catalog 根目录固定在此前的工作区。应用侧托盘回归检查
+实际链接的英文和中文 Quit 值；显式离线原生夹具另通过根语言 callback 验证
+同一菜单的原位刷新。
+
 ## 目录和职责
 
 ### 应用装配和运行时
@@ -210,7 +215,7 @@ Hook UI bridge 统一负责开始/结束通知、
 | `src/platform/` | 跨平台原生集成边界。`macos.rs` 负责 AppKit 外观、标题栏附件、窗口交互通知、原生标题栏点击桥接、PR Review 字体注册、`NSSound` 点击音和 Auto 主题实时跟随；同时成对管理并在正常关闭时注销 NSEvent monitor、窗口/主题 observer 与独立 Preview resize observer。`windows.rs` 负责 Windows 主题检测与 `MessageBeep`；`linux.rs` 负责 XDG Portal 主题检测和不阻塞 UI 的桌面音效播放。`mod.rs` 提供统一 API、Auto 主题监听开关（全平台 1 秒轮询兜底），以及用操作系统文件管理器打开目录（Finder / Explorer / `xdg-open`）。 |
 | `src/shutdown.rs` | 按优先级协调关闭。正常关闭在 event loop 执行 UI/AppKit 清理；若 event-loop dispatch 失败，后台兜底只执行线程安全的 pre/post 清理并跳过 UI/AppKit。 |
 | `src/single_instance.rs` | 进程锁与有界文件信号唤起通道；第二次启动时让已有窗口重新显示并获得焦点。 |
-| `src/tray.rs` | 桌面托盘和托盘触发的生命周期操作。`src/tray/animation.rs` 负责点击触发的虎鲸跳跃动画、event-loop Timer 及按实际 elapsed 选帧；平台 adapter 预载原色原生图片（macOS 使用非 template 图片）、保留现有点击动作、恢复启动时选定的静止图，并在托盘清理前停止播放。详见[托盘行为](specs/tray.md)。 |
+| `src/tray.rs` | 桌面托盘和托盘触发的生命周期操作。macOS 路由已完成的左/右键 mouse-up，临时挂载 `NSStatusItem.menu` 并通过 `performClick:` 进入原生追踪，返回后解除挂载以恢复主点击。追踪 guard 在嵌套 run loop 期间持有原生对象并抑制激活 observer 唤起。Quit 使用 `tray.quit`，由 `src/lib.rs` 语言 callback 调用 `tray::sync_language` 刷新。`src/tray/animation.rs` 负责虎鲸跳跃的 event-loop Timer 与按实际 elapsed 选帧；平台 adapter 预载原色原生图片（macOS 使用非 template 图片）、恢复启动时选定的静止图，并在托盘清理前停止播放。原生菜单验收仍待完成。详见[托盘行为](specs/tray.md)。 |
 
 `src/lib.rs` 是 composition root，不应继续堆积功能逻辑。原生窗口行为归 `src/platform/`，诊断统计归 `src/memory_diagnostics.rs`；新业务应放入对应模块，只向装配层暴露精简的 setup 或 service API。
 
@@ -246,7 +251,10 @@ Hook UI bridge 统一负责开始/结束通知、
 仓库接口地址与可执行行为必须保持分离：`src/git/` 可以引用 `src/codereview/api/` 中的常量，但 `src/codereview/api/` 不得依赖 `src/git/`、`src/http/`、reqwest 或 serde。
 
 PR Review 的 `controller.rs` 保留加载、上下文和导航编排；子模块
-`controller/actions.rs` 负责远端 review/merge/revert 命令及能力展示，
+`controller/actions.rs` 负责命令准入、独立读取/变更代际与受保护的 event-loop 完成回写。
+`actions/remote.rs` 在返回持有快照的 Future 前同步捕获仓库/凭据身份和 Hook 事件元数据；
+Provider 成功后先发布共享 PR 状态，再发 Hook，最后投递 UI。
+`actions/presentation.rs` 负责能力、就绪状态、合并选择及国际化投影。两个叶模块均不反向依赖 controller。
 `controller/diff_bindings.rs` 负责 event-loop 上的几何、选择、虚拟列表与 Find
 绑定，`controller/diagnostics.rs` 负责显式开启的滚动/定位诊断。
 `ui/features/pr_review/diff_bridge.slint` 中无状态的 `PrDiffBridge` global
@@ -259,7 +267,9 @@ model。AI Review 的 `session_transactions.rs` 负责生产环境的 Review/PR 
 读取、基于当前文件的读改写、Review 完成合并、blocking IO driver 和协调文件对账。
 `sessions.rs` 负责轻量 schema 与中断任务恢复；唯一的旧版整份会话 helper 是
 `load_chat_session`，仅在 `#[cfg(test)]` 下编译，用于损坏文件保留测试。
-`controller.rs` 负责请求与展示编排；
+`controller.rs` 负责请求与展示编排；`review_input.rs` 独立拥有不可变请求、Provider
+diff 规范化、UTF-8 安全的有界 Ask 上下文、模型校验和仅在 Worker 执行的规则快照读取，
+不依赖 controller 或 UI。
 `task_persistence.rs` 负责自动任务快照持久化，并在成功写入后调用同一 Session
 事务 owner。生产叶子模块不反向导入 controller。
 
@@ -291,6 +301,15 @@ callback 耗时和夹具效果预算避免相对比较掩盖回归。显式 `--b
 前后对照。缺失/无效采样、夹具未完成或子进程失败均使门禁失败；失败时仍上传
 日志、逐进程状态/采样及汇总报告。短时固定夹具不证明长期内存上界，也不能替代
 手工输入与绘制验收。
+
+Project 展示与临时草稿归 `ui/features/project/bridge.slint`，页面与
+`ProjectDialogHost` 直接绑定同一个 `ProjectBridge`，包括已保存的 PR 预取开关。
+根窗口保持原全窗口层级，只负责弹窗挂载、路由与几何；持久领域状态仍归
+`ProjectStateFacade`。Rust 投影、语言刷新、Hook 选择和诊断在 event loop 消费
+bridge；它不是另一份领域 Store。列表行的焦点与指针区域使用相同显式原点，
+避开尾部操作，防止未聚焦行吞掉首次 Edit 按下。UI 门禁通过文件局部 import/export 解析 Dialog
+继承链到唯一共享 Shell，保留直接消费者清单，并拒绝已有 Shell 的继承适配器增加
+视觉子树。无法解析或存在歧义时失败；源码结构证明不能替代原生 UI 验收。
 
 ### Slint UI
 
@@ -699,11 +718,19 @@ workspace 根 `Cargo.toml` 中的 profile 统一负责构建产物策略。日�
 
 需要 LLDB 查看完整变量和类型时，显式使用 `dev-full` profile。它继承日常开发
 设置，但把完整 packed 调试信息写入独立 profile 目录；因此可以通过
-`cargo clean --profile dev-full` 单独移除，而不丢弃日常开发产物。Release 和
-dist profile 保持独立：Release 继续禁用调试信息和增量编译。隔离的
+`cargo clean --profile dev-full` 单独移除，而不丢弃日常开发产物。Release
+继续禁用调试信息和增量编译。隔离的
 `release-fast` profile 只用于日常优化构建；它继承 Release 运行时策略，但使用
 Thin LTO、8 个 codegen unit 和增量编译。发布自动化继续使用未改变的 `release`
 profile。
+
+Release 打包使用既有 custom workflow 和 cargo-bundle；未使用的 cargo-dist
+配置及独立 profile 已移除。
+
+未使用的 Rust 模块、未挂载的旧 Slint 标题栏及其图标例外已移除。Project
+Provider 身份使用现有 ribbon 资源，侧栏与 Terminal 控件保留当前实现。
+本地历史基准及 Release 产物压缩保存在已忽略的 `.local-archives/`，并校验
+内容清单；参见[本地归档](local-archives.md)。
 
 workspace 全目标 IDE 后台诊断使用隔离的 `ide` profile：不生成调试信息，也不
 保留增量状态，避免后台分析重复制造数 GiB 的应用与生成 UI 缓存。VS
@@ -1369,7 +1396,8 @@ Interceptor 按注册顺序执行。Request hook 可修改 header；Response hoo
   保持冻结，并且只在最终稳定后写入配置。
 - 应用快捷键统一经过根捕获边界和 `src/shortcuts/`；原生标题栏按钮调用同一组
   callback，并从注册表读取展示 accelerator。
-- Rust-facing property 和 callback 统一在 `ui/main.slint` 声明并保持命名一致。
+- Shell 的 Rust-facing property 和 callback 在 `ui/main.slint` 声明并保持命名一致；
+  Feature API 归导出的功能 bridge，使用方直接绑定，禁止重复添加根代理。
 - Feature view 负责布局；Rust 负责 IO 和业务状态转换。
 - `ui/views/` 下的路由文件只声明 `GitHub*Page` 页面编排；视觉子组件统一放入
   `ui/components/<feature>/`；实现 GitHub/Primer 模式的组件使用 `GitHub*`

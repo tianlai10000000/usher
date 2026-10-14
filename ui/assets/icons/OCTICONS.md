@@ -62,18 +62,16 @@ used by the notification Banner overflow “View all notifications” action.
 open/closed envelope icons used by the read and unread Inbox row actions.
 `octicon-arrow-up-16.svg` is the upstream ArrowUp Octicon used by the page
 Back-to-top IconButton.
-`octicon-home-16.svg`, `octicon-gear-16.svg`, and
-`octicon-broadcast-16.svg` are unchanged upstream icons used by application
-navigation, settings actions, and network status. The native TitleBar keeps
-its established `settings.svg` and `about.svg` assets as explicit product
-exceptions.
+`octicon-gear-16.svg` and `octicon-broadcast-16.svg` are unchanged upstream
+icons used by settings actions and network status. The application sidebar
+uses the Lucide assets documented in `LUCIDE.md`.
 `octicon-play-16.svg` is the unchanged upstream Play icon used by the UI
 Components registry entry for the application-level Job Run route.
 `octicon-list-unordered-16.svg` and `octicon-table-16.svg` are the unchanged
 upstream controls used by the Project page's list/grid SegmentedControl.
-`octicon-screen-full-16.svg`, `octicon-screen-normal-16.svg`, and
-`octicon-grabber-16.svg` are the unchanged upstream controls used by the global
-terminal drawer.
+`octicon-screen-full-16.svg` and `octicon-screen-normal-16.svg` are the
+unchanged upstream window-mode controls used by the global terminal drawer.
+Its resize handle is painted directly by the application-owned component.
 
 ## GitHub diffstat blocks
 

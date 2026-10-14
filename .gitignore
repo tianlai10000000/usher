@@ -32,4 +32,6 @@ chat-interaction-benchmark-results/
 artifact-preview-interaction-benchmark-results/
 artifact-preview-transition-benchmark-results/
 artifact-preview-scroll-benchmark-results/
+# Local compressed history retained during repository cleanup.
+.local-archives/
 __pycache__/

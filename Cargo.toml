@@ -51,6 +51,11 @@ name = "pr_approval_state_fixture"
 path = "examples/pr_approval_state_fixture.rs"
 required-features = ["test-fixtures"]
 
+[[example]]
+name = "project_bridge_fixture"
+path = "examples/project_bridge_fixture.rs"
+required-features = ["test-fixtures"]
+
 [dependencies]
 # "backend-android-activity-06",
 # 生产构建只启用 FemtoVG/OpenGL。Skia 与 FemtoVG/WGPU 仅用于显式诊断构建：
@@ -230,11 +235,6 @@ inherits = "release"
 lto = "thin"
 codegen-units = 8
 incremental = true
-
-# The profile that 'dist' will build with
-[profile.dist]
-inherits = "release"
-lto = "thin"
 
 [patch.crates-io]
 # Temporary upstream override for the opt-in development live preview only.

@@ -5525,3 +5525,8 @@ slint = false
 [[messages]]
 key = "navigation.more_tabs"
 text = "More"
+
+[[messages]]
+key = "tray.quit"
+text = "Quit"
+slint = false

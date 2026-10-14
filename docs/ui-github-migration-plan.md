@@ -301,7 +301,8 @@ Its final acceptance is grouped with Batch 4 below.
   names; keep every visual component under `ui/components/`.
 - [x] Consolidate application command/status icons on official Octicons and
   remove unused legacy assets; preserve the TitleBar `settings.svg` and
-  `about.svg` exceptions unchanged.
+  `about.svg` exceptions unchanged. This records the original batch acceptance;
+  the unused TitleBar and those exceptions were removed in the 2026-10-14 cleanup.
 - [x] Remove pass-through FAB, terminal-action, loading-button, pagination,
   and spinner duplicates; reuse `GitHubIconButton`, `GitHubButton`, and
   `GitHubSpinner` directly.

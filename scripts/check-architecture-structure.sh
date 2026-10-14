@@ -57,13 +57,35 @@ check_max "AI Review sessions lines" "$(line_count src/ai_review/sessions.rs)" 1
 check_max "Settings save feedback lines" "$(line_count src/settings_feedback.rs)" 110
 check_max "PR Diff bridge callbacks" "$(slint_declaration_count ui/features/pr_review/diff_bridge.slint '^[[:space:]]*(pure[[:space:]]+)?callback[[:space:]]+')" 16
 
+# Batch 6 keeps every original limit above and gives the new owners their own
+# tripwires. Moving an API or method is not permission for unbounded regrowth.
+check_max "AI Review input lines" "$(line_count src/ai_review/review_input.rs)" 330
+check_max "PR Review action presentation lines" "$(line_count src/workflow/pr_review/controller/actions/presentation.rs)" 460
+check_max "PR Review action remote lines" "$(line_count src/workflow/pr_review/controller/actions/remote.rs)" 310
+check_max "Project bridge lines" "$(line_count ui/features/project/bridge.slint)" 70
+check_max "Project bridge callbacks" "$(slint_declaration_count ui/features/project/bridge.slint '^[[:space:]]*(pure[[:space:]]+)?callback[[:space:]]+')" 9
+check_max "Project bridge properties" "$(slint_declaration_count ui/features/project/bridge.slint '^[[:space:]]*(in|out|in-out|private)[[:space:]]+property')" 24
+check_max "Project dialog host lines" "$(line_count ui/features/project/dialog.slint)" 90
+
 reverse_controller_dependencies=$(rg -n 'interactive::|controller::|use super::\*' \
     src/chat/viewport_policy.rs src/chat/message_model.rs src/ai_review/sessions.rs \
     src/workflow/pr_review/controller/diff_bindings.rs \
-    src/workflow/pr_review/controller/diagnostics.rs || true)
+    src/workflow/pr_review/controller/diagnostics.rs \
+    src/ai_review/review_input.rs \
+    src/workflow/pr_review/controller/actions/presentation.rs \
+    src/workflow/pr_review/controller/actions/remote.rs || true)
 if [ -n "$reverse_controller_dependencies" ]; then
     echo "Architecture structure: extracted leaf owners depend on controller internals:" >&2
     echo "$reverse_controller_dependencies" >&2
+    failed=1
+fi
+
+unexpected_leaf_ui=$(rg -n 'MainWindow|WorkflowPrReviewController|ControllerInner' \
+    src/ai_review/review_input.rs \
+    src/workflow/pr_review/controller/actions/remote.rs || true)
+if [ -n "$unexpected_leaf_ui" ]; then
+    echo "Architecture structure: domain/remote leaves depend on UI or controller types:" >&2
+    echo "$unexpected_leaf_ui" >&2
     failed=1
 fi
 

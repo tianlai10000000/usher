@@ -268,6 +268,7 @@ fn ui(
                 notification::sync_hook_language(&app, &messages_for_hook_language);
                 toast::sync_language(&app);
                 chat::sync_language(&app);
+                tray::sync_language();
                 #[cfg(feature = "ai-code-review")]
                 ai_review::sync_language(&app);
                 settings::save_language(canonical);

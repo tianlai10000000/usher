@@ -3,16 +3,15 @@ import { GitHubButton } from "../components/settings/github_settings_controls.sl
 import { GitHubBlankslate } from "../components/github_blankslate.slint";
 import { GitHubPageHeader } from "../components/page/github_page_header.slint";
 import { I18n } from "@i18n";
+import { ProjectBridge } from "../features/project/bridge.slint";
 import {
     GitHubProjectGridCard,
     GitHubProjectIconButton,
     GitHubProjectListRow,
     GitHubProjectSearchField,
-    GitHubProjectViewSwitcher,
-    ProjectItem
+    GitHubProjectViewSwitcher
 } from "../components/project/github_project_components.slint";
 import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
-export { ProjectItem } from "../components/project/github_project_components.slint";
 // Project uses Primer's Card/List collection, medium controls, Labels and
 // Dialog safe-area geometry. See docs/specs/ui-design.md.
 
@@ -34,33 +33,10 @@ export { ProjectItem } from "../components/project/github_project_components.sli
 export component GitHubProjectPage {
     callback navigate(Route);
     callback open-project(string, string, string, string, string, image, bool);
-    callback open-terminal(string, string, string);
-    callback add-project(string, string, string, string, string, string, bool);
-    callback preview-logo(string);
-    callback prepare-hooks(string);
-    callback search-projects(string);
-    callback reload-projects();
 
     in property <length> viewport-height;
     in property <length> viewport-width;
-    in property <[ProjectItem]> projects: [];
-    in-out property <bool> show-add-modal: false;
-    in-out property <string> new-project-name: "";
-    in-out property <string> new-project-alias: "";
-    in-out property <string> new-project-local-repo: "";
-    in-out property <string> new-project-remote-repo: "";
-    in-out property <string> new-project-logo: "";
-    in-out property <string> new-project-tags: "";
-    in-out property <bool> new-project-pr-auto-update: false;
-    in property <image> logo-preview-image: @image-url("../../logo.png");
-    in property <string> logo-preview-status: I18n.projects-using-default-logo;
-    in-out property <string> add-error: "";
-    in-out property <string> modal-mode: "add";
-    in-out property <string> modal-original-alias: "";
-    in-out property <string> search-query: "";
-    in-out property <string> view-mode: "grid";
-    in property <bool> loading: false;
-    in property <string> load-error: "";
+
 
     private property <length> available-width: max(320px, root.width - 32px);
     private property <length> content-width:
@@ -77,7 +53,7 @@ export component GitHubProjectPage {
         : root.content-width >= root.grid-card-min-width * 3 + 32px ? 3
         : root.content-width >= root.grid-card-min-width * 2 + 16px ? 2
         : 1;
-    private property <int> grid-rows: Math.ceil(root.projects.length / root.grid-columns);
+    private property <int> grid-rows: Math.ceil(ProjectBridge.items.length / root.grid-columns);
     // Floor the divided card width. A fractional card width shifts the trailing
     // terminal/edit/delete cluster onto a half-pixel and FemtoVG blurs the SVGs.
     private property <length> grid-card-width:
@@ -113,19 +89,19 @@ export component GitHubProjectPage {
                     text: I18n.projects-new-project;
                     primary: true;
                     clicked => {
-                        root.modal-mode = "add";
-                        root.prepare-hooks("");
-                        root.modal-original-alias = "";
-                        root.new-project-name = "";
-                        root.new-project-alias = "";
-                        root.new-project-local-repo = "";
-                        root.new-project-remote-repo = "";
-                        root.new-project-logo = "";
-                        root.new-project-tags = "";
-                        root.new-project-pr-auto-update = false;
-                        root.preview-logo("");
-                        root.add-error = "";
-                        root.show-add-modal = true;
+                        ProjectBridge.modal-mode = "add";
+                        ProjectBridge.prepare-hooks("");
+                        ProjectBridge.modal-original-alias = "";
+                        ProjectBridge.new-name = "";
+                        ProjectBridge.new-alias = "";
+                        ProjectBridge.new-local-repo = "";
+                        ProjectBridge.new-remote-repo = "";
+                        ProjectBridge.new-logo = "";
+                        ProjectBridge.new-tags = "";
+                        ProjectBridge.new-pr-auto-update = false;
+                        ProjectBridge.preview-logo("");
+                        ProjectBridge.add-error = "";
+                        ProjectBridge.show-add-modal = true;
                     }
                 }
             }
@@ -146,14 +122,14 @@ export component GitHubProjectPage {
                     x: 0px;
                     y: 0px;
                     width: min(360px, parent.width - 136px);
-                    text <=> root.search-query;
-                    accepted(query) => { root.search-projects(query); }
+                    text <=> ProjectBridge.search-query;
+                    accepted(query) => { ProjectBridge.search-projects(query); }
                 }
 
                 GitHubProjectViewSwitcher {
                     x: Math.floor((parent.width - 112px) / 1px) * 1px;
                     y: 0px;
-                    mode <=> root.view-mode;
+                    mode <=> ProjectBridge.view-mode;
                 }
 
                 GitHubProjectIconButton {
@@ -161,34 +137,34 @@ export component GitHubProjectPage {
                     y: 0px;
                     icon: @image-url("../assets/icons/octicon-sync-16.svg");
                     tooltip: I18n.tooltip-reload-projects;
-                    loading: root.loading;
+                    loading: ProjectBridge.list-loading;
                     // Trailing toolbar edge: grow the tip left so it is not clipped.
                     tooltip-end: true;
-                    clicked => { root.reload-projects(); }
+                    clicked => { ProjectBridge.reload-projects(); }
                 }
             }
 
             list-box := Rectangle {
                 width: parent.width;
-                height: root.loading || root.load-error != "" || root.projects.length == 0
-                    ? (root.search-query == "" ? 224px : 184px)
-                    : root.view-mode == "list"
-                        ? root.projects.length * 136px
+                height: ProjectBridge.list-loading || ProjectBridge.list-error != "" || ProjectBridge.items.length == 0
+                    ? (ProjectBridge.search-query == "" ? 224px : 184px)
+                    : ProjectBridge.view-mode == "list"
+                        ? ProjectBridge.items.length * 136px
                         : root.grid-rows * 220px - 16px;
                 border-radius: 6px;
-                border-width: root.loading || root.load-error != ""
-                    || root.projects.length == 0 || root.view-mode == "list"
+                border-width: ProjectBridge.list-loading || ProjectBridge.list-error != ""
+                    || ProjectBridge.items.length == 0 || ProjectBridge.view-mode == "list"
                         ? 1px : 0px;
                 border-color: GitHubTheme.border-default;
-                background: root.loading || root.load-error != ""
-                    || root.projects.length == 0 || root.view-mode == "list"
+                background: ProjectBridge.list-loading || ProjectBridge.list-error != ""
+                    || ProjectBridge.items.length == 0 || ProjectBridge.view-mode == "list"
                     ? (GitHubTheme.canvas-default)
                     : transparent;
                 // Clip row hover fills inside the border so the Box edge stays visible.
-                clip: root.loading || root.load-error != ""
-                    || root.projects.length == 0 || root.view-mode == "list";
+                clip: ProjectBridge.list-loading || ProjectBridge.list-error != ""
+                    || ProjectBridge.items.length == 0 || ProjectBridge.view-mode == "list";
 
-                if root.loading: GitHubBlankslate {
+                if ProjectBridge.list-loading: GitHubBlankslate {
                     width: parent.width;
                     height: parent.height;
                     narrow: true;
@@ -197,54 +173,54 @@ export component GitHubProjectPage {
                     description: I18n.projects-loading-registry;
                 }
 
-                if !root.loading && root.load-error != "": GitHubBlankslate {
+                if !ProjectBridge.list-loading && ProjectBridge.list-error != "": GitHubBlankslate {
                     width: parent.width;
                     height: parent.height;
                     narrow: true;
                     error: true;
                     icon: @image-url("../assets/icons/octicon-alert-16.svg");
                     heading: I18n.projects-load-failed;
-                    description: root.load-error;
+                    description: ProjectBridge.list-error;
                     primary-label: I18n.common-try-again;
-                    primary-clicked => { root.reload-projects(); }
+                    primary-clicked => { ProjectBridge.reload-projects(); }
                 }
 
-                if !root.loading && root.load-error == "" && root.projects.length == 0: GitHubBlankslate {
+                if !ProjectBridge.list-loading && ProjectBridge.list-error == "" && ProjectBridge.items.length == 0: GitHubBlankslate {
                     width: parent.width;
                     height: parent.height;
-                    narrow: root.search-query != "";
-                    icon: root.search-query == ""
+                    narrow: ProjectBridge.search-query != "";
+                    icon: ProjectBridge.search-query == ""
                         ? @image-url("../assets/icons/octicon-repo-16.svg")
                         : @image-url("../assets/icons/octicon-search-16.svg");
-                    heading: root.search-query == "" ? I18n.projects-none : I18n.projects-no-matches;
-                    description: root.search-query == ""
+                    heading: ProjectBridge.search-query == "" ? I18n.projects-none : I18n.projects-no-matches;
+                    description: ProjectBridge.search-query == ""
                         ? I18n.projects-add-repository-to-start
                         : I18n.projects-try-another;
-                    primary-label: root.search-query == "" ? I18n.projects-new-project : "";
+                    primary-label: ProjectBridge.search-query == "" ? I18n.projects-new-project : "";
                     primary-clicked => {
-                        root.modal-mode = "add";
-                        root.prepare-hooks("");
-                        root.modal-original-alias = "";
-                        root.new-project-name = "";
-                        root.new-project-alias = "";
-                        root.new-project-local-repo = "";
-                        root.new-project-remote-repo = "";
-                        root.new-project-logo = "";
-                        root.new-project-tags = "";
-                        root.new-project-pr-auto-update = false;
-                        root.preview-logo("");
-                        root.add-error = "";
-                        root.show-add-modal = true;
+                        ProjectBridge.modal-mode = "add";
+                        ProjectBridge.prepare-hooks("");
+                        ProjectBridge.modal-original-alias = "";
+                        ProjectBridge.new-name = "";
+                        ProjectBridge.new-alias = "";
+                        ProjectBridge.new-local-repo = "";
+                        ProjectBridge.new-remote-repo = "";
+                        ProjectBridge.new-logo = "";
+                        ProjectBridge.new-tags = "";
+                        ProjectBridge.new-pr-auto-update = false;
+                        ProjectBridge.preview-logo("");
+                        ProjectBridge.add-error = "";
+                        ProjectBridge.show-add-modal = true;
                     }
                 }
 
                 // Only mount the active representation. Keeping both the list
                 // rows and grid cards alive made every window resize evaluate
                 // two complete project trees even though one was never painted.
-                for project[index] in (root.view-mode == "list" ? root.projects : []): GitHubProjectListRow {
+                for project[index] in (ProjectBridge.view-mode == "list" ? ProjectBridge.items : []): GitHubProjectListRow {
                     y: index * 136px;
                     width: parent.width;
-                    visible: root.view-mode == "list";
+                    visible: ProjectBridge.view-mode == "list";
                     project: project;
                     first: index == 0;
                     open-requested => {
@@ -252,88 +228,88 @@ export component GitHubProjectPage {
                         root.navigate(Route.Workflow);
                     }
                     terminal-requested => {
-                        root.open-terminal(project.project_name, project.project_alias, project.local_repo);
+                        ProjectBridge.open-terminal(project.project_name, project.project_alias, project.local_repo);
                     }
                     edit-requested => {
-                        root.modal-mode = "edit";
-                        root.prepare-hooks(project.project_alias);
-                        root.modal-original-alias = project.project_alias;
-                        root.new-project-name = project.project_name;
-                        root.new-project-alias = project.project_alias;
-                        root.new-project-local-repo = project.local_repo;
-                        root.new-project-remote-repo = project.remote_repo;
-                        root.new-project-logo = project.logo;
-                        root.new-project-tags = project.project_tags_text;
-                        root.new-project-pr-auto-update = project.is_pr_auto_update;
-                        root.preview-logo(project.logo);
-                        root.add-error = "";
-                        root.show-add-modal = true;
+                        ProjectBridge.modal-mode = "edit";
+                        ProjectBridge.prepare-hooks(project.project_alias);
+                        ProjectBridge.modal-original-alias = project.project_alias;
+                        ProjectBridge.new-name = project.project_name;
+                        ProjectBridge.new-alias = project.project_alias;
+                        ProjectBridge.new-local-repo = project.local_repo;
+                        ProjectBridge.new-remote-repo = project.remote_repo;
+                        ProjectBridge.new-logo = project.logo;
+                        ProjectBridge.new-tags = project.project_tags_text;
+                        ProjectBridge.new-pr-auto-update = project.is_pr_auto_update;
+                        ProjectBridge.preview-logo(project.logo);
+                        ProjectBridge.add-error = "";
+                        ProjectBridge.show-add-modal = true;
                     }
                     delete-requested => {
-                        root.modal-mode = "delete";
-                        root.modal-original-alias = project.project_alias;
-                        root.new-project-name = project.project_name;
-                        root.new-project-alias = project.project_alias;
-                        root.new-project-local-repo = project.local_repo;
-                        root.new-project-remote-repo = project.remote_repo;
-                        root.new-project-logo = project.logo;
-                        root.new-project-tags = project.project_tags_text;
-                        root.new-project-pr-auto-update = project.is_pr_auto_update;
-                        root.add-error = "";
-                        root.show-add-modal = true;
+                        ProjectBridge.modal-mode = "delete";
+                        ProjectBridge.modal-original-alias = project.project_alias;
+                        ProjectBridge.new-name = project.project_name;
+                        ProjectBridge.new-alias = project.project_alias;
+                        ProjectBridge.new-local-repo = project.local_repo;
+                        ProjectBridge.new-remote-repo = project.remote_repo;
+                        ProjectBridge.new-logo = project.logo;
+                        ProjectBridge.new-tags = project.project_tags_text;
+                        ProjectBridge.new-pr-auto-update = project.is_pr_auto_update;
+                        ProjectBridge.add-error = "";
+                        ProjectBridge.show-add-modal = true;
                     }
                 }
 
-                for row-index in (root.view-mode == "grid" ? root.grid-rows : 0): grid-row := HorizontalLayout {
+                for row-index in (ProjectBridge.view-mode == "grid" ? root.grid-rows : 0): grid-row := HorizontalLayout {
                     y: row-index * 220px;
                     width: parent.width;
                     height: 204px;
                     spacing: 16px;
                     alignment: start;
-                    visible: root.view-mode == "grid";
+                    visible: ProjectBridge.view-mode == "grid";
 
                     private property <int> start-index: row-index * root.grid-columns;
                     private property <int> end-index:
-                        Math.min(self.start-index + root.grid-columns, root.projects.length);
+                        Math.min(self.start-index + root.grid-columns, ProjectBridge.items.length);
                     private property <int> cards-in-row: self.end-index - self.start-index;
 
                     for column-index in self.cards-in-row: GitHubProjectGridCard {
                         width: root.grid-card-width;
-                        project: root.projects[grid-row.start-index + column-index];
+                        project: ProjectBridge.items[grid-row.start-index + column-index];
                         open-requested => {
                             root.open-project(self.project.project_name, self.project.project_alias, self.project.local_repo, self.project.remote_repo, self.project.logo, self.project.logo_image, self.project.is_pr_auto_update);
                             root.navigate(Route.Workflow);
                         }
                         terminal-requested => {
-                            root.open-terminal(self.project.project_name, self.project.project_alias, self.project.local_repo);
+                            ProjectBridge.open-terminal(self.project.project_name, self.project.project_alias, self.project.local_repo);
                         }
                         edit-requested => {
-                            root.modal-mode = "edit";
-                            root.prepare-hooks(self.project.project_alias);
-                            root.modal-original-alias = self.project.project_alias;
-                            root.new-project-name = self.project.project_name;
-                            root.new-project-alias = self.project.project_alias;
-                            root.new-project-local-repo = self.project.local_repo;
-                            root.new-project-remote-repo = self.project.remote_repo;
-                            root.new-project-logo = self.project.logo;
-                            root.new-project-tags = self.project.project_tags_text;
-                            root.new-project-pr-auto-update = self.project.is_pr_auto_update;
-                            root.preview-logo(self.project.logo);
-                            root.add-error = "";
-                            root.show-add-modal = true;
+                            ProjectBridge.modal-mode = "edit";
+                            ProjectBridge.prepare-hooks(self.project.project_alias);
+                            ProjectBridge.modal-original-alias = self.project.project_alias;
+                            ProjectBridge.new-name = self.project.project_name;
+                            ProjectBridge.new-alias = self.project.project_alias;
+                            ProjectBridge.new-local-repo = self.project.local_repo;
+                            ProjectBridge.new-remote-repo = self.project.remote_repo;
+                            ProjectBridge.new-logo = self.project.logo;
+                            ProjectBridge.new-tags = self.project.project_tags_text;
+                            ProjectBridge.new-pr-auto-update = self.project.is_pr_auto_update;
+                            ProjectBridge.preview-logo(self.project.logo);
+                            ProjectBridge.add-error = "";
+                            ProjectBridge.show-add-modal = true;
                         }
                         delete-requested => {
-                            root.modal-mode = "delete";
-                            root.modal-original-alias = self.project.project_alias;
-                            root.new-project-name = self.project.project_name;
-                            root.new-project-alias = self.project.project_alias;
-                            root.new-project-local-repo = self.project.local_repo;
-                            root.new-project-remote-repo = self.project.remote_repo;
-                            root.new-project-logo = self.project.logo;
-                            root.new-project-tags = self.project.project_tags_text;
-                            root.new-project-pr-auto-update = self.project.is_pr_auto_update;
-                            root.add-error = "";
-                            root.show-add-modal = true;
+                            ProjectBridge.modal-mode = "delete";
+                            ProjectBridge.modal-original-alias = self.project.project_alias;
+                            ProjectBridge.new-name = self.project.project_name;
+                            ProjectBridge.new-alias = self.project.project_alias;
+                            ProjectBridge.new-local-repo = self.project.local_repo;
+                            ProjectBridge.new-remote-repo = self.project.remote_repo;
+                            ProjectBridge.new-logo = self.project.logo;
+                            ProjectBridge.new-tags = self.project.project_tags_text;
+                            ProjectBridge.new-pr-auto-update = self.project.is_pr_auto_update;
+                            ProjectBridge.add-error = "";
+                            ProjectBridge.show-add-modal = true;
                         }
                     }
                 }

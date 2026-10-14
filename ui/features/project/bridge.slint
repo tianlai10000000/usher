@@ -1,0 +1,42 @@
+import { I18n } from "@i18n";
+import { ProjectItem } from "../../components/project/github_project_components.slint";
+import { ProjectHookChoice } from "../../components/project/github_project_dialog.slint";
+
+// Event-loop presentation and transient draft shared by the Project page and
+// window-root dialog. Durable registry state remains in ProjectStateFacade.
+export global ProjectBridge {
+    in property <[ProjectItem]> items: [];
+    in property <[ProjectHookChoice]> hook-choices: [];
+    in property <int> selected-hook-count: 0;
+    in property <int> selectable-hook-count: 0;
+    in-out property <bool> hooks-enabled: false;
+    in property <bool> hooks-ready: false;
+    in property <string> hooks-status: "";
+    in-out property <bool> show-add-modal: false;
+    in-out property <string> new-name: "";
+    in-out property <string> new-alias: "";
+    in-out property <string> new-local-repo: "";
+    in-out property <string> new-remote-repo: "";
+    in-out property <string> new-logo: "";
+    in-out property <string> new-tags: "";
+    in-out property <bool> new-pr-auto-update: false;
+    in property <image> logo-preview-image: @image-url("../../../logo.png");
+    in property <string> logo-preview-status: I18n.projects-using-default-logo;
+    in-out property <string> add-error: "";
+    in-out property <string> modal-mode: "add";
+    in-out property <string> modal-original-alias: "";
+    in-out property <string> search-query: "";
+    in-out property <string> view-mode: "grid";
+    in-out property <bool> list-loading: false;
+    in-out property <string> list-error: "";
+
+    callback add-project(string, string, string, string, string, string, bool);
+    callback preview-logo(string);
+    callback update-project(string, string, string, string, string, string, string, bool);
+    callback prepare-hooks(string);
+    callback toggle-hook(string, bool);
+    callback delete-project(string);
+    callback search-projects(string);
+    callback reload-projects();
+    callback open-terminal(string, string, string);
+}

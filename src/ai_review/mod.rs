@@ -1,6 +1,7 @@
 mod config;
 mod controller;
 mod response;
+mod review_input;
 mod session_transactions;
 mod sessions;
 mod storage;

@@ -1,0 +1,54 @@
+baseline: ['python3', '-m', 'unittest', 'scripts.tests.test_quality_checks.PolicyTests.test_named_dialog_accepts_imported_inheritance_and_reexport_alias', 'scripts.tests.test_quality_checks.PolicyTests.test_named_dialog_accepts_same_file_inheritance', 'scripts.tests.test_quality_checks.PolicyTests.test_named_dialog_does_not_credit_a_fake_shared_shell']
+base_ref=1890c8ac9eeec812e3eeab1d18cf9546a3bab3b0
+exit=1
+FFF
+======================================================================
+FAIL: test_named_dialog_accepts_imported_inheritance_and_reexport_alias (scripts.tests.test_quality_checks.PolicyTests.test_named_dialog_accepts_imported_inheritance_and_reexport_alias)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/yuankai/yuankai/Demo/rust/usher/scripts/tests/test_quality_checks.py", line 332, in test_named_dialog_accepts_imported_inheritance_and_reexport_alias
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 1 != 0 : UI policy: application surfaces must use fixed-source elevation or direct paint:
+ui/features/project/dialog.slint: component ProjectDialogHost must own exactly one GitHubDialog instance (found 0)
+ui/fixtures/inherited.slint: component InheritedDialog must own exactly one GitHubDialog instance (found 0)
+
+
+======================================================================
+FAIL: test_named_dialog_accepts_same_file_inheritance (scripts.tests.test_quality_checks.PolicyTests.test_named_dialog_accepts_same_file_inheritance)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/yuankai/yuankai/Demo/rust/usher/scripts/tests/test_quality_checks.py", line 340, in test_named_dialog_accepts_same_file_inheritance
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 1 != 0 : UI policy: application surfaces must use fixed-source elevation or direct paint:
+ui/features/project/dialog.slint: component ProjectDialogHost must own exactly one GitHubDialog instance (found 0)
+ui/fixtures/inherited.slint: component InheritedDialog must own exactly one GitHubDialog instance (found 0)
+
+
+======================================================================
+FAIL: test_named_dialog_does_not_credit_a_fake_shared_shell (scripts.tests.test_quality_checks.PolicyTests.test_named_dialog_does_not_credit_a_fake_shared_shell)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/yuankai/yuankai/Demo/rust/usher/scripts/tests/test_quality_checks.py", line 421, in test_named_dialog_does_not_credit_a_fake_shared_shell
+    self.assert_inheritance_rejected("found 0 across its inheritance chain")
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/yuankai/yuankai/Demo/rust/usher/scripts/tests/test_quality_checks.py", line 318, in assert_inheritance_rejected
+    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1 : UI policy checks passed.
+
+
+----------------------------------------------------------------------
+Ran 3 tests in 1.350s
+
+FAILED (failures=3)
+
+candidate: ['python3', '-m', 'unittest', 'scripts.tests.test_quality_checks.PolicyTests.test_named_dialog_accepts_imported_inheritance_and_reexport_alias', 'scripts.tests.test_quality_checks.PolicyTests.test_named_dialog_accepts_same_file_inheritance', 'scripts.tests.test_quality_checks.PolicyTests.test_named_dialog_does_not_credit_a_fake_shared_shell']
+base_ref=None
+exit=0
+...
+----------------------------------------------------------------------
+Ran 3 tests in 1.378s
+
+OK

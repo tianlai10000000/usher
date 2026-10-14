@@ -157,7 +157,10 @@ Workflow scope are separate cleanup boundaries, not equivalent route changes.
 Workflow 域不可达是独立的清理边界，不能把任意离页都当作会话关闭。
 
 `src/workflow/pr_review/controller.rs` owns context, loading and navigation;
-`controller/actions.rs` owns remote actions and capability presentation.
+`controller/actions.rs` owns command admission and guarded completion; its
+`actions/remote.rs` leaf captures repository/credential identity and Hook metadata
+before asynchronous execution, publishes confirmed mutations before Hooks, and
+never writes UI. `actions/presentation.rs` owns capability/readiness/locale projection.
 `controller/diff_bindings.rs` owns the event-loop Diff geometry, selection,
 virtual-list and Find adapters; `controller/diagnostics.rs` owns opt-in evidence.
 The stateless `PrDiffBridge` global in `ui/features/pr_review/diff_bridge.slint`
@@ -165,7 +168,9 @@ is the Rust-facing Diff callback contract. The root only forwards page events;
 request generations, weak-window delivery and project scoping remain unchanged.
 
 `src/workflow/pr_review/controller.rs` 负责上下文、加载和导航，
-`controller/actions.rs` 负责远端动作与能力展示。`controller/diff_bindings.rs`
+`controller/actions.rs` 负责命令准入与受保护的完成回写；`actions/remote.rs` 在异步
+执行前捕获仓库/凭据身份与 Hook 元数据，确认操作成功后先发布共享状态再发 Hook，
+不写 UI。`actions/presentation.rs` 负责能力/就绪状态/国际化投影。`controller/diff_bindings.rs`
 负责 event-loop 上的 Diff 几何、选择、虚拟列表与 Find adapter，
 `controller/diagnostics.rs` 负责显式开启的诊断证据。
 `ui/features/pr_review/diff_bridge.slint` 中无状态的 `PrDiffBridge` global

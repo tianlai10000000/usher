@@ -1,0 +1,7 @@
+Baseline: 1890c8ac9eeec812e3eeab1d18cf9546a3bab3b0
+Initial git status --short: clean
+Command: sh scripts/check-architecture-structure.sh
+Exit: 1
+Architecture structure: root Slint lines is 3101 (budget 3000).
+Architecture structure: root Slint callbacks is 142 (budget 140).
+Architecture structure: root Slint properties is 425 (budget 410).

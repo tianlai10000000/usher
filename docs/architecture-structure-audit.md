@@ -86,7 +86,7 @@ controller 子模块实现，以保留现有七类 generation 与生命周期。
 #63 为 `main` push 接入原 PR 质量门禁，并将真实 Project、Job、Preview、Find
 夹具纳入 Nightly。所有权以中英文架构与对应 spec 为准，实测及验收缺口见
 [`p5-d-performance.md`](p5-d-performance.md)，后续完成状态以
-[`claude-proposal.md`](../claude-proposal.md) 第 20 节为准。以下 7 月路线是历史
+[`optimizing-proposal.md`](../optimizing-proposal.md) 第 20 节为准。以下 7 月路线是历史
 记录，不再作为停止结构治理的当前依据。
 
 ## 2026-07 已完成的结构调整（历史基线）

@@ -119,11 +119,78 @@ fn fixture() { let _ = another_crate::Client::new(); }
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("src/lib.rs lines is 1101 (budget 1100)", result.stderr)
 
+    def test_batch_six_original_limits_accept_boundary_and_reject_growth(self):
+        # Keep these literal: deriving expected limits from the gate would let
+        # a budget increase silently update both the implementation and test.
+        cases = [
+            ("src/ai_review/controller.rs", "AI Review controller lines", 3850, "// fixture\n"),
+            ("ui/main.slint", "root Slint lines", 3000, "// fixture\n"),
+            ("ui/main.slint", "root Slint callbacks", 140, "callback fixture();\n"),
+            ("ui/main.slint", "root Slint properties", 410, "in property <bool> fixture;\n"),
+            ("src/workflow/pr_review/controller/actions.rs", "PR Review remote actions lines", 580, "// fixture\n"),
+        ]
+        for path, label, limit, declaration in cases:
+            with self.subTest(label=label):
+                previous = (self.root / path).read_text()
+                try:
+                    self.write(path, declaration * limit)
+                    self.assert_accepted()
+                    self.write(path, declaration * (limit + 1))
+                    result = self.check()
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertIn(f"{label} is {limit + 1} (budget {limit})", result.stderr)
+                finally:
+                    self.write(path, previous)
+
     def test_existing_runtime_boundary_remains_blocking(self):
         self.write("src/feature.rs", "fn fixture() { let _ = Runtime::new(); }\n")
         result = self.check()
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("Tokio runtime creation escaped", result.stderr)
+
+    def test_extracted_owners_cannot_hide_structural_growth(self):
+        cases = [
+            ("src/ai_review/review_input.rs", "AI Review input lines", 330, "// fixture\n"),
+            ("src/workflow/pr_review/controller/actions/presentation.rs", "PR Review action presentation lines", 460, "// fixture\n"),
+            ("src/workflow/pr_review/controller/actions/remote.rs", "PR Review action remote lines", 310, "// fixture\n"),
+            ("ui/features/project/bridge.slint", "Project bridge lines", 70, "// fixture\n"),
+            ("ui/features/project/bridge.slint", "Project bridge callbacks", 9, "callback fixture();\n"),
+            ("ui/features/project/bridge.slint", "Project bridge properties", 24, "in property <bool> fixture;\n"),
+            ("ui/features/project/dialog.slint", "Project dialog host lines", 90, "// fixture\n"),
+        ]
+        for path, label, limit, declaration in cases:
+            with self.subTest(label=label):
+                target = self.root / path
+                previous = target.read_text() if target.exists() else ""
+                try:
+                    self.write(path, declaration * limit)
+                    self.assert_accepted()
+                    self.write(path, declaration * (limit + 1))
+                    result = self.check()
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertIn(f"{label} is {limit + 1} (budget {limit})", result.stderr)
+                finally:
+                    self.write(path, previous)
+
+    def test_extracted_leaves_cannot_import_controller_or_ui(self):
+        cases = [
+            ("src/ai_review/review_input.rs", "use super::controller::ControllerInner;"),
+            ("src/workflow/pr_review/controller/actions/presentation.rs", "use super::*;"),
+            ("src/workflow/pr_review/controller/actions/remote.rs", "use crate::MainWindow;"),
+            ("src/ai_review/review_input.rs", "use crate::MainWindow;"),
+        ]
+        for path, source in cases:
+            with self.subTest(path=path, source=source):
+                target = self.root / path
+                previous = target.read_text() if target.exists() else ""
+                try:
+                    self.write(path, source + "\n")
+                    result = self.check()
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertIn("Architecture structure:", result.stderr)
+                    self.assertIn(path, result.stderr)
+                finally:
+                    self.write(path, previous)
 
 
 if __name__ == "__main__":

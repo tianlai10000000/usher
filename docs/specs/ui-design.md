@@ -154,12 +154,12 @@ to be a Primer primitive.
   the official round-stroke Lucide assets registered in
   `ui/assets/icons/LUCIDE.md`, because filled Octicons have a visibly heavier
   optical weight than the desktop reference at this size.
-- Repository-host provider marks registered in `ui/assets/icons/PROVIDERS.md`
-  are identity assets rather than command icons. They may only identify the
-  corresponding provider and do not create a general non-Octicon exception.
-- `ui/components/title_bar.slint` may retain `settings.svg` and `about.svg` as
-  the two explicit native-title-bar product exceptions. No other component may
-  introduce a non-Octicon command icon without a documented product decision.
+- Repository-host provider marks are bundled with their band and caption in
+  `ui/assets/provider-ribbons/`, documented in `ui/assets/icons/PROVIDERS.md`.
+  They are identity assets rather than command icons. They may only identify
+  the corresponding provider and do not create a general non-Octicon exception.
+- A component may only introduce a non-Octicon command icon through a
+  documented product decision, such as the sidebar's Lucide exception above.
 
 ## 6. Layout and responsive behavior / 布局与响应式行为
 

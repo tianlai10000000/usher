@@ -4,6 +4,8 @@ use slint::Weak;
 use crate::MainWindow;
 
 mod animation;
+#[cfg(all(target_os = "macos", feature = "test-fixtures"))]
+mod locale_fixture;
 
 // ==================== macOS Native Implementation ====================
 #[cfg(target_os = "macos")]
@@ -11,16 +13,21 @@ mod macos {
     use super::*;
     use objc::runtime::{BOOL, Class, NO, Object, Sel, YES};
     use objc::{msg_send, sel, sel_impl};
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::ffi::CString;
     use std::rc::Rc;
     use std::sync::OnceLock;
 
     const STATUS_ICON_SIZE: f64 = 22.0;
+    const LEFT_MOUSE_UP: u64 = 2;
+    const RIGHT_MOUSE_UP: u64 = 4;
+    const CONTROL_MODIFIER: u64 = 1 << 18;
+    const CLICK_ACTION_MASK: u64 = (1 << LEFT_MOUSE_UP) | (1 << RIGHT_MOUSE_UP);
 
     thread_local! {
         // AppKit images and the Slint timer remain on the event-loop thread.
         static JUMP: RefCell<Option<Rc<animation::Player<NativeImage>>>> = const { RefCell::new(None) };
+        static MENU_TRACKING: Cell<bool> = const { Cell::new(false) };
     }
 
     /// Own the +1 reference returned by NSImage's init methods.
@@ -115,11 +122,9 @@ mod macos {
                 // Set click action on the button
                 let _: () = msg_send![button, setTarget: delegate];
                 let _: () = msg_send![button, setAction: sel!(trayIconClicked:)];
-                // Send action on both left and right mouse down events
-                // NSEventMaskLeftMouseDown = 1 << 1 = 2
-                // NSEventMaskRightMouseDown = 1 << 3 = 8
-                // Combined: 2 | 8 = 10
-                let _: () = msg_send![button, sendActionOn: 10u64];
+                // Open after the completed click, so its release cannot dismiss
+                // the menu's newly entered tracking loop.
+                let _: i64 = msg_send![button, sendActionOn: CLICK_ACTION_MASK];
             }
 
             // Create simple menu with only Quit option (shown on right-click)
@@ -280,7 +285,11 @@ mod macos {
             let menu: *mut Object = msg_send![menu, init];
 
             // Only Quit menu item
-            let quit_item = create_menu_item("Quit", sel!(quitApp:), delegate)?;
+            let quit_item = create_menu_item(
+                &usher_i18n::translate("tray.quit"),
+                sel!(quitApp:),
+                delegate,
+            )?;
             let _: () = msg_send![menu, addItem: quit_item];
 
             Ok(menu)
@@ -347,38 +356,107 @@ mod macos {
         }
     }
 
-    /// Show the tray menu at the status item location
-    unsafe fn show_tray_menu() {
+    pub(super) fn sync_language() {
         unsafe {
-            if TRAY_MENU.is_null() || STATUS_ITEM.is_null() {
-                return;
+            if !TRAY_MENU.is_null() {
+                let quit_item: *mut Object = msg_send![TRAY_MENU, itemAtIndex: 0i64];
+                let title = create_nsstring(&usher_i18n::translate("tray.quit"));
+                let _: () = msg_send![quit_item, setTitle: title];
             }
-            // Pop up the menu below the status item
-            let _: () = msg_send![STATUS_ITEM, popUpStatusItemMenu: TRAY_MENU];
         }
     }
 
-    /// Check if current event is a right-click
-    unsafe fn is_right_click() -> bool {
+    #[cfg(feature = "test-fixtures")]
+    pub(super) fn menu_locale_snapshot() -> Result<(usize, String)> {
+        use std::ffi::{CStr, c_char};
+
+        unsafe {
+            anyhow::ensure!(!TRAY_MENU.is_null(), "native tray menu is unavailable");
+            let count: i64 = msg_send![TRAY_MENU, numberOfItems];
+            anyhow::ensure!(count > 0, "native tray menu has no items");
+            let item: *mut Object = msg_send![TRAY_MENU, itemAtIndex: 0i64];
+            anyhow::ensure!(!item.is_null(), "native Quit item is unavailable");
+            let title: *mut Object = msg_send![item, title];
+            anyhow::ensure!(!title.is_null(), "native Quit title is unavailable");
+            let utf8: *const c_char = msg_send![title, UTF8String];
+            anyhow::ensure!(!utf8.is_null(), "native Quit title has no UTF-8 value");
+            Ok((
+                TRAY_MENU as usize,
+                CStr::from_ptr(utf8).to_str()?.to_owned(),
+            ))
+        }
+    }
+
+    /// Own native tracking across performClick's nested AppKit event loop.
+    /// Quit/teardown may remove the global status item before tracking returns.
+    struct MenuTracking {
+        status_item: *mut Object,
+        button: *mut Object,
+    }
+
+    impl Drop for MenuTracking {
+        fn drop(&mut self) {
+            unsafe {
+                // Restore primary-click routing even after Escape/outside click.
+                let _: () = msg_send![self.status_item, setMenu: std::ptr::null::<Object>()];
+                let _: () = msg_send![self.button, release];
+                let _: () = msg_send![self.status_item, release];
+            }
+            MENU_TRACKING.set(false);
+        }
+    }
+
+    /// Show the tray menu with the supported NSStatusItem.menu path.
+    unsafe fn show_tray_menu() {
+        unsafe {
+            if TRAY_MENU.is_null() || STATUS_ITEM.is_null() || MENU_TRACKING.get() {
+                return;
+            }
+            let button: *mut Object = msg_send![STATUS_ITEM, button];
+            if button.is_null() {
+                return;
+            }
+            let _: () = msg_send![STATUS_ITEM, retain];
+            let _: () = msg_send![button, retain];
+            let tracking = MenuTracking {
+                status_item: STATUS_ITEM,
+                button,
+            };
+            MENU_TRACKING.set(true);
+            // A non-nil menu overrides the button action. performClick enters
+            // native menu tracking without recursively calling trayIconClicked.
+            let _: () = msg_send![tracking.status_item, setMenu: TRAY_MENU];
+            let _: () = msg_send![tracking.button, performClick: std::ptr::null::<Object>()];
+        }
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum ClickAction {
+        ShowWindow,
+        ShowMenu,
+    }
+
+    fn click_action(event_type: u64, modifier_flags: u64) -> Option<ClickAction> {
+        match event_type {
+            RIGHT_MOUSE_UP => Some(ClickAction::ShowMenu),
+            LEFT_MOUSE_UP if modifier_flags & CONTROL_MODIFIER != 0 => Some(ClickAction::ShowMenu),
+            LEFT_MOUSE_UP => Some(ClickAction::ShowWindow),
+            _ => None,
+        }
+    }
+
+    unsafe fn current_click_action() -> Option<ClickAction> {
         unsafe {
             let ns_app_class = Class::get("NSApplication").unwrap();
             let ns_app: *mut Object = msg_send![ns_app_class, sharedApplication];
             let current_event: *mut Object = msg_send![ns_app, currentEvent];
 
             if current_event.is_null() {
-                return false;
+                return None;
             }
-
-            // NSEventTypeRightMouseDown = 3
-            // NSEventTypeRightMouseUp = 4
             let event_type: u64 = msg_send![current_event, type];
-
-            // Also check for control+click (which is also right-click on macOS)
             let modifier_flags: u64 = msg_send![current_event, modifierFlags];
-            // NSEventModifierFlagControl = 1 << 18 = 262144
-            let control_pressed = (modifier_flags & 262144) != 0;
-
-            event_type == 3 || event_type == 4 || control_pressed
+            click_action(event_type, modifier_flags)
         }
     }
 
@@ -399,13 +477,13 @@ mod macos {
             // Right click: show menu
             extern "C" fn tray_icon_clicked(_this: &Object, _cmd: Sel, _sender: *mut Object) {
                 unsafe {
-                    if is_right_click() {
-                        // Right click: show menu
-                        show_tray_menu();
-                    } else {
-                        // Left click: show window
-                        play_jump();
-                        show_main_window();
+                    match current_click_action() {
+                        Some(ClickAction::ShowMenu) => show_tray_menu(),
+                        Some(ClickAction::ShowWindow) => {
+                            play_jump();
+                            show_main_window();
+                        }
+                        None => {}
                     }
                 }
             }
@@ -451,7 +529,9 @@ mod macos {
                 _notification: *mut Object,
             ) {
                 unsafe {
-                    if MAIN_WINDOW.is_null() {
+                    // Menu activation is not a Dock/Cmd-Tab reopen. Bringing
+                    // the hidden main window forward here interrupts tracking.
+                    if MENU_TRACKING.get() || MAIN_WINDOW.is_null() {
                         return;
                     }
                     let is_visible: BOOL = msg_send![MAIN_WINDOW, isVisible];
@@ -603,6 +683,44 @@ mod macos {
     struct NSSize {
         width: f64,
         height: f64,
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn native_menu_copy_resolves_in_each_packaged_language() {
+            assert_eq!(usher_i18n::translate_for("en", "tray.quit"), "Quit");
+            assert_eq!(usher_i18n::translate_for("zh-CN", "tray.quit"), "退出");
+        }
+
+        #[test]
+        fn completed_click_routes_once_to_the_menu_or_window() {
+            for (events, expected) in [
+                ([(1, 0), (2, 0)], ClickAction::ShowWindow),
+                ([(3, 0), (4, 0)], ClickAction::ShowMenu),
+                (
+                    [(1, CONTROL_MODIFIER), (2, CONTROL_MODIFIER)],
+                    ClickAction::ShowMenu,
+                ),
+            ] {
+                let actions = events
+                    .into_iter()
+                    .filter(|(event, _)| CLICK_ACTION_MASK & (1 << event) != 0)
+                    .filter_map(|(event, flags)| click_action(event, flags))
+                    .collect::<Vec<_>>();
+                assert_eq!(actions, vec![expected]);
+            }
+        }
+
+        #[test]
+        fn unrelated_events_never_reveal_the_window_or_open_the_menu() {
+            for event in [0, 1, 3, 5, 10, 11, 12, 25, 26, 27] {
+                assert_eq!(click_action(event, 0), None);
+                assert_eq!(click_action(event, CONTROL_MODIFIER), None);
+            }
+        }
     }
 }
 
@@ -847,13 +965,24 @@ mod other {
 pub fn setup_tray(ui_weak: Weak<MainWindow>) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
-        macos::setup_tray_macos(ui_weak)
+        #[cfg(feature = "test-fixtures")]
+        let fixture_window = ui_weak.clone();
+        macos::setup_tray_macos(ui_weak)?;
+        #[cfg(feature = "test-fixtures")]
+        locale_fixture::start(fixture_window);
+        Ok(())
     }
 
     #[cfg(not(target_os = "macos"))]
     {
         other::setup_tray_other(ui_weak)
     }
+}
+
+/// Refresh an already-created native menu on the Slint event loop.
+pub(crate) fn sync_language() {
+    #[cfg(target_os = "macos")]
+    macos::sync_language();
 }
 
 /// Update tray icon tooltip

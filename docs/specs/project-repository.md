@@ -20,6 +20,10 @@ This specification covers provider metadata resolved on the Project page and the
 - `src/http/mod.rs` owns request execution, interception, timeout/status handling, and safe logging.
 - `src/workflow/pr_list.rs` owns selected-project list presentation, status filters, and
   pagination; `pr_list_state.rs` owns independent typed Page and Totals request generations.
+- `ui/features/project/bridge.slint` owns event-loop presentation and one transient
+  draft shared by the page and root-mounted dialog host. Editing restores the saved
+  prefetch flag; cancelling clears the draft without dispatching a save. Rust uses
+  this bridge directly; durable state remains in the Project facade.
 - `ui/views/project.slint` owns only `GitHubProjectPage` route composition.
   Project controls/cards/dialogs live under `ui/components/project/`; generic
   empty/loading/error presentation is owned by `GitHubBlankslate`.
@@ -36,9 +40,23 @@ This specification covers provider metadata resolved on the Project page and the
 - `src/http/mod.rs` 负责请求执行、拦截、超时/状态处理及安全日志。
 - `src/workflow/pr_list.rs` 负责当前项目的 PR 列表展示、状态筛选和分页；
   `pr_list_state.rs` 负责相互独立的强类型 Page 与 Totals 请求代际。
+- `ui/features/project/bridge.slint` 拥有 event-loop 展示和页面/根层弹窗共用的临时
+  草稿。编辑恢复已保存的预取开关；取消只清草稿、不提交保存。Rust 直接使用此 bridge，
+  持久状态仍归 Project 门面。
 - `ui/views/project.slint` 只负责 `GitHubProjectPage` 路由编排。Project
   控件、卡片和对话框统一位于 `ui/components/project/`；通用空白、加载和错误
   展示由 `GitHubBlankslate` 负责。
+
+## Project presentation input boundary / Project 展示输入边界
+
+The list row's open/focus area and pointer area use the same explicit origin and
+exclude trailing Terminal/Edit/Delete actions. An initially unfocused row must
+allow one pointer click on Edit to open the shared draft; tests must not warm it
+with a preliminary click or invoke the feature callback directly.
+
+列表行的打开/焦点区域与指针区域使用同一显式原点，并避开尾部 Terminal/Edit/Delete
+操作。行尚未聚焦时，单次点击 Edit 就必须打开共享草稿；测试不得先点击预热或直接
+调用 Feature callback。
 
 ## Invariants / 不变量
 

@@ -5,7 +5,8 @@ use slint::{ComponentHandle, Model, VecModel};
 use super::state::ProjectStateFacade;
 
 pub(super) fn selected_ids(ui: &MainWindow) -> Vec<String> {
-    ui.get_project_hook_choices()
+    ui.global::<crate::ProjectBridge>()
+        .get_hook_choices()
         .iter()
         .filter(|row| row.preferred_selected)
         .map(|row| row.id.to_string())
@@ -14,32 +15,35 @@ pub(super) fn selected_ids(ui: &MainWindow) -> Vec<String> {
 
 pub(super) fn bind(ui: &MainWindow, state: ProjectStateFacade) {
     let weak = ui.as_weak();
-    ui.on_project_prepare_hooks(move |alias| {
-        let Some(ui) = weak.upgrade() else { return };
-        let snapshot = state.snapshot();
-        let project = snapshot
-            .state()
-            .projects
-            .iter()
-            .find(|project| !alias.is_empty() && project.project_alias == alias.as_str());
-        let selected = project
-            .map(|project| project.hook_ids.clone())
-            .unwrap_or_default();
-        ui.set_project_hooks_enabled(project.is_some_and(|project| project.hooks_enabled));
-        project_choices(&ui, &selected);
-    });
+    ui.global::<crate::ProjectBridge>()
+        .on_prepare_hooks(move |alias| {
+            let Some(ui) = weak.upgrade() else { return };
+            let snapshot = state.snapshot();
+            let project = snapshot
+                .state()
+                .projects
+                .iter()
+                .find(|project| !alias.is_empty() && project.project_alias == alias.as_str());
+            let selected = project
+                .map(|project| project.hook_ids.clone())
+                .unwrap_or_default();
+            ui.global::<crate::ProjectBridge>()
+                .set_hooks_enabled(project.is_some_and(|project| project.hooks_enabled));
+            project_choices(&ui, &selected);
+        });
     let weak = ui.as_weak();
-    ui.on_project_toggle_hook(move |id, selected| {
-        let Some(ui) = weak.upgrade() else { return };
-        let choices = ui.get_project_hook_choices();
-        if let Some(model) = choices
-            .as_any()
-            .downcast_ref::<VecModel<ProjectHookChoice>>()
-        {
-            set_choice_selected(model, id.as_str(), selected);
-        }
-        update_counts(&ui);
-    });
+    ui.global::<crate::ProjectBridge>()
+        .on_toggle_hook(move |id, selected| {
+            let Some(ui) = weak.upgrade() else { return };
+            let choices = ui.global::<crate::ProjectBridge>().get_hook_choices();
+            if let Some(model) = choices
+                .as_any()
+                .downcast_ref::<VecModel<ProjectHookChoice>>()
+            {
+                set_choice_selected(model, id.as_str(), selected);
+            }
+            update_counts(&ui);
+        });
 }
 
 fn set_choice_selected(model: &VecModel<ProjectHookChoice>, id: &str, selected: bool) {
@@ -56,15 +60,17 @@ fn set_choice_selected(model: &VecModel<ProjectHookChoice>, id: &str, selected: 
 }
 
 fn update_counts(ui: &MainWindow) {
-    let rows = ui.get_project_hook_choices();
-    ui.set_project_selected_hook_count(
-        rows.iter().filter(|row| row.preferred_selected).count() as i32
-    );
-    ui.set_project_selectable_hook_count(rows.iter().filter(|row| row.enabled).count() as i32);
+    let rows = ui.global::<crate::ProjectBridge>().get_hook_choices();
+    ui.global::<crate::ProjectBridge>()
+        .set_selected_hook_count(rows.iter().filter(|row| row.preferred_selected).count() as i32);
+    ui.global::<crate::ProjectBridge>()
+        .set_selectable_hook_count(rows.iter().filter(|row| row.enabled).count() as i32);
 }
 
 pub(crate) fn refresh_hook_choices(ui: &MainWindow) {
-    if ui.get_project_show_add_modal() && ui.get_project_modal_mode() != "delete" {
+    if ui.global::<crate::ProjectBridge>().get_show_add_modal()
+        && ui.global::<crate::ProjectBridge>().get_modal_mode() != "delete"
+    {
         project_choices(ui, &selected_ids(ui));
     }
 }
@@ -74,8 +80,8 @@ fn project_choices(ui: &MainWindow, selected: &[String]) {
     let snapshot = service.as_ref().map(|service| service.state.snapshot());
     let state = snapshot.as_ref().map(|snapshot| snapshot.state());
     let ready = state.is_some_and(|state| state.ready);
-    ui.set_project_hooks_ready(ready);
-    ui.set_project_hooks_status(
+    ui.global::<crate::ProjectBridge>().set_hooks_ready(ready);
+    ui.global::<crate::ProjectBridge>().set_hooks_status(
         if let Some(state) = state.filter(|state| !state.error.is_empty()) {
             state.error.clone().into()
         } else if !ready {
@@ -94,8 +100,15 @@ fn project_choices(ui: &MainWindow, selected: &[String]) {
         .map(|state| state.hooks.as_slice())
         .unwrap_or_default();
     let rows = choices(hooks, selected, state.is_some_and(|state| state.enabled));
-    if ui.get_project_hook_choices().iter().collect::<Vec<_>>() != rows {
-        ui.set_project_hook_choices(std::rc::Rc::new(VecModel::from(rows)).into());
+    if ui
+        .global::<crate::ProjectBridge>()
+        .get_hook_choices()
+        .iter()
+        .collect::<Vec<_>>()
+        != rows
+    {
+        ui.global::<crate::ProjectBridge>()
+            .set_hook_choices(std::rc::Rc::new(VecModel::from(rows)).into());
     }
     update_counts(ui);
 }
@@ -194,16 +207,19 @@ mod tests {
         ]);
         bind(&ui, state.clone());
 
-        ui.invoke_project_prepare_hooks("alpha".into());
-        assert!(ui.get_project_hooks_enabled());
+        ui.global::<crate::ProjectBridge>()
+            .invoke_prepare_hooks("alpha".into());
+        assert!(ui.global::<crate::ProjectBridge>().get_hooks_enabled());
         assert_eq!(selected_ids(&ui), ["hook-one"]);
 
-        ui.invoke_project_prepare_hooks("beta".into());
-        assert!(!ui.get_project_hooks_enabled());
+        ui.global::<crate::ProjectBridge>()
+            .invoke_prepare_hooks("beta".into());
+        assert!(!ui.global::<crate::ProjectBridge>().get_hooks_enabled());
         assert_eq!(selected_ids(&ui), ["hook-two"]);
 
-        ui.invoke_project_prepare_hooks("".into());
-        assert!(!ui.get_project_hooks_enabled());
+        ui.global::<crate::ProjectBridge>()
+            .invoke_prepare_hooks("".into());
+        assert!(!ui.global::<crate::ProjectBridge>().get_hooks_enabled());
         assert!(selected_ids(&ui).is_empty());
         state.shutdown();
     }
@@ -314,25 +330,29 @@ mod tests {
             size: slint::LogicalSize::new(1_000.0, 900.0),
         });
         ui.set_platform_is_macos(false);
-        ui.set_project_hook_choices(ModelRc::new(Rc::new(VecModel::from(vec![
-            ProjectHookChoice {
-                id: "disabled".into(),
-                name: "Disabled Hook".into(),
-                description: "Pull request approved".into(),
-                status: "Disabled".into(),
-                enabled: false,
-                selected: true,
-                preferred_selected: true,
-            },
-        ]))));
-        ui.set_project_selected_hook_count(1);
-        ui.set_project_selectable_hook_count(0);
-        ui.set_project_hooks_ready(true);
-        ui.set_project_show_add_modal(true);
+        ui.global::<crate::ProjectBridge>()
+            .set_hook_choices(ModelRc::new(Rc::new(VecModel::from(vec![
+                ProjectHookChoice {
+                    id: "disabled".into(),
+                    name: "Disabled Hook".into(),
+                    description: "Pull request approved".into(),
+                    status: "Disabled".into(),
+                    enabled: false,
+                    selected: true,
+                    preferred_selected: true,
+                },
+            ]))));
+        ui.global::<crate::ProjectBridge>()
+            .set_selected_hook_count(1);
+        ui.global::<crate::ProjectBridge>()
+            .set_selectable_hook_count(0);
+        ui.global::<crate::ProjectBridge>().set_hooks_ready(true);
+        ui.global::<crate::ProjectBridge>().set_show_add_modal(true);
 
         let activations = Rc::new(Cell::new(0));
         let observed = activations.clone();
-        ui.on_project_toggle_hook(move |_, _| observed.set(observed.get() + 1));
+        ui.global::<crate::ProjectBridge>()
+            .on_toggle_hook(move |_, _| observed.set(observed.get() + 1));
         i_slint_backend_testing::mock_elapsed_time(std::time::Duration::ZERO);
 
         assert!(
@@ -340,7 +360,7 @@ mod tests {
                 .all(|element| element.accessible_label().as_deref() != Some("Disabled Hook"))
         );
 
-        ui.set_project_hooks_enabled(true);
+        ui.global::<crate::ProjectBridge>().set_hooks_enabled(true);
         let form_scroll = ElementHandle::find_by_element_type_name(&ui, "GitHubScrollView")
             .find(|element| element.size().width > 400.0 && element.size().width < 500.0)
             .expect("project form scroll view");

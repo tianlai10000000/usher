@@ -44,7 +44,7 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | [HTTP pipeline](http.md) | Live configurable millisecond timeout with Axios zero semantics and empty-input recovery; explicit response budgets and bounded error reads / 即时可配置毫秒超时、Axios 零值语义与空值恢复；显式响应预算与有界错误读取 | `src/http/mod.rs`, `src/settings/request_preferences.rs`, all HTTP callers |
 | [Cross-page state store](state-store.md) | Current: bounded latest/dirty snapshots, explicit same-state retry and revision/attempt barriers / 当前：有界 latest/dirty 快照、同值显式重试与 revision/attempt 屏障 | `crates/usher-state-store/`, all cross-page state owners and UI bridges |
 | [Shared search navigation](search.md) | Current / 当前 | `crates/usher-search/`, feature Find adapters, PR `find_bridge.rs`, `controller/diff_bindings.rs`, `PrDiffBridge` |
-| [Internationalization](i18n.md) | Implementation current; full-route visual QA pending / 实现当前，全路由视觉验收待完成 | `i18n/`, `crates/usher-i18n/`, `src/i18n.rs`, all user-facing copy |
+| [Internationalization](i18n.md) | Current-invocation catalog inputs and application-linked copy regressions; full-route visual QA pending / 当前调用的 catalog 输入与应用实际链接文案回归；全路由视觉验收待完成 | `i18n/`, `crates/usher-i18n/`, `src/i18n.rs`, all user-facing copy |
 | [AI Agent configuration](ai-agent.md) | Current / 当前 | `src/settings.rs`, `src/ai/agent.rs`, `ui/views/settings.slint` |
 | [AI Code Review](ai-code-review.md) | Current: production Session transactions, real operation receipts, checked reconciliation and guarded UI delivery; aggregate drain acceptance and legacy Chat loader are test-only / 当前：生产 Session 事务、真实操作 receipt、checked 对账与受保护的 UI 投递；聚合 drain 验收及旧版 Chat loader 仅用于测试 | `crates/usher-ai-review/`, `src/ai_review/` (controller, session transactions, sessions, task persistence), `src/agent_response/`, PR list/detail and Settings bridges |
 | [Diagnostic logging](diagnostics.md) | Current: grouped settings, legacy-key migration, lifecycle/failure severity separation and final sink flush / 当前：配置分类、旧键迁移、生命周期/失败日志级别区分及最终 sink flush | `src/settings.rs`, `src/diagnostics.rs`, `src/logger/`, `src/memory_diagnostics.rs`, `src/terminal/`, `src/platform/macos.rs`, `src/shutdown.rs`, `src/lib.rs`, Settings UI and bridges |
@@ -59,9 +59,9 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | [Terminal behavior](terminal.md) | Bounded I/O and asynchronous session shutdown barrier / 有界 IO 与异步会话退出屏障 | `src/terminal/`, `ui/components/drawer/terminal_drawer.slint`, `ui/main.slint` |
 | [Application keyboard shortcuts](shortcuts.md) | Current / 当前 | `src/shortcuts/`, `ui/main.slint`, `src/platform/` |
 | [Application status bar](status-bar.md) | Current / 当前 | `ui/components/status_bar.slint`, `ui/main.slint`, shortcut/notification/network/update state owners |
-| [Tray behavior](tray.md) | Click-triggered original-colour orca jump with static-icon restoration; macOS/Windows native acceptance pending / 点击触发原色虎鲸跳跃并恢复静止图；macOS/Windows 原生验收待完成 | `src/tray.rs`, `src/tray/animation.rs`, `ui/assets/tray-jump/`, `scripts/generate-tray-jump.py` |
+| [Tray behavior](tray.md) | macOS completed-click native menu tracking with activation suppression and live Quit localization; original-colour orca jump and static-icon restoration; macOS/Windows native acceptance pending / macOS 完成点击后进入原生菜单追踪、抑制激活唤起并即时刷新 Quit 语言；原色虎鲸跳跃与静止图恢复；macOS/Windows 原生验收待完成 | `src/tray.rs`, `src/tray/animation.rs`, `src/lib.rs` locale callback, `i18n/`, `ui/assets/tray-jump/`, `scripts/generate-tray-jump.py` |
 | [Application message center](messages.md) | Current: latest durable/dirty state, real flush errors and bounded native FIFO; existing 20-record pages and lifecycle tooltip host / 当前：latest durable/dirty 状态、真实 flush 错误与有界原生 FIFO；保留每页 20 条和生命周期 Tooltip host | `crates/usher-messages/`, `src/message_center.rs`, `src/notification.rs`, message/status UI |
-| [GitHub/Primer UI design](ui-design.md) | Shared numbered Pagination and directional-only fallback / 共享页码 Pagination 与仅方向降级 | `ui/theme/github_theme.slint`, `ui/`, `ui/assets/icons/`, `crates/usher-ui/src/pagination.rs`, all UI contributors |
+| [GitHub/Primer UI design](ui-design.md) | Shared numbered Pagination, active icon inventory and directional-only fallback / 共享页码 Pagination、当前图标清单与仅方向降级 | `ui/theme/github_theme.slint`, `ui/`, `ui/assets/icons/`, `crates/usher-ui/src/pagination.rs`, all UI contributors |
 | [Tooltip implementation contract](tooltips.md) | Mandatory: factory isolation, centered text/anchor, viewport avoidance and lifecycle-owned single-host portals / 强制阅读：工厂隔离、文字与锚点居中、视口避让及生命周期托管的单宿主 Portal | Shared Tooltip/Float/IconButton, factory-owned actions and root portals |
 
 The UI design specification includes the shared small Primer Label geometry,
@@ -141,6 +141,11 @@ button, with a 6 px gap, using the shared Floating UI adapter. / 通知队列菜
 
 Documents that are not specs:
 
+- `docs/local-archives.md`: verified local benchmark/release archive locations
+  and restoration instructions; these are historical evidence, not build inputs.
+
+- `docs/structure-cleanup-20261014.md`: batch 6 ownership extraction, unchanged
+  structure budgets, gate comparisons and validation evidence.
 - `docs/security-maintenance-20261014.md`: dated batches 1–5 findings, regression
   evidence, unresolved platform/release issues and lessons for future agents.
 - `docs/architecture.md`, `docs/architecture.zh.md`: canonical architecture.

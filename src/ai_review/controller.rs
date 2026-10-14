@@ -1,8 +1,8 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+#[cfg(test)]
 use std::fs;
 use std::future::Future;
-use std::hash::{Hash, Hasher};
 #[cfg(any(test, feature = "test-fixtures"))]
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -13,12 +13,11 @@ use std::time::{Duration, Instant};
 use slint::{ComponentHandle, Global, Model, ModelRc, SharedString, VecModel};
 use tokio::sync::Notify;
 use usher_ai_review::{
-    AiModelRef, DEFAULT_DIFF_CHUNK_BYTES, MAX_RULE_BYTES, ProjectReviewKey, PromptProvenance,
-    RepositoryContext, ReviewConversationMessage, ReviewConversationRole, ReviewInput,
-    ReviewResult, ReviewRule, ReviewScheduler, ReviewSession, ReviewTarget, ReviewTaskAction,
-    ReviewTaskActionResult, ReviewTaskId, ReviewTaskState, ReviewTaskStatus, ReviewTaskSummary,
-    RuleBinding, RuleId, RuleSnapshot, chunk_diff, merge_review_results, parse_review_response,
-    reduce_tasks,
+    AiModelRef, DEFAULT_DIFF_CHUNK_BYTES, ProjectReviewKey, PromptProvenance, RepositoryContext,
+    ReviewConversationMessage, ReviewConversationRole, ReviewInput, ReviewResult, ReviewScheduler,
+    ReviewSession, ReviewTarget, ReviewTaskAction, ReviewTaskActionResult, ReviewTaskId,
+    ReviewTaskState, ReviewTaskStatus, ReviewTaskSummary, RuleBinding, RuleId, chunk_diff,
+    merge_review_results, parse_review_response, reduce_tasks,
 };
 #[cfg(any(test, feature = "test-fixtures"))]
 use usher_ai_review::{FindingDiffSide, FindingSeverity, ReviewFinding};
@@ -39,6 +38,12 @@ use crate::{
 
 use super::config::{ReviewConfigFacade, default_session_dir};
 use super::response::{self, ResponseVariant};
+#[cfg(any(test, feature = "test-fixtures"))]
+use super::review_input::bounded_utf8_prefix;
+use super::review_input::{
+    PendingReviewRequest, provisional_chat_input, read_rule_snapshot, target_from_detail,
+    unified_diff_from_detail, validate_model_settings,
+};
 
 #[cfg(test)]
 use super::storage::{reconcile_session_files, session_paths};
@@ -59,7 +64,6 @@ const DOCKED_LIFECYCLE_ENV: &str = "USHER_AI_REVIEW_DOCKED_LIFECYCLE";
 const RESPONSE_LIST_ENV: &str = "USHER_AI_REVIEW_RESPONSE_LIST";
 #[cfg(any(test, feature = "test-fixtures"))]
 const DEFAULT_FIXTURE_DELAY_MS: u64 = 90;
-const MAX_CHAT_DIFF_BYTES: usize = 48 * 1024;
 const MAX_PROJECTED_ASSISTANT_ROWS: usize = 128;
 const MAX_STRUCTURED_ASSISTANT_ROWS: usize = 32;
 
@@ -201,25 +205,6 @@ impl ResponseListPolicy {
     fn virtualizes(self) -> bool {
         self == Self::Virtualized
     }
-}
-
-#[derive(Debug, Clone)]
-struct PendingReviewRequest {
-    project_alias: String,
-    project_key: ProjectReviewKey,
-    project_name: String,
-    local_repo: String,
-    remote_repo: String,
-    repo_type: String,
-    repo_project_id: String,
-    number: String,
-    title: String,
-    author: String,
-    source_branch: String,
-    target_branch: String,
-    updated_at: String,
-    model_name: String,
-    extra_requirements: String,
 }
 
 use super::session_transactions::{SessionSnapshot, SessionTransactions};
@@ -2244,53 +2229,12 @@ async fn build_chat_input(
     fixture: bool,
 ) -> Result<ReviewInput, String> {
     let (target, unified_diff) = load_pull_request_context(request, fixture).await?;
-    let unified_diff_truncated = unified_diff.len() > MAX_CHAT_DIFF_BYTES;
-    let unified_diff = bounded_utf8_prefix(unified_diff.as_str(), MAX_CHAT_DIFF_BYTES).to_string();
-    Ok(ReviewInput {
+    Ok(super::review_input::chat_input(
+        request,
+        settings,
         target,
-        model: AiModelRef {
-            provider: settings.provider.clone(),
-            base_url: settings.base_url.clone(),
-            model: settings.model.clone(),
-        },
         unified_diff,
-        unified_diff_truncated,
-        repository_context: RepositoryContext {
-            local_repo: (!request.local_repo.trim().is_empty())
-                .then(|| PathBuf::from(request.local_repo.clone())),
-            remote_repo: (!request.remote_repo.trim().is_empty())
-                .then(|| request.remote_repo.clone()),
-        },
-        base_rule: None,
-        additional_rules: Vec::new(),
-        extra_requirements: String::new(),
-    })
-}
-
-fn provisional_chat_input(
-    request: &PendingReviewRequest,
-    settings: &AiAgentSettings,
-    target: &ReviewTarget,
-) -> ReviewInput {
-    ReviewInput {
-        target: target.clone(),
-        model: AiModelRef {
-            provider: settings.provider.clone(),
-            base_url: settings.base_url.clone(),
-            model: settings.model.clone(),
-        },
-        unified_diff: String::new(),
-        unified_diff_truncated: false,
-        repository_context: RepositoryContext {
-            local_repo: (!request.local_repo.trim().is_empty())
-                .then(|| PathBuf::from(request.local_repo.clone())),
-            remote_repo: (!request.remote_repo.trim().is_empty())
-                .then(|| request.remote_repo.clone()),
-        },
-        base_rule: None,
-        additional_rules: Vec::new(),
-        extra_requirements: String::new(),
-    }
+    ))
 }
 
 async fn complete_chat(
@@ -2344,17 +2288,6 @@ async fn complete_chat(
         .to_string()
     })?;
     Ok((response, Some(provenance)))
-}
-
-fn bounded_utf8_prefix(value: &str, max_bytes: usize) -> &str {
-    if value.len() <= max_bytes {
-        return value;
-    }
-    let mut end = max_bytes;
-    while end > 0 && !value.is_char_boundary(end) {
-        end -= 1;
-    }
-    &value[..end]
 }
 
 fn user_chat_message(content: String) -> ReviewConversationMessage {
@@ -2956,127 +2889,6 @@ fn latest_active_task_for_pr<'a>(
     latest_task_for_pr(state, project, number).filter(|task| task.status.is_active())
 }
 
-fn target_from_detail(
-    request: &PendingReviewRequest,
-    detail: &crate::git::PullRequestDiffDetail,
-) -> ReviewTarget {
-    ReviewTarget {
-        author_name: detail.author_identity.name.clone(),
-        author_email: detail.author_identity.email.clone(),
-        project_key: request.project_key.clone(),
-        project_name: request.project_name.clone(),
-        pull_request_number: request.number.clone(),
-        pull_request_title: request.title.clone(),
-        base_sha: detail.base_sha.clone(),
-        head_sha: detail.head_sha.clone(),
-        author: request.author.clone(),
-        source_branch: request.source_branch.clone(),
-        target_branch: request.target_branch.clone(),
-        updated_at: request.updated_at.clone(),
-    }
-}
-
-fn unified_diff_from_detail(detail: &crate::git::PullRequestDiffDetail) -> String {
-    let mut output = String::new();
-    for file in &detail.files {
-        let old_path = if file.old_path.trim().is_empty() {
-            file.path.as_str()
-        } else {
-            file.old_path.as_str()
-        };
-        output.push_str("diff --git a/");
-        output.push_str(old_path);
-        output.push_str(" b/");
-        output.push_str(file.path.as_str());
-        output.push('\n');
-        output.push_str("--- a/");
-        output.push_str(old_path);
-        output.push('\n');
-        output.push_str("+++ b/");
-        output.push_str(file.path.as_str());
-        output.push('\n');
-        for line in &file.lines {
-            // Only the provider-reported kind identifies hunk headers. Body
-            // lines whose content merely starts with "@@" must keep their
-            // +/-/space prefix, or the AI receives shifted line numbers.
-            if line.kind == crate::git::DiffLineKind::Hunk {
-                output.push_str(line.content.as_str());
-            } else {
-                output.push(match line.kind {
-                    crate::git::DiffLineKind::Addition => '+',
-                    crate::git::DiffLineKind::Deletion => '-',
-                    _ => ' ',
-                });
-                output.push_str(line.content.as_str());
-            }
-            output.push('\n');
-        }
-    }
-    output
-}
-
-fn read_rule_snapshot(rule: ReviewRule) -> Result<RuleSnapshot, String> {
-    let metadata = fs::metadata(&rule.markdown_path).map_err(|error| {
-        log::warn!(
-            "[AI Review][Rule] Cannot read rule '{}': {error}",
-            rule.name
-        );
-        "ai_review.failure.rule".to_string()
-    })?;
-    if !metadata.is_file() {
-        log::warn!("[AI Review][Rule] Rule '{}' is not a file", rule.name);
-        return Err("ai_review.failure.rule".to_string());
-    }
-    if metadata.len() > MAX_RULE_BYTES {
-        log::warn!(
-            "[AI Review][Rule] Rule '{}' exceeds the {} KiB limit",
-            rule.name,
-            MAX_RULE_BYTES / 1024
-        );
-        return Err("ai_review.failure.rule".to_string());
-    }
-    let is_markdown = rule
-        .markdown_path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            matches!(extension.to_ascii_lowercase().as_str(), "md" | "markdown")
-        });
-    if !is_markdown {
-        log::warn!("[AI Review][Rule] Rule '{}' is not Markdown", rule.name);
-        return Err("ai_review.failure.rule".to_string());
-    }
-    let content = fs::read_to_string(&rule.markdown_path).map_err(|error| {
-        log::warn!(
-            "[AI Review][Rule] Cannot read rule '{}': {error}",
-            rule.name
-        );
-        "ai_review.failure.rule".to_string()
-    })?;
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    content.hash(&mut hasher);
-    Ok(RuleSnapshot {
-        id: rule.id,
-        name: rule.name,
-        markdown_path: rule.markdown_path,
-        content,
-        content_hash: format!("{:016x}", hasher.finish()),
-    })
-}
-
-fn validate_model_settings(settings: &AiAgentSettings) -> Result<(), String> {
-    if settings.base_url.trim().is_empty() {
-        return Err("ai_review.failure.configure_base_url".to_string());
-    }
-    if settings.api_key.trim().is_empty() {
-        return Err("ai_review.failure.configure_api_key".to_string());
-    }
-    if settings.model.trim().is_empty() {
-        return Err("ai_review.failure.configure_model".to_string());
-    }
-    Ok(())
-}
-
 #[cfg(any(test, feature = "test-fixtures"))]
 fn fixture_enabled() -> bool {
     std::env::var("USHER_AI_REVIEW_FIXTURE").is_ok_and(|value| value == FIXTURE_NAME)
@@ -3409,6 +3221,7 @@ mod tests {
     use crate::git::{PullRequestDiffFile, PullRequestDiffLine};
     use slint::platform::{PointerEventButton, WindowEvent};
     use slint::{ComponentHandle, LogicalPosition, LogicalSize};
+    use usher_ai_review::ReviewRule;
 
     #[test]
     fn hidden_pr_ai_review_rows_hydrate_on_visible_list_return() {

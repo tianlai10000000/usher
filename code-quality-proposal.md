@@ -8,7 +8,7 @@
 
 ## 范围与结论
 
-本文补充 `claude-proposal.md`，关注代码表达、类型设计、局部重复、函数接口和可维护性，不重复展开架构、性能、发布与安全专项。
+本文补充 `optimizing-proposal.md`，关注代码表达、类型设计、局部重复、函数接口和可维护性，不重复展开架构、性能、发布与安全专项。
 
 结论来自对 Git、Tag、Chat、Job、Toast 和文本几何代码的抽查，不代表全仓逐行审计。2026-09-08 复核开始时工作区干净；实施按下方批次记录持续更新。上一轮的测试结果保留在历史记录中，不作为已完成批次的验收结果。
 
@@ -32,7 +32,7 @@
 - `src/workflow/pr_review/controller/diff_bindings.rs`、`ui/features/pr_review/diff_bridge.slint`：Diff 服务已归无状态 `PrDiffBridge`；Find 后台扫描与取消由 `find_worker.rs`、`find_bridge.rs` 承担。
 - `src/chat/viewport_policy.rs`、`message_model.rs` 和 `src/ai_review/sessions.rs` 已承接提取后的职责。本轮只处理请求状态和 Diff 类型相关调用，不重新划分这些模块。
 
-这些前提已核对相应代码；P5 的完整性能结论与手工验收范围仍以 `claude-proposal.md` 第 18–20 节及对应性能记录为准。CQ-B2 已按相同 P5-B #58 生产 fixture 重跑专项 A/B，结果见文末实施记录。
+这些前提已核对相应代码；P5 的完整性能结论与手工验收范围仍以 `optimizing-proposal.md` 第 18–20 节及对应性能记录为准。CQ-B2 已按相同 P5-B #58 生产 fixture 重跑专项 A/B，结果见文末实施记录。
 
 ## CQ-01：命令返回值混合业务数据与展示日志
 
@@ -316,7 +316,7 @@ create 返回包含名称、argv 和说明的 `PlannedCommand`，remove 却返�
 | `./scripts/check-ui-policy.sh` | 通过 |
 | `cargo test --lib --locked`（沙箱外） | 523 通过、1 失败、2 忽略；两项 Logo loader 测试通过 |
 
-失败项为 `chat::interactive::pagination_tests::real_layout_prepend_and_bidirectional_scrolling`，断言位于 `src/chat/pagination_tests.rs:174`：`Ai: viewport must contain a real message at 9984`。与 `claude-proposal.md` 第 20 节的 P5-D 记录一致，属于开始本轮优化前可复现的基线失败；本轮仅记录，未修复或忽略该测试。
+失败项为 `chat::interactive::pagination_tests::real_layout_prepend_and_bidirectional_scrolling`，断言位于 `src/chat/pagination_tests.rs:174`：`Ai: viewport must contain a real message at 9984`。与 `optimizing-proposal.md` 第 20 节的 P5-D 记录一致，属于开始本轮优化前可复现的基线失败；本轮仅记录，未修复或忽略该测试。
 
 库测试还报告 `__eh_frame` 过大的链接器警告，与上一轮同类；未作为本次代码质量批次的新优化项。
 

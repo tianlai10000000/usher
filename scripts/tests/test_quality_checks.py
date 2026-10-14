@@ -51,6 +51,7 @@ class PolicyTests(unittest.TestCase):
             "ui/components/dialog/github_dialog.slint",
             "ui/components/dialog/dialog_enhance.slint",
             "ui/components/project/github_project_dialog.slint",
+            "ui/features/project/dialog.slint",
             "ui/components/settings/github_hook_settings.slint",
             "ui/components/update/update.slint",
             "ui/components/github_action_menu.slint",
@@ -240,6 +241,7 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("private vendored Material", result.stderr)
 
     def test_hook_code_editor_current_lifecycle_owner_is_accepted(self):
+        self.copy_elevation_fixture()
         path = "ui/components/settings/github_hook_settings.slint"
         self.write(path, (ROOT / path).read_text())
         result = self.check()
@@ -303,6 +305,130 @@ class PolicyTests(unittest.TestCase):
             "component RogueDialog must own exactly one GitHubDialog instance",
             result.stderr,
         )
+
+    def write_inherited_dialog(self, imports, base="BaseSurface", body=""):
+        self.copy_elevation_fixture()
+        self.write(
+            "ui/fixtures/inherited.slint",
+            f"{imports}\nexport component InheritedDialog inherits {base} {{ {body} }}\n",
+        )
+
+    def assert_inheritance_rejected(self, detail):
+        result = self.check()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(
+            "component InheritedDialog must own exactly one GitHubDialog instance",
+            result.stderr,
+        )
+        self.assertIn(detail, result.stderr)
+
+    def test_named_dialog_accepts_imported_inheritance_and_reexport_alias(self):
+        self.write_inherited_dialog('import { Surface as BaseSurface } from "./barrel.slint";')
+        self.write(
+            "ui/fixtures/barrel.slint",
+            'export { GitHubProjectDialog as Surface } from "../components/project/github_project_dialog.slint";\n',
+        )
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_named_dialog_accepts_same_file_inheritance(self):
+        self.write_inherited_dialog(
+            'import { GitHubProjectDialog } from "../components/project/github_project_dialog.slint";\n'
+            'component BaseSurface inherits GitHubProjectDialog {}'
+        )
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_named_dialog_rejects_zero_shell_through_inheritance(self):
+        self.write_inherited_dialog("component BaseSurface inherits Rectangle {}")
+        self.assert_inheritance_rejected("found 0 across its inheritance chain")
+
+    def test_named_dialog_rejects_inherited_plus_direct_aliased_shell(self):
+        self.write_inherited_dialog(
+            'import { GitHubProjectDialog as BaseSurface } from "../components/project/github_project_dialog.slint";\n'
+            'import { GitHubDialog as ExtraShell } from "../components/dialog/github_dialog.slint";',
+            body="ExtraShell {}",
+        )
+        self.assert_inheritance_rejected("found 2 across its inheritance chain")
+
+    def test_inherited_dialog_rejects_extra_wrapper_subtree(self):
+        self.write_inherited_dialog(
+            'import { GitHubProjectDialog } from "../components/project/github_project_dialog.slint";',
+            base="GitHubProjectDialog",
+            body="GitHubProjectDialog {}",
+        )
+        self.assert_inheritance_rejected("inherited Dialog adapter must not add component instances")
+
+    def test_inherited_dialog_rejects_extra_wrapper_alias_subtree(self):
+        self.write_inherited_dialog(
+            'import { GitHubProjectDialog as BaseSurface } from "../components/project/github_project_dialog.slint";',
+            body="BaseSurface {}",
+        )
+        self.assert_inheritance_rejected("inherited Dialog adapter must not add component instances")
+
+    def test_inherited_dialog_rejects_an_unproven_visual_subtree(self):
+        self.write_inherited_dialog(
+            'import { GitHubProjectDialog as BaseSurface } from "../components/project/github_project_dialog.slint";',
+            body="Rectangle {}",
+        )
+        self.assert_inheritance_rejected("inherited Dialog adapter must not add component instances")
+
+    def test_named_dialog_rejects_local_inheritance_cycle(self):
+        self.write_inherited_dialog("component BaseSurface inherits InheritedDialog {}")
+        self.assert_inheritance_rejected("cyclic Dialog inheritance")
+
+    def test_named_dialog_rejects_reexport_binding_cycle(self):
+        self.write_inherited_dialog('import { BaseSurface } from "./first.slint";')
+        self.write("ui/fixtures/first.slint", 'export { BaseSurface } from "./second.slint";\n')
+        self.write("ui/fixtures/second.slint", 'export { BaseSurface } from "./first.slint";\n')
+        self.assert_inheritance_rejected("cyclic component binding")
+
+    def test_named_dialog_rejects_ambiguous_ancestor_import(self):
+        self.write_inherited_dialog(
+            'import { GitHubProjectDialog as BaseSurface } from "../components/project/github_project_dialog.slint";\n'
+            'import { GitHubProjectDialog as BaseSurface } from "../components/project/github_project_dialog.slint";'
+        )
+        self.assert_inheritance_rejected("ambiguous component ui/fixtures/inherited.slint:BaseSurface")
+
+    def test_named_dialog_rejects_duplicate_ancestor_definition(self):
+        self.write_inherited_dialog(
+            'import { GitHubProjectDialog } from "../components/project/github_project_dialog.slint";\n'
+            'component BaseSurface inherits GitHubProjectDialog {}\n'
+            'component BaseSurface inherits GitHubProjectDialog {}'
+        )
+        self.assert_inheritance_rejected("ambiguous component ui/fixtures/inherited.slint:BaseSurface")
+
+    def test_named_dialog_does_not_resolve_same_name_from_another_file(self):
+        self.write_inherited_dialog(
+            'import { GitHubProjectDialog as BaseSurface } from "./unrelated.slint";'
+        )
+        self.write(
+            "ui/fixtures/unrelated.slint",
+            "export component GitHubProjectDialog inherits Rectangle {}\n",
+        )
+        self.assert_inheritance_rejected("found 0 across its inheritance chain")
+
+    def test_named_dialog_does_not_credit_a_fake_shared_shell(self):
+        self.write(
+            "ui/fixtures/dialog.slint",
+            'import { GitHubDialog } from "./fake.slint";\n'
+            'export component InheritedDialog { GitHubDialog {} }\n',
+        )
+        self.write(
+            "ui/fixtures/fake.slint",
+            "export component GitHubDialog inherits Rectangle {}\n",
+        )
+        self.assert_inheritance_rejected("found 0 across its inheritance chain")
+
+    def test_named_dialog_rejects_missing_or_private_imported_ancestor(self):
+        self.write_inherited_dialog('import { BaseSurface } from "./private.slint";')
+        self.assert_inheritance_rejected("missing component source")
+        self.write("ui/fixtures/private.slint", "component BaseSurface inherits Rectangle {}\n")
+        self.assert_inheritance_rejected("unresolved or ambiguous component")
+
+    def test_named_dialog_rejects_unresolved_library_ancestor(self):
+        self.write_inherited_dialog('import { BaseSurface } from "@unknown";')
+        self.assert_inheritance_rejected("missing component source")
 
     def test_named_modal_comments_and_strings_do_not_satisfy_the_shared_shell(self):
         self.write(

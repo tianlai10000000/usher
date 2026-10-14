@@ -18,8 +18,12 @@ import { GitHubAiReviewPanel, AiReviewTaskItem, AiReviewRuleChoice, AiReviewFind
 import { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffRowMetric, WorkflowPrDiffVirtualWindow, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffGlyphRange, WorkflowPrDiffGlyphRect, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit, GitHubHeaderActionStrip } from "./components/pr_review/shell.slint";
 import { JobLogLineItem, JobStepItem } from "./components/jobs/job.slint";
 
-import { GitHubProjectPage as ProjectPage, ProjectItem } from "./views/project.slint";
-import { GitHubProjectDialog, ProjectHookChoice } from "./components/project/github_project_dialog.slint";
+import { GitHubProjectPage as ProjectPage } from "./views/project.slint";
+import { ProjectBridge } from "./features/project/bridge.slint";
+import { ProjectDialogHost } from "./features/project/dialog.slint";
+export { ProjectBridge } from "./features/project/bridge.slint";
+export { ProjectItem } from "./components/project/github_project_components.slint";
+export { ProjectHookChoice } from "./components/project/github_project_dialog.slint";
 import { GitHubChatPage as ChatPage, ChatMessage, ChatSelectionRect, MessageRole, MessageStatus } from "./views/chat.slint";
 import { Route } from "./route/routeMap.slint";
 import { AppState, LanguageOption } from "./state/app_state.slint";
@@ -309,7 +313,7 @@ export component MainWindow inherits Window {
                 || root.workflow-pr-revert-dialog-open
                 || root.workflow-pr-commit-range-dialog-open);
     out property <bool> modal-overlay-visible:
-        root.project-show-add-modal
+        ProjectBridge.show-add-modal
             || (root.current-route == Route.Settings && root.settings-hook-dialog-open)
             || root.pr-review-dialog-visible
             || (DialogManager.visible && DialogManager.overlay)
@@ -593,30 +597,6 @@ export component MainWindow inherits Window {
     in property <string> workflow-open-local-folder-tooltip: I18n.workflow-show-in-file-manager;
     in property <string> workflow-project-logo: "";
     in property <image> workflow-project-logo-image: @image-url("../logo.png");
-    in property <[ProjectItem]> project-items: [];
-    in property <[ProjectHookChoice]> project-hook-choices: [];
-    in property <int> project-selected-hook-count: 0;
-    in property <int> project-selectable-hook-count: 0;
-    in-out property <bool> project-hooks-enabled: false;
-    in property <bool> project-hooks-ready: false;
-    in property <string> project-hooks-status: "";
-    in-out property <bool> project-show-add-modal: false;
-    in-out property <string> project-new-name: "";
-    in-out property <string> project-new-alias: "";
-    in-out property <string> project-new-local-repo: "";
-    in-out property <string> project-new-remote-repo: "";
-    in-out property <string> project-new-logo: "";
-    in-out property <string> project-new-tags: "";
-    in-out property <bool> project-new-pr-auto-update: false;
-    in property <image> project-logo-preview-image: @image-url("../logo.png");
-    in property <string> project-logo-preview-status: I18n.projects-using-default-logo;
-    in-out property <string> project-add-error: "";
-    in-out property <string> project-modal-mode: "add";
-    in-out property <string> project-modal-original-alias: "";
-    in-out property <string> project-search-query: "";
-    in-out property <string> project-view-mode: "grid";
-    in-out property <bool> project-list-loading: false;
-    in-out property <string> project-list-error: "";
     in-out property <bool> settings-git-tokens-saved: false;
     in-out property <bool> settings-git-hosting-config-saved: false;
     in-out property <bool> settings-ai-agent-saved: false;
@@ -914,15 +894,6 @@ export component MainWindow inherits Window {
     callback shell-drawer-selection-mode-changed(bool);
     callback page-memory-diag(Route, int, int, bool);
     callback workflow-open-project(string, string, string, string, string, image, bool);
-    callback project-add-project(string, string, string, string, string, string, bool);
-    callback project-preview-logo(string);
-    callback project-update-project(string, string, string, string, string, string, string, bool);
-    callback project-prepare-hooks(string);
-    callback project-toggle-hook(string, bool);
-    callback project-delete-project(string);
-    callback project-search-projects(string);
-    callback project-reload-projects();
-    callback project-open-terminal(string, string, string);
 
     init => {
         // TODO: delete
@@ -1517,44 +1488,9 @@ export component MainWindow inherits Window {
                         if root.current-route == Route.Project: ProjectPage {
                             viewport-height: page-scroll-view.visible-height;
                             viewport-width: page-scroll-view.visible-width;
-                            navigate(route) => {
-                                root.navigate(route);
-                            }
-                            projects: root.project-items;
-                            search-query <=> root.project-search-query;
-                            view-mode <=> root.project-view-mode;
-                            loading: root.project-list-loading;
-                            load-error: root.project-list-error;
-                            show-add-modal <=> root.project-show-add-modal;
-                            new-project-name <=> root.project-new-name;
-                            new-project-alias <=> root.project-new-alias;
-                            new-project-local-repo <=> root.project-new-local-repo;
-                            new-project-remote-repo <=> root.project-new-remote-repo;
-                            new-project-logo <=> root.project-new-logo;
-                            new-project-tags <=> root.project-new-tags;
-                            logo-preview-image: root.project-logo-preview-image;
-                            logo-preview-status: root.project-logo-preview-status;
-                            add-error <=> root.project-add-error;
-                            modal-mode <=> root.project-modal-mode;
-                            modal-original-alias <=> root.project-modal-original-alias;
+                            navigate(route) => { root.navigate(route); }
                             open-project(project-name, project-alias, local-repo, remote-repo, logo, logo-image, is-pr-auto-update) => {
                                 root.workflow-open-project(project-name, project-alias, local-repo, remote-repo, logo, logo-image, is-pr-auto-update);
-                            }
-                            add-project(project-name, project-alias, local-repo, remote-repo, logo, project-tags, is-pr-auto-update) => {
-                                root.project-add-project(project-name, project-alias, local-repo, remote-repo, logo, project-tags, is-pr-auto-update);
-                            }
-                            preview-logo(logo) => {
-                                root.project-preview-logo(logo);
-                            }
-                            prepare-hooks(alias) => { root.project-prepare-hooks(alias); }
-                            search-projects(query) => {
-                                root.project-search-projects(query);
-                            }
-                            reload-projects() => {
-                                root.project-reload-projects();
-                            }
-                            open-terminal(project-name, project-alias, local-repo) => {
-                                root.project-open-terminal(project-name, project-alias, local-repo);
                             }
                         }
                     }
@@ -2270,68 +2206,13 @@ export component MainWindow inherits Window {
         }
     }
 
-    GitHubProjectDialog {
+    ProjectDialogHost {
         x: 0;
         y: 0;
         width: root.width;
         z: 1200;
-        // Modal backdrops cover the complete application window, including
-        // the persistent bottom status bar.
+        // Cover the complete window, including the persistent status bar.
         height: root.height;
-        modal-visible: root.project-show-add-modal;
-        mode: root.project-modal-mode;
-        original-alias: root.project-modal-original-alias;
-        name <=> root.project-new-name;
-        alias <=> root.project-new-alias;
-        local-repo <=> root.project-new-local-repo;
-        remote-repo <=> root.project-new-remote-repo;
-        logo <=> root.project-new-logo;
-        project-tags <=> root.project-new-tags;
-        is-pr-auto-update <=> root.project-new-pr-auto-update;
-        hook-choices: root.project-hook-choices;
-        selected-hook-count: root.project-selected-hook-count;
-        selectable-hook-count: root.project-selectable-hook-count;
-        hooks-enabled <=> root.project-hooks-enabled;
-        hooks-ready: root.project-hooks-ready;
-        hooks-status: root.project-hooks-status;
-        toggle-hook(id, value) => { root.project-toggle-hook(id, value); }
-        logo-preview-image: root.project-logo-preview-image;
-        logo-preview-status: root.project-logo-preview-status;
-        error-text <=> root.project-add-error;
-        preview-logo(logo) => {
-            root.project-preview-logo(logo);
-        }
-        submit(name, alias, local-repo, remote-repo, logo, project-tags, is-pr-auto-update) => {
-            if root.project-modal-mode == "edit" {
-                root.project-update-project(root.project-modal-original-alias, name, alias, local-repo, remote-repo, logo, project-tags, is-pr-auto-update);
-            } else {
-                root.project-add-project(name, alias, local-repo, remote-repo, logo, project-tags, is-pr-auto-update);
-            }
-            root.project-show-add-modal = false;
-            root.project-modal-mode = "add";
-            root.project-modal-original-alias = "";
-        }
-        confirm-delete(alias) => {
-            root.project-delete-project(alias);
-            root.project-show-add-modal = false;
-            root.project-modal-mode = "add";
-            root.project-modal-original-alias = "";
-        }
-        cancel => {
-            root.project-new-name = "";
-            root.project-new-alias = "";
-            root.project-new-local-repo = "";
-            root.project-new-remote-repo = "";
-            root.project-new-logo = "";
-            root.project-new-tags = "";
-            root.project-new-pr-auto-update = false;
-            root.project-hooks-enabled = false;
-            root.project-preview-logo("");
-            root.project-add-error = "";
-            root.project-show-add-modal = false;
-            root.project-modal-mode = "add";
-            root.project-modal-original-alias = "";
-        }
     }
 
     if root.current-route == Route.PrReview: GitHubPullRequestReviewPage {

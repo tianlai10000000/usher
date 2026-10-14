@@ -5485,3 +5485,7 @@ msgstr "默认 PR 合并方式已保存。"
 msgctxt "settings.feedback.default_pr_merge_method_save_failed"
 msgid "Default PR merge method could not be saved."
 msgstr "无法保存默认 PR 合并方式。"
+
+msgctxt "tray.quit"
+msgid "Quit"
+msgstr "退出"

@@ -3,7 +3,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::{MainWindow, Route};
-use slint::Model;
+use slint::{ComponentHandle, Model};
 
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -320,7 +320,7 @@ pub(crate) fn log_ui_models(ui: &MainWindow, route: Route) {
         }
     }
 
-    let projects = ui.get_project_items();
+    let projects = ui.global::<crate::ProjectBridge>().get_items();
     let mut project_text_bytes = 0usize;
     let mut project_tags = 0usize;
     for index in 0..projects.row_count() {

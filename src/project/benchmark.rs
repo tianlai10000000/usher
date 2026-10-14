@@ -42,8 +42,10 @@ pub(super) fn setup(ui: &MainWindow, state: &ProjectStateFacade) {
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = weak.upgrade() {
                         let query = if round % 2 == 0 { "project 1" } else { "" };
-                        ui.set_project_search_query(query.into());
-                        ui.invoke_project_search_projects(query.into());
+                        ui.global::<crate::ProjectBridge>()
+                            .set_search_query(query.into());
+                        ui.global::<crate::ProjectBridge>()
+                            .invoke_search_projects(query.into());
                         log::info!(
                             "[P5][57] round={round} dispatch_to_ui_us={}",
                             began.elapsed().as_micros()
@@ -55,7 +57,7 @@ pub(super) fn setup(ui: &MainWindow, state: &ProjectStateFacade) {
             tokio::time::sleep(Duration::from_secs(3)).await;
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = window.upgrade() {
-                    let model = ui.get_project_items();
+                    let model = ui.global::<crate::ProjectBridge>().get_items();
                     let updated = (0..model.row_count())
                         .filter(|&i| {
                             model
@@ -250,9 +252,12 @@ fn setup_home_return_attribution(ui: &MainWindow, state: &ProjectStateFacade) ->
     let interaction = interaction.expect("validated interaction");
     let timing = timing.expect("validated timing");
     ui.window().set_size(slint::LogicalSize::new(800.0, 600.0));
-    ui.set_project_show_add_modal(false);
-    ui.set_project_search_query("".into());
-    ui.set_project_view_mode("grid".into());
+    ui.global::<crate::ProjectBridge>()
+        .set_show_add_modal(false);
+    ui.global::<crate::ProjectBridge>()
+        .set_search_query("".into());
+    ui.global::<crate::ProjectBridge>()
+        .set_view_mode("grid".into());
 
     let weak = ui.as_weak();
     let state = state.clone();
@@ -303,11 +308,11 @@ fn wait_for_projection(
         };
         let snapshot = state.snapshot();
         let hydrated_rows = snapshot.state().projects.len();
-        let projected_rows = ui.get_project_items().row_count();
+        let projected_rows = ui.global::<crate::ProjectBridge>().get_items().row_count();
         let ready = snapshot.state().hydrated
             && hydrated_rows == arm.expected_rows()
             && projected_rows == arm.expected_rows()
-            && !ui.get_project_list_loading();
+            && !ui.global::<crate::ProjectBridge>().get_list_loading();
         if ready {
             log::info!(
                 "[Memory][ProjectHome] event=projection_ready arm={} hydrated_rows={} projected_rows={}",
@@ -327,7 +332,7 @@ fn wait_for_projection(
                 snapshot.state().hydrated,
                 hydrated_rows,
                 projected_rows,
-                ui.get_project_list_loading(),
+                ui.global::<crate::ProjectBridge>().get_list_loading(),
             );
             crate::shutdown::request_shutdown("project-home-projection-timeout");
         }
@@ -352,11 +357,14 @@ fn publish_home_phase(
     } else {
         "returned_home_2"
     };
-    let projected_rows = ui.get_project_items().row_count();
+    let projected_rows = ui.global::<crate::ProjectBridge>().get_items().row_count();
     let valid = ui.get_current_route() == Route::Home
-        && !ui.get_project_show_add_modal()
-        && ui.get_project_search_query().is_empty()
-        && ui.get_project_view_mode().as_str() == "grid"
+        && !ui.global::<crate::ProjectBridge>().get_show_add_modal()
+        && ui
+            .global::<crate::ProjectBridge>()
+            .get_search_query()
+            .is_empty()
+        && ui.global::<crate::ProjectBridge>().get_view_mode().as_str() == "grid"
         && projected_rows == arm.expected_rows();
     log::info!(
         "[Memory][ProjectHome] event=phase_ready phase={phase} arm={} interaction={} round={} route={:?} projected_rows={} modal_visible={} query_empty={} view_mode={} valid={}",
@@ -365,9 +373,11 @@ fn publish_home_phase(
         completed_round,
         ui.get_current_route(),
         projected_rows,
-        ui.get_project_show_add_modal(),
-        ui.get_project_search_query().is_empty(),
-        ui.get_project_view_mode(),
+        ui.global::<crate::ProjectBridge>().get_show_add_modal(),
+        ui.global::<crate::ProjectBridge>()
+            .get_search_query()
+            .is_empty(),
+        ui.global::<crate::ProjectBridge>().get_view_mode(),
         valid,
     );
     crate::memory_diagnostics::log_checkpoint("project_home.phase_ready");
@@ -397,8 +407,10 @@ fn start_home_return_round(
     let Some(ui) = weak.upgrade() else {
         return;
     };
-    ui.set_project_search_query("".into());
-    ui.set_project_view_mode("grid".into());
+    ui.global::<crate::ProjectBridge>()
+        .set_search_query("".into());
+    ui.global::<crate::ProjectBridge>()
+        .set_view_mode("grid".into());
     if arm.enters_project() {
         ui.invoke_navigate(Route::Project);
     }
@@ -408,20 +420,22 @@ fn start_home_return_round(
         interaction.label(),
         round,
         ui.get_current_route(),
-        ui.get_project_items().row_count(),
+        ui.global::<crate::ProjectBridge>().get_items().row_count(),
     );
 
     let view = ui.as_weak();
     Timer::single_shot(Duration::from_secs(2), move || {
         if let Some(ui) = view.upgrade() {
             if interaction.visits_list() {
-                ui.set_project_view_mode("list".into());
+                ui.global::<crate::ProjectBridge>()
+                    .set_view_mode("list".into());
                 log::info!(
                     "[Memory][ProjectHome] event=view_changed arm={} interaction=grid-list round={round} mode=list",
                     arm.label(),
                 );
             } else {
-                ui.set_project_view_mode("grid".into());
+                ui.global::<crate::ProjectBridge>()
+                    .set_view_mode("grid".into());
                 log::info!(
                     "[Memory][ProjectHome] event=view_changed arm={} interaction=grid-only round={round} mode=grid",
                     arm.label(),
@@ -438,8 +452,10 @@ fn start_home_return_round(
     let search = ui.as_weak();
     Timer::single_shot(timing.operation_delay(4), move || {
         if let Some(ui) = search.upgrade() {
-            ui.set_project_search_query("Project 1".into());
-            ui.invoke_project_search_projects("Project 1".into());
+            ui.global::<crate::ProjectBridge>()
+                .set_search_query("Project 1".into());
+            ui.global::<crate::ProjectBridge>()
+                .invoke_search_projects("Project 1".into());
             log::info!(
                 "[Memory][ProjectHome] event=search_applied arm={} interaction={} round={round}",
                 arm.label(),
@@ -450,9 +466,13 @@ fn start_home_return_round(
     let verify_search = ui.as_weak();
     Timer::single_shot(timing.operation_delay(5), move || {
         if let Some(ui) = verify_search.upgrade() {
-            let projected_rows = ui.get_project_items().row_count();
+            let projected_rows = ui.global::<crate::ProjectBridge>().get_items().row_count();
             let expected_rows = arm.expected_filtered_rows();
-            let valid = ui.get_project_search_query().as_str() == "Project 1"
+            let valid = ui
+                .global::<crate::ProjectBridge>()
+                .get_search_query()
+                .as_str()
+                == "Project 1"
                 && projected_rows == expected_rows;
             log::info!(
                 "[Memory][ProjectHome] event=search_projection_checked arm={} interaction={} round={round} projected_rows={} expected_rows={} valid={valid}",
@@ -469,9 +489,12 @@ fn start_home_return_round(
     let restore = ui.as_weak();
     Timer::single_shot(timing.operation_delay(6), move || {
         if let Some(ui) = restore.upgrade() {
-            ui.set_project_search_query("".into());
-            ui.invoke_project_search_projects("".into());
-            ui.set_project_view_mode("grid".into());
+            ui.global::<crate::ProjectBridge>()
+                .set_search_query("".into());
+            ui.global::<crate::ProjectBridge>()
+                .invoke_search_projects("".into());
+            ui.global::<crate::ProjectBridge>()
+                .set_view_mode("grid".into());
             log::info!(
                 "[Memory][ProjectHome] event=search_cleared arm={} interaction={} round={round} mode=grid",
                 arm.label(),
@@ -499,13 +522,16 @@ fn publish_active_phase(
     } else {
         "grid"
     };
-    let projected_rows = ui.get_project_items().row_count();
+    let projected_rows = ui.global::<crate::ProjectBridge>().get_items().row_count();
     let valid = arm.enters_project()
         && ui.get_current_route() == Route::Project
         && projected_rows == arm.expected_rows()
-        && !ui.get_project_show_add_modal()
-        && ui.get_project_search_query().is_empty()
-        && ui.get_project_view_mode().as_str() == expected_mode;
+        && !ui.global::<crate::ProjectBridge>().get_show_add_modal()
+        && ui
+            .global::<crate::ProjectBridge>()
+            .get_search_query()
+            .is_empty()
+        && ui.global::<crate::ProjectBridge>().get_view_mode().as_str() == expected_mode;
     log::info!(
         "[Memory][ProjectHome] event=phase_ready phase=active_project_{round} arm={} interaction={} round={} route={:?} projected_rows={} modal_visible={} query_empty={} view_mode={} valid={}",
         arm.label(),
@@ -513,9 +539,11 @@ fn publish_active_phase(
         round,
         ui.get_current_route(),
         projected_rows,
-        ui.get_project_show_add_modal(),
-        ui.get_project_search_query().is_empty(),
-        ui.get_project_view_mode(),
+        ui.global::<crate::ProjectBridge>().get_show_add_modal(),
+        ui.global::<crate::ProjectBridge>()
+            .get_search_query()
+            .is_empty(),
+        ui.global::<crate::ProjectBridge>().get_view_mode(),
         valid,
     );
     crate::memory_diagnostics::log_checkpoint("project_home.active_phase_ready");
@@ -535,7 +563,7 @@ fn finish_home_return_round(
     let Some(ui) = weak.upgrade() else {
         return;
     };
-    let projected_rows = ui.get_project_items().row_count();
+    let projected_rows = ui.global::<crate::ProjectBridge>().get_items().row_count();
     let expected_route = if arm.enters_project() {
         Route::Project
     } else {
@@ -543,8 +571,11 @@ fn finish_home_return_round(
     };
     let operation_complete = ui.get_current_route() == expected_route
         && projected_rows == arm.expected_rows()
-        && ui.get_project_search_query().is_empty()
-        && ui.get_project_view_mode().as_str() == "grid";
+        && ui
+            .global::<crate::ProjectBridge>()
+            .get_search_query()
+            .is_empty()
+        && ui.global::<crate::ProjectBridge>().get_view_mode().as_str() == "grid";
     ui.invoke_navigate(Route::Home);
     log::info!(
         "[Memory][ProjectHome] event=returned_home arm={} interaction={} round={} route={:?} projected_rows={} operation_complete={}",

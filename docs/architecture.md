@@ -247,6 +247,13 @@ User
 
 External integrations currently include Git executables, GitHub/GitLab/Gitee-compatible APIs, a user-configured OpenAI-compatible AI Agent provider, GitHub Releases through `self_update`, platform tray/window APIs, and OS-native application directories.
 
+The i18n catalog build script resolves its repository inputs from the current
+Cargo invocation, so reusing its executable through a shared target directory
+cannot freeze the catalog root at an earlier checkout. Application-side tray
+regressions verify the linked English and Chinese Quit values; the explicit
+offline native fixture also checks in-place menu updates through the root
+language callback.
+
 ## Source layout and ownership
 
 ### Composition and runtime
@@ -271,7 +278,7 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | `src/platform/` | Cross-platform native integration boundary. `macos.rs` owns AppKit appearance (forced Light/Dark or follow-system for Auto), title-bar accessories, window-interaction notifications, the native-title-bar click bridge for dismissible transient overlays, macOS PR-review font registration, the `NSSound` click, and live Auto theme updates. It also owns paired shutdown removal for its event monitor, window/theme observers, and detached-preview resize observers. `windows.rs` owns Windows theme detection and `MessageBeep`; `linux.rs` owns XDG Portal theme detection and non-blocking desktop sound playback. `mod.rs` exposes the shared API, Auto theme watch enablement with a 1s poll fallback on all platforms, plus opening a directory in the OS file manager (Finder/Explorer/`xdg-open`). |
 | `src/shutdown.rs` | Ordered shutdown coordination. Normal cleanup runs UI/AppKit tasks on the event loop; a dispatch-failure fallback skips those tasks and runs only thread-safe pre/post cleanup before process exit. |
 | `src/single_instance.rs` | Process lock plus a bounded file-signal activation channel that reveals and focuses the existing window when a second launch is attempted. |
-| `src/tray.rs` | Desktop tray integration and tray-driven lifecycle actions. `src/tray/animation.rs` owns the event-loop timer and elapsed-time frame selection for the click-triggered orca jump; platform adapters preload original-colour native images (non-template on macOS), preserve existing click actions, restore the selected static icon and stop playback before tray teardown. See [Tray behavior](specs/tray.md). |
+| `src/tray.rs` | Desktop tray integration and tray-driven lifecycle actions. macOS routes completed left/right mouse-up events, temporarily attaches `NSStatusItem.menu` for native `performClick:` tracking, then detaches it to restore primary clicks. The tracking guard retains native objects across the nested run loop and suppresses activation-observer reopening. Quit uses `tray.quit`; the `src/lib.rs` locale callback refreshes it through `tray::sync_language`. `src/tray/animation.rs` owns the event-loop timer and elapsed-time frame selection for the orca jump; platform adapters preload original-colour native images (non-template on macOS), restore the selected static icon and stop playback before tray teardown. Native menu acceptance remains pending. See [Tray behavior](specs/tray.md). |
 
 `src/lib.rs` is a composition root, not the preferred home for feature logic. Native-window behavior belongs in `src/platform/`, diagnostics accounting belongs in `src/memory_diagnostics.rs`, and new business behavior belongs in a feature module that exposes a small setup or service API.
 
@@ -307,8 +314,12 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 Repository endpoint definitions and executable behavior are intentionally separated: `src/git/` may reference constants from `src/codereview/api/`, while `src/codereview/api/` must not depend on `src/git/`, `src/http/`, reqwest, or serde.
 
 PR Review keeps loading, context and navigation in `controller.rs`; its child
-`controller/actions.rs` owns remote review/merge/revert commands and capability
-presentation, while `controller/diff_bindings.rs` owns event-loop geometry,
+`controller/actions.rs` owns command admission, independent read/mutation generations
+and guarded event-loop completion. Its `actions/remote.rs` leaf captures repository/
+credential identity and Hook event metadata synchronously before returning an owned
+Future; Provider success publishes shared PR state before Hooks and UI delivery.
+`actions/presentation.rs` owns capability, readiness, merge-choice and locale projection.
+Neither leaf imports the controller. `controller/diff_bindings.rs` owns event-loop geometry,
 selection, virtual-list and Find bindings. `controller/diagnostics.rs` owns
 opt-in scroll/reveal evidence. The stateless `PrDiffBridge` global in
 `ui/features/pr_review/diff_bridge.slint` declares that feature's Diff callback
@@ -323,7 +334,9 @@ updates, Review completion merges, blocking I/O drivers, and coordinated file
 reconciliation. `sessions.rs` owns the lightweight schema and interrupted-task
 hydration; its only legacy whole-session helper is `load_chat_session`, compiled
 under `#[cfg(test)]` for corruption-preservation coverage. `controller.rs` owns
-request and presentation orchestration;
+request and presentation orchestration. `review_input.rs` owns immutable requests,
+Provider diff normalization, UTF-8-safe bounded Ask context, model validation and
+worker-only rule snapshots, without controller or UI dependencies.
 `task_persistence.rs` owns automatic task snapshot persistence and invokes the
 same Session transaction owner after successful writes. Production leaf owners
 do not import their controllers.
@@ -365,6 +378,18 @@ Missing/invalid raw samples, incomplete fixtures and failed subprocesses fail
 the gate. Logs, per-run state/samples and the consolidated report are uploaded
 even on failure. These short, fixed fixtures do not establish long-term memory
 bounds or replace manual input/paint validation.
+
+Project presentation and transient drafts live in `ui/features/project/bridge.slint`.
+The page and `ProjectDialogHost` bind that same `ProjectBridge`, including the saved
+PR prefetch flag. The root mounts the dialog at the existing full-window layer and
+owns routing/geometry; `ProjectStateFacade` retains durable state. Rust projection,
+locale refresh, Hook selection and diagnostics consume the bridge on the event loop.
+The bridge is not a second domain store. List-row focus and pointer areas share an
+explicit origin and exclude trailing actions, so an unfocused row cannot consume
+the first Edit press. UI policy resolves Dialog ancestry by
+file-local imports/exports to the canonical shared shell, retains the direct-consumer
+registry, and rejects extra visual children in an inherited shell adapter. Unknown
+or ambiguous ancestry fails; this source proof does not replace native UI acceptance.
 
 ### Slint UI
 
@@ -918,12 +943,20 @@ Full LLDB variable/type inspection is explicit through the `dev-full` profile.
 It inherits normal development behavior but emits full, packed debug
 information into its own profile directory. This keeps heavyweight symbols
 separate and allows `cargo clean --profile dev-full` to remove them without
-discarding normal development artifacts. Release and dist profiles remain
-independent: release builds disable debug information and incremental
+discarding normal development artifacts. Release builds disable debug information and incremental
 compilation. The isolated `release-fast` profile is for routine optimized local
 builds only: it inherits the release runtime policy but uses Thin LTO, eight
 codegen units, and incremental compilation. Release automation continues to use
 the unchanged `release` profile.
+
+Release packaging uses the maintained custom workflow and cargo-bundle; the
+unused cargo-dist configuration and its separate profile have been removed.
+
+Unused Rust modules, the unmounted legacy Slint title bar and its icon exceptions
+have been removed. Project provider identity comes from the active ribbon assets;
+sidebar and terminal controls retain their current implementation. Local historical
+benchmark and release outputs are compressed under the ignored `.local-archives/`
+directory with verified content manifests; see [local archives](local-archives.md).
 
 Workspace-wide IDE diagnostics use the isolated `ide` profile. It checks all
 targets without debug information or incremental state, preventing background
@@ -1753,7 +1786,7 @@ Interceptors execute in registration order. Request hooks may mutate headers; re
 - Application keyboard commands pass through the one root capture boundary and
   `src/shortcuts/`; native title-bar buttons invoke the same callbacks and read
   their displayed accelerators from that registry.
-- Root Rust-facing properties and callbacks are declared in `ui/main.slint` with consistent names.
+- Shell Rust-facing properties and callbacks are declared in `ui/main.slint` with consistent names. Feature APIs belong to exported feature bridges; consumers bind those directly instead of adding duplicate root proxies.
 - Feature views own layout; Rust owns I/O and business state transitions.
 - Route files under `ui/views/` declare only `GitHub*Page` composition.
   Visual subcomponents belong in `ui/components/<feature>/`; components that

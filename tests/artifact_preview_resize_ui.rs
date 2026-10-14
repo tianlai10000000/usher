@@ -111,7 +111,9 @@ fn docked_preview_captures_first_drag_across_the_complete_divider() {
         }
     }
 
-    window.set_project_show_add_modal(true);
+    window
+        .global::<usher_lib::ProjectBridge>()
+        .set_show_add_modal(true);
     settle();
     let start = window.get_artifact_preview_divider_x();
     for offset in [-3.0, 0.0, 3.0] {

@@ -1,0 +1,39 @@
+Command: cargo test --locked --test project_bridge_ui --test pr_review_core_journeys --test pr_review_header_ui --test artifact_preview_resize_ui
+Exit: 0
+   Compiling usher v0.0.9-alpha.4 (/Users/yuankai/yuankai/Demo/rust/usher)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.93s
+     Running tests/artifact_preview_resize_ui.rs (target/debug/deps/artifact_preview_resize_ui-252401cb60320762)
+
+running 2 tests
+test pr_review_divider_keeps_first_drag_capture_with_either_trailing_surface ... ok
+test docked_preview_captures_first_drag_across_the_complete_divider ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.44s
+
+     Running tests/pr_review_core_journeys.rs (target/debug/deps/pr_review_core_journeys-1ea11ee6f39a3e9a)
+
+running 5 tests
+test review_submission_never_implicitly_merges ... ok
+test opening_a_pull_request_preserves_context_and_initial_tab ... ok
+test files_changed_commands_keep_their_order_and_payloads ... ok
+test diff_find_starts_its_debounce_for_the_first_query ... ok
+test diff_code_click_dismisses_the_open_diff_settings_popover ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests/pr_review_header_ui.rs (target/debug/deps/pr_review_header_ui-5002708191f4cd28)
+
+running 3 tests
+test wide_pr_summary_clears_the_header_divider ... ok
+test commit_identity_and_timestamp_share_one_shaping_node ... ok
+test approved_status_survives_repeated_comment_completion_and_locale_switch ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/project_bridge_ui.rs (target/debug/deps/project_bridge_ui-a9a4bb123fd80e1b)
+
+running 1 test
+test project_page_and_root_dialog_share_one_draft_across_modes_and_locales ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+

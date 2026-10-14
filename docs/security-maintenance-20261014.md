@@ -2,6 +2,8 @@
 
 本次仅审计并实施用户批准的批次 1–5，没有执行第 6 批架构治理。基线为 `ad6e701071a6695370f9228eb5626218b7f63cff`，初始工作区干净，未涉及无关用户改动或 vendored Material。主机为 macOS，Rust 1.98.1。结论限于已证实的漏洞和维护缺陷；未建立恶意植入证据，不代表整个仓库不存在其它问题。本次不宣称性能收益，也没有执行 Release 性能 A/B。
 
+后续第 6 批结构治理见 [结构清理记录](structure-cleanup-20261014.md)，本文保留批次 1–5 当时的验证结果。
+
 本文是历史记录；当前约束见 [安全边界](specs/security-boundaries.md)、[HTTP 管线](specs/http.md) 和 [AGENTS.md](../AGENTS.md)。小型原始证据统一保存于 [raw-evidence.txt](validation/security-maintenance-20261014/raw-evidence.txt)，每段保留来源文件名，excerpt 是原文摘录。没有保存真实配置、凭据或完整库测试日志。
 
 ## 批次 1：凭据目标与重定向

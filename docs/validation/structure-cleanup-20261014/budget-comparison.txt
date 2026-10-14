@@ -1,0 +1,10 @@
+Baseline: 1890c8ac9eeec812e3eeab1d18cf9546a3bab3b0
+All 22 original check_max clauses retained verbatim.
+Added 7 owner/API budgets:
+check_max "AI Review input lines" "$(line_count src/ai_review/review_input.rs)" 330
+check_max "PR Review action presentation lines" "$(line_count src/workflow/pr_review/controller/actions/presentation.rs)" 460
+check_max "PR Review action remote lines" "$(line_count src/workflow/pr_review/controller/actions/remote.rs)" 310
+check_max "Project bridge lines" "$(line_count ui/features/project/bridge.slint)" 70
+check_max "Project bridge callbacks" "$(slint_declaration_count ui/features/project/bridge.slint '^[[:space:]]*(pure[[:space:]]+)?callback[[:space:]]+')" 9
+check_max "Project bridge properties" "$(slint_declaration_count ui/features/project/bridge.slint '^[[:space:]]*(in|out|in-out|private)[[:space:]]+property')" 24
+check_max "Project dialog host lines" "$(line_count ui/features/project/dialog.slint)" 90

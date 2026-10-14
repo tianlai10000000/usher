@@ -1,0 +1,16 @@
+captured_at=2026-10-14T15:43:01.009154+08:00
+working_directory=/Users/yuankai/yuankai/Demo/rust/usher
+USHER_TEST_I18N_BUILD_SCRIPT=/Users/yuankai/yuankai/Demo/rust/usher/target/debug/build/usher-i18n-db6b49be6f984a8c/build-script-build
+build_script_sha256=d8aa40c32c8df91b117e9d3401b44351696e3869dd0231b1bdce5a09897a9de0
+command=python3 -m unittest scripts.tests.test_i18n_build_paths -v
+exit_code=0
+
+STDOUT:
+
+STDERR:
+test_reused_executable_reads_current_checkout_and_watches_its_inputs (scripts.tests.test_i18n_build_paths.I18nBuildPathTests.test_reused_executable_reads_current_checkout_and_watches_its_inputs) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.324s
+
+OK

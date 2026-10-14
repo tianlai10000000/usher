@@ -1,0 +1,36 @@
+   Compiling usher-i18n v0.0.9-alpha.1 (/tmp/usher-batch6-baseline-7eiregxp/crates/usher-i18n)
+   Compiling usher-state-store v0.0.9-alpha.1 (/tmp/usher-batch6-baseline-7eiregxp/crates/usher-state-store)
+   Compiling usher-fs v0.0.9-alpha.1 (/tmp/usher-batch6-baseline-7eiregxp/crates/usher-fs)
+   Compiling usher-virtual-list v0.0.9-alpha.1 (/tmp/usher-batch6-baseline-7eiregxp/crates/usher-virtual-list)
+   Compiling usher-preview v0.0.9-alpha.1 (/tmp/usher-batch6-baseline-7eiregxp/crates/usher-preview)
+   Compiling usher-search v0.0.9-alpha.1 (/tmp/usher-batch6-baseline-7eiregxp/crates/usher-search)
+   Compiling usher-ai-review v0.0.9-alpha.1 (/tmp/usher-batch6-baseline-7eiregxp/crates/usher-ai-review)
+   Compiling usher-ui v0.0.9-alpha.1 (/tmp/usher-batch6-baseline-7eiregxp/crates/usher-ui)
+   Compiling usher-ui-settings v0.0.9-alpha.1 (/tmp/usher-batch6-baseline-7eiregxp/crates/usher-ui-settings)
+   Compiling usher-messages v0.0.9-alpha.1 (/tmp/usher-batch6-baseline-7eiregxp/crates/usher-messages)
+   Compiling usher v0.0.9-alpha.4 (/tmp/usher-batch6-baseline-7eiregxp)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3m 58s
+     Running tests/project_bridge_ui.rs (target/debug/deps/project_bridge_ui-a9a4bb123fd80e1b)
+
+running 1 test
+test project_page_and_root_dialog_share_one_draft_across_modes_and_locales ... FAILED
+
+failures:
+
+---- project_page_and_root_dialog_share_one_draft_across_modes_and_locales stdout ----
+BASELINE RECT GitHubProjectPage::list-box: LogicalPosition { x: 40.0, y: 148.0 } LogicalSize { width: 1120.0, height: 136.0 }
+BASELINE RECT GitHubProjectPage::page-host: LogicalPosition { x: 20.0, y: 0.0 } LogicalSize { width: 1160.0, height: 284.0 }
+BASELINE RECT GitHubProjectPage::page-content: LogicalPosition { x: 40.0, y: 0.0 } LogicalSize { width: 1120.0, height: 284.0 }
+BASELINE RECT MainWindow::page-scroll-view: LogicalPosition { x: 0.0, y: 0.0 } LogicalSize { width: 1200.0, height: 868.0 }
+
+thread 'project_page_and_root_dialog_share_one_draft_across_modes_and_locales' (11459809) panicked at tests/project_bridge_ui.rs:65:13:
+assertion failed: window.get_project_show_add_modal()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    project_page_and_root_dialog_share_one_draft_across_modes_and_locales
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+error: test failed, to rerun pass `--test project_bridge_ui`
