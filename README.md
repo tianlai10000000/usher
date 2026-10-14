@@ -77,7 +77,7 @@ The commands require `cargo`, `rg`, `python3`, and `git`; HTTP fixtures need loc
 listening permission. Known structure and lint failures remain blocking. The manual
 macOS CI job uses the full entry; Windows retains its separate default workspace
 check. This does not enable hosted schedules or replace targeted UI/Release A/B
-checks. The original structure ownership plan is in [batch 64](docs/p6-64-quality.md).
+checks. The original structure ownership plan is in [batch 64](docs/archive/optimization/p6-64-quality.md).
 
 AI Code Review is a detachable Cargo feature enabled by the default product
 build. For a constrained build without its core package or UI/settings bridge:
@@ -335,9 +335,11 @@ CI remains available through manual `workflow_dispatch` when needed.
 
 ## Documentation
 
+- [Documentation guide / 文档导航](docs/README.md)
+- [Historical archive](docs/archive/README.md)
 - [English architecture](docs/architecture.md)
 - [中文架构文档](docs/architecture.zh.md)
-- [Project structure audit and refactoring roadmap (中文)](docs/architecture-structure-audit.md)
+- [Project structure audit and refactoring roadmap (中文)](docs/archive/architecture-structure-audit.md)
 - [Coding-agent instructions](AGENTS.md)
 - [Specification index](docs/specs/README.md)
 - [GitHub/Primer UI design specification](docs/specs/ui-design.md)
@@ -348,7 +350,7 @@ CI remains available through manual `workflow_dispatch` when needed.
 - [Build performance and artifact policy](docs/build-performance.md)
 - [Memory optimization backlog](docs/memory_optimization_backlog.md)
 - [内存优化待办](docs/memory_optimization_backlog.zh.md)
-- [Historical terminal investigation notes](docs/terminal_viewport_iteration_notes.md)
+- [Historical terminal investigation notes](docs/archive/terminal_viewport_iteration_notes.md)
 
 ## License
 

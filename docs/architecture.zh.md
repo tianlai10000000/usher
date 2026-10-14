@@ -1,6 +1,6 @@
 # Usher 架构文档
 
-[English](architecture.md) · [README](../README.zh.md) · [规格索引](specs/README.md)
+[English](architecture.md) · [README](../README.zh.md) · [文档导航](README.md) · [规格索引](specs/README.md)
 
 PR 冲突查看由 `src/git/conflicts/` 负责领域语义与隔离 Git 分析，复用仓库上下文
 校验，HTTP 归平台 adapter。`workflow/pr_conflict_status.rs` 通过临时 typed
@@ -1452,4 +1452,4 @@ Terminal viewport/session、更新取消、托盘关闭和路由布局需要做�
 - `Route.UiComponents` 是由 `ui-components` 控制的长期维护开发演练场；旧
   Login/Tools/List/Detail/Notification/Toast/Dialog demo 路由已删除。
 - 应用为专有/非开源软件，见根目录 `LICENSE.txt`；第三方 vendored 组件仍保留各自许可证。
-- `docs/terminal_viewport_iteration_notes.md` 是历史证据，不是当前规格。
+- `docs/archive/terminal_viewport_iteration_notes.md` 是历史证据，不是当前规格。

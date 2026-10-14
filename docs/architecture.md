@@ -1,6 +1,6 @@
 # Usher Architecture
 
-[中文](architecture.zh.md) · [README](../README.md) · [Specifications](specs/README.md)
+[中文](architecture.zh.md) · [README](../README.md) · [Documentation](README.md) · [Specifications](specs/README.md)
 
 PR conflict browsing has a separate domain service in `src/git/conflicts/`,
 validated through the existing repository context, and provider-owned HTTP
@@ -1848,4 +1848,4 @@ Run targeted manual checks for terminal viewport/session changes, update cancell
   playground; obsolete Login/Tools/List/Detail/Notification/Toast/Dialog demo
   routes are removed.
 - The application is proprietary / non-open-source; see root `LICENSE.txt`. Third-party vendored components keep their own licenses.
-- `docs/terminal_viewport_iteration_notes.md` is historical evidence, not a current specification.
+- `docs/archive/terminal_viewport_iteration_notes.md` is historical evidence, not a current specification.

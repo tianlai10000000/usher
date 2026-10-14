@@ -1,8 +1,9 @@
 # Tooltip 设计方案纪要 / Tooltip Design Notes
 
 > 文档状态：设计与迁移纪要，不是稳定行为规格。当前产品契约以
-> [`docs/specs/ui-design.md`](specs/ui-design.md) 为准；架构归属见
-> [`architecture.md`](architecture.md) / [`architecture.zh.md`](architecture.zh.md)。
+> [Tooltip 实现规范](../specs/tooltips.md) 和
+> [`docs/specs/ui-design.md`](../specs/ui-design.md) 为准；架构归属见
+> [`architecture.md`](../architecture.md) / [`architecture.zh.md`](../architecture.zh.md)。
 > 下文保留各方案的取舍与实测结论，便于后续回退或再评估。
 >
 > **产品决定（2026-08-07）：采用方案 E「锚点式自适应 portal」。** Slint 1.17
@@ -182,7 +183,7 @@ portal，禁止为了“全局统一”跨 factory 读取另一个生成图的 g
 
 ## 7. 相关文档 / Related docs
 
-- 稳定契约：[`docs/specs/ui-design.md`](specs/ui-design.md)（`GitHubTooltip`）
-- Messages：[`docs/specs/messages.md`](specs/messages.md)
-- Status bar：[`docs/specs/status-bar.md`](specs/status-bar.md)
-- 架构：[`docs/architecture.md`](architecture.md)、[`docs/architecture.zh.md`](architecture.zh.md)
+- 稳定契约：[`docs/specs/ui-design.md`](../specs/ui-design.md)（`GitHubTooltip`）
+- Messages：[`docs/specs/messages.md`](../specs/messages.md)
+- Status bar：[`docs/specs/status-bar.md`](../specs/status-bar.md)
+- 架构：[`docs/architecture.md`](../architecture.md)、[`docs/architecture.zh.md`](../architecture.zh.md)

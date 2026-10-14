@@ -165,7 +165,7 @@ Set `USHER_PR_CONFLICTS_SCENE=review` to start on ordinary Review and exercise
 the asynchronous count read without first opening the conflict workspace.
 
 Native screenshots, commands and explicitly unexecuted scenarios are recorded
-in [the 2026-09-28 acceptance record](../pr-conflicts-validation.zh.md) and
-[the interaction-fix acceptance record](../pr-conflicts-fixes-validation.zh.md).
+in [the 2026-09-28 acceptance record](../archive/pr-conflicts/validation.zh.md#offline-validation-20260928) and
+[the interaction-fix acceptance record](../archive/pr-conflicts/validation.zh.md#interaction-fixes-20260929).
 The current single-row navigation and resizable pane are verified in
-[the navigation acceptance record](../pr-conflicts-navigation-validation.zh.md).
+[the navigation acceptance record](../archive/pr-conflicts/validation.zh.md#navigation-and-counts-20260929).

@@ -697,7 +697,7 @@ reply locale, message count, and context field byte/truncation totals. The
 source-controlled catalog is the exact authority for static Agent instructions.
 The measured reason for the current 300-second threshold and the adjustment
 playbook are preserved in the historical
-[response-timeout investigation](../ai-review-response-timeout-investigation.md).
+[response-timeout investigation](../archive/ai-review-response-timeout-investigation.md).
 
 `ai-code-review` 包含核心包和完整 UI/Settings bridge；默认产品 feature 会启用它，
 可通过 `--no-default-features --features renderer-femtovg` 排除。关闭时使用协议兼容的
@@ -720,7 +720,7 @@ chunk 序号、completion 消息数量与字节总量、序列化请求体大小
 Prompt 诊断另外只记录 catalog id/version、实际回复 locale、消息数和上下文字段字节/截断
 汇总；受版本控制的 catalog 是 Agent 静态指令的唯一准确来源。
 当前 300 秒阈值的实测依据和后续调参流程保留在历史
-[响应超时排查记录](../ai-review-response-timeout-investigation.md) 中。
+[响应超时排查记录](../archive/ai-review-response-timeout-investigation.md) 中。
 
 ## Regression checklist / 回归检查
 
@@ -733,14 +733,14 @@ Its old-terminal/new-Ask case checks the source locale `en` and packaged `zh-CN`
 the initial-read and Review-result preservation cases check model behavior.
 These tests do not replace full-route multilingual visual inspection. Controlled
 Release component/native evidence and its limits are recorded in
-[the Session commit acceptance record](../p7-76-session-commits.md).
+[the Session commit acceptance record](../archive/optimization/p7-76-session-commits.md).
 
 Session 测试通过受控写入/准入屏障覆盖过早 Stop、同操作重试与独立同文案提交、Review
 promotion、receipt 被丢弃、活跃临时文件、对账期间退役，以及可返回的 IO 失败。
 `controller_session_tests.rs` 在测试 backend 上按故意延后的顺序调用生产 UI 投递
 操作。旧终态/新 Ask 用例核验源语言 `en` 与内置 `zh-CN`；首次读取及 Review 结果
 保留用例核验 model 行为。这些测试不替代全路由多语言视觉检查。受控 Release 组件/
-原生证据及其边界见[Session 提交验收记录](../p7-76-session-commits.md)。
+原生证据及其边界见[Session 提交验收记录](../archive/optimization/p7-76-session-commits.md)。
 
 - Queue more tasks than the configured limit with `USHER_AI_REVIEW_FIXTURE=review-v1`;
   verify the running high-water equals the configured limit and queued tasks

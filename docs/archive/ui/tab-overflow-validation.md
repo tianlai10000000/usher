@@ -40,14 +40,14 @@ into the temporary `/private/tmp/Usher Conflicts.app` bundle and ad-hoc signed.
 Its identifier is `com.usher.conflicts-validation`. The installed Usher was not
 used. The offline fixture has isolated state and makes no provider requests.
 
-- [English PR, narrow content, More menu](designs/pr-conflicts/validation/tabs-en-narrow-more.png): 800px window with sidebar; Conflicts shows 99+ for 128 files.
-- [English PR, all tabs inline](designs/pr-conflicts/validation/tabs-en-all-inline.png): same window with sidebar hidden; labels and badges remain aligned.
-- [Five items, overflow menu](designs/pr-conflicts/validation/tabs-five-counts-menu.png): 10, 99, 99+ visible inline; another 99+ and a disabled fifth option in More.
-- [Hidden item selected](designs/pr-conflicts/validation/tabs-more-selected.png): selecting Conflicts moves the underline to More.
-- [Five items, restored width](designs/pr-conflicts/validation/tabs-five-all-inline.png): all five items reappear and the selected item is retained.
-- [Chinese PR, 1200px, count 99](designs/pr-conflicts/validation/tabs-zh-wide-99.png): two-digit badge fits; diff statistics occupy remaining space.
-- [Runtime switch to English](designs/pr-conflicts/validation/tabs-runtime-locale-en.png): the same process updates the tab labels and their measured widths while retaining count 99 and selection.
-- [More opens Conflicts](designs/pr-conflicts/validation/tabs-menu-opens-conflicts.png): final source build opens the selected conflict workspace from the overflow menu.
+- [English PR, narrow content, More menu](../pr-conflicts/screenshots/tabs-en-narrow-more.png): 800px window with sidebar; Conflicts shows 99+ for 128 files.
+- [English PR, all tabs inline](../pr-conflicts/screenshots/tabs-en-all-inline.png): same window with sidebar hidden; labels and badges remain aligned.
+- [Five items, overflow menu](../pr-conflicts/screenshots/tabs-five-counts-menu.png): 10, 99, 99+ visible inline; another 99+ and a disabled fifth option in More.
+- [Hidden item selected](../pr-conflicts/screenshots/tabs-more-selected.png): selecting Conflicts moves the underline to More.
+- [Five items, restored width](../pr-conflicts/screenshots/tabs-five-all-inline.png): all five items reappear and the selected item is retained.
+- [Chinese PR, 1200px, count 99](../pr-conflicts/screenshots/tabs-zh-wide-99.png): two-digit badge fits; diff statistics occupy remaining space.
+- [Runtime switch to English](../pr-conflicts/screenshots/tabs-runtime-locale-en.png): the same process updates the tab labels and their measured widths while retaining count 99 and selection.
+- [More opens Conflicts](../pr-conflicts/screenshots/tabs-menu-opens-conflicts.png): final source build opens the selected conflict workspace from the overflow menu.
 
 ## Reproduce From Source
 

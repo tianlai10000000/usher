@@ -85,7 +85,7 @@ Usher 是一个约 **94,268 行手写代码**（Rust 62,745 行 + Slint 31,523 �
 
 ### A3.【高】零测试 CI，重构成果正在回流
 - `.github/workflows/` 只有 release.yml；无 `cargo test`/`clippy`/`fmt --check`。
-- 实证后果：`docs/architecture-structure-audit.md`（2026-07，声称"P1/P2 已全部完成"）与今日实际对比——`src/lib.rs` 635→1,066 行（+68%）、`gitee/conversation.rs` 194→961（+395%）、`chat/interactive.rs` 871→1,855（+113%）、`gitee/mod.rs` 2,263→3,595（+59%）。拆分完成但无守护，热点文件全数回涨；22 处 `allow(dead_code)` 无人清理；两套锁中毒策略并存无人统一。
+- 实证后果：`docs/archive/architecture-structure-audit.md`（2026-07，声称"P1/P2 已全部完成"）与今日实际对比——`src/lib.rs` 635→1,066 行（+68%）、`gitee/conversation.rs` 194→961（+395%）、`chat/interactive.rs` 871→1,855（+113%）、`gitee/mod.rs` 2,263→3,595（+59%）。拆分完成但无守护，热点文件全数回涨；22 处 `allow(dead_code)` 无人清理；两套锁中毒策略并存无人统一。
 - **修复**：一天工作量——`on: pull_request` 跑 `cargo test --workspace --locked` + `cargo clippy -- -D warnings` + `cargo fmt --check` + `cargo check --no-default-features --features renderer-femtovg`（后者同时守护 A5 的 feature 双实现漂移）。**投入产出比全场最高。**
 
 ### A4.【中】构建/编译速度：瓶颈是单入口生成的巨型 crate，且开发环境本身有三处"白白变慢"的问题
@@ -174,7 +174,7 @@ user time ≈ wall time，链路几乎完全串行、单核受限——`ui/main.
 - 图片解码峰值内存翻倍：32 MB 解码结果再 `clone_from_slice` 一份（`artifact_preview/mod.rs:767-777`）。
 
 ### P10.【中】AI Review 请求无总超时 + 分块可跑 80 分钟
-- `src/ai/agent.rs:169` `.timeout(Duration::ZERO)` 无总时长上限，仅靠 300s 空闲超时（`docs/ai-review-response-timeout-investigation.md` 记录的排障刚把它从 90s 提到 300s——治标）；非流式请求 + 64 KiB 分块串行（`ai_review/controller.rs:1255`），1 MB diff = 16 块 × 最坏 300s；`shutdown()` 只取消 chat 不取消 review（`controller.rs:695-699`），退出时最多 8 个长连接悬挂、最终状态丢失。
+- `src/ai/agent.rs:169` `.timeout(Duration::ZERO)` 无总时长上限，仅靠 300s 空闲超时（`docs/archive/ai-review-response-timeout-investigation.md` 记录的排障刚把它从 90s 提到 300s——治标）；非流式请求 + 64 KiB 分块串行（`ai_review/controller.rs:1255`），1 MB diff = 16 块 × 最坏 300s；`shutdown()` 只取消 chat 不取消 review（`controller.rs:695-699`），退出时最多 8 个长连接悬挂、最终状态丢失。
 - **修复**：改 streaming（文档自己已建议）；加 `chunk_count × 单块预算` 的总超时；shutdown 先 cancel 全部 review 任务。
 
 ---
@@ -645,7 +645,7 @@ RSS 门槛：峰值和稳定值增量不超过 `max(8 MiB, A 的 5%)`，阶段�
 8 MiB。此结果覆盖本次固定夹具，不代表长时间压力、全部项目页面交互或全局内存上限。
 
 完整协议、二进制 SHA256、每次结果及复现命令见
-[`docs/p5-a-performance.md`](docs/p5-a-performance.md)；自动化脚本为
+[`docs/archive/optimization/p5-a-performance.md`](docs/archive/optimization/p5-a-performance.md)；自动化脚本为
 [`scripts/benchmark-p5-a.py`](scripts/benchmark-p5-a.py)。中英文架构和相关 spec 已同步。
 
 验证补充：`cargo fmt --all`、`cargo check --locked`、`git diff --check` 通过，新增
@@ -662,7 +662,7 @@ RSS 门槛：峰值和稳定值增量不超过 `max(8 MiB, A 的 5%)`，阶段�
 ## 18. P5-B 实施与逐项 A/B（2026-09-07）
 
 本轮从干净的 `a42ce0e` 开始，逐项实施 #57 → #58 → #59，每项通过 A/B 后
-才推进下一项。完整测量及失败记录见 [`docs/p5-b-performance.md`](docs/p5-b-performance.md)。
+才推进下一项。完整测量及失败记录见 [`docs/archive/optimization/p5-b-performance.md`](docs/archive/optimization/p5-b-performance.md)。
 
 - **#57 已完成**：Project 注册表采用 Arc 结构共享；selector 排除 pending 记账，
   单个 Worker 准备最新列表与预览，最多一个排队 UI 回调。稳定 VecModel 只更新
@@ -700,7 +700,7 @@ Logo HTTP 测试后，513 通过、0 失败、2 忽略；两个 HTTP 测试在�
 ## 19. P5-C 实施与逐项 A/B（2026-09-07，09-08 收尾）
 
 从干净的 `6183769` 开始，先验收 #60，再实施 #61。完整协议、原始数据位置、
-编译异常和视觉预检修复记录见 [`docs/p5-c-performance.md`](docs/p5-c-performance.md)。
+编译异常和视觉预检修复记录见 [`docs/archive/optimization/p5-c-performance.md`](docs/archive/optimization/p5-c-performance.md)。
 
 - **#60 已完成**：Provider Worker 准备不可变测量快照，共享 blocking pool 执行
   精确 Parley 测量；按文档版本、稳定宽度、字体拒绝旧结果。保留一个执行中计算、
@@ -736,7 +736,7 @@ Logo HTTP 测试后，513 通过、0 失败、2 忽略；两个 HTTP 测试在�
 ## 20. P5-D 职责收敛与持续门禁（2026-09-08）
 
 从干净的 `8b29a8f` 开始。协议、原始证据位置和验收限制见
-[`docs/p5-d-performance.md`](docs/p5-d-performance.md)。
+[`docs/archive/optimization/p5-d-performance.md`](docs/archive/optimization/p5-d-performance.md)。
 
 - **#62 已实现，A/B 通过**：PR Review 提取远端动作、Diff 绑定和诊断；Chat
   提取视口/锚点策略和稳定增量消息 model；AI Review 提取会话 I/O 与中断恢复。
@@ -981,7 +981,7 @@ UI policy 本轮报告 `ui/components/settings/github_hook_tooltip.slint`。检�
 ## 27. 第 64 批实施与行为 A/B（2026-09-16）
 
 基线 `209e5c6`；保留上一轮未提交的第四轮审查内容。完整范围、四项结构职责方案、
-命令及原始证据见 [`docs/p6-64-quality.md`](docs/p6-64-quality.md)。
+命令及原始证据见 [`docs/archive/optimization/p6-64-quality.md`](docs/archive/optimization/p6-64-quality.md)。
 
 - 采用 `cargo fmt --all` 产生的三个 Jobs 文件格式修复；应用逻辑不变。
 - UI policy 精确登记 spec 中已有的 Hook factory Portal，不放宽目录级规则，
@@ -1002,7 +1002,7 @@ UI policy 本轮报告 `ui/components/settings/github_hook_tooltip.slint`。检�
 
 ## 28. P6-B 第 65 批：Terminal 有界 IO（2026-09-16，自动验收通过）
 
-实现与完整证据说明见 [`docs/p6-65-terminal.md`](docs/p6-65-terminal.md)。
+实现与完整证据说明见 [`docs/archive/optimization/p6-65-terminal.md`](docs/archive/optimization/p6-65-terminal.md)。
 
 - 输出改为 64 × 8 KiB 有界队列，满时背压到 PTY；不丢弃活动会话字节。
   解析后的 scrollback、UI model 和内核缓冲不属于这 512 KiB 队列预算。
@@ -1032,7 +1032,7 @@ UI policy 本轮报告 `ui/components/settings/github_hook_tooltip.slint`。检�
 ## 29. P6-B 第 66 批：高亮候选拒绝（2026-09-16）
 
 基线 `47b0892`，起始工作区干净。完整实验与证据见
-[`docs/p6-66-highlight.md`](docs/p6-66-highlight.md)。本批完成了实现、自测和正式
+[`docs/archive/optimization/p6-66-highlight.md`](docs/archive/optimization/p6-66-highlight.md)。本批完成了实现、自测和正式
 Release A/B，但**未通过采用门槛，运行时改动已撤回**。
 
 - 候选把 Diff/全文高亮收敛到 `LatestCompute`，完整源码投影进入 Worker，逐行
@@ -1055,7 +1055,7 @@ R4-2 尚未关闭；不把已拒绝候选作为 #67 的基线。
 ## 30. P6-B 第 67 批：HTTP 输入预算（2026-09-16，采用）
 
 基线继续使用已验收的 `47b0892`（#65），加双方相同的显式夹具。实现、限制及
-原始证据见 [`docs/p6-67-http.md`](docs/p6-67-http.md)。
+原始证据见 [`docs/archive/optimization/p6-67-http.md`](docs/archive/optimization/p6-67-http.md)。
 
 - 统一 HTTP 在缓冲/投递 chunk 前累计真实字节，超限返回非瞬态
   `ResponseTooLarge`，不记录正文，失败不可恢复成截断成功，重复读取只反馈一次。
@@ -1088,7 +1088,7 @@ check、fmt、diff 检查通过。三对 Release A/B 每进程 90 秒，让增�
 稳定 RSS 413.45 -> 412.92 MiB，周期 2965 -> 2957ms，心跳 p95 52.183 -> 52.158ms。
 最终 footprint 中位数 258.60 -> 130.19 MiB，但 A 波动很大，不归因于此小范围改动；
 本批作为正确性修复采用，不宣称 RSS 优化。完整协议、数据和边界见
-[第66批补充报告](docs/p6-66-correctness.md)。
+[第66批补充报告](docs/archive/optimization/p6-66-correctness.md)。
 
 ## 32. #68 Hook 日志预算与回放验收（2026-09-16）
 
@@ -1106,7 +1106,7 @@ Journal 准入改为累计完整 JSONL 字节（字段、转义、换行），�
 224.52 -> 131.52 MiB，心跳 p95 均 52.180ms，周期 298 -> 297ms。32 项 Hook
 测试、627 项库测试（2 忽略）、28 项脚本测试通过；排版修复另有回归并纳入最终全量测试。
 **采用 #68**，不把受控夹具降幅外推为全应用 RSS 承诺。未测长期 soak/Windows/Node RSS。
-完整证据见 [第68批报告](docs/p6-68-hooks-journal.md)。
+完整证据见 [第68批报告](docs/archive/optimization/p6-68-hooks-journal.md)。
 
 ## 33. #69 Hook 状态与投影验收（2026-09-16）
 
@@ -1130,7 +1130,7 @@ i18n 和 diff 检查通过。结构门禁仍是原有 4 项超限，未放宽预
 unused 警告及现有链接器告警。未运行完整 doctest，已知 logger doctest 未处理；
 未覆盖 Windows、长期 soak、外部 Node RSS 及新一轮完整手工交互矩阵。起始工作区
 干净，本轮只改动这些批次相关代码/文档，未提交 Git commit。
-完整协议及证据见 [第69批报告](docs/p6-69-hooks-state.md)。
+完整协议及证据见 [第69批报告](docs/archive/optimization/p6-69-hooks-state.md)。
 
 ## 34. 第70批：Job 测量快照与布局保留（Job 子项已采用）
 
@@ -1173,7 +1173,7 @@ unused 警告及现有链接器告警。未运行完整 doctest，已知 logger 
 各自测量和 A/B；本次未改变其淘汰/重载/锚点策略。Job 的 16 项视口缓存也仍无
 整体字节预算，本次减少重复表示，不宣称解决所有数据保留问题。保留进入本轮时
 #66/#68/#69 的未提交改动，未创建 Git commit。协议、复现方式和证据见
-[第70批 Job 报告](docs/p6-70-job-retention.md)。
+[第70批 Job 报告](docs/archive/optimization/p6-70-job-retention.md)。
 
 ## 35. #72 回归入口与持续循环（2026-09-17）
 
@@ -1187,7 +1187,7 @@ unused 警告及现有链接器告警。未运行完整 doctest，已知 logger 
 Job 15 分钟长跑因用户报告前台闪烁而取消，已完成 23 轮/约 261 秒，不计通过。
 闪烁对应夹具持续切换日志源；停止切换后的固定日志与滚动检查未复现持续重载，
 测试窗口已退出。工具实现与长跑验收分开记录，当前整体仍未完成验收。
-详见 [第72批报告](docs/p6-72-regression.md) 和 [复现协议](docs/p6-regression.md)。
+详见 [第72批报告](docs/archive/optimization/p6-72-regression.md) 和 [复现协议](docs/p6-regression.md)。
 
 ## 36. #71 Hook 文案与错误语义（2026-09-17）
 
@@ -1203,7 +1203,7 @@ UI policy、catalog 和 diff 通过，无 AI 编译及默认 Release 构建通�
 52.168 ms，原门槛未放宽。英文/中文失败历史和 Job 摘要桌面检查通过，技术诊断
 保持原文，测试窗口已退出。**采用本批语义改造，不宣称性能收益**；#72 长跑
 未完成及重复性失败记录仍保留。原生通知送达、Windows 和完整 doctest 未验证。
-详见 [第71批报告](docs/p6-71-hook-semantics.md)。
+详见 [第71批报告](docs/archive/optimization/p6-71-hook-semantics.md)。
 
 ---
 
@@ -1241,14 +1241,14 @@ UI 结果过期保护、文件原子替换、持久化成功屏障是三个不�
 
 9 月末的内存实验必须继续遵守原决策：
 
-- [PR Batch A](docs/pr-review-memory-batch-a-20260927.md) 拒绝
+- [PR Batch A](docs/archive/memory/pr-review-memory-batch-a-20260927.md) 拒绝
   `release-transient-v2`；正常隐藏保留同一 PR，不能重新默认卸载语法/展示资源。
-- [Settings Batch B](docs/settings-memory-batch-b-20260928.md) 拒绝圆角控制层候选；
-  [Batch C](docs/settings-memory-batch-c-attribution-20260928.md) 只确认组合残留，
+- [Settings Batch B](docs/archive/memory/settings-memory-batch-b-20260928.md) 拒绝圆角控制层候选；
+  [Batch C](docs/archive/memory/settings-memory-batch-c-attribution-20260928.md) 只确认组合残留，
   未找到通过原筛选线的单一 owner。
-- [Terminal Batch D](docs/terminal-memory-batch-d-attribution-20260928.md)
+- [Terminal Batch D](docs/archive/memory/terminal-memory-batch-d-attribution-20260928.md)
   归因未达到筛选线；同项目 PTY/content/cwd 保留契约继续有效。
-- [Project Batch E](docs/project-list-memory-batch-e-20260928.md) 降低 active 峰值，
+- [Project Batch E](docs/archive/memory/project-list-memory-batch-e-20260928.md) 降低 active 峰值，
   但 returned-Home 收益未过门槛，产品改动已回滚。
 
 这些是相应提交/fixture 的证据，不是本 HEAD 的 RSS 预测；析构成功、malloc
@@ -1448,7 +1448,7 @@ state-store、virtual-list、search 等依赖包自身单测。
 本轮结构门禁仍失败四项：AI controller **3876/3850**；根 Slint
 **3084/3000**；根属性 **422/410**；PR actions **717/580**。
 文件长度是警报，不是业务缺陷证明；沿用
-[第64批职责方案](docs/p6-64-quality.md)，优先由 #76/#84 收口 Ask/session，
+[第64批职责方案](docs/archive/optimization/p6-64-quality.md)，优先由 #76/#84 收口 Ask/session，
 PR action 捕获上下文/Hook payload 与能力投影按独立变化原因收口，根层保留
 窗口/路由/overlay，Feature 独占展示协议归既有 feature global。
 
@@ -1639,10 +1639,10 @@ PY
 
 | 批次 | 状态 | 证据与决定 |
 | --- | --- | --- |
-| #74 同值持久化恢复 | **采用，保留代码** | [独立记录](docs/p7-74-persistence.md)；Store 18 项、默认根库 701 项、组件 Release A/B 和三对原生回归通过；候选 Peak RSS +0.391 MiB、growth 不变 |
-| #75 MessageCenter | **采用，保留代码** | [独立记录](docs/p7-75-message-center.md)；消息 27 项、默认根库 701 项、组件 Release A/B 和三对原生回归通过；所测场景 Peak RSS -8.531 MiB |
-| #76 Ask/Session 提交 | **采用，保留代码** | [独立记录](docs/p7-76-session-commits.md)；真实会话 Release 42 项 A/B、根库 715 项、三对原生回归通过；Peak RSS +0.281 MiB、growth 不变 |
-| #77 后台关闭屏障 | **拒绝，已撤回代码** | [失败记录](docs/p7-77-shutdown.md)；候选根库 778 项通过，但三对真实 Release A/B 复现同值保存恢复后误报退出失败：A 三次退出 0，B 三次退出 1 且保留 sentinel。已按冻结基线恢复 #74+#75+#76，未保留 #77 局部代码 |
+| #74 同值持久化恢复 | **采用，保留代码** | [独立记录](docs/archive/optimization/p7-74-persistence.md)；Store 18 项、默认根库 701 项、组件 Release A/B 和三对原生回归通过；候选 Peak RSS +0.391 MiB、growth 不变 |
+| #75 MessageCenter | **采用，保留代码** | [独立记录](docs/archive/optimization/p7-75-message-center.md)；消息 27 项、默认根库 701 项、组件 Release A/B 和三对原生回归通过；所测场景 Peak RSS -8.531 MiB |
+| #76 Ask/Session 提交 | **采用，保留代码** | [独立记录](docs/archive/optimization/p7-76-session-commits.md)；真实会话 Release 42 项 A/B、根库 715 项、三对原生回归通过；Peak RSS +0.281 MiB、growth 不变 |
+| #77 后台关闭屏障 | **拒绝，已撤回代码** | [失败记录](docs/archive/optimization/p7-77-shutdown.md)；候选根库 778 项通过，但三对真实 Release A/B 复现同值保存恢复后误报退出失败：A 三次退出 0，B 三次退出 1 且保留 sentinel。已按冻结基线恢复 #74+#75+#76，未保留 #77 局部代码 |
 
 首次沙箱根库测试 691 passed、10 failed、2 ignored；十项失败均为本机
 测试服务器 bind 返回 `PermissionDenied`。允许回环测试服务器后重跑为
@@ -1673,16 +1673,16 @@ receipt 全部有效。不能以单元测试通过代替跨批次恢复验收，
 
 | 批次 | 状态 | 证据与决定 |
 | --- | --- | --- |
-| #73 快速/完整检查层 | **采用，保留工具改动** | [独立记录](docs/p7-73-quality.md)；13 组/26 次工具 A/B、77 项脚本测试通过；真实 full 878 项测试通过，但保留结构与既有 Clippy 失败，实际入口返回非零；业务源码未改，不宣称运行时收益 |
-| #78 Provider JSON/diff 预算 | **采用，保留代码** | [独立记录](docs/p7-78-provider-budgets.md)；87 个 options 保留 8 个旧预算；metadata 16 MiB/diff 64 MiB，根库 718 passed/0 failed/2 ignored；组件 360 次通过；有效原生矩阵 120 次通过（114 v3 + 6 v4 分类断言修正重跑，原失败记录保留）；Home 六次 RSS/持久化/正常关闭通过；full 881 tests 通过，仍准确报告原结构与 Clippy 两项失败，不宣称内存收益 |
-| #79 冲突列表任务 owner/总并发 | 已采用，代码保留 | [独立记录](docs/p7-79-conflict-owner.md)；11 项 owner/cache、真实 Settings SaveErr、根库 730 项通过；Release 组件正式 60 项、原生完整有效对照 156 项及 Home 六轮通过。B 并发峰值 4，保守替换/设置取消观测最大 6.923ms，切项目旧轮次完整生命周期最大 52.089ms。原生首矩阵 A 一次缺帧超时、整场景重跑及检查器/构建缓存修正均保留原证据；完整质量实际 893 passed/0 failed/4 ignored，8 检查通过、2 既有门禁红项仍 exit1，不豁免 |
-| #80 Chat 历史索引/游标 | 本轮拒绝，代码已撤回 | [独立记录](docs/p7-80-chat-index.md)；168组件场景、24真实 OS 场景、749 root 单测及A/B标准Release通过，完整质量原结构/Clippy仍红。原生 smoke 超时、物理尺寸不符及后续锁屏/显示器休眠证据保留；fresh真实显示预检仍失败，原生/物理/完整Preview/Home采用门槛未完成。5个Rust文件及4项架构/spec改动已逐SHA恢复至已采用#79，候选与全部原始结果保留；未宣称候选独有渲染缺陷或应用/RSS收益 |
+| #73 快速/完整检查层 | **采用，保留工具改动** | [独立记录](docs/archive/optimization/p7-73-quality.md)；13 组/26 次工具 A/B、77 项脚本测试通过；真实 full 878 项测试通过，但保留结构与既有 Clippy 失败，实际入口返回非零；业务源码未改，不宣称运行时收益 |
+| #78 Provider JSON/diff 预算 | **采用，保留代码** | [独立记录](docs/archive/optimization/p7-78-provider-budgets.md)；87 个 options 保留 8 个旧预算；metadata 16 MiB/diff 64 MiB，根库 718 passed/0 failed/2 ignored；组件 360 次通过；有效原生矩阵 120 次通过（114 v3 + 6 v4 分类断言修正重跑，原失败记录保留）；Home 六次 RSS/持久化/正常关闭通过；full 881 tests 通过，仍准确报告原结构与 Clippy 两项失败，不宣称内存收益 |
+| #79 冲突列表任务 owner/总并发 | 已采用，代码保留 | [独立记录](docs/archive/optimization/p7-79-conflict-owner.md)；11 项 owner/cache、真实 Settings SaveErr、根库 730 项通过；Release 组件正式 60 项、原生完整有效对照 156 项及 Home 六轮通过。B 并发峰值 4，保守替换/设置取消观测最大 6.923ms，切项目旧轮次完整生命周期最大 52.089ms。原生首矩阵 A 一次缺帧超时、整场景重跑及检查器/构建缓存修正均保留原证据；完整质量实际 893 passed/0 failed/4 ignored，8 检查通过、2 既有门禁红项仍 exit1，不豁免 |
+| #80 Chat 历史索引/游标 | 本轮拒绝，代码已撤回 | [独立记录](docs/archive/optimization/p7-80-chat-index.md)；168组件场景、24真实 OS 场景、749 root 单测及A/B标准Release通过，完整质量原结构/Clippy仍红。原生 smoke 超时、物理尺寸不符及后续锁屏/显示器休眠证据保留；fresh真实显示预检仍失败，原生/物理/完整Preview/Home采用门槛未完成。5个Rust文件及4项架构/spec改动已逐SHA恢复至已采用#79，候选与全部原始结果保留；未宣称候选独有渲染缺陷或应用/RSS收益 |
 | #81 Chat 原文页/bytes | 条件未满足，本轮不实施 | 前置 #80 本轮未采用；4项装配工具测试通过不构成原文owner测量或候选验收，不能使用失败#80继续 |
-| #82 PR 共享源码/后台行准备 | 本轮拒绝，未合入 | [独立记录](docs/p7-82-full-source.md)。已采用#79隔离v6的fmt/check通过，实际库测试745通过、0失败、2忽略，含新增15项；26项reader通过。早期9处API、3处test编译错误及首轮10项localhost沙箱失败保留；合法hunk展开与旧冷全文交错回退已窄修并补测试。fresh真实显示预检仍锁屏/休眠；受控Release A/B、真实HTTP/native48场景、P6/Preview/Home未执行，采用门槛未完成，不宣称收益或推进基线 |
+| #82 PR 共享源码/后台行准备 | 本轮拒绝，未合入 | [独立记录](docs/archive/optimization/p7-82-full-source.md)。已采用#79隔离v6的fmt/check通过，实际库测试745通过、0失败、2忽略，含新增15项；26项reader通过。早期9处API、3处test编译错误及首轮10项localhost沙箱失败保留；合法hunk展开与旧冷全文交错回退已窄修并补测试。fresh真实显示预检仍锁屏/休眠；受控Release A/B、真实HTTP/native48场景、P6/Preview/Home未执行，采用门槛未完成，不宣称收益或推进基线 |
 | #83 PR retained bytes/淘汰 | 条件未满足，本轮不实施 | 前置#82本轮未采用；不能使用失败候选或未测owner设置配额 |
-| #84 AI 会话 Review/conversation | 本轮拒绝，未合入 | [独立记录](docs/p7-84-session-journal.md)。accepted73快照中已采用#76行为的8组前置测量及1组receipt控制通过，并非最终受控Release A臂；1000轮长Review累计写约9.2GiB。v4 reader15项通过，format通过，但全UI locked check101：派生组件无法绑定基类2项只读out高度属性。49项业务测试未运行；Release/内核故障/原生/Preview/locale验收未执行，不保留失败代码、不宣称收益 |
-| #85 PR Commit/i18n 表达式 | 本轮拒绝，未合入 | [独立记录](docs/p7-85-commit-i18n.md)。25表达式/入口、5reader、132正反例工具A/B通过；全UI fmt/check通过，库测试初始化修正后735通过、0失败、2忽略，真实catalog7项通过，初次1失败保留。全项目扫描A8诊断→B仍6；实际i18n shell返回1，包含3条Notify真实文案遗漏及3条工程标签规则覆盖缺口。原生en/zh/en、Dialog像素及Release/Home未执行，不作采用或收益声称 |
-| #86 剩余职责/结构债 | 本轮拒绝，未合入 | [独立记录](docs/p7-86-owner-structure.md)。真实同源结构对照经相同fmt：原候选1139→窄修1107，仍>940，测试292>220；独立owner命令及接入同一门禁的候选shell均实际返回1，保留missing-crates扫描警告，不构成完整现行旧检查覆盖，旧968仅未fmt计数。reader26项及真实4线程/128事件writer1项通过；结构工具14项中11通过、3正例因复用超预算源码失败，前置路径/编译失败保留。#85未采用，业务/真实HTTP/native/性能验收未执行，所有预算不提高 |
+| #84 AI 会话 Review/conversation | 本轮拒绝，未合入 | [独立记录](docs/archive/optimization/p7-84-session-journal.md)。accepted73快照中已采用#76行为的8组前置测量及1组receipt控制通过，并非最终受控Release A臂；1000轮长Review累计写约9.2GiB。v4 reader15项通过，format通过，但全UI locked check101：派生组件无法绑定基类2项只读out高度属性。49项业务测试未运行；Release/内核故障/原生/Preview/locale验收未执行，不保留失败代码、不宣称收益 |
+| #85 PR Commit/i18n 表达式 | 本轮拒绝，未合入 | [独立记录](docs/archive/optimization/p7-85-commit-i18n.md)。25表达式/入口、5reader、132正反例工具A/B通过；全UI fmt/check通过，库测试初始化修正后735通过、0失败、2忽略，真实catalog7项通过，初次1失败保留。全项目扫描A8诊断→B仍6；实际i18n shell返回1，包含3条Notify真实文案遗漏及3条工程标签规则覆盖缺口。原生en/zh/en、Dialog像素及Release/Home未执行，不作采用或收益声称 |
+| #86 剩余职责/结构债 | 本轮拒绝，未合入 | [独立记录](docs/archive/optimization/p7-86-owner-structure.md)。真实同源结构对照经相同fmt：原候选1139→窄修1107，仍>940，测试292>220；独立owner命令及接入同一门禁的候选shell均实际返回1，保留missing-crates扫描警告，不构成完整现行旧检查覆盖，旧968仅未fmt计数。reader26项及真实4线程/128事件writer1项通过；结构工具14项中11通过、3正例因复用超预算源码失败，前置路径/编译失败保留。#85未采用，业务/真实HTTP/native/性能验收未执行，所有预算不提高 |
 
 桌面恢复前的独立预验证只核临时草稿与工具，不代替各批正式验收。66项早期
 工具测试的命令、结果及原始日志位于
@@ -1730,8 +1730,8 @@ Git状态干净，468项生产代码/构建输入与已采用#79逐SHA一致。�
 
 | 批次 | 本次状态 | 实际证据与决定 |
 | --- | --- | --- |
-| #80 Chat 历史索引/游标 | 重试仍拒绝，未合入 | [独立记录](docs/p7-80-chat-index.md)：真实显示已active/awake；旧预检对null锁字段误拒已窄修为仅允许尝试，16项工具测试通过，不伪造已解锁证明。A/B smoke及正式AB/BA/AB六进程均正常退出；B smoke提交相邻帧p95 52.9641ms>50ms，正式B三次中两次第一idle就绪帧实际移除锚行、下一帧重挂载，严格F−1/F的1px门槛未通过。物理/Home/P6未继续推进，不采用失败代码，不宣称索引独有根因或应用/RSS收益 |
-| #82 PR 共享源码/后台行准备 | 重试仍拒绝，未合入 | [独立记录](docs/p7-82-full-source.md)：标准Release/组件6及修订后真实HTTP/native48格通过，旧45格无效夹具失败保留。原#66六轮完整采样、应用退出/显示/回收通过，但B三轮RSS峰值360.50/358.73/366.75MiB均超严格300；final footprint中位数138.97→206.86MiB、+67.89超原允许8MiB。两资源门槛失败，不采用代码；positive12、普通UI/物理/Preview及独立Home未推进，编译或部分通过不替代验收 |
+| #80 Chat 历史索引/游标 | 重试仍拒绝，未合入 | [独立记录](docs/archive/optimization/p7-80-chat-index.md)：真实显示已active/awake；旧预检对null锁字段误拒已窄修为仅允许尝试，16项工具测试通过，不伪造已解锁证明。A/B smoke及正式AB/BA/AB六进程均正常退出；B smoke提交相邻帧p95 52.9641ms>50ms，正式B三次中两次第一idle就绪帧实际移除锚行、下一帧重挂载，严格F−1/F的1px门槛未通过。物理/Home/P6未继续推进，不采用失败代码，不宣称索引独有根因或应用/RSS收益 |
+| #82 PR 共享源码/后台行准备 | 重试仍拒绝，未合入 | [独立记录](docs/archive/optimization/p7-82-full-source.md)：标准Release/组件6及修订后真实HTTP/native48格通过，旧45格无效夹具失败保留。原#66六轮完整采样、应用退出/显示/回收通过，但B三轮RSS峰值360.50/358.73/366.75MiB均超严格300；final footprint中位数138.97→206.86MiB、+67.89超原允许8MiB。两资源门槛失败，不采用代码；positive12、普通UI/物理/Preview及独立Home未推进，编译或部分通过不替代验收 |
 
 正式工作区复验原始记录在
 `memory-benchmark-results/p7-p2-retry-final-production-20261006/`。

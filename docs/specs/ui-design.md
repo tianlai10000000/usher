@@ -365,7 +365,7 @@ expanded/collapsed, and success confirmation.
   closed-form damped-oscillator step; a fixed timer/fixed Euler step is only an
   explicit A/B baseline. Retargeting preserves current position and velocity.
   The accepted measurements and reproduction command are recorded in
-  `docs/sidebar_motion_ab.md`.
+  `docs/archive/performance/sidebar_motion_ab.md`.
   Settings uses the same regular label weight as navigation rows, with a 1 px
   optical baseline correction against its 16 px icon.
   The sidebar body itself must not paint an independent container shadow.
@@ -455,7 +455,7 @@ expanded/collapsed, and success confirmation.
   原生标题栏操作必须在所属 Event Loop 线程直接重定向运动，快速点击不得排队旧回调。
   弹簧必须使用 Slint 显示动画时钟、真实帧间隔和闭式阻尼振子步进；固定 Timer/固定
   欧拉步长只能作为显式 A/B 基线。重定向时保留当前进度和速度。采用数据与复现命令见
-  `docs/sidebar_motion_ab.md`。
+  `docs/archive/performance/sidebar_motion_ab.md`。
   Settings 与普通导航行使用相同的常规字重，并针对 16px 图标做 1px 视觉基线校正。
   侧栏主体自身不得绘制独立的右侧容器阴影；固定态使用根层清晰边框与克制的内向
   Elevation，临时 Hover 态使用不透明白色（浅色模式 `#ffffff`）、只有边框、尾部上下

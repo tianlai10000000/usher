@@ -2,12 +2,12 @@
 
 Date: 2026-08-12; memory-lifecycle addendum: 2026-08-19; syntax-fallback and
 AI-response lifecycle addenda: 2026-08-27. This report measures the implementation defined by
-[`docs/specs/artifact-preview.md`](specs/artifact-preview.md). All latency and
+[`docs/specs/artifact-preview.md`](../../specs/artifact-preview.md). All latency and
 memory claims below use Release builds; Debug runs were used only for visual QA.
 
 日期：2026-08-12；内存生命周期补测：2026-08-19；完整语法 fallback 与 AI response
 生命周期补测：2026-08-27。本文量化
-[`docs/specs/artifact-preview.md`](specs/artifact-preview.md) 对应实现。延迟和内存
+[`docs/specs/artifact-preview.md`](../../specs/artifact-preview.md) 对应实现。延迟和内存
 结论全部来自 Release 构建；Debug 仅用于视觉验收。
 
 ## Environment / 环境

@@ -9,7 +9,7 @@
 3. [specs/README.md](specs/README.md)：稳定行为规格索引。
 4. 对应 feature 的源码和测试。
 
-历史终端排障过程位于 [terminal_viewport_iteration_notes.md](terminal_viewport_iteration_notes.md)，它不是当前行为的 source of truth。当前 Terminal 契约以 [specs/terminal.md](specs/terminal.md) 为准。
+历史终端排障过程位于 [terminal_viewport_iteration_notes.md](archive/terminal_viewport_iteration_notes.md)，它不是当前行为的 source of truth。当前 Terminal 契约以 [specs/terminal.md](specs/terminal.md) 为准。
 
 ## 本次整理修正的旧文档偏差
 

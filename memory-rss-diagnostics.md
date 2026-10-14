@@ -858,7 +858,7 @@ A/B 使用固定的五张原始 Logo，记录解码峰值 RSS、最终 RGBA live
 - **本次隔离诊断当时没有真实 PR/Workflow 和大 Chat 数据。** 第 13.3 节随后补入冻结的 `tianlai10000000/usher#1`、Chat 历史、Hook 与项目 fixture，并记录了 PR/Chat 离页 owner；它仍没有达到 300/400 MiB。PR 的 count-bounded 高亮/源码/range 缓存、不同离页路径及 Chat 历史不能据此认定为原 400 MB 的主因，释放 owner 也不保证 allocator/renderer 立即等额归还 RSS。
 - **重复访问是否线性增长必须单独判断。** 空数据 Release 第二轮已接近平台期，不能由“首次增加且离页后保留”推导出“每轮都会泄漏”。小窗口切页的 graphics 台阶也不能与旧版 resize/IOSurface 高水位混为同一问题。
 
-完整诊断与原始日志保留在本地忽略目录 [rss-diagnosis-20260920](memory-benchmark-results/rss-diagnosis-20260920/analysis.zh.md)。其中 `debug-clean-routes.log`、`release-routes.log`、`*-resident.vmmap`、`*.footprint` 为有效证据；并行编译期间受内存压缩干扰的首轮 Debug 和一次错误的 `footprint -f MB` 输出保留但不纳入比较。该目录不随 Git 分发，因此本节同时保留了关键条件、数值与结论边界。
+完整诊断与原始日志已保存在本地 `benchmark-history.tar.gz` 归档，内部原路径为 `memory-benchmark-results/rss-diagnosis-20260920/analysis.zh.md`，恢复方式见[本地归档说明](docs/local-archives.md)。其中 `debug-clean-routes.log`、`release-routes.log`、`*-resident.vmmap`、`*.footprint` 为有效证据；并行编译期间受内存压缩干扰的首轮 Debug 和一次错误的 `footprint -f MB` 输出保留但不纳入比较。该归档不随 Git 分发，因此本节同时保留了关键条件、数值与结论边界。
 
 ### 13.2 本轮统一 A/B、交付与回滚门禁
 

@@ -73,7 +73,7 @@ UI/Settings bridge 的根应用 all-targets check。完整层固定 `CARGO_INCRE
 `cargo`、`rg`、`python3`、`git`；HTTP 夹具需要本地监听权限。已知结构和 lint
 失败仍会阻断。macOS 手动 CI 复用完整入口，Windows 保留独立的默认 workspace
 编译检查；不会启用托管 schedule，也不替代专项 UI/Release A/B 验收。原结构
-职责方案见[第 64 批](docs/p6-64-quality.md)。
+职责方案见[第 64 批](docs/archive/optimization/p6-64-quality.md)。
 
 AI Code Review 是默认产品构建启用的可拆卸 Cargo feature。受限构建可排除其核心包和
 UI/Settings bridge：
@@ -309,9 +309,11 @@ push `v*` tag 是唯一的自动构建触发器，只会启动 Release workflow�
 
 ## 文档
 
+- [文档导航](docs/README.md)
+- [历史归档索引](docs/archive/README.md)
 - [中文架构文档](docs/architecture.zh.md)
 - [English architecture](docs/architecture.md)
-- [项目结构审计与重构路线图](docs/architecture-structure-audit.md)
+- [项目结构审计与重构路线图](docs/archive/architecture-structure-audit.md)
 - [Coding agent 指令](AGENTS.md)
 - [规格索引](docs/specs/README.md)
 - [GitHub/Primer UI 设计规范](docs/specs/ui-design.md)
@@ -322,7 +324,7 @@ push `v*` tag 是唯一的自动构建触发器，只会启动 Release workflow�
 - [构建性能与产物策略](docs/build-performance.md)
 - [内存优化待办](docs/memory_optimization_backlog.zh.md)
 - [Memory optimization backlog](docs/memory_optimization_backlog.md)
-- [终端历史排障记录](docs/terminal_viewport_iteration_notes.md)
+- [终端历史排障记录](docs/archive/terminal_viewport_iteration_notes.md)
 
 ## 许可证
 

@@ -5,8 +5,8 @@
 ## 实际参考与实现
 
 直接查看 [GitHub cli/cli PR 列表](https://github.com/cli/cli/pulls)，分别记录
-[默认宽度](designs/pr-conflicts/validation/github-pr-list-reference-wide.png) 与
-[640px](designs/pr-conflicts/validation/github-pr-list-reference-narrow.png)。
+[默认宽度](../pr-conflicts/screenshots/github-pr-list-reference-wide.png) 与
+[640px](../pr-conflicts/screenshots/github-pr-list-reference-narrow.png)。
 GitHub 将标题置于首行，作者/时间、评审和 CI 检查自然排列在下方，使用分隔点，
 窄窗口各段按剩余空间换行。CI 检查不是代码冲突状态；本次观察没有把 GitHub
 列表宣称为存在独立冲突列的依据。Usher 保留用户要求的冲突入口和分支信息，
@@ -39,10 +39,10 @@ macOS 截图工具需要应用包身份，截图运行通过 Cargo runner 把该
 
 ## 原生截图
 
-- [英文 1200px，侧栏展开；计数/图标最后修正前](designs/pr-conflicts/validation/pr-list-inline-en-wide.png)
-- [英文 1200px，侧栏收起；计数/图标最后修正前](designs/pr-conflicts/validation/pr-list-inline-en-wide-full.png)
-- [英文 800px，GitHub](designs/pr-conflicts/validation/pr-list-inline-en-narrow.png)
-- [最终换行状态图标对齐](designs/pr-conflicts/validation/pr-list-icons-aligned.png)
+- [英文 1200px，侧栏展开；计数/图标最后修正前](../pr-conflicts/screenshots/pr-list-inline-en-wide.png)
+- [英文 1200px，侧栏收起；计数/图标最后修正前](../pr-conflicts/screenshots/pr-list-inline-en-wide-full.png)
+- [英文 800px，GitHub](../pr-conflicts/screenshots/pr-list-inline-en-narrow.png)
+- [最终换行状态图标对齐](../pr-conflicts/screenshots/pr-list-icons-aligned.png)
 
 设置中运行时由中文切换英文，返回列表后元信息、相对时间、状态标签和布局均更新。
 原生验证采用分别指定启动尺寸及侧栏切换，未将系统窗口拖拽作为已通过项。

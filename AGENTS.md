@@ -39,7 +39,7 @@ Keep Usher a responsive desktop application with explicit module ownership, even
 - `README.md` and `README.zh.md`: product scope, setup, support status.
 - `docs/architecture.md` and `docs/architecture.zh.md`: ownership and data flow.
 - `docs/specs/`: stable behavior contracts.
-- `docs/terminal_viewport_iteration_notes.md`: historical investigation, not current truth.
+- `docs/archive/terminal_viewport_iteration_notes.md`: historical investigation, not current truth.
 - `material-1.18.1/`: byte-for-byte upstream `ui-libraries/material/src` from
   Slint v1.18.1 (`372cf0ee5577c3dfec309a45e7b778ba4e81b734`); treat it as
   replace-only third-party code.

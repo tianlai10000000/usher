@@ -597,10 +597,10 @@ span 为空；点击标题后完整 Preview 可以在其 Worker 上初始化并�
 
 The dated Release measurements, commands, raw samples, binary-size delta, and
 known retained-memory caveat are recorded in
-[`docs/artifact-preview-performance.md`](../artifact-preview-performance.md).
+[`docs/archive/performance/artifact-preview-performance.md`](../archive/performance/artifact-preview-performance.md).
 
 带日期的 Release 测量、复现命令、原始样本、二进制体积差值和已知内存残留说明见
-[`docs/artifact-preview-performance.md`](../artifact-preview-performance.md)。
+[`docs/archive/performance/artifact-preview-performance.md`](../archive/performance/artifact-preview-performance.md)。
 
 ## Regression checklist / 回归清单
 

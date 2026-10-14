@@ -250,7 +250,7 @@ create 返回包含名称、argv 和说明的 `PlannedCommand`，remove 却返�
 
 - **修改范围**：`tag/command_output.rs`、`controller.rs`、现有 `version.rs` 或专用小型引用解析模块、`benchmark.rs`。
 - **完成标准**：业务解析不再读取合并/截断日志；命令终态使用类型表示；同步/异步共用同一引用选择规则；半条 stdout 记录也有预算。
-- **专项验证**：`cargo test --lib --locked workflow::tag`；新增跨块/双流交错、最大版本在输出前部、空记录、错误类型和超限输入回归。沿用背压、取消和排空测试；触及传输时复跑现有 P5-B #58 Job 基准，命令选项与预算见 `docs/p5-b-performance.md` 和对应脚本。
+- **专项验证**：`cargo test --lib --locked workflow::tag`；新增跨块/双流交错、最大版本在输出前部、空记录、错误类型和超限输入回归。沿用背压、取消和排空测试；触及传输时复跑现有 P5-B #58 Job 基准，命令选项与预算见 `docs/archive/optimization/p5-b-performance.md` 和对应脚本。
 - **边界**：保持已完成的 4 KiB / 16 块 / 32 KiB / 2 秒约束，不恢复无界输出或整行读取；benchmark 继续检查真实生产路径。
 
 ### CQ-B3：Tag 计划及版本模式

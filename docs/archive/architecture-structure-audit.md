@@ -4,7 +4,7 @@
 > `docs/specs/` 为准，模块所有权仍以中英文架构文档为准。
 
 > 2026-09-16：第 64 批已核查当前四项结构超限，职责方案与验证记录见
-> [P6 #64](p6-64-quality.md)。以下日期章节保留历史语境；当前 CI 仅手动触发，
+> [P6 #64](optimization/p6-64-quality.md)。以下日期章节保留历史语境；当前 CI 仅手动触发，
 > 不再由 PR/push 自动运行。第 64 批不提高结构预算，超限继续返回失败。
 
 ## 结论
@@ -85,8 +85,8 @@ controller 子模块实现，以保留现有七类 generation 与生命周期。
 
 #63 为 `main` push 接入原 PR 质量门禁，并将真实 Project、Job、Preview、Find
 夹具纳入 Nightly。所有权以中英文架构与对应 spec 为准，实测及验收缺口见
-[`p5-d-performance.md`](p5-d-performance.md)，后续完成状态以
-[`optimizing-proposal.md`](../optimizing-proposal.md) 第 20 节为准。以下 7 月路线是历史
+[`p5-d-performance.md`](optimization/p5-d-performance.md)，后续完成状态以
+[`optimizing-proposal.md`](../../optimizing-proposal.md) 第 20 节为准。以下 7 月路线是历史
 记录，不再作为停止结构治理的当前依据。
 
 ## 2026-07 已完成的结构调整（历史基线）

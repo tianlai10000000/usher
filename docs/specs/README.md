@@ -1,5 +1,7 @@
 # Specifications / 规格索引
 
+[Documentation / 文档导航](../README.md) · [Historical archive / 历史归档](../archive/README.md)
+
 Hooks requires typed host/validation errors and semantic notification metadata,
 with immediate locale refresh of mounted history, feedback and Job/Banner copy.
 Hooks 约束类型化宿主/校验错误、语义通知元数据及已挂载文案的即时语言切换。
@@ -144,27 +146,27 @@ Documents that are not specs:
 - `docs/local-archives.md`: verified local benchmark/release archive locations
   and restoration instructions; these are historical evidence, not build inputs.
 
-- `docs/structure-cleanup-20261014.md`: batch 6 ownership extraction, unchanged
+- `docs/archive/maintenance/structure-cleanup-20261014.md`: batch 6 ownership extraction, unchanged
   structure budgets, gate comparisons and validation evidence.
-- `docs/security-maintenance-20261014.md`: dated batches 1–5 findings, regression
+- `docs/archive/maintenance/security-maintenance-20261014.md`: dated batches 1–5 findings, regression
   evidence, unresolved platform/release issues and lessons for future agents.
 - `docs/architecture.md`, `docs/architecture.zh.md`: canonical architecture.
-- `docs/architecture-structure-audit.md`: dated structure audit and refactoring roadmap.
+- `docs/archive/architecture-structure-audit.md`: dated structure audit and refactoring roadmap.
 - `docs/ARCHITECTURE_FOR_AI.md`: compatibility entry point for older agent prompts.
-- `docs/settings-tooltip-memory-20260924.md`: dated Settings Tooltip Release A/B,
+- `docs/archive/memory/settings-tooltip-memory-20260924.md`: dated Settings Tooltip Release A/B,
   repository-wide host audit, prevention gate, and pending Messages A/B.
-- `docs/hook-editor-memory-20260926.md`: Hook Dialog shadow attribution,
+- `docs/archive/memory/hook-editor-memory-20260926.md`: Hook Dialog shadow attribution,
   rejected lifecycle-only candidate, repository-wide renderer-surface audit,
   source-built Release evidence, and prevention gate.
 - `docs/memory_optimization_backlog.md`, `docs/memory_optimization_backlog.zh.md`: measured memory baseline and phased optimization backlog.
-- `docs/artifact-preview-performance.md`: dated Release measurements for Chat resize and artifact-preview hosts.
+- `docs/archive/performance/artifact-preview-performance.md`: dated Release measurements for Chat resize and artifact-preview hosts.
 - `docs/ui-github-migration-plan.md`: staged UI implementation checklist and
   user-acceptance gate.
 - `bug-history.md`: append-only migration defect ledger.
-- `docs/terminal_viewport_iteration_notes.md`: historical terminal investigation log.
-- `docs/ai-review-response-timeout-investigation.md`: historical AI Review
+- `docs/archive/terminal_viewport_iteration_notes.md`: historical terminal investigation log.
+- `docs/archive/ai-review-response-timeout-investigation.md`: historical AI Review
   non-streaming response-timeout evidence and threshold-adjustment playbook.
-- `docs/workflow-optimization-rollback.md`: rejected Workflow compile-boundary
+- `docs/archive/workflow-optimization-rollback.md`: rejected Workflow compile-boundary
   experiment, UI regression history, measurements, and rollback scope.
 
 When adding a spec, include scope, invariants, ownership, failure behavior, and a regression checklist. Update this index in the same change.

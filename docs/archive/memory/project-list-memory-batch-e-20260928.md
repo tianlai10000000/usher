@@ -36,7 +36,7 @@ The renderer boundary was checked before implementation:
   framebuffer resources;
 - the relevant Slint 1.18.1 renderer, item-cache, compiler clip, and FemtoVG
   dependency sources are byte-identical to 1.18.0, as recorded in
-  `docs/settings-memory-batch-c-attribution-20260928.md`;
+  `docs/archive/memory/settings-memory-batch-c-attribution-20260928.md`;
 - dropping the item/layer releases ownership, but neither Rust deallocation nor
   the system/driver allocator promises an immediate RSS reduction.
 

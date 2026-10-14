@@ -1,11 +1,11 @@
 # AI Review Response Timeout Investigation / AI Review 响应超时排查记录
 
 > Document status: historical investigation evidence, not the current behavior
-> specification. Use [AI Code Review](specs/ai-code-review.md) for the active
+> specification. Use [AI Code Review](../specs/ai-code-review.md) for the active
 > timeout contract and regression requirements.
 >
 > 文档状态：历史排障证据，不是当前行为规格。现行超时契约与回归要求以
-> [AI Code Review](specs/ai-code-review.md) 为准。
+> [AI Code Review](../specs/ai-code-review.md) 为准。
 
 Date / 日期：2026-08-26
 

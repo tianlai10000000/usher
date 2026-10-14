@@ -2,9 +2,9 @@
 
 ## Scope / 范围
 
-This is the stable contract for the project-aware terminal drawer. Historical experiments and abandoned approaches remain in `docs/terminal_viewport_iteration_notes.md`.
+This is the stable contract for the project-aware terminal drawer. Historical experiments and abandoned approaches remain in `docs/archive/terminal_viewport_iteration_notes.md`.
 
-本文是项目感知 Terminal Drawer 的稳定契约。历史实验和放弃方案保留在 `docs/terminal_viewport_iteration_notes.md`。
+本文是项目感知 Terminal Drawer 的稳定契约。历史实验和放弃方案保留在 `docs/archive/terminal_viewport_iteration_notes.md`。
 
 ## Ownership / 所有权
 

@@ -1,8 +1,8 @@
 # PR Conflicts 设计图
 
-状态：v5 待审核，尚未定稿。2026-09-28。采用用户提供的当前程序 PR 详情截图作为编辑底图，核对了 `ui/views/workflow/pr_review_workspace.slint`、`ui/components/pr_review/shell.slint` 与 Tooltip 样式。未实现应用 UI。
+状态：2026-09-28 的历史设计基线。v5 对应当时的只读适配方案，首批只读实现与随后交互修复已记录于 [2026-09-28 至 2026-09-29 的离线验收档案](../../archive/pr-conflicts/validation.zh.md)。当前行为契约以 [PR 冲突查看规格](../../specs/pr-conflicts.md) 为准；本次整理未新增手工验收。制作设计图时采用用户提供的程序 PR 详情截图作为编辑底图，核对了 `ui/views/workflow/pr_review_workspace.slint`、`ui/components/pr_review/shell.slint` 与 Tooltip 样式。位图保留为设计参考。
 
-再次对照 [GitHub 官方 2025-10-02 冲突编辑器截图](https://github.blog/changelog/2025-10-02-one-click-merge-conflict-resolution-now-in-the-web-interface/)后重绘 v3：分支说明仅一处；左侧平铺文件；单一文件工具栏；代码 canvas 保持干净，冲突用 gutter 浅色和边界标记；不使用整行绿蓝 Diff 底色、额外分支横条或重复只读标签。该图是保留 Usher Shell 的只读适配，不是 GitHub 原样复刻或已批准的实施稿。完整规范已同步到[设计方案](../../pr-conflicts-design.zh.md)。
+再次对照 [GitHub 官方 2025-10-02 冲突编辑器截图](https://github.blog/changelog/2025-10-02-one-click-merge-conflict-resolution-now-in-the-web-interface/)后重绘 v3：分支说明仅一处；左侧平铺文件；单一文件工具栏；代码 canvas 保持干净，冲突用 gutter 浅色和边界标记；不使用整行绿蓝 Diff 底色、额外分支横条或重复只读标签。该图保留 Usher Shell 的只读适配，v3 只作历史对照；v5 的实现与验收边界见上方记录。完整规范已同步到[设计方案](../../archive/pr-conflicts/design.zh.md)。
 
 本组取代此前脱离现有 UI 的通用网页概念图。保留当前 PR 页头、操作按钮、字体风格、Branch 标签和分隔线；冲突文件使用 GitHub 参考的平铺列表，代码区域采用简化工具栏。不添加新全局侧栏、品牌 logo、面包屑、提示横幅或永久第四个 Tab。冲突状态入口使用现有顶部 Conflicts 按钮。
 
@@ -26,7 +26,7 @@ v5 修正 v4 实际漏绘的起始行括号槽背景：`<<<<<<<` 行也属于黄
 
 这两张图按底图的当前 English UI 展示。PR 标题、作者与 Branch 来自底图；冲突文件数量、块数及代码是设计示例，不代表实际 PR 查询结果。图像是概念编辑结果，不是运行中的 Slint 功能截图，文字与尺寸以实施时的组件和 catalog 为准。
 
-i18n 属于第一批必验：所有应用文案使用共享语义 catalog，支持全部内置 locale；运行时切换即时更新，源码、路径、Branch 和用户 PR 标题保持原文。详见[完整设计](../../pr-conflicts-design.zh.md)的多语言契约。最终程序不使用这些位图作为 UI。
+i18n 属于第一批必验：所有应用文案使用共享语义 catalog，支持全部内置 locale；运行时切换即时更新，源码、路径、Branch 和用户 PR 标题保持原文。详见[完整设计](../../archive/pr-conflicts/design.zh.md)的多语言契约。最终程序不使用这些位图作为 UI。
 
 生成工具：内置 `image_gen`，参考图编辑模式。最终生成约束分别是：
 
