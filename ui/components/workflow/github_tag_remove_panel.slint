@@ -8,6 +8,7 @@ export component GitHubTagRemovePanel {
     in property <bool> has-run: false;
     in-out property <string> tag-to-remove: "";
     callback remove-tag(string);
+    callback target-edited(string);
     callback view-run();
 
     width: 100%;
@@ -25,6 +26,7 @@ export component GitHubTagRemovePanel {
             width: 100%;
             label: I18n.tag-to-remove;
             value <=> root.tag-to-remove;
+            edited(value) => { root.target-edited(value); }
             placeholder: "v1.2.3";
             enabled: !root.running && !root.initializing;
         }

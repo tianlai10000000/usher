@@ -3,15 +3,36 @@
 ## Scope / 范围
 
 `src/hooks/` owns the shared event registry, configuration, execution, cancellation,
-bounded run history, journals, and Settings/Job Run bridges. PR review submission
+bounded run history, journals, and Settings/Job Run bridges. PR approval, PR merge,
 and optional AI Review completion are the first sources. Other modules register a
 versioned `EventDefinition` and call `hooks::emit(HookTrigger)` from their worker.
 There is no remote-provider polling or automatic script installation.
 
 `src/hooks/` 统一管理事件注册、配置、执行、取消、有界运行历史、日志和设置/Job Run
-桥接。人工评审提交和可选的 AI Review 完成是首批来源。其他模块注册带版本的
+桥接。PR 审核通过、PR 合并和可选的 AI Review 完成是首批来源。其他模块注册带版本的
 `EventDefinition`，在后台通过 `hooks::emit(HookTrigger)` 发布事件。
 本机制不轮询远端平台，也不自动安装脚本或运行时。
+
+## Ownership and iteration entry points / 职责与迭代入口
+
+| Responsibility / 职责 | Owner / 入口 |
+| --- | --- |
+| Definitions, event/payload schema and limits / 定义、事件 schema 与预算 | `src/hooks/types.rs` |
+| Registry, admission, dispatch, cancellation and shutdown / 注册、准入、分派、取消与退出 | `src/hooks/mod.rs` (`HookService`) |
+| Typed Store and durable summaries / 强类型 Store 与持久摘要 | `src/hooks/state.rs` (`HookStateFacade`) |
+| Interpreter, output drain and journal / 解释器、输出排空与日志 | `src/hooks/runner.rs`; shared `src/app_runtime/process_tree.rs` |
+| Bounded/cancellable journal replay / 有界可取消回放 | `src/hooks/replay.rs` |
+| Failure categories, semantic copy and notifications / 错误分类、语义文案与通知 | `src/hooks/errors.rs`, `src/hooks/presentation.rs` |
+| Worker Job projection and event-loop UI / Worker Job 投影与 event-loop UI | `src/hooks/projection.rs`, `src/hooks/bridge.rs` |
+| Settings form and factory lifecycle / 设置表单与工厂生命周期 | `ui/components/settings/github_hook_settings.slint`, `ui/views/settings.slint`, `src/settings_page.rs` |
+| Project opt-in / 项目准入 | `src/project/hook_selection.rs`, `src/project/mod.rs` |
+| Business emit boundaries / 业务 emit 边界 | `src/workflow/pr_review/controller/actions/remote.rs`, `src/ai_review/controller.rs` (optional / 可选) |
+
+Execution and diagnostics follow [security boundaries](security-boundaries.md),
+shared logs follow [Jobs](jobs.md), and dynamic copy follows [i18n](i18n.md).
+Read [Tooltip](tooltips.md) and [text layout](text-layout.md) before changing the
+Settings editor or action surfaces. / 进程/诊断、共用日志、动态文案分别沿对应规范修改；
+设置编辑器和操作控件还须先读 Tooltip 与文字排版契约。
 
 ## Configuration / 配置
 
@@ -312,14 +333,14 @@ submissions do not emit the approval event. `pr.merged.v1` is emitted only after
 the provider confirms the merge operation succeeded, independent of merge method.
 Hooks never change or roll back the result of the completed source operation.
 
-Registered events declare `project_scoped`; both review events require a project
+Registered events declare `project_scoped`; all three built-in events require a project
 ID. Every event carrying a project checks membership through the Project facade
 using its normalized Workflow ID. Missing, unhydrated or ambiguous project
 configuration fails closed. Application-scoped events without a project retain
 global matching. Dispatch receipts explain unselected skips. The runner rechecks
 membership after acquiring queue permits, before spawning the interpreter.
 
-注册事件声明 `project_scoped`；两种评审事件均必传项目 ID。所有携带项目的事件
+注册事件声明 `project_scoped`；上述三种内置事件均必传项目 ID。所有携带项目的事件
 通过 Project 门面按归一化 Workflow ID 验证勾选；项目不存在、未加载或 ID 歧义
 均不执行。不携带项目的应用级事件保留全局匹配。未选中原因写入 dispatch 回执；
 Runner 获得排队许可后、启动解释器前再次验证勾选。
@@ -347,8 +368,9 @@ An editor's entire script is one execution step, not one step per source line.
 `emit` returns a `DispatchReceipt` with run IDs and skipped reasons. Upper layers
 can call `wait`, `cancel`, subscribe to events, or replay `events_after(run, seq)`.
 Broadcast subscribers must recover lag through the journal/current snapshot.
-There is no automatic retry or hook-on-hook dispatch. Retained event ID + Hook ID
-prevents repeated automatic execution. Crash recovery marks unfinished summaries
+There is no automatic retry or hook-on-hook dispatch. Retained trigger occurrence
+`event_id` + Hook ID prevents repeated automatic execution; this occurrence ID is
+distinct from the versioned event name such as `pr.merged.v1`. Crash recovery marks unfinished summaries
 interrupted and never replays side effects; arbitrary external scripts do not
 have an exactly-once guarantee.
 
@@ -359,7 +381,8 @@ stdout/stderr 不能伪造生命周期，分别保持读取顺序，不保证两
 
 `emit` 返回 run ID 和跳过原因；上层可等待、取消、订阅或按 seq 回放。订阅落后时
 从日志和当前快照恢复。默认不重试、不递归触发；保留期内 event ID + Hook ID
-去重。崩溃后标记中断，不自动重放；外部副作用不承诺严格 exactly-once。
+去重，其中 `event_id` 表示该次触发身份，不是 `pr.merged.v1` 这类版本化事件名称。
+崩溃后标记中断，不自动重放；外部副作用不承诺严格 exactly-once。
 
 ## Execution / 执行
 
@@ -417,7 +440,7 @@ stdout/stderr 不能伪造生命周期，分别保持读取顺序，不保证两
   后也等待同一屏障。任务接收等待启动加载及孤立日志清理完成；退出关闭接收入口，
   等待已提交的配置操作完成，再停止持久化。
 
-## Regression checklist / 回归清单
+## Replay contract / 回放契约
 
 Replay streams records with bounded buffers and an enforced 16 MiB read budget
 (including legacy journals), rather than trusting file metadata. Unterminated
@@ -438,6 +461,23 @@ UI 回放捕获摘要 seq 并直接格式化到一个字符串；连续打开历
 旧工作，旧完成回调不得覆盖当前选择。滚动继续复用共享 Job 虚拟化。
 崩溃恢复的 interrupted 运行已经没有写入方，其显示水位从日志的完整记录恢复，
 避免跳过纯输出摘要写入后丢失已落盘输出；结论仍保持 interrupted，不重放脚本。
+
+## Regression checklist / 回归清单
+
+```sh
+cargo test --lib --locked hooks::
+cargo test --lib --locked jobs::
+```
+
+`src/hooks/tests.rs` covers dispatch/interpreters/processes; `state_tests.rs`
+covers configuration snapshots and persistence; `replay_tests.rs` covers journal
+budgets, legacy/malformed records, cancellation and interrupted recovery; `presentation_tests.rs` covers
+localized errors/notifications. Job tests cover the shared output viewport.
+These fixtures use temporary state and sample events; never dispatch workstation
+Hooks merely to validate documentation. Native editor/Tooltip/process-tree
+acceptance below is additional to compilation and unit tests. / 上述测试按分派执行、状态预算、
+回放和文案通知分工；只使用临时状态和样例事件，不为文档验收触发工作站 Hook。
+编译与单测仍不替代下列原生 UI/进程树验收。
 
 - Switches, project/outcome filtering, config revision, event deduplication.
 - Default-empty migration, selection save/edit/clear/restart, mixed parent and

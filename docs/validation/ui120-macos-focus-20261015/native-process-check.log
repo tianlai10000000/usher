@@ -1,0 +1,3 @@
+baseline: pgrep exit 1, PASS: owned process absent
+candidate: pgrep exit 1, PASS: owned process absent
+final: pgrep exit 1, PASS: owned process absent

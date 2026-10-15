@@ -10,13 +10,15 @@ use std::sync::{
 use std::time::Duration;
 
 // Use types re-exported from crate root
+use crate::message_center::MessageCommandWorker;
+
+mod ingress;
 use crate::{
     MainWindow, Notification, NotificationDelivery, NotificationIcons, NotificationManager,
     NotificationOptions, NotificationType, UpdateLogic, i18n,
 };
-use usher_messages::{
-    MessageCenter, MessageDraft, MessageSeverity, NativeDelivery, Subscription, categories,
-};
+use ingress::{clear_pending_notifications, enqueue_notification};
+use usher_messages::{MessageCenter, MessageSeverity, Subscription, categories};
 
 lazy_static::lazy_static! {
     // Keeps the Inbox→Banner reconciliation subscription alive for the process.
@@ -48,7 +50,7 @@ const DEFAULT_DURATION_ERROR: i32 = 5000;
 
 /// Visible Banner queue cap (VS Code-style). Queue order is newest-first:
 /// index 0 is the visible head. Older tails are dropped from the transient
-/// overlay only; durable Inbox rows remain via `record_message`.
+/// overlay only; durable Inbox rows remain via the message command worker.
 const MAX_BANNER_QUEUE: usize = 3;
 const DISMISS_ANIMATION_DURATION: Duration = Duration::from_millis(180);
 
@@ -227,6 +229,7 @@ pub struct SharedQueue(pub SharedVector<Notification>);
 
 thread_local! {
     static BANNER_QUEUE_MODEL: RefCell<Option<Rc<VecModel<Notification>>>> = const { RefCell::new(None) };
+
 }
 
 fn banner_queue_model(manager: &NotificationManager) -> Rc<VecModel<Notification>> {
@@ -277,16 +280,12 @@ fn prepend_capped<T>(mut items: Vec<T>, item: T, cap: usize) -> (Vec<T>, Vec<T>)
 // Helper function: add notification to queue
 fn push_notification(
     manager: &NotificationManager,
-    mut notification: Notification,
+    notification: Notification,
     shared_queue: &Option<Arc<RwLock<SharedQueue>>>,
-    message_center: &MessageCenter,
 ) {
-    if notification.message_id.is_empty()
-        && let Some(message_id) = record_message(message_center, &notification)
-    {
-        notification.message_id = message_id.into();
-    }
-
+    // Caller-supplied IDs obey the same uniqueness rule as generated IDs.
+    // Replacing a pending/visible notification starts one fresh timer owner.
+    remove_notification_by_id(manager, notification.id, shared_queue);
     let model = banner_queue_model(manager);
     model.insert(0, notification.clone());
     let mut dropped = Vec::new();
@@ -323,44 +322,11 @@ fn push_notification(
     }
 }
 
-fn record_message(message_center: &MessageCenter, notification: &Notification) -> Option<String> {
-    let severity = match notification.r#type {
-        NotificationType::Info => MessageSeverity::Info,
-        NotificationType::Success => MessageSeverity::Success,
-        NotificationType::Warning => MessageSeverity::Warning,
-        NotificationType::Error => MessageSeverity::Error,
-    };
-    let fallback_title = i18n::tr(default_title_key(notification.r#type));
-    let title = if notification.title.is_empty() {
-        fallback_title.as_ref()
-    } else {
-        notification.title.as_str()
-    };
-    let native_delivery = match notification.native_delivery {
-        NotificationDelivery::WhenUnfocused => NativeDelivery::WhenUnfocused,
-        NotificationDelivery::Never => NativeDelivery::Never,
-        NotificationDelivery::Always => NativeDelivery::Always,
-    };
-    match message_center.publish(
-        MessageDraft::new(title, notification.message.as_str())
-            .source(notification.source.as_str())
-            .category(notification.category.as_str())
-            .severity(severity)
-            .native_delivery(native_delivery),
-    ) {
-        Ok(message) => Some(message.id),
-        Err(error) => {
-            log::error!("[Messages] Failed to record application notification: {error}");
-            None
-        }
-    }
-}
-
 /// Present an already persisted message without duplicating Inbox/native delivery.
 /// The caller enters on the Slint event loop.
 pub(crate) fn show_recorded_message(
     ui: &MainWindow,
-    center: &MessageCenter,
+    _center: &MessageCenter,
     message: &usher_messages::Message,
 ) {
     let kind = match message.severity {
@@ -390,7 +356,7 @@ pub(crate) fn show_recorded_message(
     );
     notification.message_id = message.id.clone().into();
     let id = notification.id;
-    push_notification(&NotificationManager::get(ui), notification, &None, center);
+    push_notification(&NotificationManager::get(ui), notification, &None);
     start_auto_close_timer(ui.as_weak(), id, Duration::from_secs(5), None);
 }
 
@@ -448,6 +414,7 @@ fn clear_banner_queue(
 /// Drops queued banners whose durable Inbox rows were deleted or cleared.
 /// Must run on the Slint event loop. Only Send data (deleted ids) may cross
 /// `invoke_from_event_loop` — the banner queue holds non-Send `Image` handles.
+#[cfg(test)]
 fn deleted_mounted_message_ids(
     mounted: &HashSet<String>,
     snapshot_ids: &HashSet<String>,
@@ -644,10 +611,11 @@ fn start_auto_close_timer(
 }
 
 // Notification manager initialization and callback binding function
-pub fn setup_notifications(
+pub(crate) fn setup_notifications(
     ui: &MainWindow,
     shared_queue: Option<Arc<RwLock<SharedQueue>>>, // Optional: for multi-window sharing
     message_center: MessageCenter,
+    commands: MessageCommandWorker,
 ) {
     let ui_weak = ui.as_weak();
 
@@ -658,262 +626,73 @@ pub fn setup_notifications(
 
     let manager = NotificationManager::get(ui);
 
-    // Convenience method callbacks
-    let ui_weak_info = ui_weak.clone();
-    let shared_queue_clone_info = shared_queue.clone();
-    let message_center_info = message_center.clone();
-    manager.on_info(move |options: NotificationOptions| {
-        let ui_weak = ui_weak_info.clone();
-        let shared_queue = shared_queue_clone_info.clone();
-        let message_center = message_center_info.clone();
-        // Extract data that can be safely sent
-        let message = options.message.to_string();
-        let title = options.title.to_string();
-        let duration = options.duration;
-        let icon = options.icon.to_string();
-        let component = options.component;
-        let tag = options.tag.to_string();
-        let source = options.source.to_string();
-        let category = options.category.to_string();
-        let native_delivery = options.native_delivery;
-        // Convert actions ModelRc to Vec<String> for thread safety
-        let actions_vec: Vec<String> = (0..options.actions.row_count())
-            .filter_map(|i| options.actions.row_data(i).map(|s| s.to_string()))
-            .collect();
-
-        // Use Timer to delay execution, avoid immediately accessing RefCell in invoke_info callback
-        Timer::single_shot(Duration::from_millis(10), move || {
-            if let Some(ui) = ui_weak.upgrade() {
-                let manager = NotificationManager::get(&ui);
-                // Reconstruct actions as ModelRc
-                let actions: ModelRc<slint::SharedString> =
-                    ModelRc::new(std::rc::Rc::new(VecModel::from(
-                        actions_vec
-                            .iter()
-                            .map(|s| slint::SharedString::from(s.as_str()))
-                            .collect::<Vec<_>>(),
-                    )));
-                let notif = create_notification_with_defaults(
-                    NotificationType::Info,
-                    NotificationOptions {
-                        message: message.into(),
-                        title: title.into(),
-                        duration,
-                        icon: icon.into(),
-                        component,
-                        actions,
-                        tag: tag.into(),
-                        source: source.into(),
-                        category: category.into(),
-                        native_delivery,
-                    },
-                );
-                let notification_id = notif.id;
-                push_notification(&manager, notif.clone(), &shared_queue, &message_center);
-
-                // Set auto-close timer (supports hover pause)
-                if notif.duration > 0 {
-                    let duration = Duration::from_millis(notif.duration as u64);
-                    start_auto_close_timer(
-                        ui_weak.clone(),
-                        notification_id,
-                        duration,
-                        shared_queue.clone(),
-                    );
-                }
+    // Capture each draft at callback admission, before any event-loop deferral.
+    // One FIFO worker owns all publications and Inbox mutations.
+    for kind in [
+        NotificationType::Info,
+        NotificationType::Success,
+        NotificationType::Warning,
+        NotificationType::Error,
+    ] {
+        let weak = ui_weak.clone();
+        let shared = shared_queue.clone();
+        let center = message_center.clone();
+        let commands = commands.clone();
+        let callback = move |options: NotificationOptions| {
+            if let Some(ui) = weak.upgrade() {
+                let notification = create_notification_with_defaults(kind, options);
+                enqueue_notification(&ui, notification, shared.clone(), &center, &commands);
             }
-        });
-    });
+        };
+        match kind {
+            NotificationType::Info => manager.on_info(callback),
+            NotificationType::Success => manager.on_success(callback),
+            NotificationType::Warning => manager.on_warn(callback),
+            NotificationType::Error => manager.on_error(callback),
+        }
+    }
 
-    let ui_weak_success = ui_weak.clone();
-    let shared_queue_clone_success = shared_queue.clone();
-    let message_center_success = message_center.clone();
-    manager.on_success(move |options: NotificationOptions| {
-        let ui_weak = ui_weak_success.clone();
-        let shared_queue = shared_queue_clone_success.clone();
-        let message_center = message_center_success.clone();
-        // Extract data that can be safely sent (component cannot be sent across threads, use None)
-        let message = options.message.to_string();
-        let title = options.title.to_string();
-        let duration = options.duration;
-        let icon = options.icon.to_string();
-        let source = options.source.to_string();
-        let category = options.category.to_string();
-        let native_delivery = options.native_delivery;
-        // Use Timer to delay execution, avoid immediately accessing RefCell in invoke_success callback
-        Timer::single_shot(Duration::from_millis(10), move || {
-            if let Some(ui) = ui_weak.upgrade() {
-                let manager = NotificationManager::get(&ui);
-                let notif = create_notification_with_defaults(
-                    NotificationType::Success,
-                    NotificationOptions {
-                        message: message.into(),
-                        title: title.into(),
-                        duration,
-                        icon: icon.into(),
-                        component: crate::CustomComponentType::None,
-                        actions: Default::default(),
-                        tag: Default::default(),
-                        source: source.into(),
-                        category: category.into(),
-                        native_delivery,
-                    },
-                );
-                let notification_id = notif.id;
-                push_notification(&manager, notif.clone(), &shared_queue, &message_center);
-
-                if notif.duration > 0 {
-                    let duration = Duration::from_millis(notif.duration as u64);
-                    start_auto_close_timer(
-                        ui_weak.clone(),
-                        notification_id,
-                        duration,
-                        shared_queue.clone(),
-                    );
-                }
-            }
-        });
-    });
-
-    let ui_weak_warning = ui_weak.clone();
-    let shared_queue_clone_warning = shared_queue.clone();
-    let message_center_warning = message_center.clone();
-    manager.on_warn(move |options: NotificationOptions| {
-        if let Some(ui) = ui_weak_warning.upgrade() {
-            let manager = NotificationManager::get(&ui);
-            let notif = create_notification_with_defaults(NotificationType::Warning, options);
-            let notification_id = notif.id;
-            push_notification(
-                &manager,
-                notif.clone(),
-                &shared_queue_clone_warning,
-                &message_center_warning,
-            );
-
-            if notif.duration > 0 {
-                let duration = Duration::from_millis(notif.duration as u64);
-                start_auto_close_timer(
-                    ui_weak_warning.clone(),
-                    notification_id,
-                    duration,
-                    shared_queue_clone_warning.clone(),
-                );
-            }
+    let weak = ui_weak.clone();
+    let shared = shared_queue.clone();
+    let center = message_center.clone();
+    let show_commands = commands.clone();
+    manager.on_show(move |kind, options| {
+        if let Some(ui) = weak.upgrade() {
+            let notification = create_notification_with_defaults(kind, options);
+            enqueue_notification(&ui, notification, shared.clone(), &center, &show_commands);
         }
     });
 
-    let ui_weak_error = ui_weak.clone();
-    let shared_queue_clone_error = shared_queue.clone();
-    let message_center_error = message_center.clone();
-    manager.on_error(move |options: NotificationOptions| {
-        let ui_weak = ui_weak_error.clone();
-        let shared_queue = shared_queue_clone_error.clone();
-        let message_center = message_center_error.clone();
-        // Extract data that can be safely sent (component cannot be sent across threads, use None)
-        let message = options.message.to_string();
-        let title = options.title.to_string();
-        let duration = options.duration;
-        let icon = options.icon.to_string();
-        let source = options.source.to_string();
-        let category = options.category.to_string();
-        let native_delivery = options.native_delivery;
-        // Use Timer to delay execution, avoid immediately accessing RefCell in invoke_error callback
-        Timer::single_shot(Duration::from_millis(10), move || {
-            if let Some(ui) = ui_weak.upgrade() {
-                let manager = NotificationManager::get(&ui);
-                let notif = create_notification_with_defaults(
-                    NotificationType::Error,
-                    NotificationOptions {
-                        message: message.into(),
-                        title: title.into(),
-                        duration,
-                        icon: icon.into(),
-                        component: crate::CustomComponentType::None,
-                        actions: Default::default(),
-                        tag: Default::default(),
-                        source: source.into(),
-                        category: category.into(),
-                        native_delivery,
-                    },
-                );
-                let notification_id = notif.id;
-                push_notification(&manager, notif.clone(), &shared_queue, &message_center);
-
-                if notif.duration > 0 {
-                    let duration = Duration::from_millis(notif.duration as u64);
-                    start_auto_close_timer(
-                        ui_weak.clone(),
-                        notification_id,
-                        duration,
-                        shared_queue.clone(),
-                    );
-                }
-            }
-        });
-    });
-
-    let ui_weak_show = ui_weak.clone();
-    let shared_queue_clone_show = shared_queue.clone();
-    let message_center_show = message_center.clone();
-    manager.on_show(move |type_, options: NotificationOptions| {
-        if let Some(ui) = ui_weak_show.upgrade() {
-            let manager = NotificationManager::get(&ui);
-            let notif = create_notification_with_defaults(type_, options);
-            let notification_id = notif.id;
-            push_notification(
-                &manager,
-                notif.clone(),
-                &shared_queue_clone_show,
-                &message_center_show,
-            );
-
-            if notif.duration > 0 {
-                let duration = Duration::from_millis(notif.duration as u64);
-                start_auto_close_timer(
-                    ui_weak_show.clone(),
-                    notification_id,
-                    duration,
-                    shared_queue_clone_show.clone(),
-                );
-            }
-        }
-    });
-
-    // push callback: add message + start timer
-    let shared_queue_clone = shared_queue.clone();
-    let ui_weak_push = ui_weak.clone();
-    let message_center_push = message_center.clone();
+    let weak = ui_weak.clone();
+    let shared = shared_queue.clone();
+    let center = message_center.clone();
     manager.on_push(move |mut notification: Notification| {
-        let ui_weak = ui_weak_push.clone();
-        let shared_queue = shared_queue_clone.clone();
-
-        // If notification has no ID (ID is 0), generate a new unique ID
         if notification.id == 0 {
             notification.id = next_notification_id();
         }
-        let notification_id = notification.id;
-
-        if let Some(ui) = ui_weak.upgrade() {
-            let manager = NotificationManager::get(&ui);
-            push_notification(
-                &manager,
-                notification.clone(),
-                &shared_queue,
-                &message_center_push,
-            );
-
-            // Auto-close timer (supports hover pause)
-            if notification.duration > 0 {
-                let duration = Duration::from_millis(notification.duration as u64);
-                start_auto_close_timer(
-                    ui_weak.clone(),
-                    notification_id,
-                    duration,
-                    shared_queue.clone(),
-                );
+        if let Some(ui) = weak.upgrade() {
+            if notification.message_id.is_empty() {
+                enqueue_notification(&ui, notification, shared.clone(), &center, &commands);
+            } else {
+                // Existing persisted messages must not publish/native-deliver twice.
+                let id = notification.id;
+                let duration = notification.duration;
+                push_notification(&NotificationManager::get(&ui), notification, &shared);
+                if duration > 0 {
+                    start_auto_close_timer(
+                        ui.as_weak(),
+                        id,
+                        Duration::from_millis(duration as u64),
+                        shared.clone(),
+                    );
+                }
             }
         }
     });
+    crate::shutdown::register_ui_shutdown_task(
+        "clear_pending_notifications",
+        clear_pending_notifications,
+    );
 
     // remove callback
     let shared_queue_clone = shared_queue.clone();
@@ -1160,33 +939,24 @@ pub fn setup_notifications(
     // Inbox delete/clear is authoritative for mirrored banners. Closing a banner
     // still never deletes the durable message (handled only in dismiss paths).
     // Clone before later callbacks move `ui_weak`.
-    let ui_weak_sync = ui.as_weak();
-    let subscription = message_center.subscribe(Arc::new(move |snapshot| {
-        let ui_weak = ui_weak_sync.clone();
+    let current_center = message_center.clone();
+    let reconcile = crate::app_runtime::latest_ui(ui.as_weak(), move |ui, _: ()| {
+        // Read the authoritative snapshot on delivery. A queued older snapshot
+        // must not remove a newly completed publication, and a delete between
+        // completion and mounting must still prune it. Coalesce commit wakes so
+        // the UI queue retains one reconciliation owner while it is busy.
+        let snapshot = current_center.snapshot();
         let mounted = BANNER_MESSAGE_IDS
             .read()
             .map(|ids| ids.clone())
             .unwrap_or_default();
-        let snapshot_ids = snapshot
-            .messages
-            .iter()
-            .map(|message| message.id.clone())
-            .collect::<HashSet<_>>();
-        // Only reconcile banners that were mounted when this snapshot was
-        // observed. A notification publish updates the message center before
-        // its Banner is inserted, so a queued stale snapshot must not remove
-        // that newly inserted Banner.
-        let deleted = deleted_mounted_message_ids(&mounted, &snapshot_ids);
-        if let Err(error) = slint::invoke_from_event_loop(move || {
-            let Some(ui) = ui_weak.upgrade() else {
-                return;
-            };
-            let manager = NotificationManager::get(&ui);
-            prune_banners_for_deleted_messages(&manager, &deleted);
-        }) {
-            log::debug!("[Messages] Banner sync dropped during shutdown: {error}");
-        }
-    }));
+        let deleted = mounted
+            .into_iter()
+            .filter(|id| !snapshot.messages.iter().any(|message| &message.id == id))
+            .collect();
+        prune_banners_for_deleted_messages(&NotificationManager::get(ui), &deleted);
+    });
+    let subscription = message_center.subscribe(Arc::new(move |_| reconcile(())));
     if let Ok(mut guard) = BANNER_MESSAGE_SYNC.lock() {
         *guard = Some(subscription);
     }

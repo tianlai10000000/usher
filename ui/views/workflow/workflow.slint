@@ -27,6 +27,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
     callback tag-change-mode(string);
     callback tag-select-version-mode(string);
     callback tag-run(string, string);
+    callback tag-draft-edited(string,string,string);
     callback tag-remove(string);
     callback tag-open-add();
     callback tag-open-remove();
@@ -55,6 +56,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
     in property <string> tag-current-version: "v0.0.0";
     in-out property <string> tag-next-version: "v0.0.1";
     in-out property <string> tag-remove-target: "";
+    in-out property <string> tag-description: "";
     in property <bool> tag-add-initializing: false;
     in property <bool> tag-remove-initializing: false;
     in property <bool> tag-running: false;
@@ -293,6 +295,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
                 current-version: root.tag-current-version;
                 next-version <=> root.tag-next-version;
                 remove-target <=> root.tag-remove-target;
+                description <=> root.tag-description;
                 add-initializing: root.tag-add-initializing;
                 remove-initializing: root.tag-remove-initializing;
                 running: root.tag-running;
@@ -300,6 +303,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
                 result: root.tag-result;
                 change-mode(mode) => { root.tag-change-mode(mode); }
                 select-version-mode(mode) => { root.tag-select-version-mode(mode); }
+                draft-edited(next,target,description) => { root.tag-draft-edited(next,target,description); }
                 run(version, description) => { root.tag-run(version, description); }
                 remove-tag(tag) => { root.tag-remove(tag); }
                 open-add-tab => { root.tag-open-add(); }

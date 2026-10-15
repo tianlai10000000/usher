@@ -1,0 +1,9 @@
+    Blocking waiting for file lock on build directory
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.95s
+     Running unittests src/lib.rs (target/debug/deps/usher_lib-fa63b6a37e703dbe)
+
+running 1 test
+test message_center::commands::tests::deferred_first_frame_hydration_applies_buffered_clear_and_mark_all_before_new_publications ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 848 filtered out; finished in 0.15s
+

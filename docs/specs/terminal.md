@@ -108,11 +108,25 @@ This is the stable contract for the project-aware terminal drawer. Historical ex
 
 ## Viewport synchronization / Viewport 同步
 
-- The Slint drawer reports content width/height after layout.
-- Rust converts physical dimensions to terminal columns/rows using the active font metrics.
-- Ignore zero, negative, or duplicate viewport values.
-- Session startup must use the latest stable viewport; late resize events may refine it.
+- The Slint drawer derives columns/rows from logical content geometry: measured
+  monospace character width, 20 px cell pitch, 12 px padding, and the optional
+  scrollback gutter. It reports the resulting integer grid through
+  `viewport-resized` → root `shell-drawer-resize`; Rust does not convert physical pixels.
+- `viewport-ready` suppresses reports before the open drawer has usable layout.
+  Opening reports immediately when ready, with a 16 ms initial-layout retry;
+  grid changes also use the 80 ms resize coalescer.
+- Rust ignores reports while hidden, clamps admitted dimensions to at least one,
+  and only resizes PTY/render state when the grid changed. The Slint producer
+  supplies a minimum of 20 columns and 4 rows; it does not send zero-size layouts.
+- Session startup uses the latest admitted grid (initially the Rust defaults).
+  The first ready layout and later reports refine it; do not assume PTY creation
+  waits for a final layout measurement.
 - Diagnostic logs should include project key, source, route, rows, columns, and viewport dimensions when verbose terminal logging is enabled.
+
+Slint 负责按逻辑内容区、字符实测宽度、20px 单元格行距、12px 留白和滚动条 gutter
+计算整数网格；Rust 接收网格而非物理尺寸。打开时立即报告可用布局并由 16ms Timer
+补报，尺寸变化另经 80ms 合并。隐藏时 Rust 忽略回调，重复网格不触发 resize；
+启动使用最近收到的网格或默认值，不能假定已经等到最终布局。
 
 ## Input and selection / 输入与选择
 
@@ -138,3 +152,16 @@ This is the stable contract for the project-aware terminal drawer. Historical ex
   interrupted/nonblocking retries preserve packet order without duplication.
 - Input-failure copy is visible in live mode and refreshes immediately between English
   and a packaged non-source locale without remounting the drawer.
+
+## Iteration entry points / 迭代入口
+
+Trace `open_terminal_for_project` and `bind_terminal` in `src/terminal/mod.rs`
+through the root callbacks in `ui/main.slint` to `GitHubTerminalDrawer` before
+changing docking or viewport behavior. Queue/process regressions live in
+`src/terminal/io.rs`, `session_tests.rs` and `lifecycle.rs`; model/visibility and
+locale regressions live in `mod.rs`. Run `cargo test --lib --locked terminal::`
+for the focused suite. Real PTY tests are Unix-gated; this does not establish
+Windows process-tree shutdown or the native layout matrix above.
+
+Dock/viewport 修改须同时追踪 Rust、根桥接和 Drawer。聚焦单测覆盖队列、真实 Unix
+PTY、回收、可见性与语言；Windows 进程树及原生布局仍需平台验收。

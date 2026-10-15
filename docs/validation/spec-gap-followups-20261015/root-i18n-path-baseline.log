@@ -1,0 +1,15 @@
+Reused existing root build script: /Users/yuankai/yuankai/Demo/rust/usher/target/debug/build/usher-5ad1d59c15c1faa9/build-script-build
+F
+======================================================================
+FAIL: test_reused_root_executable_publishes_bundle_in_current_checkout (scripts.tests.test_root_i18n_build_paths.RootI18nBuildPathTests.test_reused_root_executable_publishes_bundle_in_current_checkout)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/yuankai/yuankai/Demo/rust/usher/scripts/tests/test_root_i18n_build_paths.py", line 56, in test_reused_root_executable_publishes_bundle_in_current_checkout
+    self.assertIn(expected, result.stdout.splitlines())
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'cargo:rustc-env=SLINT_BUNDLE_TRANSLATIONS=/var/folders/b0/0c4fb4xx7_j74_vzjy67bhww0000gn/T/usher root i18n paths ell__hzh/checkout alpha/target/slint-macro-tests/usher-i18n/translations' not found in ['cargo:rerun-if-changed=build.rs', 'cargo:rerun-if-changed=i18n/manifest.toml', 'cargo:rerun-if-changed=i18n/messages.toml', 'cargo:rerun-if-changed=i18n/locales', 'cargo:rustc-env=SLINT_BUNDLE_TRANSLATIONS=/Users/yuankai/yuankai/Demo/rust/usher/target/slint-macro-tests/usher-i18n/translations', 'cargo:rustc-env=SLINT_EMIT_DEBUG_INFO=1']
+
+----------------------------------------------------------------------
+Ran 1 test in 0.036s
+
+FAILED (failures=1)

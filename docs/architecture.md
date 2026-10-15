@@ -27,6 +27,10 @@ uses the shared copy control's localized success feedback.
 The shared conflict status indicator mounts `GitHubSpinner` only while checking;
 its fixed icon slot and localized label are shared by list and workspace surfaces.
 Reopening the active conflict session is idempotent; explicit refresh owns reload.
+Workspace Back cancels loading/preparation and releases its snapshot and heavy
+models, retaining only the file-count badge. Reentry reads a fresh snapshot and
+selects its first file; selection/scroll are not restored. Review close clears
+the badge as well. See [PR conflicts](specs/pr-conflicts.md).
 The conflict workspace owns its resizable file-pane width locally. Its entry uses
 the shared model-driven UnderlineNav in a single navigation row. Whole trailing
 tabs overflow into a root-owned More menu; inline and menu counters cap at 99+.
@@ -262,7 +266,7 @@ language callback.
 | --- | --- |
 | `src/main.rs` | Minimal binary entry point. Delegates to the library entry point. |
 | `src/lib.rs` | Imports and re-exports the generated UI API, creates `MainWindow`, initializes modules, wires cross-cutting callbacks, and manages window lifecycle and shutdown. |
-| `crates/usher-ui/` | Owns the Slint build script and generated Rust API. Compiles the repository-level `ui/main.slint` tree and exports its window, globals, models, structs, and enums; `src/pagination.rs` owns shared bounded Primer page-link projection. |
+| `crates/usher-ui/` | Owns the Slint build script and generated Rust API. Compiles the repository-level `ui/main.slint` tree and exports its window, globals, models, structs, and enums; `crates/usher-ui/src/pagination.rs` owns shared bounded Primer page-link projection. |
 | `crates/usher-i18n/` | Framework-neutral locale registry and compiled message catalogs. Its build validates the root `i18n/` manifest/PO assets, generates the typed Slint `I18n` global, and stages one index-identical translation bundle for every independently compiled UI root. Runtime locale resolution and Rust copy lookup do not depend on a generated UI engine. |
 | `crates/usher-messages/` | Independently compiled message-center package: durable domain/storage service, snapshot subscriptions, background persistence/native-delivery worker, `notify-rust` OS adapter, and generated Inbox page API. Its embeddable Slint page is compiled in library-module mode rather than through the deprecated non-Window root fallback. |
 | `crates/usher-search/` | Framework-neutral shared Find engine: Unicode-safe non-overlapping text matches, wrapped adjacent-result navigation, and Chromium/Blink `CenterIfNeeded` viewport policy. Features supply only domain/model and visual-wrap adapters. |
@@ -273,10 +277,10 @@ language callback.
 | `src/ai/` | OpenAI-compatible transport, the feature-owned typed/persistent AI Agent settings Store, plus the sole source-controlled built-in prompt catalog in `prompts.toml`; `prompts.rs` strictly renders typed, bounded AI Chat, AI Review, and Review Ask message envelopes and metadata-only provenance. |
 | `src/app_runtime.rs` | Process-wide Tokio runtime with two production worker threads. Runtime threads install the tracing dispatch; an explicit environment override exists for controlled benchmarks. |
 | `src/memory_diagnostics.rs` | Process-wide RSS/footprint snapshots and lifetime high-water marks, startup/run metadata, bounded Slint-model accounting, UI-size correlation, and the cancellable periodic memory sampler. |
-| `src/diagnostics.rs` | Crash-run sentinel, retention workers, log-directory reveal, and privacy-bounded diagnostic archive export. The shared logging severity contract distinguishes normal lifecycle records from failure/fallback diagnostics; `src/logger/debug_logger.rs::flush_application_log` directly flushes the real application file sink after the final cleanup summary and `MainWindow`-drop record. See [Diagnostic logging](specs/diagnostics.md). |
+| `src/diagnostics.rs`, `src/diagnostics/archive.rs` | Sentinel, retention scheduling and directory reveal stay in the facade; the archive owner serializes private temporary-file completion, unique publication and retention to five archives before success. The shared logging severity contract distinguishes normal lifecycle records from failure/fallback diagnostics; `src/logger/debug_logger.rs::flush_application_log` directly flushes the real application file sink after the final cleanup summary and `MainWindow`-drop record. See [Diagnostic logging](specs/diagnostics.md). |
 | `src/startup.rs` | Elapsed/delta startup timeline plus the one-shot post-first-frame queue used to defer disk hydration and expensive image projection. |
 | `src/platform/` | Cross-platform native integration boundary. `macos.rs` owns AppKit appearance (forced Light/Dark or follow-system for Auto), title-bar accessories, window-interaction notifications, the native-title-bar click bridge for dismissible transient overlays, macOS PR-review font registration, the `NSSound` click, and live Auto theme updates. It also owns paired shutdown removal for its event monitor, window/theme observers, and detached-preview resize observers. `windows.rs` owns Windows theme detection and `MessageBeep`; `linux.rs` owns XDG Portal theme detection and non-blocking desktop sound playback. `mod.rs` exposes the shared API, Auto theme watch enablement with a 1s poll fallback on all platforms, plus opening a directory in the OS file manager (Finder/Explorer/`xdg-open`). |
-| `src/shutdown.rs` | Ordered shutdown coordination. Normal cleanup runs UI/AppKit tasks on the event loop; a dispatch-failure fallback skips those tasks and runs only thread-safe pre/post cleanup before process exit. |
+| `src/shutdown.rs`, `src/shutdown/pipeline.rs` | Ordered shutdown coordination: async producer drains, original-thread producer stops, blocking background barriers, then original-thread UI/AppKit and logger cleanup. A dispatch-failure fallback skips UI/AppKit tasks. Shared phase ownership preserves priorities and once-only completion. |
 | `src/single_instance.rs` | Process lock plus a bounded file-signal activation channel that reveals and focuses the existing window when a second launch is attempted. |
 | `src/tray.rs` | Desktop tray integration and tray-driven lifecycle actions. macOS routes completed left/right mouse-up events, temporarily attaches `NSStatusItem.menu` for native `performClick:` tracking, then detaches it to restore primary clicks. The tracking guard retains native objects across the nested run loop and suppresses activation-observer reopening. Quit uses `tray.quit`; the `src/lib.rs` locale callback refreshes it through `tray::sync_language`. `src/tray/animation.rs` owns the event-loop timer and elapsed-time frame selection for the orca jump; platform adapters preload original-colour native images (non-template on macOS), restore the selected static icon and stop playback before tray teardown. Native menu acceptance remains pending. See [Tray behavior](specs/tray.md). |
 
@@ -309,6 +313,8 @@ language callback.
 | `src/toast.rs` | Transient single-toast manager binding. |
 | `src/notification.rs` | Stable queued-notification model, generation-guarded timers, hover pause, actions, durable-message reconciliation, and icons. |
 | `src/message_center.rs` | Thin bridge between the root window and `usher-messages`; mirrors theme/viewport state, pushes total/unread/read filter counts, and converts immutable snapshots into isolated-page Slint models. |
+| `src/message_center/focus.rs`, `src/message_center/focus/navigation.rs` | Event-loop-only Inbox keyboard ownership: move neutral pointer focus onto the actual host adapter, forward existing application shortcuts, and traverse eligible mounted controls across static factory boundaries. Precisely reveal the selected target in its actual scroll viewport before assigning Tab focus. No persistence, reducer or worker work belongs here. |
+| `src/message_center/commands.rs`, `src/notification/ingress.rs` | Ordered, bounded UI message commands and ticketed notification completion; domain reduction stays on the command worker, while non-Send Banner payloads stay on the event loop under a separate budget. |
 | `src/dialog.rs` | Imperative `DialogManager` binding and action dispatch; it owns no visual variant. |
 
 Repository endpoint definitions and executable behavior are intentionally separated: `src/git/` may reference constants from `src/codereview/api/`, while `src/codereview/api/` must not depend on `src/git/`, `src/http/`, reqwest, or serde.
@@ -360,8 +366,21 @@ cancellation before admission; an atomic write already admitted may finish.
 The test drain reports owned Session I/O completion and bounded failures; it
 does not represent the current production exit drain or prove completion of
 controller terminal Task actions, Message Center publishes, or Hook events.
-Production shutdown still cancels Review/Ask work, stops task persistence, then
-stops configuration persistence; it does not invoke a global Session drain.
+Production instead uses `ai_review/producers.rs`: whole-operation permits are
+captured before first poll for startup recovery, Review, Ask and Session reads.
+Shutdown closes admission, cancels work, completes reserved startup recovery and
+waits for accepted continuations (including terminal Message/Hook publication),
+then closes task/config writers off UI. Its async drain precedes Hooks and final
+MessageCenter close. Session aggregate test APIs remain separate; a recovered
+same-value Save/Ask is not failed merely because an earlier attempt failed.
+
+Generic Preview File sources use `crates/usher-preview/src/file_source.rs` to
+validate and read the same regular-file handle. Chunked reads cap payload and
+requested Vec capacity at 16 MiB even after metadata-time growth; one stack byte
+detects overflow. Unix nonblocking open rejects a FIFO without a writer. This
+generic reader allows ordinary symlinks; repository Markdown retains its separate
+verified containment policy. Cancellation is cooperative between reads, and
+Windows device/pipe behavior remains untested. See [Preview](specs/artifact-preview.md).
 
 The architecture gate retains the original controller/root budgets and also
 checks extracted owners and reverse controller dependencies. CI is manual-only;
@@ -481,6 +500,13 @@ feature state, while notification and version remain non-health indicators.
 Right-edge tooltips expand leftward and status popups share one parent
 coordinate space. Pages must not recreate either shell surface. See
 [specs/status-bar.md](specs/status-bar.md).
+
+An open status popup retains only its semantic selection and anchor; its
+catalog-backed title/content remain bound to live feature state. Shortcut
+initialization keeps a typed phase with its weak window, while
+`src/update/download_status.rs` keeps semantic download stages and byte counts.
+The root locale callback reprojects both without restarting work or reopening
+the popup; completed operations close their unavailable popup on the next UI turn.
 
 The navigation sidebar and its content-boundary decoration are mounted as root
 shell layers above ordinary route surfaces, including PR Review, while modal
@@ -629,8 +655,8 @@ On Unix, traversal starts from one opened canonical-root descriptor and rejects
 links in every relative component; Windows verifies containment from the final
 paths of the opened root and target handles. The verified regular-file handle is
 size-bounded and read once before it is
-submitted to the common Preview provider pipeline. In Docked mode the PR shell
-uses its existing trailing slot: the one application Preview host moves into
+submitted to the common Preview provider pipeline. In-app Docked/Floating modes use the PR shell
+and its existing trailing slot: the one application Preview host moves into
 that geometry and temporarily replaces the
 AI Review surface without reserving the width twice or clearing the conversation.
 Closing that Preview restores the intact conversation. Detached mode remains an
@@ -639,9 +665,9 @@ above either docked surface.
 
 Closing the AI Review panel or leaving `Route.PrReview` clears the inline response
 projection, opaque-action map, and task repository binding. It also dismisses an
-active PR-context Preview only when that Preview is Docked; an already Detached
+active PR-context Preview when it is Docked or Floating; an already Detached
 Preview remains available as an independent application window. Closing only the
-Docked Preview does not run AI Review cleanup. AI panel close and PR-route exit
+in-app Preview does not run AI Review cleanup. AI panel close and PR-route exit
 cancel the current Ask so a late completion cannot enter a reopened mount; the
 independently scheduled Review task continues.
 
@@ -670,14 +696,15 @@ initial `AppState`, forward callbacks to `MainWindow`, and mirror later state
 changes rather than assuming globals are shared. Messages inbox rows report an
 action enum and anchor rectangle through the dedicated factory-local
 `MessageTooltipOverlayState`; one page-owned `GitHubMessageTooltipOverlayHost`
-maps those enum values to three separate literal surfaces inside one
+maps those enum values to three separate fixed-action I18n surfaces inside one
 `GitHubTransientFloatingOverlayHost`. No label string crosses a list delegate.
 Settings mounts a local generic `GitHubTooltipOverlayHost` for shared controls;
 that portal uses the same transient facade and remounts its text-measurement
 surface for each claim token. Settings and Messages each lazily create one stable
-factory product after their first visit. Slint 1.17.1 can reuse the wrong control
-text or placeholder when a cross-crate product is destroyed and remounted, so
-route exit only hides these hosts; feature bridges own the separate state-reset
+factory product after their first visit. Historical Slint 1.17.1 investigations
+observed incorrect control text/placeholders after cross-crate remounts. The
+retained-host contract remains in force on the pinned version until native
+reentry acceptance supports changing it; route exit only hides these hosts; feature bridges own the separate state-reset
 lifecycle and drive the transient host inactive.
 
 The Settings factory host occupies the root window above the status bar; its
@@ -697,8 +724,8 @@ content. Native drawing is suppressed while this image is active; the input
 shield remains mounted. Native layout updates mirror its geometry. Closing
 releases the image and restores native controls with current navigation state.
 
-Within a Settings factory product, Slint 1.17.1 selector bodies must use fixed
-mounted leaves and select them with `visible` plus an explicit active height.
+Within a Settings factory product, selector bodies follow the application
+factory-isolation contract and use fixed mounted leaves and select them with `visible` plus an explicit active height.
 Do not recreate mutually exclusive section or provider forms with `if` nodes:
 repeated tab changes can otherwise retain a sibling's label,
 placeholder, value, or selected state. Route-local selector indices start at a
@@ -771,7 +798,7 @@ selection styling. UI Components exercises the same popup with an adjacent
 field and a disabled trigger, with its overlay mounted at `MainWindow` root.
 The grouped showcase trigger resolves its anchor from the zero-offset plain
 trigger's viewport origin plus its own local offset, avoiding duplicated
-component offsets in Slint 1.17.1's inherited `absolute-position`. Both showcase
+component offsets from an unverified inherited `absolute-position`. Both showcase
 menus scope active-option focus to their open owner.
 There is no full-page input scrim. The existing window pointer observer reports
 outside releases after the target handles its click; the Settings bridge forwards page-local
@@ -798,12 +825,15 @@ while Settings is open. The code-hosting groups commit their complete drafts onl
 through their visible Save commands. AI Agent additionally owns one committed
 typed Store snapshot for consumption by Chat and Review. Selecting a preset
 updates Provider, Base URL, and Model atomically in the isolated page draft;
-other edits likewise do not mutate `MainWindow` or the Store. Save dispatches
-the complete draft as one typed action through `src/ai/settings_state.rs`, then
-the bridge projects the normalized committed snapshot into the page and
-`MainWindow`. The changed commit is queued to the Store-owned persistence worker,
-which writes `[ai.agent]` through the existing atomic TOML boundary, and success
-feedback waits for an explicit flush. Every route entry overwrites these
+other edits likewise do not mutate `MainWindow` or the Store. Save captures the
+complete draft into the bounded FIFO in `src/ai/settings_state.rs` (eight saves,
+including the active save). Its worker dispatches the typed action and waits for
+durable flush. `src/ai/settings_ui.rs` projects each receipt on the event loop;
+an independent eight-owner budget remains held until UI completion/drop;
+request order protects committed host state, while factory identity, route visit
+and unchanged draft protect editable fields. Only the latest attempt owns Save
+feedback. The changed commit writes `[ai.agent]` through the existing atomic TOML
+boundary; an explicit unchanged Save can retry a failed write. Every route entry overwrites these
 page-local drafts from the last committed host/Store snapshot before the stable
 factory host paints, never from independent selector fields. Thus leaving and
 returning without Save discards edits without remounting the visual tree.
@@ -813,8 +843,9 @@ visit. `MessageSnapshot::page` filters the immutable history before selecting a
 20-record page; `src/message_center.rs` converts only that page to Slint rows.
 Total/unread/read counts still describe the complete Store. Filtering resets to
 page one while preserving scroll position, clamping only when the filtered
-content is shorter than the current offset. Explicit pagination resets scroll
-to the top; deletion clamps an invalid page to the new last page. The page
+content is shorter than the current offset. Pointer pagination resets scroll
+to the top; keyboard pagination keeps the focused footer visible. Deletion
+clamps an invalid page to the new last page. The page
 owns only its filter/page/scroll presentation, with Primer pagination below the
 list. Per-row borders form one outline with four 6px corners; rounded clipping
 is limited to the first and last rows, never the full list texture. The bridge
@@ -825,7 +856,7 @@ queries the latest snapshot before reactivation, so an inactive Inbox retains no
 projected message data. Rebuilding the page shell per
 visit was rejected after a release A/B showed no material RSS saving and mixed
 physical-footprint regressions. The Messages action portal therefore keeps three
-fixed literal surfaces inside one transient host and drives that host inactive
+fixed-action catalog surfaces inside one transient host and drives that host inactive
 for `None` and route exit. Both factory pages reuse the same anchor-based
 offset/flip/shift/size implementation as `MainWindow` through the shared
 lifecycle facade without attempting to share a global instance across the
@@ -833,9 +864,10 @@ factory boundary.
 Changing `settings.slint` or
 `messages.slint` must not regenerate or compile `usher-ui`; changing the main shell
 still rebuilds the main generated crate. When `SLINT_LIVE_PREVIEW` is enabled,
-both isolated build scripts deliberately keep factory products static because Slint 1.17's
-`ComponentFactory` cannot accept the live-preview dynamic handle; the main
-window and UI Components route remain live-reloadable.
+both isolated build scripts deliberately remove that environment variable while
+compiling their static factory products, then restore it. The main window and
+UI Components route remain live-reloadable; this is the current build boundary,
+not a claim that a historical Slint limitation has been retested on every upgrade.
 
 Settings keeps its wide navigation sticky with a 16 px viewport top inset,
 bounded by the navigation column's bottom. `ui/views/settings.slint` derives the
@@ -904,24 +936,43 @@ generated crates.
 ### Cross-page automatic state stores
 
 Any State consumed by more than one route, page, status surface, or background
-publisher is owned behind the `usher-state-store::StateStore` port and a stable
+publisher must be owned behind the `usher-state-store::StateStore` port and a stable
 feature facade. Typed Actions are the only mutation path. A changed reduction
 installs an immutable snapshot with a monotonically increasing revision and
 automatically notifies subscribers; a new subscriber immediately hydrates from
 the current snapshot. Subscriber revision guards prevent delayed callbacks from
 overwriting newer UI state. Slint bridges remain event-loop adapters and never
-become Store engines.
+become Store engines. UI mutation callbacks capture typed commands and identity
+before nonblocking admission to a feature-owned ordered worker; reducers and
+durable barriers execute there. Actions are not coalesced like pending snapshots.
+Inbox actions and Banner mirroring share `src/message_center/commands.rs`;
+notification completion is ticketed and projected back through weak UI handles.
+The async command drain finishes accepted mutations and flushes. Final
+MessageCenter close runs in `src/shutdown/pipeline.rs`'s background phase after
+the prioritized producer-stop phase, before returning to the original thread
+for UI/AppKit cleanup. Concurrent exit paths share the same owned barrier.
 
 Durable Store owners use the reusable `PersistentStore` facade. Each changed
 revision is queued to one worker, adjacent pending snapshots collapse to the
 latest State, and flush/shutdown preserve the application close boundary;
 reducers and the Slint event loop perform no file I/O. Deferred stores enable
-persistence after typed startup hydration so post-first-frame loading does not
-rewrite the loaded snapshot. Concrete engines, including the built-in
+persistence after typed startup hydration; avoiding redundant writes of a
+loaded snapshot remains the contract. Message-center hydration is one-shot and
+compares the merged current snapshot with disk after registering its observer;
+disk-only/empty recovery submits no write, while accepted differences remain
+durable. See [Messages](specs/messages.md). Concrete engines, including the built-in
 `LocalStateStore`, stay behind the trait. A future community Redux/Pinia-style
 library is accepted only as an adapter that preserves the same Actions, feature
 facade, schema, revision/hydration contract, and tests. See
 [specs/state-store.md](specs/state-store.md).
+
+Ordinary busy subscribers coalesce to the latest revision rather than delivering
+one callback per Action; ordered events need a separate channel.
+`PersistentStore::shutdown` currently returns `()` and removes the persistence
+observer; it neither returns worker close errors nor closes Store Action admission.
+Checked close/flush and admission barriers belong to feature lifecycle facades.
+Do not substitute this API for `LatestPersistence::shutdown` or
+`MessageCenter::shutdown_checked`, which return errors.
 
 ## Build artifact policy
 
@@ -986,6 +1037,19 @@ The effective startup sequence in `src/lib.rs` is intentionally ordered:
 9. After the first render completes, schedule one next-turn handoff that loads Project JSON, decodes projected logos, hydrates durable messages, and hydrates AI Review task state on blocking workers. Typed hydration Actions merge any data created during startup before automatic persistence resumes.
 10. Install tray integration and run the Slint event loop. A second process writes only a nonce to the activation channel; the primary process reveals and focuses its existing window on the event loop.
 11. On close/quit, coordinate terminal, updater, tray, runtime, and process cleanup through shutdown priorities. Main-window creation, `show()`, native-input installation, and event-loop failures use a native startup alert and terminate with a nonzero status instead of panicking.
+
+Explicit shutdown first hides the root window on its event loop to close UI
+admission. Shared async drains then complete accepted work; AI Review and Workflow
+finish terminal publication before Hooks close. Only afterward is the cleanup
+registry captured, preserving registrations made during those drains. Prioritized
+pre callbacks stop remaining producers on the original thread. Blocking Message
+Center, Project and request-preference joins run in the background phase; the
+normal-priority settings flush follows high-priority feature joins. UI/AppKit
+detach and the final logger flush return to the original thread. Equal priorities
+retain reverse registration order. Natural event-loop return shares the same
+drains and completion barriers; a cancelled/concurrent waiter cannot bypass a
+running phase or finalizer. This preserves existing failure logging and exit
+policy rather than adopting the rejected historical P7 #77 policy.
 
 Expected macOS native-handle readiness retries are `DEBUG`; if Chrome is still
 unready at the 1200 ms reveal deadline, showing the visible fallback emits one
@@ -1128,7 +1192,7 @@ Saved label only after persistence succeeds, and emits one bottom Toast for the
 terminal result.
 `settings/save_worker.rs` owns one latest-state preference writer. Each request
 resets a 100 ms debounce deadline; at most one save and one pending request exist.
-Normal-priority pre-shutdown flush runs after high-priority feature shutdown,
+Normal-priority background flush runs after high-priority feature shutdown,
 bypasses the deadline and joins the writer. Explicit credential/provider saves
 retain their existing feedback and serialized atomic-write path.
 Read-heavy provider helpers use fine-grained `with_settings`/`with_git` access
@@ -1155,9 +1219,11 @@ notifier panic remains observable. Short Action permits cover hydration and
 publication without holding a lock across subscriber callbacks. Checked shutdown
 drains both workers and retains both failure causes; lifecycle reentry is rejected
 before waiting. A changed deferred state cannot report durable success before
-hydration enables persistence. The shell still uses its existing pre-shutdown
-registration; moving these waits off the event loop remains pending after the
-P7 #77 candidate was rejected.
+hydration enables persistence. The shell closes the center on its background
+cleanup phase, after producer-stop callbacks and before UI cleanup. A natural
+event-loop return shares the same async drains and background barrier. This is
+a narrower lifecycle change than the rejected historical P7 #77 candidate; it
+does not introduce cumulative historical-error exit classification.
 Delivery policy is orthogonal to category and severity: normal events use
 `WhenUnfocused`, explicit in-app events use `Never`, and critical/diagnostic
 events may use `Always`. The shell feeds window activity into the service so a
@@ -1166,6 +1232,20 @@ Read state, individual deletion, and bulk operations publish immutable snapshots
 the root bridge schedules unread-count and isolated-page model updates on the
 event loop. Transient Banner dismissal never mutates the durable Inbox. See
 [specs/messages.md](specs/messages.md).
+
+Inbox pagination distinguishes pointer activation explicitly. Pointer changes
+still return to the top; a neutral page scope then owns host focus so Return or
+Space cannot activate the old sidebar or a business action. Keyboard pagination
+retains the mounted link slot's focus and reveals the footer; numbered labels may
+change as the neighboring-page window is projected, while Previous/Next keep their
+direction. The factory's capture scope delegates
+Tab/Shift+Tab and standalone Backtab to the mounted-host focus owner. It reveals
+each chosen target with the minimum vertical movement inside its actual Flickable
+bounds before assigning Tab focus, preventing an offscreen row Clip from triggering
+Slint's forward fallback during reverse traversal. It forwards existing root shortcuts;
+inactive/modal page input is blocked, and route exit releases only this page's
+focus. Stable row/link slots remain mounted. See the Messages spec for the pinned
+Slint adapter boundary and native acceptance.
 
 The message contract separates ingress `channel` from semantic `category`.
 Built-in keys cover general, Webhook, software-update, and CD-workflow messages,
@@ -1270,7 +1350,17 @@ keeps at most 32 entries for 30 seconds, deduplicates by IID, refreshes page one
 explicitly, and invalidates repository entries after a successful merge. Public
 Gitee reuses one raw closed prefix for merged and closed-unmerged local subsets.
 
-`WorkflowStore` keeps a current project plus per-project `WorkflowViewState`. Switching projects must rebind UI state and prevent logs, steps, or running flags from leaking between projects. `Route.Workflow` and `Route.PrReview` form one lifecycle domain: moving between them retains the Workflow list/model state, and a temporary route outside the domain retains it while either workflow route remains reachable through Back.
+`WorkflowStore` keeps a current project plus project-scoped `WorkflowViewState`
+behind the typed `SharedWorkflowState` facade and `StateStore` port. Its bounded
+FIFO reduces on a blocking worker and automatically projects latest revisions;
+64 operation owners cover queued commands, effects, cancelling tasks and pending
+UI callbacks. Project identity plus selection generation rejects late A→B→A
+results. Project cards/rows navigate only after a matching selection commit has
+hydrated the new fields; rejected admission stays on Project. Tag drafts retain
+complete raw inputs, with pending-input projection guards. `Route.Workflow` and
+`Route.PrReview` form one lifecycle domain: moving between them retains the
+Workflow list/model state, and a temporary route outside the domain retains it
+while either workflow route remains reachable through Back. See [Tag](specs/tag.md).
 
 Cross-page Back/Forward navigation is owned by `src/router/` as bounded dual history stacks; direct navigation pushes the current route onto Back and clears Forward, Back moves the current route onto Forward, and Forward performs the inverse. Slint renders the current route and delegates history actions instead of mutating a one-slot `previous-route` value. Feature controllers own drill-down checkpoints that do not change the route. Back first consumes such a feature-local checkpoint, then pops the global route history. A workflow route retained in either history stack remains a live return target, so temporarily opening Settings, About, or another page does not discard the PR review; heavy workflow state is released only when the workflow domain is no longer current or reachable through history navigation. `RouteLifecycleHooks` exposes ordinary transition hooks and named scope-unreachable hooks; `src/app_lifecycle.rs`, not Router, registers Chat visibility and Workflow cleanup. Hooks run only after the Router history lock and hook-registry borrows are released, so callbacks may safely re-enter application code.
 
@@ -1300,7 +1390,7 @@ sidebar animation is enabled only for later user-driven toggles.
 
 The application shell owns one 240 px desktop sidebar. Its persisted docked state drives one interruptible frame-paced spring for the sidebar, content surface, title-bar divider, and status-bar painted leading edge. Slint's display animation clock supplies the actual elapsed frame delta to a closed-form damped oscillator, so a 120 Hz display updates position on every rendered frame and a delayed frame does not accumulate fixed-step timing error. Target reversals preserve the current position and velocity. The mounted route adopts the target layout width once at motion start, while the status bar's transparent host and persistent right cluster remain in window coordinates. Repeated title-bar clicks retarget the same motion without queueing stale callbacks. Native live resize snaps any in-flight sidebar motion to its target, freezes the mounted route width, and applies the exact final width when dragging ends. The docked boundary elevation belongs to the main content surface, spans the complete window height, and projects only toward the sidebar as a clear stroke plus ambient and near shadow lobes. When undocked, an independent 8 px left-edge hover target opens the same sidebar as a border-only temporary root-layer overlay with rounded trailing corners and dismisses it shortly after pointer exit. macOS exposes sidebar, Back, and Forward through native accessory-bar buttons with hover-only backgrounds, tooltips, and accessibility labels. Its sidebar button uses Codex's outlined `sidebar.left` symbol while collapsed and a filled left-third symbol while expanded. The route breadcrumb occupies the remaining native title-bar inset rather than a second content row; its empty area remains input-transparent for native window dragging. Native accessory buttons, the Slint breadcrumb, and trailing actions share the geometric center of the full 46 px title-bar inset. The title/content divider begins at the animated main-content edge. On macOS a width-fixed 240 px `NSVisualEffectView` supplies Menu/BehindWindow material only below the sidebar. A full-window opaque native backdrop matching the active canvas stays below Slint's renderer so a late GPU surface resize cannot expose wallpaper tint in the content region. Vibrancy installation adopts the full-size transparent-title-bar style first, then attaches the effect and backdrop while the window is still opaque, and only then opens the transparent window path with a near-clear background instead of `clearColor`, all inside one AppKit transaction while the startup window is still alpha-gated, so the sidebar never flashes desktop content at startup. The docked sidebar mirrors Codex desktop Settings by painting a dark `#131313cc` page-surface layer and a `#212121a6` navigation layer above the effect; the rounded opaque source-over fallback is `#1d1d1d`. Active light remains `#ffffffa6`. After resigning key, the effect is hidden and the native `#000000` dark or `#f9f9f9` light fallback remains below the renderer layers. Router history owns the controls' enabled state. Windows and Linux expose the same controls in the Slint sidebar header and in a compact collapsed-state control strip. All platforms share the same Router callbacks and sidebar preference; platform code never owns route history.
 
-The Workflow PR list and full-window review workspace use a single provider-neutral façade in `src/git/`. `RepoContext` validates the persisted provider/id against `remote_repo` once, then every list, detail/diff, repository-file, review-state, review-submit, merge, and revert operation dispatches through one object-safe `GitProvider`; `ProviderCapabilities` exposes endpoint support without UI inference. Shared JSON decoding and pagination helpers live in `src/git/json.rs`. `workflow/pr_review.rs` is the stable façade and `workflow/pr_review/controller.rs` owns asynchronous orchestration and UI writes; shared cache/diff ownership and avatar I/O live in `cache.rs` and `avatar.rs`. Pure immutable-source alignment and hunk expansion live in `workflow/pr_review/hunk.rs`, local tree construction and file classification live in `workflow/pr_review/file_tree.rs`, Unified/Split row mapping lives in `workflow/pr_review/diff_projection.rs`, the Slint lazy row adapter lives in `workflow/pr_review/diff_model.rs`, selection geometry plus clipboard projection live in `workflow/pr_review/selection.rs`, and Conversation/Commit presentation plus range mapping live in `workflow/pr_review/timeline.rs`. The review controller owns one shared immutable normalized diff, while its feature-owned state-store facade holds independent typed generations for diff, highlighting, expansion, Conversation, Commits, remote action-state reads, and remote mutations. The normalized detail moves each base file into an `Arc`, so the selected-file lazy model and highlighting task share that allocation instead of cloning every line; only a hunk expansion creates a per-file copy-on-write override. Provider HTML and diff aliases are decoded at the adapter boundary. `DiffChangeType` and `DiffLineKind` remain typed through repository, hunk, search, highlighting, and AI unified-diff logic; the lazy Slint adapter alone projects the existing strings. Each diff record is normalized to one visual source line without CR/LF controls before fixed-height Slint rendering. Collapsing an expanded file drops its override and exposes the shared base file again. Immutable head/base file content is fetched lazily for hunk expansion or in-app full-file viewing; edited-file expansion aligns both fixed revisions locally so one-sided lines are retained. Per-file highlighted diffs use a four-entry LRU and immutable source text uses a three-entry LRU; the full-file highlighted model is transient UI state. The active diff is exposed to Slint through the read-only lazy adapter, which materializes at most 64 converted rows, while the complete highlighted result remains Rust-owned for arbitrary-language support and fast scrolling. All late async responses are generation-guarded.
+The Workflow PR list and full-window review workspace use a single provider-neutral façade in `src/git/`. `RepoContext::discover` resolves the remote locator; `ProjectContext::from_saved` validates the persisted provider/id against it once, then every list, detail/diff, repository-file, review-state, review-submit, merge, and revert operation dispatches through one object-safe `GitProvider`; `ProviderCapabilities` exposes endpoint support without UI inference. Shared JSON decoding and pagination helpers live in `src/git/json.rs`. `workflow/pr_review.rs` is the stable façade and `workflow/pr_review/controller.rs` owns asynchronous orchestration and UI writes; shared cache/diff ownership and avatar I/O live in `cache.rs` and `avatar.rs`. Pure immutable-source alignment and hunk expansion live in `workflow/pr_review/hunk.rs`, local tree construction and file classification live in `workflow/pr_review/file_tree.rs`, Unified/Split row mapping lives in `workflow/pr_review/diff_projection.rs`, the Slint lazy row adapter lives in `workflow/pr_review/diff_model.rs`, selection geometry plus clipboard projection live in `workflow/pr_review/selection.rs`, and Conversation/Commit presentation plus range mapping live in `workflow/pr_review/timeline.rs`. The review controller owns one shared immutable normalized diff, while its feature-owned state-store facade holds eight independent typed generations for diff, highlighting, expansion, AI-finding Reveal, Conversation, Commits, remote action-state reads, and remote mutations. The normalized detail moves each base file into an `Arc`, so the selected-file lazy model and highlighting task share that allocation instead of cloning every line; only a hunk expansion creates a per-file copy-on-write override. Provider HTML and diff aliases are decoded at the adapter boundary. `DiffChangeType` and `DiffLineKind` remain typed through repository, hunk, search, highlighting, and AI unified-diff logic; the lazy Slint adapter alone projects the existing strings. Each diff record is normalized to one visual source line without CR/LF controls before fixed-height Slint rendering. Collapsing an expanded file drops its override and exposes the shared base file again. Immutable head/base file content is fetched lazily for hunk expansion or in-app full-file viewing; edited-file expansion aligns both fixed revisions locally so one-sided lines are retained. Per-file highlighted diffs use a four-entry LRU and immutable source text uses a three-entry LRU; the full-file highlighted model is transient UI state. The active diff is exposed to Slint through the read-only lazy adapter, which materializes at most 64 converted rows, while the complete highlighted result remains Rust-owned for arbitrary-language support and fast scrolling. All late async responses are generation-guarded.
 
 PR Review splits logical selection from shaped-text geometry. `selection.rs`
 owns row/character ranges and clipboard projection. `text_geometry.rs` is the
@@ -1315,6 +1405,16 @@ use fixed-pitch, non-overlapping paint rectangles. Slint
 continues to paint native `syntect` token models and never imports Parley types.
 No WebView/editor is embedded; the facade cache is bounded and no Find viewport
 positioning work enters scrolling or resizing.
+
+Local Tag Add reads sorted local tags. Local Remove initialization and successful
+removal refresh fetch `origin --tags --force` and read `ls-remote --tags --refs origin`;
+Local mode is not an offline contract. Initialization uses the shared bounded
+streaming process driver, a 30-second per-command deadline and cancellation with
+process-tree cleanup. The complete Tag draft, including description, belongs to
+Workflow; real editor `edited` callbacks submit it atomically, preserving it across
+panel/route remounts. Progress has one replaceable mailbox drained before the
+terminal commit; stale run/navigation generations cannot reset newer inputs.
+Windows process/job attachment still requires native acceptance. See [Tag](specs/tag.md).
 
 The Tag workflow follows the same façade pattern: `workflow/tag.rs` exposes binding and refresh,
 `tag/controller.rs` owns project state, UI sequencing and command orchestration;
@@ -1410,9 +1510,11 @@ For Gitee Enterprise Conversation, Usher uses PAT-authenticated v8 APIs only. A 
 PR presentation ownership follows the common UI boundary: reusable list,
 filter, pagination, review-shell, file-tree, and diff controls live under
 `ui/components/` with `GitHub`-prefixed symbols. `ui/views/workflow/` only
-composes the full-window route. Public `@material` ListView/ScrollView may
-provide virtualization for large timelines, trees, and diffs, but they do not
-own product typography, palette, focus treatment, or controls; those stay in
+composes the full-window route. Timeline/tree virtualization imports the
+application-owned exact-name `ListView` wrapper from
+`ui/components/github_scroll_view.slint`. Diff uses `GitHubPassiveScrollView`
+with the exact `usher-virtual-list` facade. These low-level hosts do not own
+product typography, palette, focus treatment, or controls; those stay in
 application-owned GitHub components. Empty/error states reuse
 `GitHubBlankslate`, and icon actions reuse `GitHubIconButton`.
 
@@ -1420,7 +1522,7 @@ PR Review uses eight independent typed state-store generations for diff, highlig
 
 The review header follows GitHub's two-step command model. A GitHub-styled readiness badge beside the title renders the normalized kind/detail with Primer semantic colors, while each adapter owns its merge semantics: GitHub maps REST mergeability, Gitee Enterprise maps v8 `current_state` conditions, public Gitee maps only v5 fields, and GitLab maps `detailed_merge_status` with an asynchronous recheck. The shared enum is a presentation boundary and must never cause one provider's conditions to be applied to another. `Review changes` submits an explicit provider-neutral Comment, Approve, or Request changes command; unsupported choices remain visible but disabled. The Conversation tab also exposes a GitHub-style plain-text composer (`Write` + green `Comment`) that submits the same Comment action. Eligible `review_summary` rows expose GitHub's per-review kebab and required-reason `Dismiss review` dialog; the aggregate header state remains informational. The provider-neutral dismissal facade delegates the selected review id to GitHub's dismissal endpoint when repository permissions allow it, posts a reason note and unapproves the authenticated user on GitLab, and withdraws the authenticated user's Gitee Enterprise review through the working Web API route `/api/code/api/{full_path}/-/pull_requests/{iid}/reviews` with the exact payload `{"state":"initialized"}`. Gitee falls back silently to the documented v8 reviews route for deployments without that Web route, then records the required reason as a best-effort MR note. Gitee public v5 has no dismissal capability. Provider success triggers a remote state refresh and never starts a merge. `Merge pull request` is enabled only by the latest normalized `PullRequestActionState` and presents only adapter-returned methods. GitHub supports repository-enabled merge, squash, and rebase methods. Gitee Enterprise v8 maps review states, omits the optional `comment` field for an Approve with no summary, and supports merge, squash, rebase, and fast-forward according to `restrict_merge_type`; public Gitee v5 supports comments plus merge/squash but has no approve/request-changes endpoint. GitLab supports comments, approvals, and SHA-guarded merge/squash with explicit source-branch deletion; its project `squash_option` limits the presented methods, and Request changes remains disabled because the stable REST API has no matching write command.
 
-The review file tree uses GitHub's platform UI font stack (SF system UI on macOS and Segoe UI on Windows), while source code uses the platform monospace stack. The file tree keeps its virtualized `ListView`; Diff rows use the exact-height `usher-virtual-list` facade and a stable, bounded Slint overscan model positioned inside a `ScrollView`. Width/model revisions rebuild only lightweight row extents, while ordinary scrolling incrementally removes and appends visible rows. The divider resizes the pane live; its moving-handle calculation applies the remaining local pointer delta to the current width, keeping the divider attached to the pointer without rebuilding the complete tree or diff. The session preference is clamped to 220–520 px and no more than 45% of the review width so the diff remains the primary surface. Visibility follows GitHub Primer `$width-md` (768px): crossing below auto-collapses the tree and crossing back above auto-expands it, while the toolbar toggle always works so a narrow workspace can reopen the tree manually. The application window minimum width is 800px, so ordinary desktop resizing no longer reaches that internal breakpoint; the responsive rule remains valid for constrained hosts and direct workspace tests.
+The review file tree uses GitHub's platform UI font stack (SF system UI on macOS and Segoe UI on Windows), while source code uses the platform monospace stack. The file tree keeps its virtualized `ListView`; Diff rows use the exact-height `usher-virtual-list` facade and a stable, bounded Slint overscan model positioned inside `GitHubPassiveScrollView`. Width/model revisions rebuild only lightweight row extents, while ordinary scrolling incrementally removes and appends visible rows. The divider resizes the pane live; its moving-handle calculation applies the remaining local pointer delta to the current width, keeping the divider attached to the pointer without rebuilding the complete tree or diff. The session preference is clamped to 220–520 px and no more than 45% of the review width so the diff remains the primary surface. Visibility follows GitHub Primer `$width-md` (768px): crossing below auto-collapses the tree and crossing back above auto-expands it, while the toolbar toggle always works so a narrow workspace can reopen the tree manually. The application window minimum width is 800px, so ordinary desktop resizing no longer reaches that internal breakpoint; the responsive rule remains valid for constrained hosts and direct workspace tests.
 
 The review workspace starts below the macOS native title-bar inset and relies on the shell's native Back control instead of rendering a second page-local Back button. Its root render tree remains fixed at window `x=0`; ordinary header/tab/diff content follows the shell spring through an internal leading inset while adopting the target width once at motion start. During native live resize the workspace preserves its last stable internal geometry until drag end, avoiding repeated reflow of the large frozen/virtualized review tree while dialogs retain full-window coordinates. The shell routes Back through the review controller first, so commit-detail checkpoints are consumed before Router history; leaving the review still invalidates its requests and clears feature state before the Router returns to Workflow. PR actions are hosted in the title bar; their readiness ActionMenu is anchored to the badge but rendered at the root window layer so it is not clipped or hit-test-limited by the title-bar strip. File-extension and file-action menus remain mutually exclusive workspace popovers; switching triggers preserves hover and opens the target popover on the first click instead of relying on a native popup mouse grab.
 
@@ -1684,11 +1786,11 @@ of the Slint compile and live-preview dependency graph.
 4. Activating a response title submits the original Markdown to Artifact Preview.
    Activating a repository token looks it up in the current task projection and
    resolves the path against that task's local repository on a worker.
-5. The one Docked Preview host reuses the PR trailing slot and temporarily hides,
+5. The one in-app Docked/Floating Preview host reuses the PR trailing slot and temporarily hides,
    but does not clear, the AI Review surface. Preview close restores it; Detached
    Preview does not participate in this replacement.
 6. AI panel close or PR-route exit clears the response projection, token map, and
-   repository binding. It dismisses only a Docked PR-context Preview; an already
+   repository binding. It dismisses Docked or Floating PR-context Preview; an already
    Detached Preview and background Review work remain independent; the current
    Ask is cancelled and mount generation rejects stale worker commits.
 7. Ask delivery has a separate generation in addition to mount/task guards.
@@ -1837,12 +1939,21 @@ Minimum validation for Rust or Slint changes:
 cargo fmt --all
 cargo check --locked
 cargo test --lib --locked
+cargo test --doc --locked
 git diff --check
 ```
 
 Run targeted manual checks for terminal viewport/session changes, update cancellation, tray shutdown, and route-specific layouts. Report every unexecuted check and new failure separately.
 
 ## Known technical debt
+
+- [Messages](specs/messages.md) UI-120's stale sidebar focus is fixed. Scoped
+  macOS English/Chinese native regression passes pointer/forward-keyboard paging,
+  disabled-direction outline cleanup, zoom/restore, shortcuts and route reentry. Reliable
+  native reverse traversal remains unverified because CUA Shift+Tab also advanced
+  ordinary host controls; Windows and screen readers remain untested. The native
+  application minimum is 800 × 600px; forced 640px component fallback is compiled
+  edge coverage. See the [scoped regression record](validation/ui120-macos-focus-20261015/README.md).
 
 - `Route.UiComponents` is the maintained, `ui-components`-gated development
   playground; obsolete Login/Tools/List/Detail/Notification/Toast/Dialog demo

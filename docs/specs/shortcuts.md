@@ -157,7 +157,8 @@ Command/Ctrl+, 打开设置。
   overlay lists every stage and binding.
 - Verify `⌘/Ctrl+B` works while a page text field has focus and the typed text is
   unchanged.
-- Verify `⌘/Ctrl+J` toggles the terminal on Workflow and is rejected elsewhere.
+- Verify `⌘/Ctrl+J` toggles the terminal on Workflow and Project and is rejected
+  on other routes.
 - Verify unavailable Back/Forward does not swallow the key.
 - Verify application shortcuts are blocked by modal overlays and dialog Escape
   still works.
@@ -172,9 +173,22 @@ Command/Ctrl+, 打开设置。
 - 验证底部状态栏只在原生输入桥接安装成功后进入 `Shortcuts ready`，随后收成
   常驻状态图标，且 Overlay 列出全部阶段与键位。
 - 文本框获得焦点时验证 `⌘/Ctrl+B` 仍可切换侧栏，且输入文本不被改写。
-- 验证 `⌘/Ctrl+J` 只在 Workflow 切换 Terminal，其他路由拒绝。
+- 验证 `⌘/Ctrl+J` 在 Workflow 与 Project 切换 Terminal，其他路由拒绝。
 - Back/Forward 不可用时不得吞键。
 - Modal Overlay 显示时阻断应用快捷键，同时 Dialog Escape 仍然有效。
 - PR Diff 的 `⌘/Ctrl+F`、Copy、Select All 以及普通文本框编辑继续走组件本地处理。
 - macOS 原生标题栏 Tooltip 与 Windows/Linux Slint Tooltip 必须和注册表一致。
 - 运行快捷键单测、完整 Slint 根编译及仓库标准验证命令。
+
+## Iteration entry points / 迭代入口
+
+Start with `DEFAULT_BINDINGS`, `ShortcutRegistry::resolve` and `dispatch` in
+`src/shortcuts/mod.rs`, then the `app-shortcut-key-pressed` declaration and
+ancestor `FocusScope` in `ui/main.slint`. The macOS physical-key adapter lives in
+`src/platform/macos.rs`. `terminal_binding_matches_both_project_routes_only`
+pins the two terminal route scopes; run `cargo test --lib --locked shortcuts::tests`
+for the resolver regressions. These tests do not replace native input-method
+and focused-control acceptance above.
+
+从注册表、resolver、dispatcher 与根 Slint callback 两端开始修改；macOS 物理键
+入口另需核对。单测锁定 Terminal 的两个项目路由作用域，原生输入法与焦点验收仍须执行。

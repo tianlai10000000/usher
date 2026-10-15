@@ -7,12 +7,21 @@ fn main() {
     // slint::slint! accepts library mappings only as string literals. Prepare
     // the generated catalog at a stable, ignored path so integration-test
     // harnesses can import the same @i18n interface as the production UI.
-    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    usher_i18n::build_support::prepare_slint_bundle(
+    let manifest_dir = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("Cargo must provide CARGO_MANIFEST_DIR"),
+    );
+    let i18n = usher_i18n::build_support::prepare_slint_bundle(
         manifest_dir.join("target/slint-macro-tests"),
         env!("CARGO_PKG_NAME"),
     )
     .expect("failed to prepare Slint translations for inline test harnesses");
+    // Importing the generated I18n global alone leaves @tr on its gettext
+    // fallback. Compile inline roots with the same index-identical bundle as
+    // the production roots so runtime locale changes exercise real bindings.
+    println!(
+        "cargo:rustc-env=SLINT_BUNDLE_TRANSLATIONS={}",
+        i18n.translations_path.display()
+    );
 
     // Inline Slint test harnesses need element metadata for semantic queries.
     // The production MainWindow is compiled separately by usher-ui's build

@@ -10,13 +10,13 @@ use crate::{DesktopNotifier, Message, MessageDraft, NoopDesktopNotifier};
 const WAIT: Duration = Duration::from_secs(5);
 
 #[derive(Default)]
-struct Gate {
+pub(super) struct Gate {
     state: Mutex<(bool, bool)>,
     wake: Condvar,
 }
 
 impl Gate {
-    fn block(&self) {
+    pub(super) fn block(&self) {
         let mut state = self.state.lock().unwrap();
         state.0 = true;
         self.wake.notify_all();
@@ -27,7 +27,7 @@ impl Gate {
         }
     }
 
-    fn wait_entered(&self) {
+    pub(super) fn wait_entered(&self) {
         let mut state = self.state.lock().unwrap();
         while !state.0 {
             let (next, timeout) = self.wake.wait_timeout(state, WAIT).unwrap();
@@ -36,13 +36,13 @@ impl Gate {
         }
     }
 
-    fn release(&self) {
+    pub(super) fn release(&self) {
         self.state.lock().unwrap().1 = true;
         self.wake.notify_all();
     }
 }
 
-fn path(name: &str) -> PathBuf {
+pub(super) fn path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
         "usher-p75-{name}-{}-{}.json",
         std::process::id(),
@@ -50,7 +50,7 @@ fn path(name: &str) -> PathBuf {
     ))
 }
 
-fn seed(count: usize) -> Vec<Message> {
+pub(super) fn seed(count: usize) -> Vec<Message> {
     (0..count)
         .map(|i| Message {
             id: format!("seed-{i}"),
@@ -216,17 +216,16 @@ fn blocked_writer_keeps_only_active_and_latest_snapshot_then_reloads_newest() {
 }
 
 #[test]
-fn deferred_empty_hydration_persists_revision_zero() {
+fn deferred_empty_hydration_does_not_persist_revision_zero() {
     let destination = path("revision-zero");
     let center =
         MessageCenter::open_deferred_with(&destination, Arc::new(NoopDesktopNotifier)).unwrap();
     assert_eq!(center.hydrate_from_storage().unwrap(), 0);
     assert_eq!(center.inner.store.snapshot().revision(), 0);
     center.flush().unwrap();
-    assert!(destination.exists());
-    assert!(crate::storage::load(&destination).unwrap().is_empty());
+    assert!(!destination.exists());
     center.shutdown_checked().unwrap();
-    std::fs::remove_file(destination).unwrap();
+    assert!(!destination.exists());
 }
 
 #[test]

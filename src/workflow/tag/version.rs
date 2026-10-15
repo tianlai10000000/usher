@@ -100,6 +100,7 @@ impl RemoteTagParser {
     }
 }
 
+#[cfg(test)]
 pub(super) fn latest_remote_tag(output: &str) -> Result<String, RemoteTagParseError> {
     let mut parser = RemoteTagParser::default();
     parser.push(output)?;

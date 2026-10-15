@@ -1,5 +1,7 @@
 //! Framework-neutral artifact preview providers and registry.
 
+mod file_source;
+
 #[cfg(feature = "markdown")]
 pub mod parser;
 
@@ -12,7 +14,6 @@ pub use parser::{
 
 use std::collections::HashMap;
 use std::fmt;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -447,16 +448,7 @@ fn materialize(
         ArtifactBody::Text(text) => (None, text.into_bytes()),
         ArtifactBody::Bytes(bytes) => (None, bytes),
         ArtifactBody::File(path) => {
-            let metadata =
-                fs::metadata(&path).map_err(|error| PreviewError::Io(error.to_string()))?;
-            if metadata.len() > MAX_SOURCE_BYTES as u64 {
-                return Err(PreviewError::SourceTooLarge {
-                    bytes: metadata.len(),
-                    limit: MAX_SOURCE_BYTES,
-                });
-            }
-            cancellation.check()?;
-            let bytes = fs::read(&path).map_err(|error| PreviewError::Io(error.to_string()))?;
+            let bytes = file_source::read(&path, cancellation)?;
             (Some(path), bytes)
         }
     };

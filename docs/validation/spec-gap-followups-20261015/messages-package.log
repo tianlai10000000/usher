@@ -1,0 +1,43 @@
+   Compiling usher-i18n v0.0.9-alpha.1 (/Users/yuankai/yuankai/Demo/rust/usher/crates/usher-i18n)
+   Compiling usher-messages v0.0.9-alpha.1 (/Users/yuankai/yuankai/Demo/rust/usher/crates/usher-messages)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.01s
+     Running unittests src/lib.rs (target/debug/deps/usher_messages-ea3118e78f7a132a)
+
+running 34 tests
+test center::persistence_tests::checked_shutdown_reports_durable_failure_without_retrying ... ok
+test center::persistence_tests::checked_shutdown_retains_both_durable_and_native_failure_causes ... ok
+test center::persistence_tests::deferred_empty_hydration_does_not_persist_revision_zero ... ok
+test center::persistence_tests::deferred_shutdown_reports_accepted_state_without_finished_hydration ... ok
+test center::persistence_tests::deferred_shutdown_without_business_changes_is_successful ... ok
+test center::hydration_tests::disk_only_hydration_never_offers_a_write_and_business_changes_still_persist ... ok
+test center::persistence_tests::native_byte_budget_includes_inflight_and_oversized_single_event_is_rejected ... ok
+test center::hydration_tests::repeated_hydration_cannot_resurrect_a_deletion_while_its_durable_write_is_pending ... ok
+test center::hydration_tests::concurrent_hydration_shares_one_result_and_checked_shutdown_waits_without_reentry_deadlock ... ok
+test center::hydration_tests::concurrent_actions_during_hydration_persist_after_the_hydration_subscriber_returns ... ok
+test center::persistence_tests::failed_durable_flush_requires_explicit_same_revision_retry ... ok
+test center::persistence_tests::native_notifier_shutdown_reentry_fails_without_self_join ... ok
+test center::persistence_tests::ordinary_native_error_degrades_delivery_but_keeps_durable_flush_successful ... ok
+test center::hydration_tests::corrupt_history_is_preserved_until_a_valid_business_change_and_io_failure_remains_retryable ... ok
+test center::persistence_tests::native_panic_is_observable_by_native_barrier_and_checked_shutdown ... ok
+test center::hydration_tests::early_publication_read_remove_and_clear_only_write_the_final_merged_state ... ok
+test center::persistence_tests::shutdown_closes_new_actions_but_drains_an_already_admitted_publish ... ok
+test center::persistence_tests::checked_shutdown_waits_for_pending_durable_state_and_admitted_native_events ... ok
+test center::persistence_tests::blocked_writer_keeps_only_active_and_latest_snapshot_then_reloads_newest ... ok
+test center::persistence_tests::subscribers_can_reenter_snapshot_and_action_creators ... ok
+test center::persistence_tests::subscriber_shutdown_reentry_fails_before_an_external_shutdown_serial_lock ... ok
+test center::tests::adapter_retries_are_idempotent_within_the_same_channel ... ok
+test paging::tests::a_shrinking_result_clamps_to_the_last_nonempty_page ... ok
+test paging::tests::filtering_precedes_paging_and_borrows_the_original_records ... ok
+test center::hydration_tests::hydration_subscriber_read_delete_and_clear_changes_are_not_missed_before_observer_install ... ok
+test paging::tests::pages_cover_history_once_with_a_fixed_projection_bound ... ok
+test center::tests::native_delivery_defaults_to_unfocused_and_honors_explicit_policies ... ok
+test center::tests::every_changed_action_is_automatically_persisted ... ok
+test center::persistence_tests::slow_native_delivery_does_not_block_durable_flush_or_lose_inbox_messages ... ok
+test center::persistence_tests::subscriber_shutdown_reentry_fails_without_closing_the_center ... ok
+test center::tests::persisted_messages_reload_in_newest_first_order ... ok
+test center::tests::publish_and_read_state_update_unread_count ... ok
+test center::tests::deferred_hydration_merges_messages_published_during_startup ... ok
+test center::tests::subscribers_hydrate_immediately_and_follow_off_page_publishes ... ok
+
+test result: ok. 34 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+

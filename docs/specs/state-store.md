@@ -40,7 +40,9 @@ features when their shared state is materially changed.
 1. Every shared mutation enters through one typed `dispatch(Action)` path.
    Pages and publishers must not mutate the stored State directly.
 2. Reducers are synchronous and side-effect free. They return the next State,
-   an action Output, and whether the State changed.
+   an action Output, and whether the State changed. Synchronous describes the
+   engine contract, not permission to run reduction on the Slint event loop.
+   UI-originated mutations use the feature-worker admission path below.
 3. A changed commit atomically installs the next immutable State and increments
    its monotonically increasing revision. An unchanged action does neither.
 4. New subscribers immediately receive the current snapshot. Changed commits
@@ -57,6 +59,8 @@ features when their shared state is materially changed.
 1. 所有共享状态变更统一经过强类型 `dispatch(Action)`；页面和发布方禁止直接修改
    Store 内 State。
 2. Reducer 必须同步且无副作用，只返回 next State、Action Output 和是否发生变化。
+   同步指引擎契约，不代表可以在 Slint event loop reduce；UI 发起的变更必须经过
+   下述 Feature Worker 准入路径。
 3. 有效 commit 原子安装新的不可变 State，并递增单调 revision；无变化 Action
    不递增、不广播。
 4. 新订阅者立即收到当前快照；有效 commit 自动通知订阅者。订阅者拒绝旧 revision
@@ -67,6 +71,61 @@ features when their shared state is materially changed.
    Worker 回调禁止直接操作 Slint。
 7. 页面在其他 Action 已提交后才创建时，必须在可见树显示前从当前 Store 快照完成
    hydration。因此其他页面发布的数据应在首次绘制出现，无需额外刷新操作。
+
+## UI admission and feature workers / UI 准入与 Feature Worker
+
+`StateStore::dispatch` and `PersistentStore::dispatch` reduce on their caller;
+`PersistentStore` schedules persistence, not reduction. A UI callback therefore
+captures the complete typed input and its request/project/route identity before
+returning, then submits it through a bounded, nonblocking feature-owned queue.
+The worker dispatches accepted commands in order. Starting one unrelated task
+per callback without preserving admission order is insufficient. Background
+publishers already running on a worker may use their feature facade directly.
+No new Tokio runtime belongs in a feature; use `app_runtime` for async work.
+
+`StateStore::dispatch` 与 `PersistentStore::dispatch` 都在调用线程执行 reducer；
+后者只调度持久化，不负责迁移 reducer。UI callback 因此必须在返回前捕获完整强类型
+输入及请求/项目/路由身份，通过 Feature 自有的有界非阻塞队列准入，由 Worker 按
+接受顺序 dispatch。每次 callback 各自启动无序任务不能保证此契约。已经位于 Worker
+的后台发布方可直接使用 Feature 门面；异步工作复用 `app_runtime`，不新建 Runtime。
+
+Queue exhaustion and closing reject new work explicitly without disturbing
+accepted commands. Features define whether an adjacent identical request may be
+deduplicated; do not coalesce distinct ordered actions such as `A → B → A` into
+one latest snapshot. Persistence and replaceable UI *state* delivery may still
+coalesce according to their own contracts. A durable command receipt owns its
+accepted input/result and waits for its real flush on a worker; it must never
+substitute a later UI or Store value for the accepted request or report durable
+success from admission alone.
+
+队列耗尽或关闭必须显式拒绝新请求，同时保留已接受动作。Feature 可定义相邻同值
+请求的去重规则，禁止把 `A → B → A` 等不同顺序动作合成最新快照；持久化和可替换的
+UI 状态投递仍可按各自契约合并。持久命令 receipt 保留已接受输入/结果，在 Worker
+等待真实 flush；不得用之后的 UI/Store 值替换原请求，也不得仅凭准入成功报告落盘。
+
+Worker-queue capacity does not bound completed payloads waiting for the UI.
+Every bridge that retains a complete request, model, image or completion must
+also bound those owners until its callback runs or is dropped. A UI completion
+uses weak handles and `invoke_from_event_loop`, rejects stale request/revision
+identity and preserves later local edits or route visits. Only the current
+attempt owns transient success/failure indicators and reset timers. Shutdown
+closes feature admission before draining accepted commands and checked durable
+barriers off the event loop; stop background publishers before closing their
+shared Store. Concurrent/repeated close must wait for the same final result.
+
+Worker 队列容量不能限制已经完成、正在等待 UI 的 payload；bridge 持有的完整请求、
+model、图片或完成 owner 也必须有界，直到回调执行或丢弃。UI 完成使用 weak handle
+与 `invoke_from_event_loop`，拒绝迟到身份/revision，保留较新的局部编辑及路由访问。
+短时成功/失败指示及复位计时器只归当前 attempt。关闭时先关闭 Feature 准入，再在
+事件循环外排空已接受动作及 checked 持久化屏障；共享 Store 的后台发布方须先停止。
+并发/重复关闭必须等待相同最终结果。
+
+| Feature / 功能 | Command and UI owners / 命令与 UI 职责 |
+| --- | --- |
+| AI Agent Save / AI Agent 保存 | `src/ai/settings_state.rs` owns the 8-request active-inclusive FIFO, typed dispatch, per-request snapshot/flush receipt and checked drain; `src/ai/settings_ui.rs` owns a separate 8-owner pending-UI budget, adjacent duplicate handling and request/attempt guards. Draft/factory guards stay in `src/settings_page.rs`. See [AI Agent](ai-agent.md). / 门面与 UI 完成各自最多 8 项，草稿工厂护栏由 Settings bridge 持有。 |
+| Inbox mutations and UI notifications / Inbox 变更与 UI 通知 | `src/message_center/commands.rs` serializes UI publication, read/delete/clear and deferred hydration; `src/message_center.rs`, `src/notification.rs` and `src/notification/ingress.rs` project results. Background publishers retain the `MessageCenter` facade. See [Messages](messages.md). / UI 命令有序入 Worker，后台发布方继续使用领域门面。 |
+| Workflow / Tag / Branch / CD | `src/workflow/state.rs`, `state/facade.rs` and `state/reducer.rs` own project/generation identity and typed Actions. The 64-operation owner budget spans admission, effects, tasks and UI completion; latest projection is separate. Project navigation follows its committed selection; editor callbacks submit complete raw drafts. See [Tag](tag.md). / 项目与代际隔离，64 owner 覆盖完整操作，草稿/导航不得越过 commit 边界。 |
+| Explicit request preferences / 显式请求偏好 | `src/settings/request_preferences.rs` owns FIFO admission, typed dispatch and flush receipts; `request_preferences_ui.rs` schedules presentation. / HTTP 超时与默认合并策略的命令和展示各归其门面/bridge。 |
 
 ## Persistence / 持久化
 
@@ -96,8 +155,10 @@ features when their shared state is materially changed.
   attempt. Flush captures both the accepted revision and scheduled attempt so
   an old failure cannot satisfy a new retry barrier. Ordinary flush/shutdown
   never create retries or busy loops; retry after closing returns failure.
-  Hook configuration saves/toggles and explicit AI Agent Settings saves request
-  this recovery before their durable flush. The worker retains at most one
+  Hook configuration saves/toggles request this recovery before their durable
+  flush. An unchanged explicit AI Agent Save requests it before its flush; a
+  changed AI Agent Save waits for its automatic write without implicitly
+  retrying that same attempt. The worker retains at most one
   active and one latest pending/dirty unique snapshot.
 - Feature workers may skip serialization/writes when a separate durable revision
   is unchanged. Output-only commits still notify live subscribers and satisfy
@@ -126,11 +187,67 @@ features when their shared state is materially changed.
 - 失败的最新快照保持 dirty，直到被新状态替代或重试成功。`retry_failed()` 显式安排
   一次写入，不 dispatch Action、不增加业务 revision；并发调用共享在途尝试。Flush
   同时捕获已接受 revision 与已安排的尝试，旧失败不能提前结束新重试的屏障。普通
-  flush/shutdown 不自动重试、不忙循环；关闭后重试返回失败。Hook 配置保存/开关和
-  AI Agent Settings 显式保存在持久化 flush 前请求恢复。Worker 最多保留一个活动
+  flush/shutdown 不自动重试、不忙循环；关闭后重试返回失败。Hook 配置保存/开关在
+  持久化 flush 前请求恢复；AI Agent 同值显式 Save 在 flush 前请求恢复，有变化的
+  Save 则等待自动写入，不隐式重试自身失败。Worker 最多保留一个活动
   快照和一个最新 pending/dirty 独占快照。
 - Hover、Focus、打开菜单、本地确认计时器等临时 UI 状态，除非确有其他页面消费，
   否则不得进入持久 Store。
+
+## Implementation boundaries / 实现边界
+
+- `crates/usher-state-store/src/lib.rs` owns `StateStore`, `LocalStateStore`,
+  subscriptions and `PersistentStore`; `crates/usher-state-store/src/latest.rs` owns
+  `LatestPersistence` and `LatestDelivery`.
+- `subscribe` hydrates synchronously. Each listener serializes callback delivery
+  and replaces its pending snapshot with the newest revision while busy. It
+  guarantees current state, not one callback per Action. Ordered events/audit
+  records need a separate event channel. Commit observers run inside the serial
+  dispatch gate; keep them nonblocking and never dispatch recursively from them.
+  Ordinary snapshot subscribers run outside that gate and may reenter dispatch.
+- `LatestPersistence::{flush,shutdown}` return `Result<(), String>`;
+  `PersistentStore::shutdown` currently returns `()` and discards the worker's
+  shutdown result after removing its commit observer. It does not close the
+  underlying Store's Action admission. Features that require checked close and
+  admission barriers must own those in their lifecycle facade, as
+  `MessageCenter::shutdown_checked` does. Do not assume all facades expose the
+  same checked API. AI Agent Settings closes its own command admission, drains
+  accepted commands and checks `flush()` before calling the unchecked Store
+  shutdown; `shutdown_async()` returns that durable result.
+- `PersistentStore`'s deferred mode does not validate feature hydration itself.
+  A feature must prevent a successful durable result for accepted business
+  changes that were never submitted to persistence.
+
+- 引擎/订阅/`PersistentStore` 位于 crate 的 `src/lib.rs`，latest Worker/投递位于
+  `crates/usher-state-store/src/latest.rs`。普通订阅同步 hydration；忙碌 listener 只保留最新待交付快照，
+  不保证每个 Action 一次回调。顺序事件与审计记录另用事件通道。
+- Commit observer 在串行 dispatch gate 内运行，只能做快速提交，不能递归 dispatch；
+  普通快照 subscriber 在 gate 外运行，可重新 dispatch。
+- `LatestPersistence` 的 flush/shutdown 返回 Result，而当前
+  `PersistentStore::shutdown` 返回 `()`、丢弃 Worker 关闭结果，也不关闭 Store Action
+  准入。需要 checked 关闭与准入屏障的 Feature 必须由生命周期门面提供，不能误用
+  同名 API；`MessageCenter::shutdown_checked` 是对应参考。AI Agent Settings 自行
+  关闭命令准入、排空已接受动作，在未返回结果的 Store shutdown 前检查 `flush()`，
+  `shutdown_async()` 返回该持久化结果。
+- Deferred 模式不替 Feature 核验 hydration；尚未提交持久化的业务变化不得被 Feature
+  报告为 durable 成功。
+
+### Deferred hydration boundary / 延迟 hydration 边界
+
+Message-center hydration demonstrates the no-redundant-write boundary: dispatch
+the typed merge before installing persistence, register the automatic observer,
+then compare the current state with the loaded durable baseline. A differing
+state needs an initial offer; equal disk-only or empty revision-zero state does
+not. Installing the observer before the final snapshot read ensures concurrent
+business changes cannot fall between the comparison and automatic persistence.
+Hydration is one successful initialization, not a repeated disk-refresh action.
+See [Messages](messages.md) and its concurrency/recovery regressions.
+
+消息中心 hydration 的边界是：强类型合并后安装自动持久化 observer，再将当前状态
+与已读取的持久基线比较。只有差异状态需要补交首次写入；纯磁盘恢复与空 revision 0
+不提交。最终读取快照前先安装 observer，保证并发业务变更不会落入比较与自动持久化
+之间的空窗。hydration 是单次成功初始化，不是重复磁盘刷新；入口、竞争及恢复回归见
+[Messages](messages.md)。
 
 ## Engine replacement / 引擎替换
 
@@ -177,6 +294,24 @@ The message center and Project registry are reference implementations:
 
 ## Regression checklist / 回归清单
 
+Focused automated checks are `cargo test -p usher-state-store --locked`,
+`cargo test -p usher-messages --locked`, and the root feature filters
+`project::`, `settings::save_worker::`, `ai::settings_state`,
+`ai::settings_ui`, and `message_center::` with
+`cargo test --lib --locked <filter>`. Store-only tests do not prove route first
+paint or application shutdown ownership; inspect the feature bridge and
+`src/lib.rs` lifecycle registrations together.
+
+专项单测覆盖引擎与 Feature 门面，路由首帧与应用关闭归属仍须配套核对 bridge 和
+`src/lib.rs` 的生命周期注册。
+
+- Block a production feature reducer/persistence observer; the UI callback must
+  still return immediately and later admitted commands must preserve their
+  captured identities/order. Cover queue exhaustion, adjacent duplicates,
+  `A → B → A`, close during a blocked command and post-close rejection.
+- Complete worker operations while holding UI delivery. Verify its separate
+  pending-owner budget, release on callback/drop/enqueue failure, stale-result
+  rejection and preservation of a newly edited draft or route visit.
 - Subscribe after several actions and verify the first callback contains the
   latest State and revision.
 - Dispatch changed and unchanged actions; only changed actions increment and
@@ -196,6 +331,11 @@ The message center and Project registry are reference implementations:
 - Run Store crate tests, the feature's persistence tests, full library tests,
   and the affected route-switch matrix.
 
+- 阻塞生产 Feature reducer/持久化 observer，确认 UI callback 仍立即返回，后续
+  准入动作保留捕获的身份/顺序；覆盖队列满、相邻重复、`A → B → A`、活动动作期间
+  关闭及关闭后拒绝。
+- Worker 完成但暂缓 UI 投递时，核验独立 pending owner 预算、完成/drop/投递失败
+  的释放、旧结果拦截，以及新编辑草稿/路由访问的保留。
 - 多次 Action 后再订阅，确认首次回调立即得到最新 State 与 revision。
 - 分别 dispatch 有变化/无变化 Action，只有前者递增并通知。
 - 并发 dispatch 后确认订阅者最终停在最大 revision，不被旧状态覆盖。
@@ -220,7 +360,7 @@ coverage includes 1,000 offers while delivery is busy, stale revisions and close
 
 Delayed Settings preferences use one worker with a resettable 100 ms deadline.
 Flush bypasses debounce and waits for the accepted request; application
-pre-shutdown joins the worker after high-priority feature workers. Explicit
+background shutdown joins the worker after high-priority feature workers. Explicit
 credential/provider saves retain their existing save feedback and write gate.
 Tests cover burst coalescing, final preference, write failure/recovery and close.
 
@@ -229,5 +369,5 @@ Tests cover burst coalescing, final preference, write failure/recovery and close
 增量、用户动作、审计或事件记录。回归覆盖投递繁忙时 1,000 次提交、旧版本与关闭。
 
 Settings 延迟偏好使用单个 Worker，每次请求重置 100ms 截止时间。Flush 跳过去抖并
-等待已接受请求；应用 pre-shutdown 在高优先级 Feature Worker 后 join。显式凭据/
+等待已接受请求；应用后台关闭阶段在高优先级 Feature Worker 后 join。显式凭据/
 Provider 保存保留反馈及写锁。测试覆盖突发合并、最终偏好、写失败/恢复和关闭。

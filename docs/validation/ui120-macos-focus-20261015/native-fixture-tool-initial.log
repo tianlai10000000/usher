@@ -1,0 +1,24 @@
+.F
+======================================================================
+FAIL: test_launcher_passes_paths_as_data_and_installs_isolation_before_exec (scripts.tests.test_messages_focus_fixture.MessageFocusFixtureTests.test_launcher_passes_paths_as_data_and_installs_isolation_before_exec)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/yuankai/yuankai/Demo/rust/usher/scripts/tests/test_messages_focus_fixture.py", line 50, in test_launcher_passes_paths_as_data_and_installs_isolation_before_exec
+    self.assertEqual(observed["argv"], [str(bundle / "Contents/MacOS/Usher")])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['/private/var/folders/b0/0c4fb4xx7_j74_vzjy[98 chars]her'] != ['/var/folders/b0/0c4fb4xx7_j74_vzjy67bhww00[90 chars]her']
+
+First differing element 0:
+'/private/var/folders/b0/0c4fb4xx7_j74_vzjy[97 chars]sher'
+'/var/folders/b0/0c4fb4xx7_j74_vzjy67bhww00[89 chars]sher'
+
+- ['/private/var/folders/b0/0c4fb4xx7_j74_vzjy67bhww0000gn/T/usher focus fixture '
+?   --------
+
++ ['/var/folders/b0/0c4fb4xx7_j74_vzjy67bhww0000gn/T/usher focus fixture '
+   'xzotu_8i/bundle 中文 & $()/Usher UI120 test.app/Contents/MacOS/Usher']
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.283s
+
+FAILED (failures=1)

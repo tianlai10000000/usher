@@ -1,0 +1,4 @@
+    Blocking waiting for file lock on build directory
+    Checking usher-preview v0.0.9-alpha.1 (/Users/yuankai/yuankai/Demo/rust/usher/crates/usher-preview)
+    Checking usher v0.0.9-alpha.4 (/Users/yuankai/yuankai/Demo/rust/usher)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 19.24s

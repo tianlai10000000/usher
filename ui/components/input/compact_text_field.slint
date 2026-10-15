@@ -3,6 +3,7 @@ import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 export component GitHubCompactTextField inherits Rectangle {
     in-out property <string> text;
     in property <string> placeholder: "";
+    in property <string> accessible-name: root.placeholder;
     in property <bool> enabled: true;
     in property <bool> read-only: false;
     in property <InputType> input-type: InputType.text;
@@ -48,7 +49,7 @@ export component GitHubCompactTextField inherits Rectangle {
         selection-foreground-color: self.color;
         accessible-role: text-input;
         accessible-enabled: root.enabled;
-        accessible-label: root.placeholder;
+        accessible-label: root.accessible-name;
         accessible-value <=> self.text;
 
         cursor_position_changed(cursor_position) => {

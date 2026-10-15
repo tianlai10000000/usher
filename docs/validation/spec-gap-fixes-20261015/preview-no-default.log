@@ -1,0 +1,6 @@
+   Compiling libc v0.2.189
+    Checking bitflags v2.13.2
+    Checking errno v0.3.14
+    Checking rustix v1.1.5
+    Checking usher-preview v0.0.9-alpha.1 (/Users/yuankai/yuankai/Demo/rust/usher/crates/usher-preview)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.76s

@@ -1,5 +1,29 @@
 # PR Conflict Browsing / PR 冲突查看
 
+## Scope and change navigation / 范围与修改导航
+
+This is the implemented read-only workspace. Resolution/editing remains planned
+in [the iteration plan](../pr-conflicts-iterations.md); an iteration checklist is
+not evidence that its write commands are available.
+
+本规格描述已实现的只读工作区；解决/编辑仍属[迭代计划](../pr-conflicts-iterations.md)，
+计划清单不表示写操作已经可用。
+
+| Change / 改动 | Code and regression entry / 代码与回归入口 |
+| --- | --- |
+| Status and shared list observations / 状态及列表共享观测 | `src/git/conflicts/mod.rs`, `src/workflow/pr_conflict_status.rs`, `pr_conflict_status_owner.rs`, `pr_conflict_status_tests.rs`; `cargo test --lib --locked pr_conflict_status` |
+| Snapshot, markers and bounded Git fallback / 快照、marker 与有界 Git fallback | `src/git/conflicts/{mod,model,merge_tree}.rs`, `src/git/gitee/conflicts.rs`; `cargo test --lib --locked git::conflicts` |
+| Session, preparation and copy / 会话、准备及复制 | `src/workflow/pr_review/conflicts/{mod,state,projection}.rs`; `cargo test --lib --locked workflow::pr_review::conflicts` |
+| Entry/Back and route lifecycle / 入口、Back 及路由生命周期 | `src/workflow/pr_review/controller.rs`, `controller/lifecycle.rs`; `ui/features/pr_review/conflicts_bridge.slint`, `ui/views/workflow/pr_review_conflicts.slint`; `cargo test --test pr_review_core_journeys --locked` plus native fixture below / 加下方原生 fixture |
+
+Read [Security boundaries](security-boundaries.md) before changing Git process or
+credential handling, and [Exact virtual scrolling](virtual-scrolling.md),
+[Internationalization](i18n.md), [Tooltip contract](tooltips.md) for affected UI.
+The focused tests do not replace `AGENTS.md` handoff checks or native acceptance.
+
+修改 Git 进程/凭据前读安全边界；相应 UI 修改须读精确虚拟滚动、国际化和 Tooltip
+契约。定向测试不替代 `AGENTS.md` 交付检查及原生验收。
+
 ## Ownership / 职责
 
 `src/git/conflicts/` owns normalized status, snapshots, marker parsing and isolated
@@ -12,8 +36,18 @@ projection data and commands, separate from ordinary Diff selection and models.
 Conflicts 保留 PR 标题，显示平铺文件列表和只读源码。返回保留来源 Tab；列表入口
 返回列表。离开 PR 路由取消冲突任务，普通 Review 缓存遵守主规格。没有在线编辑、
 Accept、标记已解决或提交操作；后续范围见 [迭代计划](../pr-conflicts-iterations.md)。
-Opening an already active session is a no-op, including while loading. Only the
-explicit refresh action reloads that session; re-entry preserves selection and scroll.
+Opening the same already active session is a no-op, including while loading;
+this preserves its selection and scroll. Explicit Refresh reloads it. Back from
+Conflicts calls `leave_workspace`: it cancels work and releases the snapshot,
+file/row models and selection presentation, retaining only the derived file-count
+badge on ordinary Review. Opening Conflicts again starts a new snapshot read and
+selects the first file; it is a different boundary from repeated Open on an active
+session. Leaving the PR route calls `close`, which also clears the badge.
+
+重复打开同一活跃会话（包括加载中）是 no-op，保留选区和滚动；显式 Refresh 才重载
+该活跃会话。Conflicts 内 Back 使用 `leave_workspace` 取消任务并释放快照、文件/行
+model 和选区展示，只在普通 Review 保留派生文件数量角标。再次打开启动新读取并
+选择首文件；不能与活跃会话的重复 Open 混淆。离开 PR 路由使用 `close`，同时清角标。
 
 ## Status / 状态
 
@@ -169,3 +203,11 @@ in [the 2026-09-28 acceptance record](../archive/pr-conflicts/validation.zh.md#o
 [the interaction-fix acceptance record](../archive/pr-conflicts/validation.zh.md#interaction-fixes-20260929).
 The current single-row navigation and resizable pane are verified in
 [the navigation acceptance record](../archive/pr-conflicts/validation.zh.md#navigation-and-counts-20260929).
+
+Those are dated offline evidence, not a claim of current provider or platform
+acceptance. In particular, re-run native UI checks after layout changes and
+record enterprise permissions, private-fork refs and Git credentials as
+unverified unless exercised against the target deployment.
+
+这些记录是当时的离线证据，不代表当前 Provider/平台已全部验收。布局变化后必须
+重跑原生 UI；企业权限、私有 fork refs 和 Git 凭据未在目标部署实际执行时仍标为未验证。

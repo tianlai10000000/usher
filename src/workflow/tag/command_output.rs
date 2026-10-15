@@ -149,6 +149,7 @@ impl Drop for Readers {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CommandFailureKind {
     EmptyCommand,
+    TimedOut,
     Cancelled,
     Spawn,
     Wait,
@@ -168,6 +169,8 @@ pub(super) struct CommandSuccess {
 pub(super) struct CommandFailure {
     pub(super) kind: CommandFailureKind,
     pub(super) log: String,
+    pub(super) spawn_kind: Option<std::io::ErrorKind>,
+    pub(super) exit_status: Option<String>,
 }
 
 impl CommandFailure {
@@ -190,17 +193,34 @@ where
 pub(super) async fn run_command_with_stdout<F, S>(
     command: Vec<String>,
     cancel: &Arc<AtomicBool>,
-    mut on_log: F,
-    mut on_stdout: S,
+    on_log: F,
+    on_stdout: S,
 ) -> Result<CommandSuccess, CommandFailure>
 where
     F: FnMut(String),
     S: FnMut(&str) -> Result<(), String>,
 {
+    run_command_with_deadline(command, cancel, on_log, on_stdout, None).await
+}
+
+pub(super) async fn run_command_with_deadline<F, S>(
+    command: Vec<String>,
+    cancel: &Arc<AtomicBool>,
+    mut on_log: F,
+    mut on_stdout: S,
+    timeout: Option<Duration>,
+) -> Result<CommandSuccess, CommandFailure>
+where
+    F: FnMut(String),
+    S: FnMut(&str) -> Result<(), String>,
+{
+    let deadline = timeout.map(|timeout| Instant::now() + timeout);
     let Some(program) = command.first() else {
         return Err(CommandFailure {
             kind: CommandFailureKind::EmptyCommand,
             log: "Command vector is empty.".into(),
+            spawn_kind: None,
+            exit_status: None,
         });
     };
     let rendered = command.join(" ");
@@ -209,20 +229,39 @@ where
         return Err(CommandFailure {
             kind: CommandFailureKind::Cancelled,
             log: format!("{log}Cancelled by user."),
+            spawn_kind: None,
+            exit_status: None,
         });
     }
     log::info!("[Workflow][Tag] Executing command: {rendered}");
-    let mut child = Command::new(program)
+    let mut process_command = Command::new(program);
+    process_command
         .args(&command[1..])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|error| CommandFailure {
-            kind: CommandFailureKind::Spawn,
-            log: format!("{log}error: failed to spawn command: {error}"),
-        })?;
+        .kill_on_drop(true);
+    #[cfg(unix)]
+    process_command.process_group(0);
+    let mut child = process_command.spawn().map_err(|error| CommandFailure {
+        kind: CommandFailureKind::Spawn,
+        log: format!("{log}error: failed to spawn command: {error}"),
+        spawn_kind: Some(error.kind()),
+        exit_status: None,
+    })?;
+    let tree = match crate::app_runtime::process_tree::ProcessTree::attach(&child) {
+        Ok(tree) => tree,
+        Err(error) => {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            return Err(CommandFailure {
+                kind: CommandFailureKind::Spawn,
+                log: format!("{log}error: cannot contain command process tree: {error}"),
+                spawn_kind: Some(error.kind()),
+                exit_status: None,
+            });
+        }
+    };
     let (sender, mut receiver) = mpsc::channel(QUEUE_CHUNKS);
     let mut readers = Readers(vec![
         tokio::spawn(read_stream(
@@ -246,7 +285,15 @@ where
     let mut received = 0usize;
     on_log(log.clone());
     let result: Result<(), CommandFailureKind> = loop {
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            tree.terminate();
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            log.push_str("\nInitialization command timed out.");
+            break Err(CommandFailureKind::TimedOut);
+        }
         if cancel.load(Ordering::Acquire) {
+            tree.terminate();
             let _ = child.start_kill();
             let _ = child.wait().await;
             log.push_str("\nCancelled by user.");
@@ -315,6 +362,7 @@ where
         }
     };
     if result.is_err() && status.is_none() {
+        tree.terminate();
         let _ = child.start_kill();
         let _ = child.wait().await;
     }
@@ -326,6 +374,7 @@ where
         let _ = handle.await;
     }
     drop(receiver);
+    drop(tree);
     log = clamp_step_log(log);
     on_log(log.clone());
     if std::env::var("USHER_P5_BENCHMARK").as_deref() == Ok("58") {
@@ -336,7 +385,17 @@ where
     }
     match result {
         Ok(()) => Ok(CommandSuccess { log }),
-        Err(kind) => Err(CommandFailure { kind, log }),
+        Err(kind) => Err(CommandFailure {
+            kind,
+            log,
+            spawn_kind: None,
+            exit_status: status.map(|status| {
+                status
+                    .code()
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "signal".into())
+            }),
+        }),
     }
 }
 

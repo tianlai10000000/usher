@@ -7,8 +7,9 @@
 
 use std::sync::{Arc, Mutex};
 
-use slint::Model;
-use slint::{ComponentFactory, ComponentHandle, Global, ModelRc, VecModel};
+use slint::{ComponentFactory, ComponentHandle, Global};
+#[cfg(feature = "ai-code-review")]
+use slint::{Model, ModelRc, VecModel};
 use usher_preview::{IMAGE_PROVIDER_ID, MARKDOWN_PROVIDER_ID, PLAIN_TEXT_PROVIDER_ID};
 #[cfg(feature = "ai-code-review")]
 use usher_ui_settings::AiReviewRuleItem;
@@ -43,6 +44,13 @@ pub(crate) fn mirror_update_checking(ui: &MainWindow, page: &SettingsPageBridge,
 pub(crate) fn mirror_ai_agent_testing(ui: &MainWindow, page: &SettingsPageBridge, testing: bool) {
     ui.set_settings_ai_agent_testing(testing);
     page.set_ai_agent_testing(testing);
+}
+
+/// Captured on the event loop when Save is accepted. A later completion may
+/// normalize this draft only while both its route visit and all fields match.
+pub(crate) struct AiAgentSaveContext {
+    page: slint::Weak<GitHubSettingsPage>,
+    route_entry: i32,
 }
 
 #[derive(Clone, Default)]
@@ -188,6 +196,38 @@ impl SettingsPageBridge {
 
     pub(crate) fn set_git_hosting_config_saved(&self, saved: bool) {
         self.with_page(|page| page.set_git_hosting_config_saved(saved));
+    }
+
+    pub(crate) fn capture_ai_agent_save(&self) -> Option<AiAgentSaveContext> {
+        let mut context = None;
+        self.with_page(|page| {
+            context = Some(AiAgentSaveContext {
+                page: page.as_weak(),
+                route_entry: page.get_route_entry_revision(),
+            });
+        });
+        context
+    }
+
+    pub(crate) fn complete_ai_agent_save(
+        &self,
+        context: &Option<AiAgentSaveContext>,
+        accepted: &crate::settings::AiAgentSettings,
+        committed: &crate::settings::AiAgentSettings,
+    ) -> bool {
+        let Some(context) = context else {
+            return false;
+        };
+        let Some(page) = context.page.upgrade() else {
+            return false;
+        };
+        if page.get_route_entry_revision() != context.route_entry
+            || ai_agent_draft_from_page(&page) != *accepted
+        {
+            return false;
+        }
+        apply_ai_agent_snapshot_to_page(&page, committed);
+        true
     }
 
     pub(crate) fn set_ai_agent_saved(&self, saved: bool) {
@@ -619,7 +659,7 @@ fn ai_agent_draft_from_page(page: &GitHubSettingsPage) -> crate::settings::AiAge
     }
 }
 
-fn apply_ai_agent_snapshot_to_window(
+pub(crate) fn apply_ai_agent_snapshot_to_window(
     window: &MainWindow,
     settings: &crate::settings::AiAgentSettings,
 ) {
@@ -885,23 +925,10 @@ fn bind_callbacks(
     );
 
     let window_weak = window.as_weak();
-    let page_weak = page.as_weak();
     let settings = ai_agent_settings;
     state.on_save_ai_agent_settings(move |provider, base_url, api_key, model, reply_language| {
         if let Some(window) = window_weak.upgrade() {
-            if let Some(settings) = &settings {
-                let snapshot = settings.replace(crate::settings::AiAgentSettings {
-                    provider: provider.to_string(),
-                    base_url: base_url.to_string(),
-                    api_key: api_key.to_string(),
-                    model: model.to_string(),
-                    reply_language: reply_language.to_string(),
-                });
-                if let Some(page) = page_weak.upgrade() {
-                    apply_ai_agent_snapshot_to_page(&page, snapshot.state());
-                }
-                apply_ai_agent_snapshot_to_window(&window, snapshot.state());
-            } else {
+            if settings.is_none() {
                 let state = AppState::get(&window);
                 state.set_ai_agent_provider(provider.clone());
                 state.set_ai_agent_base_url(base_url.clone());
@@ -2164,6 +2191,7 @@ mod tests {
             crate::settings::AiAgentSettings::default(),
         );
         bridge.configure_ai_agent_settings(ai_agent_settings.clone());
+        crate::ai::settings_ui::bind(&window, &bridge, ai_agent_settings.clone());
         crate::i18n::apply_preference("zh-CN").expect("select Chinese");
         crate::i18n::sync_main_window(&window, "zh-CN");
         crate::i18n::sync_ai_reply_language(&window, usher_i18n::AUTO_LANGUAGE);
@@ -2226,6 +2254,9 @@ mod tests {
         );
         select_language(&page, "English");
         save_ai_agent_draft(&page);
+        ai_agent_settings
+            .shutdown_checked()
+            .expect("drain accepted AI Save");
         drop(page);
         window.set_current_route(Route::Home);
         i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
@@ -2268,6 +2299,7 @@ mod tests {
             },
         );
         bridge.configure_ai_agent_settings(ai_agent_settings.clone());
+        crate::ai::settings_ui::bind(&window, &bridge, ai_agent_settings.clone());
         bridge.install(&window);
 
         window.set_current_route(Route::Settings);
@@ -2345,6 +2377,9 @@ mod tests {
 
         select_ai_agent_provider(&page, "OpenAI");
         save_ai_agent_draft(&page);
+        ai_agent_settings
+            .shutdown_checked()
+            .expect("drain accepted AI Save");
         assert_eq!(ai_agent_settings.snapshot().state().provider, "openai");
         drop(page);
         window.set_current_route(Route::Home);
@@ -2523,6 +2558,32 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn ai_agent_completion_preserves_new_edits_and_a_new_route_visit() {
+        let _locale_guard = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let window = MainWindow::new().expect("main window");
+        let bridge = SettingsPageBridge::default();
+        bridge.install(&window);
+        window.set_current_route(Route::Settings);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        let page = mounted_page(&bridge);
+        let state = SettingsAppState::get(&page);
+        let accepted = super::ai_agent_draft_from_page(&page);
+        let committed = crate::ai::settings_state::apply_provider_preset(&accepted, "openai");
+        let context = bridge.capture_ai_agent_save();
+        state.set_ai_agent_api_key("newer-unsaved-secret".into());
+        assert!(!bridge.complete_ai_agent_save(&context, &accepted, &committed));
+        assert_eq!(state.get_ai_agent_api_key(), "newer-unsaved-secret");
+        super::apply_ai_agent_snapshot_to_page(&page, &accepted);
+        page.set_route_entry_revision(page.get_route_entry_revision() + 1);
+        assert!(!bridge.complete_ai_agent_save(&context, &accepted, &committed));
+        assert_eq!(super::ai_agent_draft_from_page(&page), accepted);
+        let current_context = bridge.capture_ai_agent_save();
+        assert!(bridge.complete_ai_agent_save(&current_context, &accepted, &committed));
+        assert_eq!(super::ai_agent_draft_from_page(&page), committed);
     }
 
     #[test]

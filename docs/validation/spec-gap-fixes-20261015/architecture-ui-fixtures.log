@@ -1,0 +1,23 @@
+....FF......................................................................
+======================================================================
+FAIL: test_extracted_leaves_cannot_import_controller_or_ui (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_extracted_leaves_cannot_import_controller_or_ui) (path='src/ai/settings_ui.rs', source='use usher_state_store::PersistentStore;')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/yuankai/yuankai/Demo/rust/usher/scripts/tests/test_architecture_checks.py", line 201, in test_extracted_leaves_cannot_import_controller_or_ui
+    self.assertIn(path, result.stderr)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'src/ai/settings_ui.rs' not found in 'Architecture structure: AI Settings UI bypasses its feature facade:\n1:use usher_state_store::PersistentStore;\n'
+
+======================================================================
+FAIL: test_extracted_leaves_cannot_import_controller_or_ui (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_extracted_leaves_cannot_import_controller_or_ui) (path='src/notification/ingress.rs', source='use usher_state_store::LocalStateStore;')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/yuankai/yuankai/Demo/rust/usher/scripts/tests/test_architecture_checks.py", line 201, in test_extracted_leaves_cannot_import_controller_or_ui
+    self.assertIn(path, result.stderr)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'src/notification/ingress.rs' not found in 'Architecture structure: notification ingress bypasses its message command facade:\n1:use usher_state_store::LocalStateStore;\n'
+
+----------------------------------------------------------------------
+Ran 75 tests in 32.888s
+
+FAILED (failures=2)

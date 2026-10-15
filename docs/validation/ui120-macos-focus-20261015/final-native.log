@@ -1,0 +1,81 @@
+sandbox_extension_issue_file_to_process failed for /tmp/usher-ui120-final-20261015/Usher UI120 final.app: 1 (Operation not permitted)
+[2026-10-15 13:16:27.189] [[34mDEBUG[0m] [usher_lib::logger::debug_logger] Debug Logger initialized successfully! - Level: Debug, PerDay: true, ConsoleOutput: true, FileOutput: true, Log file path: "/private/tmp/usher-ui120-final-20261015/state/default/run-0/logs/2026-10-15/usher.log"
+[2026-10-15 13:16:27.190] [[32mINFO[0m] [usher_lib::logger] [Logger] Slint callbacks bound
+[2026-10-15 13:16:27.190] [[32mINFO[0m] [usher_lib::startup] [Startup][Timeline] checkpoint=process_entered elapsed_ms=0 delta_ms=0
+[2026-10-15 13:16:27.190] [[32mINFO[0m] [usher_lib::startup] [Startup][Timeline] checkpoint=instance_lock_acquired elapsed_ms=9 delta_ms=8
+[2026-10-15 13:16:27.190] [[32mINFO[0m] [usher_lib::startup] [Startup][Timeline] checkpoint=crash_sentinel_ready elapsed_ms=26 delta_ms=16
+[2026-10-15 13:16:27.190] [[32mINFO[0m] [usher_lib::startup] [Startup][Timeline] checkpoint=settings_loaded elapsed_ms=35 delta_ms=9
+[2026-10-15 13:16:27.190] [[32mINFO[0m] [usher_lib::startup] [Startup][Timeline] checkpoint=native_appearance_applied elapsed_ms=79 delta_ms=43
+[2026-10-15 13:16:27.190] [[32mINFO[0m] [usher_lib::startup] [Startup][Timeline] checkpoint=main_window_created elapsed_ms=223 delta_ms=144
+[2026-10-15 13:16:27.190] [[32mINFO[0m] [usher_lib::startup] [Startup][Timeline] checkpoint=language_initialized elapsed_ms=224 delta_ms=0
+[2026-10-15 13:16:27.190] [[32mINFO[0m] [usher_lib::startup] [Startup][Timeline] checkpoint=message_center_ready elapsed_ms=231 delta_ms=7
+[2026-10-15 13:16:27.190] [[32mINFO[0m] [usher_lib::startup] [Startup][Timeline] checkpoint=debug_logger_ready elapsed_ms=235 delta_ms=4
+[2026-10-15 13:16:27.190] [[32mINFO[0m] [usher_lib] [SidebarMotion] mode=display-link
+[2026-10-15 13:16:27.190] [[32mINFO[0m] [usher_lib::settings] [Settings] Applied settings: theme_mode=0, auto_update=false, application_console_logging=true, application_file_logging=true, tracing_logger_active=false, terminal_verbose_logging=false, memory_diagnostics_logging=false, ui_sound_effects=false, navigation_drawer_expanded=true, git_tokens=(empty/empty/empty), ai.agent=(empty/empty/empty)
+[2026-10-15 13:16:27.190] [[32mINFO[0m] [usher_lib::artifact_preview] [ArtifactPreview::Performance] variant=optimized
+[2026-10-15 13:16:27.191] [[32mINFO[0m] [usher_lib::shutdown] [Shutdown] Registered task 'cancel_latest_computations' in stage 'pre_shutdown' with priority 0
+[2026-10-15 13:16:27.194] [[32mINFO[0m] [usher_lib::platform::macos] [Theme] Listening for AppleInterfaceThemeChangedNotification
+[2026-10-15 13:16:27.194] [[32mINFO[0m] [usher_lib::shutdown] [Shutdown] Registered task 'clear_pending_notifications' in stage 'ui_shutdown' with priority 0
+[2026-10-15 13:16:27.200] [[32mINFO[0m] [usher_lib::chat] [Chat] Initializing chat module
+[2026-10-15 13:16:27.200] [[32mINFO[0m] [usher_lib::chat::interactive] [Chat::Interactive] Setting up interactive callbacks...
+[2026-10-15 13:16:27.200] [[32mINFO[0m] [usher_lib::chat::interactive] [Chat::Performance] variant=optimized
+[2026-10-15 13:16:27.200] [[32mINFO[0m] [usher_lib::chat::interactive] [Chat::Interactive] Interactive callbacks initialized successfully
+[2026-10-15 13:16:27.200] [[32mINFO[0m] [usher_lib::chat] [Chat] Chat module initialized successfully
+[2026-10-15 13:16:27.201] [[32mINFO[0m] [usher_lib::workflow] [Workflow] Initializing workflow module
+[2026-10-15 13:16:27.203] [[32mINFO[0m] [usher_lib::workflow] [Workflow] Workflow module initialized successfully
+[2026-10-15 13:16:27.203] [[32mINFO[0m] [usher_lib::ai_review::controller] [AI Review][DockedLifecycle] policy=retain unmounts_response_delegates=false
+[2026-10-15 13:16:27.203] [[32mINFO[0m] [usher_lib::ai_review::controller] [AI Review][ResponseList] policy=retain virtualized=false
+[2026-10-15 13:16:27.204] [[32mINFO[0m] [usher_lib::ai_review::controller] [AI Review][Response] variant=formatted lightweight_parser=true
+[2026-10-15 13:16:27.204] [[32mINFO[0m] [usher_lib::shutdown] [Shutdown] Initializing signal handlers
+[2026-10-15 13:16:27.204] [[32mINFO[0m] [usher_lib::shutdown] [Shutdown] Registered task 'stop_auto_update' in stage 'pre_shutdown' with priority 100
+[2026-10-15 13:16:27.204] [[32mINFO[0m] [usher_lib::shutdown] [Shutdown] Registered task 'stop_memory_diagnostics' in stage 'pre_shutdown' with priority 100
+[2026-10-15 13:16:27.204] [[32mINFO[0m] [usher_lib::shutdown] [Shutdown] Registered task 'shutdown_terminal' in stage 'pre_shutdown' with priority 100
+[2026-10-15 13:16:27.204] [[32mINFO[0m] [usher_lib::shutdown] [Shutdown] Registered task 'shutdown_request_preferences' in stage 'background_shutdown' with priority 100
+[2026-10-15 13:16:27.204] [[32mINFO[0m] [usher_lib::shutdown] [Shutdown] Registered task 'shutdown_ai_agent_settings' in stage 'pre_shutdown' with priority 100
+[2026-10-15 13:16:27.204] [[32mINFO[0m] [usher_lib::shutdown] [Shutdown] Registered task 'shutdown_project_state' in stage 'background_shutdown' with priority 100
+[2026-10-15 13:16:27.204] [[32mINFO[0m] [usher_lib::shutdown] [Shutdown] Registered task 'shutdown_ai_review' in stage 'pre_shutdown' with priority 100
+[2026-10-15 13:16:27.204] [[32mINFO[0m] [usher_lib::shutdown] [Shutdown] Registered task 'flush_settings' in stage 'background_shutdown' with priority 0
+[2026-10-15 13:16:27.204] [[32mINFO[0m] [usher_lib::shutdown] [Shutdown] Registered task 'remove_tray' in stage 'ui_shutdown' with priority 100
+[2026-10-15 13:16:27.204] [[32mINFO[0m] [usher_lib::shutdown] [Shutdown] Registered task 'shutdown_native_integrations' in stage 'ui_shutdown' with priority 100
+[2026-10-15 13:16:27.204] [[32mINFO[0m] [usher_lib::shutdown] [Shutdown] Signal handlers are active
+[2026-10-15 13:16:27.204] [[32mINFO[0m] [usher_lib::startup] [Startup][Timeline] checkpoint=ui_bindings_complete elapsed_ms=250 delta_ms=14
+[2026-10-15 13:16:27.204] [[32mINFO[0m] [usher_lib::startup] [Startup][Timeline] checkpoint=diagnostics_ready elapsed_ms=250 delta_ms=0
+[2026-10-15 13:16:27.204] [[34mDEBUG[0m] [usher_lib::platform::macos] [TitleBar] native render view is unavailable, skip install this round
+[2026-10-15 13:16:27.207] [[32mINFO[0m] [usher_lib::startup] [Startup][Timeline] checkpoint=window_show_requested elapsed_ms=253 delta_ms=2
+[2026-10-15 13:16:27.207] [[34mDEBUG[0m] [usher_lib::platform::macos] [TitleBar] native render view is unavailable, skip install this round
+[2026-10-15 13:16:27.254] [[34mDEBUG[0m] [usher_lib::platform::macos] [TitleBar] native render view is unavailable, skip install this round
+[2026-10-15 13:16:27.379] [[32mINFO[0m] [usher_lib::startup] [Startup][Timeline] checkpoint=first_frame_before_rendering elapsed_ms=425 delta_ms=171
+[2026-10-15 13:16:27.448] [[32mINFO[0m] [usher_lib::platform::macos] [TitleBar] Installed bounded Menu vibrancy and opaque content backdrop
+[2026-10-15 13:16:27.452] [[32mINFO[0m] [usher_lib::platform::macos] [TitleBar] Added native sidebar and history controls to macOS title bar
+[2026-10-15 13:16:27.483] [[32mINFO[0m] [usher_lib::startup] [Startup][Timeline] checkpoint=first_frame_after_rendering elapsed_ms=529 delta_ms=104
+[2026-10-15 13:16:27.582] [[32mINFO[0m] [usher_lib::chat::session] [Chat::Storage] AI history file: /private/tmp/usher-ui120-final-20261015/state/default/run-0/im/ai_chat_history.jsonl
+[2026-10-15 13:16:27.582] [[32mINFO[0m] [usher_lib::chat::session] [Chat::Storage] RAG history file: /private/tmp/usher-ui120-final-20261015/state/default/run-0/im/chat_history.jsonl
+[2026-10-15 13:16:27.582] [[32mINFO[0m] [usher_lib::chat::interactive] [Chat::History] bootstrap loaded_messages=0 can_load_more=false
+[2026-10-15 13:16:27.583] [[32mINFO[0m] [usher_lib::shortcuts] [Shortcut] Initialization complete
+[2026-10-15 13:16:27.583] [[32mINFO[0m] [usher_lib::ai_review::controller] [AI Review][Task Store] Deferred hydration complete
+[2026-10-15 13:16:27.584] [[32mINFO[0m] [usher_lib::message_center::commands] [Messages] Deferred hydration loaded 1000 messages
+[2026-10-15 13:16:27.585] [[32mINFO[0m] [usher_lib::startup] [Startup][Timeline] checkpoint=messages_hydrated elapsed_ms=631 delta_ms=101
+[2026-10-15 13:16:27.696] [[32mINFO[0m] [usher_lib::settings] [Settings] Saved settings to "/private/tmp/usher-ui120-final-20261015/state/default/run-0/settings.toml"
+[2026-10-15 13:16:27.703] [[32mINFO[0m] [usher_lib] [Startup] Window revealed (native chrome ready: true)
+[2026-10-15 13:16:27.709] [[33mWARN[0m] [usher_lib::tray::macos] Failed to load tray icon, using text fallback 'U'
+[2026-10-15 13:16:27.709] [[32mINFO[0m] [usher_lib::tray::macos] macOS tray icon created successfully
+[2026-10-15 13:16:47.533] [[34mDEBUG[0m] [usher_lib::router] → Navigate to: Messages
+[2026-10-15 13:16:47.536] [[32mINFO[0m] [usher_lib::ai_review::controller] [AI Review][Memory] reason=panel.route_hidden queued_metadata_bytes=0 task_state_bytes=23 response_cache_entries=0 response_cache_bytes=0 response_actions=0 response_action_bytes=0 running=0 queued=0
+2026-10-15 13:16:47.687 Usher[74562:13322988] Warning: Window move completed without beginning
+[2026-10-15 13:19:25.655] [[34mDEBUG[0m] [usher_lib::router] → Navigate to: Settings
+[2026-10-15 13:19:25.658] [[32mINFO[0m] [usher_lib::ai_review::controller] [AI Review][Memory] reason=panel.route_hidden queued_metadata_bytes=0 task_state_bytes=23 response_cache_entries=0 response_cache_bytes=0 response_actions=0 response_action_bytes=0 running=0 queued=0
+[2026-10-15 13:19:25.659] [[34mDEBUG[0m] [usher_lib::message_center] [Messages][Lifecycle] active=false projected_rows=0
+[2026-10-15 13:19:39.402] [[32mINFO[0m] [usher_lib] [I18n] Language preference changed to zh-CN; active locale=zh-CN
+[2026-10-15 13:19:39.516] [[32mINFO[0m] [usher_lib::settings] [Settings] Saved settings to "/private/tmp/usher-ui120-final-20261015/state/default/run-0/settings.toml"
+[2026-10-15 13:19:39.976] [[34mDEBUG[0m] [usher_lib::router] → Navigate to: Messages
+[2026-10-15 13:19:39.976] [[32mINFO[0m] [usher_lib::ai_review::controller] [AI Review][Memory] reason=panel.route_hidden queued_metadata_bytes=0 task_state_bytes=23 response_cache_entries=0 response_cache_bytes=0 response_actions=0 response_action_bytes=0 running=0 queued=0
+[2026-10-15 13:19:39.977] [[34mDEBUG[0m] [usher_lib::message_center] [Messages][Lifecycle] active=true projected_rows=20
+[2026-10-15 13:22:27.218] [[34mDEBUG[0m] [usher_lib::shortcuts] [Shortcut] Dispatched ToggleSidebar
+[2026-10-15 13:22:27.651] [[34mDEBUG[0m] [usher_lib::shortcuts] [Shortcut] Dispatched ToggleSidebar
+[2026-10-15 13:22:28.443] [[32mINFO[0m] [usher_lib::settings] [Settings] Saved settings to "/private/tmp/usher-ui120-final-20261015/state/default/run-0/settings.toml"
+[2026-10-15 13:22:28.885] [[34mDEBUG[0m] [usher_lib::router] → Navigate to: Home
+[2026-10-15 13:22:28.886] [[32mINFO[0m] [usher_lib::ai_review::controller] [AI Review][Memory] reason=panel.route_hidden queued_metadata_bytes=0 task_state_bytes=23 response_cache_entries=0 response_cache_bytes=0 response_actions=0 response_action_bytes=0 running=0 queued=0
+[2026-10-15 13:22:28.886] [[34mDEBUG[0m] [usher_lib::message_center] [Messages][Lifecycle] active=false projected_rows=0
+[2026-10-15 13:22:29.593] [[34mDEBUG[0m] [usher_lib::router] → Navigate to: Messages
+[2026-10-15 13:22:29.594] [[32mINFO[0m] [usher_lib::ai_review::controller] [AI Review][Memory] reason=panel.route_hidden queued_metadata_bytes=0 task_state_bytes=23 response_cache_entries=0 response_cache_bytes=0 response_actions=0 response_action_bytes=0 running=0 queued=0
+[2026-10-15 13:22:29.594] [[34mDEBUG[0m] [usher_lib::message_center] [Messages][Lifecycle] active=true projected_rows=20

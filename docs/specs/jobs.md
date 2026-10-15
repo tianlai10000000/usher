@@ -2,12 +2,12 @@
 
 ## Scope / 范围
 
-This specification defines the application-wide Job Run boundary used by Tag
-and future executable features. It covers immutable step input, runtime
+This specification defines the application-wide Job Run boundary used by Tag,
+Hooks, and future executable features. It covers immutable step input, runtime
 snapshots, source-independent routing, ownership, presentation, and observable
 lifecycle state.
 
-本文定义 Tag 与后续可执行 Feature 共用的应用级 Job Run 边界，覆盖不可变步骤输入、
+本文定义 Tag、Hooks 与后续可执行 Feature 共用的应用级 Job Run 边界，覆盖不可变步骤输入、
 运行时快照、来源无关路由、职责归属、展示以及可观察的生命周期状态。
 
 GitHub Actions is the reference model: a workflow contains jobs; a job contains
@@ -171,23 +171,50 @@ offset overflow. Extents continue to come from measured visual lines.
   compact duration formatting.
 - `src/jobs/mod.rs`: source-independent descriptor, UI projection, and
   source-keyed Stop/log action dispatch.
+- `src/jobs/presenter.rs`: stable Step/log model updates and locale-resolved row copy.
+- `src/jobs/log_model.rs`: immutable parsed log snapshots and bounded lazy row conversion.
+- `src/jobs/log_layout.rs`, `src/jobs/log_viewport.rs`: cancellable shaped-text
+  measurement, exact extents, viewport leases and soft-budget cache pruning.
 - `ui/components/jobs/job.slint`: reusable `GitHubActionsJob` and Step log
   presentation.
 - `ui/components/jobs/github_job_run.slint`: GitHub Actions-style run layout.
 - `ui/views/job_run.slint`: application-level `Route.JobRun` composition.
 - Feature controllers such as `src/workflow/tag/controller.rs`: domain
   orchestration and side effects.
-- `src/workflow/state.rs`: project-scoped ownership of feature Job snapshots.
+- `src/workflow/state.rs`: project-scoped ownership of Workflow Job snapshots.
+- `src/hooks/state.rs`, `src/hooks/projection.rs`, `src/hooks/bridge.rs`: Hook run
+  state, worker preparation and source registration; Hook execution follows [Hooks](hooks.md).
 
 - `src/jobs/model.rs`：通用定义、运行时快照、生命周期和紧凑耗时格式。
 - `src/jobs/mod.rs`：来源无关描述符、UI 投影和按 source key 分发 Stop/日志动作。
+- `src/jobs/presenter.rs`：保持 Step/log model 身份的增量投影及 locale 文案解析。
+- `src/jobs/log_model.rs`：不可变解析日志快照及有界懒加载行转换。
+- `src/jobs/log_layout.rs`、`src/jobs/log_viewport.rs`：可取消文字测量、精确 extent、
+  viewport lease 和软预算淘汰。
 - `ui/components/jobs/job.slint`：可复用的 `GitHubActionsJob` 与 Step 日志展示。
 - `ui/components/jobs/github_job_run.slint`：GitHub Actions 风格运行页布局。
 - `ui/views/job_run.slint`：应用级 `Route.JobRun` 装配。
 - `src/workflow/tag/controller.rs` 等 Feature controller：领域编排与副作用。
-- `src/workflow/state.rs`：按项目隔离持有各 Feature 的 Job 快照。
+- `src/workflow/state.rs`：按项目隔离持有 Workflow 的 Job 快照。
+- `src/hooks/state.rs`、`src/hooks/projection.rs`、`src/hooks/bridge.rs`：Hook 运行状态、
+  Worker 准备与来源注册；Hook 进程执行遵循 [Hooks](hooks.md)。
+
+`JobStepDefinition.name`, step detail, and descriptor application copy use
+`LocalizedText`; command argv and external output remain data. When changing
+runtime locale handling, inspect the source feature's re-projection together
+with `presenter.rs`, under [i18n](i18n.md). Log geometry also follows
+[text layout](text-layout.md) and [virtual scrolling](virtual-scrolling.md).
+/ 名称、步骤说明和应用摘要保存语义 `LocalizedText`，命令 argv 与外部输出保留原始数据；
+语言切换应同时核对来源 Feature 的重投影，不能只更新通用 presenter。
 
 ## Regression checklist / 回归清单
+
+Test navigation / 测试导航：`model.rs` covers lifecycle/argv, `presenter.rs`
+covers model identity, `log_model.rs`/`log_layout.rs`/`log_viewport.rs` cover
+snapshot/measurement/cache budgets, and `src/jobs/scroll_tests.rs` exercises the
+compiled JobRun's output-only scrolling and wrapped-row geometry. Tests live in
+the root library and are included by the `jobs` filter below. / 生命周期、model 身份、
+测量/预算和编译后页面滚动分别由上述入口覆盖；下列 `jobs` filter 会执行这些根库测试。
 
 - Run `cargo test --lib --locked jobs`.
 - Compile the complete root Slint UI.

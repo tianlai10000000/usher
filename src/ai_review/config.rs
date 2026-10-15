@@ -74,6 +74,20 @@ pub(crate) struct ReviewConfigFacade {
 }
 
 impl ReviewConfigFacade {
+    #[cfg(test)]
+    pub(super) fn isolated(path: PathBuf) -> Self {
+        Self {
+            store: PersistentStore::new(
+                ReviewConfigurationState::default().normalize(),
+                reduce_configuration,
+                "ai-review-isolated-config",
+                move |state| persist_configuration(&path, state),
+                |_, error| log::error!("[AI Review][Test Config] Persistence failed: {error}"),
+            )
+            .unwrap(),
+        }
+    }
+
     pub(crate) fn open_default() -> Self {
         let path = default_config_path();
         let (initial, writes_allowed) = load_configuration(&path);

@@ -179,16 +179,17 @@ to be a Primer primitive.
   and display it without a runtime rotation. Small live `Text` must not be placed
   below a rotated transform with the FemtoVG renderer because rotation switches
   glyphs from the hinted atlas to low-DPI outline rendering.
-- Chat history pagination is part of the message flow after the virtual top
-  spacer. It reserves layout height and must never float over the oldest
+- Chat history pagination is part of the message flow before the virtual top
+  spacer, at the true start of the loaded history. It reserves layout height and must never float over the oldest
   mounted message.
 - PR review exposes one visible state source in the summary row. The header
   action strip must not repeat the same Open/Closed/Merged readiness label.
   Its three counted tabs and Conflicts entry follow the shared Primer UnderlineNav geometry at every
   width: content-sized items, left alignment, a 16 px inset on both sides, and
   explicit 4 px inter-item gaps. They never stretch to divide the row equally;
-  the full-width baseline remains edge-to-edge, and nonessential trailing diff
-  statistics yield before tabs need overflow.
+  the full-width baseline remains edge-to-edge. The current PR implementation
+  reserves the measured trailing diff-stat width before computing tab overflow;
+  narrow layouts move whole trailing tabs into More rather than hiding the totals.
   Keep a single 48px row with normal item spacing. When items no longer fit,
   the shared navigation moves whole trailing items into a localized More menu.
   The menu preserves label, count, disabled state and selection; More receives
@@ -287,6 +288,8 @@ expanded/collapsed, and success confirmation.
 
 ## 8. Shared component contracts / 共享组件契约
 
+### Buttons and immediate choices / 按钮与即时选择
+
 - `GitHubButton`: Primer default/primary/danger action variants, medium 32 px
   control geometry by default, semibold single-line label, stable loading
   dimensions (width measured with the visible weight-600 label plus a reserved
@@ -315,6 +318,12 @@ expanded/collapsed, and success confirmation.
   4px 内缩。文本和图标控件默认使用 32px 中号尺寸，密集工具栏可选择 28px 小号文本
   控件。鼠标选择不得显示键盘焦点轮廓。Project 的列表/网格切换必须复用该组件，
   不能继续使用两个独立 IconButton。
+- `GitHubCopyButton`: 32×32 invisible icon button, centered 16 px Copy
+  Octicon, persistent tooltip, and Copy→Check confirmation only after the
+  clipboard callback returns success.
+
+### Shell and sidebar / Shell 与侧栏
+
 - A Codex-style title-bar toggle built on `GitHubIconButton` must keep hover,
   selected, and selected-plus-hover visually distinct. In light mode the
   sampled reference values are: hover uses `#f5f5f5` background with
@@ -492,6 +501,8 @@ expanded/collapsed, and success confirmation.
   Bezel 对半点号符号再次双线性缩放。普通非固定侧栏窗口中的面包屑必须避开交通灯及
   原生历史控件；进入 macOS 系统全屏、AppKit 移除这些左侧 Chrome 后，面包屑必须与
   页面内容左缘对齐。
+### Links, tooltips and labels / 链接、Tooltip 与标签
+
 - `GitHubLink`: default, inline, and muted text-link states with visible
   underline and keyboard focus behavior.
 - `GitHubTooltip`: TooltipV2 pattern; tooltip canvas/foreground tokens, 12 px
@@ -511,8 +522,10 @@ expanded/collapsed, and success confirmation.
   ComponentFactory cannot reuse the preceding label's preferred width. Locators
   stay mounted and clear text while inactive; action activation synchronously
   dismisses the active claim before callbacks that may unmount the anchor, with
-  token/lease expiry only as a model-removal fallback. Messages row actions use
-  an enum-only factory-local state and separate literal surfaces; no label
+  token/lease expiry only as a model-removal fallback. Fixed factory actions follow the separate isolation recipe in
+  [tooltips.md](tooltips.md); alternating generic claim slots do not replace it.
+  Messages row actions use an enum-only factory-local state and separate
+  fixed-action surfaces bound to the semantic catalog; no label
   string or shared dynamic tip-label property may cross a list delegate. Local
   Tooltip rectangles, pointer-relative built-in
   `Tooltip`, and local `z` escalation are not valid alternatives. /
@@ -525,8 +538,9 @@ expanded/collapsed, and success confirmation.
   菜单的 `clip` 不得裁剪 Tooltip。
   通用 portal 每次收到新的 claim token 都重新创建文本测量 surface，禁止独立 factory
   复用上一条文案的 preferred-width。定位器常驻并用空文案撤销；操作触发业务回调前
-  同步关闭当前 claim，token/lease 仅作为模型移除兜底。Messages 行动作使用只传枚举的
-  factory-local state 和相互独立的字面量 surface，任何标签字符串或共享动态 tip-label
+  同步关闭当前 claim，token/lease 仅作为模型移除兜底。固定 factory 动作须遵循 [tooltips.md](tooltips.md) 的隔离路径，不能用通用 claim
+  槽交替代替。Messages 行动作使用只传枚举的 factory-local state 和每动作独立的
+  catalog 文案 surface，任何标签字符串或共享动态 tip-label
   属性都不得穿过列表 delegate。局部 Tooltip Rectangle、指针相对的内置 `Tooltip` 和提高局部
   `z` 均不是允许的替代方案。
 - `GitHubMetadataLabel`: the small, non-interactive Primer Product UI Label.
@@ -557,6 +571,8 @@ expanded/collapsed, and success confirmation.
   提供 Default、Primary、Secondary Scheme、可选上限格式、紧凑叠加模式与明确的
   零值隐藏，并在 Layout 中保持内容宽度。仅图标宿主必须在无障碍名称和 Tooltip 中
   包含计数语义；其属性矩阵归入 UI Components 的 `Labels and counters` 分类。
+### Status and message rows / 状态栏与消息行
+
 - `GitHubStatusBar`: one 28 px transparent, full-window root-shell host whose
   painted surface starts at the live main-content edge, leaving no status-bar
   surface below an open sidebar. Its persistent keyboard, bell, network, and
@@ -598,9 +614,8 @@ expanded/collapsed, and success confirmation.
   为 0 时不挂载 Counter。绿色只表示就绪/在线，未读通知使用强调色，版本保持弱化色。
   右侧 Tooltip 与宿主尾边对齐并向左展开；铃铛导航到 `Route.Messages`，其余共享浮层
   只使用一套状态栏父坐标系，且不得遮挡版本项。完整契约见 [status-bar.md](status-bar.md)。
-- `GitHubCopyButton`: 32×32 invisible icon button, centered 16 px Copy
-  Octicon, persistent tooltip, and Copy→Check confirmation only after the
-  clipboard callback returns success.
+### Select and action menus / 选择与操作菜单
+
 - Form Select geometry: shared `GitHubSelectPopup`/`GitHubSelectOption` use
   explicit 32 px option rows, 4 px padding per edge,
   and content-sized height (40 px for one plain option, capped for scrolling).
@@ -745,6 +760,8 @@ expanded/collapsed, and success confirmation.
   scroll and closes when the trigger leaves the viewport instead of remaining
   clamped over later sections. Scrolling the menu's own options does not close it.
   Reference: [Primer ActionList source](https://github.com/primer/react/blob/main/packages/react/src/ActionList/ActionList.module.css).
+### Page headers and navigation / 页头与导航
+
 - `GitHubPageHeader`: the shared Primer PageHeader foundation for page title,
   description, leading visual, optional divider, and trailing actions.
 - `GitHubRadio`: controlled single-choice input with radio accessibility,
@@ -755,7 +772,8 @@ expanded/collapsed, and success confirmation.
   saved or tested. The radio states are mutually exclusive. UI Components demonstrates
   selected/unselected/disabled states plus the optional-caption geometry. Hook test feedback stays beside its action,
   with bounded inline error details below, following Primer Forms feedback.
-  Hook actions use literal tooltip leaves and permanently mounted surfaces at the
+  Hook actions use fixed-action tooltip leaves and permanently mounted catalog
+  surfaces at the
   factory root (UI-103), with shared floating geometry. `GitHubDialog` supports
   opt-in primary-modifier+Enter submission; Hook Add/Edit enables it, preserving
   ordinary source newlines, Escape cancellation, and busy-state guards.
@@ -797,6 +815,8 @@ expanded/collapsed, and success confirmation.
   contain 2–5 concise non-wrapping labels. Selection may change text weight or
   color, but measuring always reserves the selected weight so divider positions
   stay stable for a given label/count.
+### Scroll, progress and jobs / 滚动、进度与 Job
+
 - `GitHubScrollView`: the application-owned mounted viewport and semantic
   scrollbar foundation. It must preserve models while scrolling, support
   track and thumb pointer interaction, and never depend on Material styling.
@@ -827,6 +847,8 @@ expanded/collapsed, and success confirmation.
   link, bordered/narrow/spacious variants, and stable top/bottom padding.
   Actions must explain the next useful step; loading and error variants must
   remain descriptive without relying on animation or color alone.
+### Text fields and choices / 文本输入与选择控件
+
 - `GitHubTextField` and `GitHubCompactTextField`: visible label when used as a
   form control, 32 px medium input, focus outline, disabled/loading handling,
   caption, and descriptive validation message. Error color alone is
@@ -863,6 +885,8 @@ expanded/collapsed, and success confirmation.
   不使用整行灰色底色。
 - `GitHubSegment`: one of 2–5 mutually exclusive, instantly applied choices;
   labels do not wrap and the group has a visible or contextual label.
+### Dialog / 弹窗
+
 - `GitHubDialog`: root-layer modal/non-modal overlay with owned backdrop input,
   stable header/body/footer safe areas, visible close control, close/Esc
   semantics, initial focus ownership, consistent action ordering, and a
@@ -898,6 +922,8 @@ expanded/collapsed, and success confirmation.
   PNG alpha mask 通过 `nine-slice(72 72 72 72)` 与语义颜色拉伸，纹理尺寸不随 Dialog
   或 Retina 目标尺寸变化。它不拥有输入、无障碍、布局、裁剪、opacity layer 或实时
   box shadow；窄屏全窗口 Dialog 不挂载该阴影。
+### Toast and notification / 提示与通知
+
 - `GitHubToast`: compact transient feedback using the current Primer Banner
   anatomy and semantic status icon/background/border, never the retired
   rail-style Toast pattern. A single-line message, leading icon/spinner, and
@@ -923,6 +949,8 @@ expanded/collapsed, and success confirmation.
 - Toast/notification feedback must not duplicate an existing feature-owned
   error surface and must never be the only way to communicate critical
   information.
+### Feature composition and pagination / 功能编排与分页
+
 - PR/MR collections use one compact DataTable/Box-like surface: state controls
   and filters share the header row, rows preserve a stable title/meta
   hierarchy, an empty filtered result uses `GitHubBlankslate`, and pagination
@@ -938,8 +966,10 @@ expanded/collapsed, and success confirmation.
   input. Insufficient width or an unknown total page count uses directional
   links only. PR pagination stays centered 16 px outside the collection and is
   absent for loading, error, empty or single-page content.
-- Review navigation uses `GitHubPullRequestTabButton` as the counted
-  UnderlineNav variant. The Files changed hierarchy uses TreeView semantics
+- Review navigation uses `GitHubUnderlineNav` with semantic item models for
+  Conversation, Commits, Files changed and Conflicts. The legacy
+  `GitHubPullRequestTabButton` remains defined but is not instantiated by the
+  current workspace. The Files changed hierarchy uses TreeView semantics
   (indent guides, expandable directories, current file), while icon-only file
   actions reuse `GitHubIconButton`. Diff source remains virtualized and
   monospace; all surrounding prose and controls use application typography.
@@ -997,6 +1027,8 @@ expanded/collapsed, and success confirmation.
 - Terminal chrome reuses shared GitHub controls, but terminal cells retain
   their dedicated monospace/ANSI rendering contract. Product theme changes
   must not recolor or reflow PTY-provided cell content.
+### Component playground / 组件演练场
+
 - `Route.UiComponents` is the mandatory interactive component playground for
   development builds and is compiled only with the non-default
   `ui-components` Cargo feature. Default and production builds omit its menu
@@ -1045,72 +1077,6 @@ expanded/collapsed, and success confirmation.
 - 章节头部采用 Primer Box header 的浅色背景、细分隔线、16px 内边距与紧凑半粗
   标题，保持通栏分组，不将整段内容包成卡片。目录、示例说明、控件文案和操作反馈
   使用共享 i18n catalog；组件 API 名称、语言自称、代码、模拟仓库与规则数据保留原始标识。
-
-All GitHub/Primer visual component symbols across `ui/` use the `GitHub`
-prefix. `MainWindow`, non-visual structs, enums, globals, routes, and callbacks
-remain domain-oriented. Legacy/demo route pages that have not yet been
-migrated must remain explicitly listed as debt; they must not receive the
-prefix until their implementation satisfies this specification.
-
-整个 `ui/` 中已实现 GitHub/Primer 规范的视觉组件符号全部使用 `GitHub`
-前缀。`MainWindow` 以及非视觉 struct、enum、global、路由和 callback 继续
-使用领域命名。尚未迁移的 legacy/demo 路由页面必须明确登记为欠债，在实现满足
-本规范之前不得仅靠加前缀伪装成合规组件。
-
-补充强制约束：Project 网格右上角 Provider 斜角标保持 10px 身份图标和文字在
-45 度色带内部垂直居中，但固定身份内容必须预合成为应用自有 SVG，并以无运行时旋转的
-`Image` 显示。FemtoVG 会把旋转变换下的小字号实时 `Text` 从带 hinting 的字形图集切换为
-低 DPI 下偏软的轮廓渲染，因此禁止在该斜角标中恢复旋转 `Text`。通用单选筛选/排序弹层统一归入 ActionMenu，由
-`GitHubFilterMenuButton`、`GitHubFilterMenuFrame` 和
-`GitHubFilterMenuItem` 负责触发器、标题/关闭、选中标记、键盘及无障碍行为；
-工具栏触发器统一使用 14px body-text 令牌；紧凑选项标签统一使用 12px small-text
-令牌，同时保持共享 ActionList 的 32px 行高；弹层按触发器实际边界定位，不得依赖
-特定字号下的固定偏移；旧 SelectMenu 的逐行边框变体保留供既有调用方使用。
-PR 筛选使用 inset ActionList：8px 外围留白、14px 常规字重标签、默认前景色 Check，
-仅分组间分隔，无持续选中背景。AI 规则的主标签半粗体、12px 说明常规字重，
-完整内容高度与浮层限高分开计算。UI Components 在“选择”的同一个 Select Menu
-分区相邻展示带边框与无边框 PR 版本。带边框示例保持固定触发器区域，菜单挂到窗口
-根层，展开不得增高分区或挤压后续内容。实时窗口锚点通过共享 Floating UI adapter
-在可见页面视口内避让，随滚动/缩放更新，触发器离屏关闭。无边框示例直接复用
-生产 PR 工具栏与规则菜单，以隔离的 2/14 条规则和 PR 样例验证，不持久化演示选择。
-PR 示例与 Workflow 共用窗口根层菜单 portal；滚动时跟随可见按钮，按钮离屏时关闭，
-不得继续夹在视口边缘遮盖后续章节。菜单内部选项滚动不关闭菜单。
-Select Menu 默认遵循 Primer AnchoredOverlay 的 outside-bottom、start 对齐和 4px
-间距；PR 筛选显式使用 end 对齐。适配器接受调用方方向和对齐，以库的两次 Flip
-先尝试反向、右侧、左侧，再尝试反向对齐与居中；最后通过 Shift/Size 约束到桌面
-实际可见页面视口。
-Project 网格
-必须按受约束内容区计算列数，新增一列前保证每张卡片至少 280px 可读宽度。Chat
-历史分页入口必须位于 virtual top spacer 之前的真正历史顶部并占据真实高度，禁止覆盖
-消息或跟随虚拟窗口出现在会话中间；用户可见错误统一使用应用语言，HTTP 技术详情仅写有界日志。
-集合页码导航统一复用 `GitHubPagination` 与 `crates/usher-ui/src/pagination.rs`，
-遵循 Primer Pagination：首末页、当前页两侧各两页、边缘七页窗口、不可交互的省略号、
-强调色当前页和带 chevron 的透明 Previous/Next 链接，不增加页码输入框。宽度不足或
-总页数未知时只保留方向链接。PR 分页在集合外间隔 16px 居中，加载、错误、空列表及
-单页状态不显示。
-PR 审核摘要是 Open/Closed/Merged 的唯一可见状态来源，页头操作条不得重复状态；
-三个带计数 Tab 与 Conflicts 入口在所有宽度下都按共享 Primer UnderlineNav 规范左对齐并按内容定宽，
-保留 16px 容器内边距与 4px Tab 间距，禁止拉伸均分；尾部 diff 统计必须先让位。
-空间不足时维持 48px 单行和标准间距，将完整的末尾选项收进“更多”菜单；
-计数在 0–99 时显示原值，超过 99 显示 99+，无障碍名称保留完整数值。PR 页头、导航和交互
-调整不得顺带修改 Files changed 代码区或文件树的字体与颜色；两者属于独立的审核
-内容契约，只有明确提出并带专门视觉回归的 diff/文件树设计变更才可调整。
-原生标题栏点击必须进入应用级 Chrome 关闭通道（`dismiss-revision`）：所有共享
-ActionMenu 和其他本来可通过页面空白关闭的临时弹层都应关闭，但不得吞掉原生标
-题栏操作。弹层互斥由组件在打开时 `claim-exclusive` 完成，业务页不得再为切换
-首击散落调用 dismiss-all。页面内容区的空白点击关闭由各宿主自行挂载在菜单之
-下的 TouchArea 承担，不能依赖 ActionMenu 在 overlay z 上铺满视口。Dialog 仅在
-普通遮罩点击本就允许关闭时响应，硬模态表单仍保持不可消隐语义。
-指针按下当前或新获得焦点的原生文本输入框时，应用级输入 bridge 必须在输入框收到
-事件后触发仅关闭 popover 的通道：Select、ActionMenu 与 Diff settings 关闭，Dialog
-与 Toast 的生命周期保持不变。
-
-UI Components 演练场中的无边框 ActionMenu 使用固定 48px 触发器行验证同一
-契约：浮层挂载在演练场根层，并按选中触发器的实际边界定位，支持 start/end 与上下展开；再次点击
-当前触发器立即收起，展开不会改变 section 高度或挤压后续内容。点击其他定位
-按钮时在同一次交互中切换已打开菜单的位置；锚点持续绑定选中触发器的实时几何
-信息，窗口缩放与响应式重排不能让已打开菜单脱离触发器；Close 控件仅在菜单打开时可用。
-同一示例还提供共享输入框，验证聚焦输入框会关闭根层 ActionMenu 而不会丢失输入事件。
 
 ### Text-input Escape contract / 文本输入 Escape 契约
 
@@ -1181,8 +1147,8 @@ For every UI batch:
 2. Search for a matching shared component and reuse it.
 3. Run `./scripts/check-ui-policy.sh`, then compile the complete root Slint
    tree with `cargo check --locked`.
-4. Run `cargo fmt --all`, `cargo test --lib --locked`, and
-   `git diff --check`.
+4. Run `cargo fmt --all`, `cargo test --lib --locked`,
+   `cargo test --doc --locked`, and `git diff --check`.
 5. Audit direct vendored imports, deprecated theme globals, raw functional
    colors, unprefixed GitHub-style components across the complete `ui/` tree,
    and component declarations incorrectly placed outside `ui/components/`

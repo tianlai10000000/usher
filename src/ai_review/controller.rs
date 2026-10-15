@@ -37,6 +37,7 @@ use crate::{
 };
 
 use super::config::{ReviewConfigFacade, default_session_dir};
+use super::producers::{ProducerPermit, Producers};
 use super::response::{self, ResponseVariant};
 #[cfg(any(test, feature = "test-fixtures"))]
 use super::review_input::bounded_utf8_prefix;
@@ -284,6 +285,10 @@ struct ControllerInner {
     artifact_preview: ArtifactPreviewHandle,
     task_persistence: TaskPersistenceWorker,
     message_center: MessageCenter,
+    producers: Producers,
+    startup_hydration: Mutex<Option<(PathBuf, ProducerPermit)>>,
+    #[cfg(test)]
+    fixture: bool,
 }
 
 #[derive(Clone)]
@@ -563,6 +568,10 @@ pub(crate) fn setup_ai_review(
         "[AI Review][Response] variant={} lightweight_parser=true",
         response_variant.label()
     );
+    let producers = Producers::default();
+    let startup_producer = producers
+        .admit()
+        .expect("new AI Review producer owner is open");
     let inner = Arc::new(ControllerInner {
         window: ui.as_weak(),
         scheduler: Mutex::new(ReviewScheduler::new(
@@ -585,6 +594,10 @@ pub(crate) fn setup_ai_review(
         artifact_preview,
         task_persistence,
         message_center,
+        producers,
+        startup_hydration: Mutex::new(Some((task_state_path, startup_producer))),
+        #[cfg(test)]
+        fixture: false,
     });
     LIFECYCLE_CONTROLLER.with(|registered| {
         *registered.borrow_mut() = Some(Arc::downgrade(&inner));
@@ -649,27 +662,9 @@ pub(crate) fn setup_ai_review(
     .with_persistence_subscription(persistence_subscription);
     let weak_inner = Arc::downgrade(&inner);
     crate::startup::run_after_first_frame(move || {
-        crate::app_runtime::shared_runtime().spawn(async move {
-            let loaded =
-                tokio::task::spawn_blocking(move || load_task_state(&task_state_path)).await;
-            let Ok((state, writes_allowed)) = loaded else {
-                log::error!("[AI Review][Task Store] Deferred hydration worker failed");
-                return;
-            };
-            let Some(inner) = weak_inner.upgrade() else {
-                return;
-            };
-            inner.task_persistence.set_writes_allowed(writes_allowed);
-            inner.task_store.dispatch(ReviewTaskAction::Hydrate(state));
-            if writes_allowed {
-                let snapshot = inner.task_store.snapshot();
-                let _ = inner
-                    .task_persistence
-                    .sender
-                    .send(snapshot.revision(), snapshot.state_arc());
-            }
-            log::info!("[AI Review][Task Store] Deferred hydration complete");
-        });
+        if let Some(inner) = weak_inner.upgrade() {
+            inner.start_task_hydration();
+        }
     });
     maybe_mount_response_fixture(ui, inner);
     controller
@@ -936,10 +931,20 @@ impl AiReviewController {
     }
 
     pub(crate) fn shutdown(&self) {
-        self.inner.cancel_all_reviews();
-        self.inner.cancel_all_chats();
-        self.inner.task_persistence.shutdown();
-        self.inner.config.shutdown();
+        // The registered pre callback observes the completed async barrier;
+        // it never reduces tasks or waits for worker joins on the UI thread.
+        match self.inner.producers.completed() {
+            Some(Err(error)) => log::error!("[AI Review] Shutdown failed: {error}"),
+            None => log::warn!(
+                "[AI Review] Producer drain is still owned by the async shutdown barrier"
+            ),
+            _ => {}
+        }
+    }
+
+    pub(crate) async fn shutdown_async(&self) -> Result<(), String> {
+        self.inner.clone().begin_shutdown();
+        self.inner.producers.finished().await
     }
 }
 
@@ -1150,6 +1155,64 @@ fn bind_callbacks(ui: &MainWindow, inner: &Arc<ControllerInner>) {
 }
 
 impl ControllerInner {
+    fn fixture_enabled(&self) -> bool {
+        #[cfg(test)]
+        if self.fixture {
+            return true;
+        }
+        fixture_enabled()
+    }
+    fn admit_producer(&self, operation: &'static str) -> Option<ProducerPermit> {
+        self.producers
+            .admit()
+            .map_err(|error| log::debug!("[AI Review] Rejected {operation}: {error}"))
+            .ok()
+    }
+
+    fn begin_shutdown(self: Arc<Self>) {
+        if !self.producers.close() {
+            return;
+        }
+        self.cancel_all_reviews();
+        self.cancel_all_chats();
+        self.clone().start_task_hydration();
+        let inner = self.clone();
+        self.producers.finish_with(move || {
+            inner.task_persistence.shutdown();
+            inner.config.shutdown();
+        });
+    }
+
+    fn start_task_hydration(self: Arc<Self>) {
+        let Some((path, producer)) = self
+            .startup_hydration
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+        else {
+            return;
+        };
+        crate::app_runtime::shared_runtime().spawn(async move {
+            let _producer = producer;
+            let Ok((state, writes_allowed)) =
+                tokio::task::spawn_blocking(move || load_task_state(&path)).await
+            else {
+                log::error!("[AI Review][Task Store] Deferred hydration worker failed");
+                return;
+            };
+            self.task_persistence.set_writes_allowed(writes_allowed);
+            self.task_store.dispatch(ReviewTaskAction::Hydrate(state));
+            if writes_allowed {
+                let snapshot = self.task_store.snapshot();
+                let _ = self
+                    .task_persistence
+                    .sender
+                    .send(snapshot.revision(), snapshot.state_arc());
+            }
+            log::info!("[AI Review][Task Store] Deferred hydration complete");
+        });
+    }
+
     fn begin_response_mount(&self) -> u64 {
         let generation = self
             .response_mount_generation
@@ -1247,6 +1310,9 @@ impl ControllerInner {
     }
 
     fn enqueue(self: Arc<Self>, request: PendingReviewRequest, open_panel: bool) {
+        let Some(_producer) = self.admit_producer("enqueue") else {
+            return;
+        };
         if request.number.trim().is_empty() {
             return;
         }
@@ -1324,22 +1390,48 @@ impl ControllerInner {
         if open_panel {
             self.clone().open_task(&id, false);
         }
-        self.schedule_ready();
+        self.clone().schedule_ready();
+        if self.producers.is_closed() {
+            self.cancel_all_reviews();
+        }
     }
 
     fn schedule_ready(self: Arc<Self>) {
+        let Some(_scheduling) = self.admit_producer("schedule") else {
+            return;
+        };
         let ready = self
             .scheduler
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .take_ready();
         for id in ready {
+            let Some(producer) = self.admit_producer("scheduled task") else {
+                self.task_store.dispatch(ReviewTaskAction::Cancel {
+                    id: id.clone(),
+                    updated_at_unix_ms: unix_millis(),
+                });
+                self.requests
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .remove(&id);
+                self.cancellations
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .remove(&id);
+                self.scheduler
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .finish();
+                continue;
+            };
             self.task_store.dispatch(ReviewTaskAction::Start {
                 id: id.clone(),
                 updated_at_unix_ms: unix_millis(),
             });
             let inner = self.clone();
             crate::app_runtime::shared_runtime().spawn(async move {
+                let _producer = producer;
                 inner.run_task(id).await;
             });
         }
@@ -1353,7 +1445,15 @@ impl ControllerInner {
             .ok()
             .and_then(|requests| requests.get(&id).cloned());
         let outcome = match request {
-            Some(request) => self.execute_review(&id, request).await,
+            Some(_) if self.is_cancelled(&id) => Err("Review cancelled".to_string()),
+            Some(request) => match self.cancellation(&id) {
+                Some(cancellation) => {
+                    run_review_work_until_cancelled(cancellation, self.execute_review(&id, request))
+                        .await
+                        .unwrap_or_else(|()| Err("Review cancelled".to_string()))
+                }
+                None => Err("Review cancelled".to_string()),
+            },
             None => Err("ai_review.failure.internal".to_string()),
         };
 
@@ -1450,7 +1550,7 @@ impl ControllerInner {
         request: PendingReviewRequest,
     ) -> Result<ReviewSession, String> {
         let settings = crate::ai::settings_state::current();
-        let fixture = fixture_enabled();
+        let fixture = self.fixture_enabled();
         if !fixture {
             validate_model_settings(&settings)?;
         }
@@ -1635,6 +1735,9 @@ impl ControllerInner {
     }
 
     fn open_task(self: Arc<Self>, id: &ReviewTaskId, navigate_to_pr: bool) {
+        let Some(producer) = self.admit_producer("open task") else {
+            return;
+        };
         let task = self.task_store.snapshot().state().tasks.get(id).cloned();
         let Some(task) = task else {
             return;
@@ -1673,6 +1776,7 @@ impl ControllerInner {
         let session_id = id.clone();
         let inner = self.clone();
         crate::app_runtime::shared_runtime().spawn(async move {
+            let _producer = producer;
             let projection = inner.sessions.read(session_id).await.map(|session| {
                 session.as_ref().and_then(|session| {
                     project_session_snapshot(session, inner.as_ref(), mount_generation)
@@ -1745,6 +1849,9 @@ impl ControllerInner {
     }
 
     fn cancel(&self, id: &ReviewTaskId) {
+        let Some(_producer) = self.admit_producer("cancel task") else {
+            return;
+        };
         let task = self.task_store.snapshot().state().tasks.get(id).cloned();
         if let Some(task) = task.as_ref() {
             log::info!(
@@ -1829,10 +1936,34 @@ impl ControllerInner {
         let cancellations = self
             .cancellations
             .lock()
-            .map(|cancellations| cancellations.values().cloned().collect::<Vec<_>>())
+            .map(|cancellations| {
+                cancellations
+                    .iter()
+                    .map(|(id, cancellation)| (id.clone(), cancellation.clone()))
+                    .collect::<Vec<_>>()
+            })
             .unwrap_or_default();
-        for cancellation in cancellations {
+        for (id, cancellation) in cancellations {
             cancellation.cancel();
+            if self
+                .scheduler
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .cancel_queued(&id)
+            {
+                self.task_store.dispatch(ReviewTaskAction::Cancel {
+                    id: id.clone(),
+                    updated_at_unix_ms: unix_millis(),
+                });
+                self.requests
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .remove(&id);
+                self.cancellations
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .remove(&id);
+            }
         }
     }
 
@@ -1901,6 +2032,9 @@ impl ControllerInner {
     }
 
     fn send_message(self: Arc<Self>, message: String) {
+        let Some(producer) = self.admit_producer("Ask") else {
+            return;
+        };
         let message = message.trim().to_string();
         let Some(ui) = self.window.upgrade() else {
             return;
@@ -1977,15 +2111,19 @@ impl ControllerInner {
         );
         ui.set_ai_review_chat_elapsed_seconds(0);
         ui.set_ai_review_message_input("".into());
+        if self.producers.is_closed() {
+            cancellation.cancel();
+        }
         let request_started = Instant::now();
         crate::app_runtime::shared_runtime().spawn(async move {
+            let _producer = producer;
             let work_cancellation = cancellation.clone();
             // Do not select cancellation against the accepted user's real blocking receipt.
             let committed_user = user_receipt.await.unwrap_or_else(|_| Err("AI review session user receipt was lost".into()));
             let result = match committed_user {
                 Err(error) => Ok(Err(error)),
                 Ok(mut snapshot) => run_review_work_until_cancelled(cancellation.clone(), async {
-                    let fixture = fixture_enabled();
+                    let fixture = self.fixture_enabled();
                     if !fixture { validate_model_settings(&settings)?; }
                     if matches!(&snapshot, SessionSnapshot::Chat(chat) if chat.input.unified_diff.is_empty()) {
                         let input = build_chat_input(&request, &settings, fixture).await?;
@@ -3211,6 +3349,10 @@ fn format_elapsed_ms(elapsed_ms: u64) -> String {
 #[cfg(test)]
 #[path = "controller_session_tests.rs"]
 mod session_tests;
+
+#[cfg(test)]
+#[path = "controller_producer_tests.rs"]
+mod producer_tests;
 
 #[cfg(test)]
 mod tests {

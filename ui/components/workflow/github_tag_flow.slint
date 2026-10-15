@@ -15,6 +15,7 @@ export component GitHubTagFlow {
     in property <string> current-version: "v0.0.0";
     in-out property <string> next-version: "v0.0.1";
     in-out property <string> remove-target: "";
+    in-out property <string> description: "";
     in property <bool> add-initializing: false;
     in property <bool> remove-initializing: false;
     in property <bool> running: false;
@@ -23,6 +24,7 @@ export component GitHubTagFlow {
     callback change-mode(string);
     callback select-version-mode(string);
     callback run(string, string);
+    callback draft-edited(string,string,string);
     callback remove-tag(string);
     callback open-add-tab();
     callback open-remove-tab();
@@ -104,11 +106,13 @@ export component GitHubTagFlow {
                 version-mode: root.version-mode;
                 current-version: root.current-version;
                 next-version <=> root.next-version;
+                description <=> root.description;
                 running: root.running;
                 has-run: root.has-run;
                 select-version-mode(mode) => {
                     root.select-version-mode(mode);
                 }
+                draft-edited(next,description) => { root.draft-edited(next,root.remove-target,description); }
                 run(version, description) => {
                     root.run(version, description);
                 }
@@ -130,6 +134,7 @@ export component GitHubTagFlow {
                 initializing: root.remove-initializing;
                 running: root.running;
                 has-run: root.has-run;
+                target-edited(target) => { root.draft-edited(root.next-version,target,root.description); }
                 remove-tag(tag) => {
                     root.remove-tag(tag);
                 }

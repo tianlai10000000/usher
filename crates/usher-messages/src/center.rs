@@ -36,6 +36,7 @@ pub enum MessageCenterError {
     NativeWorker(String),
     Shutdown { persistence: String, native: String },
     ReentrantShutdown,
+    ReentrantHydration,
     WorkerUnavailable,
 }
 
@@ -57,6 +58,10 @@ impl std::fmt::Display for MessageCenterError {
             Self::ReentrantShutdown => write!(
                 formatter,
                 "message shutdown cannot wait from its own action or native callback"
+            ),
+            Self::ReentrantHydration => write!(
+                formatter,
+                "message hydration cannot wait from its own snapshot callback"
             ),
             Self::WorkerUnavailable => write!(formatter, "message worker is unavailable"),
         }
@@ -100,6 +105,8 @@ struct Inner {
     // Keeps the automatic persistence observer registered for this center.
     persistence_subscription: Mutex<Option<StoreSubscription>>,
     persistence_enabled: AtomicBool,
+    hydration: Mutex<HydrationState>,
+    hydration_done: Condvar,
     application_active: AtomicBool,
     persistence: Arc<LatestPersistence<MessageSnapshot>>,
     native: NativeWorker,
@@ -113,6 +120,35 @@ struct AdmissionState {
     closing: bool,
     active_actions: usize,
     active_threads: HashMap<std::thread::ThreadId, usize>,
+}
+
+#[derive(Default)]
+struct HydrationState {
+    owner: Option<std::thread::ThreadId>,
+    loaded: Option<usize>,
+}
+
+struct HydrationPermit<'a>(&'a Inner);
+
+impl HydrationPermit<'_> {
+    fn complete(self, loaded: usize) {
+        self.0
+            .hydration
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .loaded = Some(loaded);
+    }
+}
+
+impl Drop for HydrationPermit<'_> {
+    fn drop(&mut self) {
+        self.0
+            .hydration
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .owner = None;
+        self.0.hydration_done.notify_all();
+    }
 }
 
 /// An admitted action may dispatch/reenter subscribers without holding a lock.
@@ -224,6 +260,7 @@ impl MessageCenter {
         install_persistence: bool,
         persist: impl Fn(&MessageSnapshot) -> Result<(), String> + Send + Sync + 'static,
     ) -> Result<Self, MessageCenterError> {
+        let loaded = install_persistence.then_some(messages.len());
         let persistence = Arc::new(LatestPersistence::start(
             "usher-message-persistence",
             Duration::ZERO,
@@ -241,6 +278,11 @@ impl MessageCenter {
                 storage_path: path,
                 persistence_subscription: Mutex::new(None),
                 persistence_enabled: AtomicBool::new(false),
+                hydration: Mutex::new(HydrationState {
+                    owner: None,
+                    loaded,
+                }),
+                hydration_done: Condvar::new(),
                 // Unknown activity is treated as foreground. This conservative
                 // default prevents duplicate native + in-app presentation until
                 // the host supplies its first focus state.
@@ -266,17 +308,53 @@ impl MessageCenter {
         // The permit covers the complete accepted hydration operation, but no
         // file I/O holds the Action/closing admission mutex.
         let _admission = self.admit()?;
+        let mut hydration = self
+            .inner
+            .hydration
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        loop {
+            if let Some(loaded) = hydration.loaded {
+                return Ok(loaded);
+            }
+            match hydration.owner {
+                Some(owner) if owner == std::thread::current().id() => {
+                    return Err(MessageCenterError::ReentrantHydration);
+                }
+                Some(_) => {
+                    hydration = self
+                        .inner
+                        .hydration_done
+                        .wait(hydration)
+                        .unwrap_or_else(|p| p.into_inner())
+                }
+                None => {
+                    hydration.owner = Some(std::thread::current().id());
+                    break;
+                }
+            }
+        }
+        drop(hydration);
+        let hydration = HydrationPermit(&self.inner);
         let messages = load_messages(&self.inner.storage_path)?;
         let loaded = messages.len();
-        self.inner.store.dispatch(MessageAction::Hydrate(messages));
-        self.install_persistence_observer();
-        let snapshot = self.inner.store.snapshot();
         self.inner
-            .persistence
-            .submit(snapshot.revision(), snapshot.state_arc());
+            .store
+            .dispatch(MessageAction::Hydrate(messages.clone()));
+        self.install_persistence_observer();
+        // Install the automatic observer before taking this snapshot: mutations
+        // before installation are captured here; later commits offer themselves.
+        // Disk-only hydration is already durable, including an absent empty file.
+        let snapshot = self.inner.store.snapshot();
+        if snapshot.state().messages.as_ref() != messages.as_slice() {
+            self.inner
+                .persistence
+                .submit(snapshot.revision(), snapshot.state_arc());
+        }
         self.inner
             .persistence_enabled
             .store(true, Ordering::Release);
+        hydration.complete(loaded);
         Ok(loaded)
     }
 
@@ -292,7 +370,7 @@ impl MessageCenter {
         let persistence = self.inner.persistence.clone();
         *subscription = Some(self.inner.store.observe_commits(Arc::new(move |snapshot| {
             if !persistence.submit(snapshot.revision(), snapshot.state_arc()) {
-                log::error!("[Messages] State commit could not reach persistence worker");
+                log::debug!("[Messages] Durable commit already covered by an equal/newer offer");
             }
         })));
     }
@@ -985,3 +1063,7 @@ mod tests {
 #[cfg(test)]
 #[path = "center_tests.rs"]
 mod persistence_tests;
+
+#[cfg(test)]
+#[path = "hydration_tests.rs"]
+mod hydration_tests;

@@ -6,6 +6,20 @@ This spec covers the Settings-page connection to an OpenAI-compatible AI Agent p
 
 本文覆盖设置页中 OpenAI-compatible（包括 DeepSeek）AI Agent 服务的连接配置、本地持久化、连通性测试，以及 AI Chat 与 AI Code Review 共用的 completion transport；RAG transport 保持独立。
 
+## Ownership and iteration entry points / 职责与迭代入口
+
+| Change / 修改内容 | Code and validation / 代码与验证 |
+| --- | --- |
+| Connection, JSON/SSE, budgets / 连接、JSON/SSE、预算 | `src/ai/agent.rs`; `cargo test --lib --locked ai::agent` |
+| Saved configuration, ordered saves and presets / 持久配置、有序保存与预设 | `src/settings.rs` (`AiAgentSettings`), `src/ai/settings_state.rs` (`AiAgentSettingsFacade`), `src/ai/settings_state_tests.rs`; `cargo test --lib --locked ai::settings_state` |
+| Save completion and feedback / 保存完成与反馈 | `src/ai/settings_ui.rs`, `src/ai/settings_ui_tests.rs`; `cargo test --lib --locked ai::settings_ui` |
+| Settings drafts, factory and callbacks / 设置草稿、工厂与 callback | `src/settings_page.rs`, `src/lib.rs`, `ui/state/app_state.slint`, `ui/views/settings.slint`; `cargo test --lib --locked settings_page` |
+| Prompt content and provenance / Prompt 内容与来源 | `src/ai/prompts.toml`, `src/ai/prompts.rs`; `cargo test --lib --locked ai::prompts` |
+
+Transport changes also follow [HTTP](http.md) and [security boundaries](security-boundaries.md).
+UI copy and draft projection follow [i18n](i18n.md). / Transport 改动同时遵循 HTTP 与安全边界；
+UI 文案和草稿投影同时遵循国际化规范。以下回归清单是验收要求，不代表本机已经完成验收。
+
 ## Configuration / 配置项
 
 Model-list JSON and buffered completions, including JSON returned for a streaming request, enforce a
@@ -28,9 +42,9 @@ The same section stores `reply_language = "auto" | <locale-id>`. `auto` resolves
 
 同一区块保存 `reply_language = "auto" | <locale-id>`。`auto` 在每次构建请求时解析为当前界面 locale；显式 locale 不随之后的界面语言切换而改变。该设置应用于 AI Chat、AI Code Review 和 Review Ask，不影响 RAG；未知旧值统一归一化为 `auto`。
 
-The five AI Agent fields form one page-local draft while Settings is open. Selecting DeepSeek or OpenAI updates Provider, Base URL, and Model atomically in that draft. Only Save dispatches the complete draft as one typed Store Action; the changed commit is automatically persisted on the Store worker and Save waits for its flush before reporting success. The Settings factory product stays mounted after its first visit to avoid Slint 1.17.1 remount corruption. On every re-entry, the bridge overwrites its draft from the last committed Store snapshot before paint, so leaving without Save still discards every edit and the selected segment cannot diverge from the displayed fields.
+The five AI Agent fields form one page-local draft while Settings is open. Selecting DeepSeek or OpenAI updates Provider, Base URL, and Model atomically in that draft. Only Save admits the complete draft to the ordered feature worker; that worker dispatches one typed Store Action and waits for the automatically persisted commit before reporting success. The Settings factory product stays mounted after its first visit under the retained factory lifecycle contract. On every re-entry, the bridge overwrites its draft from the last committed Store snapshot before paint, so leaving without Save still discards every edit and the selected segment cannot diverge from the displayed fields.
 
-Settings 打开期间，这五项 AI Agent 字段构成一份页面局部草稿。选择 DeepSeek 或 OpenAI 时，Provider、Base URL 与 Model 必须在草稿中原子更新。只有点击 Save 才把完整草稿作为一个强类型 Store Action 提交；有效 commit 由 Store worker 自动持久化，Save 等待 flush 后再提示成功。Settings factory 产品首次访问后保持挂载，以规避 Slint 1.17.1 重挂载损坏；每次重新进入时，bridge 都在绘制前用最近提交的 Store 快照覆盖草稿，因此未点击 Save 的所有编辑仍会丢弃，选中按钮与显示字段也不得出现分裂。
+Settings 打开期间，这五项 AI Agent 字段构成一份页面局部草稿。选择 DeepSeek 或 OpenAI 时，Provider、Base URL 与 Model 必须在草稿中原子更新。只有点击 Save 才把完整草稿交给有序 Feature Worker；Worker 再 dispatch 一个强类型 Store Action，等待有效 commit 自动持久化及 flush 后才提示成功。Settings factory 产品遵循首次访问后持续挂载的生命周期契约；每次重新进入时，bridge 都在绘制前用最近提交的 Store 快照覆盖草稿，因此未点击 Save 的所有编辑仍会丢弃，选中按钮与显示字段也不得出现分裂。
 
 配置（包括选中的 Provider 预设）保存到本机平台目录下 `settings.toml` 的 `[ai.agent]`，启动时读取并同步到 `AppState`。API Key 不得写入日志或提交到仓库。
 
@@ -73,26 +87,139 @@ Diagnostics log metadata only: operation, prompt id/version, effective locale, m
 ## Invariants / 不变量
 
 1. No AI request may construct a reqwest client or bypass `src/http/mod.rs`.
-2. API keys must only be attached to the configured provider test request and must not appear in logs, Toasts, notifications, or error bodies.
+2. API keys must only be attached to configured provider requests (connection tests and completions) and must not appear in logs, Toasts, notifications, or error bodies.
 3. Slint state is updated only on the event loop; the connection test runs on the shared Tokio runtime.
 4. A missing URL, key, or model is a local validation error and must not create a network request.
 5. Completion requests carry a bounded feature-owned message list. API keys, complete prompts, source payloads, and response bodies must not be logged.
-6. Ordinary completions keep the shared 30-second total and body-idle timeouts. Explicitly cancellable AI Review and Review Ask completions use OpenAI-compatible SSE streaming through the same interceptor pipeline, disable only the HTTP request total deadline, retain the 10-second connect timeout, and use a 300-second response-body idle timeout. Review chunks and Review Ask conversations additionally have caller-owned 600-second wall-clock limits. An SSE response is successful only after `[DONE]` or a `finish_reason`; provider error events and cleanly truncated streams fail explicitly. A provider that answers a streaming request with one JSON response remains supported.
+6. Ordinary completions and connection tests capture the shared `[http].request_timeout_ms` when `RequestOptions` is created: the default is 30,000 ms for both total and body-idle timeouts, and `0` disables both. Runtime edits affect subsequently created requests. Explicitly cancellable AI Review and Review Ask completions use OpenAI-compatible SSE streaming through the same interceptor pipeline, disable only the HTTP request total deadline, retain the 10-second connect timeout, and use a 300-second response-body idle timeout. Review chunks and Review Ask conversations additionally have caller-owned 600-second wall-clock limits. An SSE response is successful only after `[DONE]` or a `finish_reason`; provider error events and cleanly truncated streams fail explicitly. A provider that answers a streaming request with one JSON response remains supported.
 7. Prompt rendering must succeed before a provider request starts; invalid catalog/schema/template data becomes a bounded internal/configuration error.
-8. AI Agent form edits remain page-local drafts. Save is the only operation that dispatches the complete settings as a typed Store Action. Persistence runs on the Store worker, never on the Slint event loop, and every Settings route re-entry restores one complete committed snapshot into the stable factory page before paint.
+8. AI Agent form edits remain page-local drafts. Save captures and admits all five fields on the Slint event loop; the feature worker dispatches the typed Store Action and waits for durable persistence. Neither reduction nor persistence runs on the event loop. Every Settings route re-entry restores one complete committed snapshot into the stable factory page before paint; a late completion must preserve newer edits and a later route visit.
 
 1. AI 请求不得创建 reqwest client，也不得绕过 `src/http/mod.rs`。
 2. API Key 仅附加到配置的 Provider 请求，不得出现在日志、Toast、通知或错误正文中。
 3. Slint 状态只在 event loop 更新；连通性测试运行在共享 Tokio runtime。
 4. URL、Key、模型任一缺失时为本地校验错误，不得发起网络请求。
 5. Completion 请求只接收 Feature 自有的有界消息列表；日志不得包含 API Key、完整 Prompt、源码 payload 或响应正文。
-6. 普通 completion 使用共享的 30 秒总时限和响应体空闲时限；可显式取消的 AI Review 与 Review Ask completion 通过同一 interceptor 管线使用 OpenAI-compatible SSE streaming，只关闭 HTTP 请求总截止时间，仍保留 10 秒连接超时和 300 秒响应体空闲超时。Review chunk 与 Review Ask conversation 另有调用方管理的 600 秒墙钟上限。SSE 只有收到 `[DONE]` 或 `finish_reason` 才成功；Provider error event 与干净断流的截断响应必须显式失败。若 Provider 对 streaming 请求返回一次性 JSON，仍须兼容。
+6. 普通 completion 与连通性测试在创建 `RequestOptions` 时读取共享 `[http].request_timeout_ms`：默认总时限和响应体空闲时限均为 30,000 ms，`0` 关闭两者；运行时修改影响随后创建的请求。可显式取消的 AI Review 与 Review Ask completion 通过同一 interceptor 管线使用 OpenAI-compatible SSE streaming，只关闭 HTTP 请求总截止时间，仍保留 10 秒连接超时和 300 秒响应体空闲超时。Review chunk 与 Review Ask conversation 另有调用方管理的 600 秒墙钟上限。SSE 只有收到 `[DONE]` 或 `finish_reason` 才成功；Provider error event 与干净断流的截断响应必须显式失败。若 Provider 对 streaming 请求返回一次性 JSON，仍须兼容。
 7. Provider 请求开始前必须成功渲染 Prompt；catalog/schema/template 无效时只暴露有界的内部/配置错误。
-8. AI Agent 表单编辑必须保留为页面局部草稿；只有 Save 才把完整配置 dispatch 为强类型 Store Action。持久化只能运行在 Store worker，禁止在 Slint event loop 执行；每次重新进入 Settings 路由时，必须在绘制前向稳定 factory 页面恢复一份完整的已提交快照。
+8. AI Agent 表单编辑必须保留为页面局部草稿；Save 在 Slint event loop 捕获并准入完整五字段，Feature Worker 再 dispatch 强类型 Store Action 并等待持久化。Reducer 与持久化均禁止在 event loop 执行。每次重新进入 Settings 路由时，必须在绘制前向稳定 factory 页面恢复完整已提交快照；迟到完成不得覆盖新编辑或后续路由访问。
+
+## Save admission, completion and shutdown / 保存准入、完成与关闭
+
+`SettingsPageBridge` forwards the five callback values to
+`src/ai/settings_ui.rs::bind`. The callback captures the complete draft, request
+identity and current factory visit before scheduling work; it never later reads
+UI fields or the current Store as the input of an already accepted Save.
+`AiAgentSettingsFacade::save_draft` uses nonblocking FIFO admission with at most
+8 accepted requests, including the active durable save. Only an identical last
+in-flight request is deduplicated; `A → B → A` retains the later revert. Full or
+closed admission returns the existing localized Save-failed feedback and leaves
+already accepted requests intact.
+
+`SettingsPageBridge` 向 `settings_ui::bind` 转发完整五字段。Callback 在调度前捕获
+完整草稿、请求身份及当前 factory 访问；已接受 Save 不得延后读取 UI 或当前 Store
+来替换原输入。`save_draft` 非阻塞 FIFO 准入最多 8 项（包含活动保存）；只合并末个
+相同的在途请求，`A → B → A` 必须保留最后的回退。队列满或关闭时沿用本地化保存
+失败反馈，已接受请求不受影响。
+
+The UI binding has a separate 8-owner budget spanning receipt waits and queued
+Slint completion callbacks. Its RAII permit survives worker completion until the
+UI callback runs or delivery is dropped; failure to enqueue onto the event loop
+also releases it. Identical latest pending UI requests do not reserve another
+owner. Thus draining the reducer/persistence queue cannot create an unbounded
+queue of complete drafts waiting for the UI.
+
+UI 绑定另有独立的 8 项完成 owner 预算，覆盖 receipt 等待及已排队的 Slint 完成回调。
+RAII 许可在 Worker 完成后仍由 UI 请求持有，直到回调执行或投递被丢弃；event loop
+投递失败同样归还。末个相同的待完成 UI 请求不重复占位。Worker 排空不会放开无限
+份完整草稿在 UI 队列等待。
+
+One actor on the shared `app_runtime` processes admitted drafts in order. Each
+blocking worker operation performs `dispatch → flush` before the next draft can
+reduce. The Store commit automatically owns persistence. An unchanged explicit
+Save calls `retry_failed()` before its checked flush, allowing the same failed
+configuration to recover without a new business revision; a changed Save does
+not implicitly retry its own failed automatic write. Every receipt carries that
+request's committed `StoreSnapshot` and persistence result. A failed write stays
+observable and dirty for a later explicit retry; no success is reported merely
+because admission or reduction succeeded.
+
+共享 `app_runtime` 上的单个 actor 顺序处理草稿，每项阻塞 Worker 操作完成
+`dispatch → flush` 后才允许下一项 reduce；持久化仍由 Store commit 自动触发。
+同值显式 Save 在 checked flush 前调用 `retry_failed()`，不增加业务 revision 即可
+恢复失败配置；有变化的 Save 不隐式重试自己的自动写入失败。Receipt 保留对应请求
+的已提交 `StoreSnapshot` 与持久化结果。写失败继续可观测并保持 dirty，等待后续
+显式重试；准入或 reducer 成功不能作为保存成功。
+
+Completion uses a weak window and `slint::invoke_from_event_loop`. The committed
+host projection advances by request ID even if callbacks arrive out of order.
+The editable factory draft is normalized only while the request is still the
+latest attempt, its captured factory/route-entry revision still matches and all
+five raw fields equal the accepted draft. Only the latest attempt owns Toast and
+Saved feedback; Saved additionally requires that matching draft and a successful
+flush. Its reset timer cannot clear a newer attempt's Saved state. Feedback copy
+is resolved in the locale active at presentation.
+
+完成通过 weak window 与 `invoke_from_event_loop` 返回 UI。Host 已提交配置按请求 ID
+单调更新，回调乱序不得回退。Factory 编辑草稿只有在仍为最新 attempt、原 factory 与
+route-entry revision 匹配、五项原始字段仍等于已接受草稿时才可归一化。Toast 与 Saved
+只归最新 attempt；Saved 还要求草稿匹配且 flush 成功。旧复位计时器不得清除较新
+attempt 的 Saved；反馈在展示时按当前 locale 翻译。
+
+Application async drain calls `shutdown_async()`: close admission first, drain
+every accepted draft, then perform a checked final flush and shut down the Store
+worker off the event loop. Concurrent/repeated close waits for the same result.
+Ordinary close does not retry a failed write; its failure is returned and logged.
+The later synchronous cleanup is an idempotent fallback.
+
+应用 async drain 调用 `shutdown_async()`：先关闭准入，再排空全部已接受草稿，最后
+在 event loop 外执行 checked flush 并关闭 Store Worker。并发/重复关闭等待相同结果；
+普通关闭不自动重试失败写入，失败必须返回并记录。后续同步 cleanup 作为幂等兜底。
 
 ## Regression checklist / 回归检查
 
-- Save a DeepSeek preset and reply language, restart the app, and verify all four values are restored (the key remains masked).
+Focused root filters are `ai::settings_state`, `ai::settings_ui` and
+`settings_page` with `cargo test --lib --locked <filter>`. Worker tests exercise
+real dispatch/persistence and the completion tests invoke the production
+presentation function on its owning test UI thread. The no-event-loop testing
+backend does not prove native event-loop scheduling or live visual acceptance.
+
+专项过滤器为 `ai::settings_state`、`ai::settings_ui` 和 `settings_page`。Worker 回归使用
+真实 dispatch/持久化；完成回归在所属测试 UI 线程调用生产展示入口。无 event loop 的
+测试 backend 不能证明原生事件调度或视觉验收。
+
+- Block the real worker; verify callbacks still return, reducers/persistence run
+  off the caller, complete drafts and receipts keep FIFO identity, adjacent
+  duplicates consume no extra owner, `A → B → A` survives, and the ninth active
+  request is rejected without disturbing the first eight.
+- Finish durable saves without consuming UI callbacks; the independent UI budget
+  must stay at 8. Verify callback completion and failed event-loop delivery return
+  permits, and an identical latest pending draft does not occupy another slot.
+- Inject a write failure, explicitly save the same configuration and verify
+  recovery without a new revision. Repeated failure and shutdown must report
+  failure without hidden retries or false Saved feedback.
+- Deliver older/newer receipts out of order, edit any field after Save, and leave
+  then re-enter Settings before completion. Verify committed host state never
+  regresses, newer drafts/visits remain intact and old feedback/reset timers
+  cannot overwrite the latest attempt. Check source and non-source locales.
+- Close while a write is blocked; reject later input immediately, await every
+  accepted receipt and durable write, and verify repeated close returns the same
+  checked result.
+
+- 阻塞真实 Worker，确认 callback 仍立即返回、reducer/持久化不在调用线程、完整草稿
+  与 receipt 保持 FIFO 身份，相邻重复不多占 owner、`A → B → A` 保留，第九个活动
+  请求被拒绝且前八个不丢失。
+- Worker 完成而 UI 不消费回调时，独立 UI owner 仍不得超过 8；回调完成或 event loop
+  投递失败必须归还许可，末个相同待完成草稿不重复占位。
+- 注入写失败并显式保存同值，确认 revision 不变且恢复成功；重复失败及关闭不得隐藏
+  重试或错误显示 Saved。
+- 逆序投递 receipt、Save 后改任一字段、完成前离开并重新进入 Settings，确认 Host
+  配置不回退、新草稿/访问不被覆盖、旧反馈/计时器不能干扰最新 attempt；覆盖源语言
+  与一种非源语言。
+- 写入阻塞时关闭，后续准入立即失败，关闭等待全部已接受 receipt 与真实落盘完成；
+  重复关闭返回相同 checked 结果。
+
+- Save a DeepSeek preset and reply language, restart the app, and verify all five fields are restored (the key remains masked).
 - Cycle `Custom -> DeepSeek -> OpenAI -> DeepSeek`. The selected segment, Base URL, and Model must always describe the same provider: DeepSeek uses `https://api.deepseek.com` / `deepseek-v4-flash`, while OpenAI uses `https://api.openai.com/v1` / `gpt-4o-mini`. Editing Base URL or Model must select Custom.
 - Change each AI Agent field without saving, navigate away, and reopen Settings. The same factory product must remain mounted while hidden, and the last committed snapshot must be restored before it becomes visible without stale segment, placeholder, or field bindings. Save a complete draft and repeat; the saved draft must then be restored.
 - Test a valid provider/key and confirm a bottom success Toast; test invalid credentials and confirm one bottom error Toast.
@@ -102,7 +229,7 @@ Diagnostics log metadata only: operation, prompt id/version, effective locale, m
 - Inspect one completed Review Session and one Review Ask assistant message; verify provenance contains only prompt metadata/context sizes and no source or credentials.
 - Verify no logs contain the API key and no new direct reqwest client exists outside `src/http/mod.rs`.
 
-- 保存 DeepSeek 预设与回复语言并重启应用，确认四项值都被恢复，API Key 仍保持遮罩。
+- 保存 DeepSeek 预设与回复语言并重启应用，确认五项字段都被恢复，API Key 仍保持遮罩。
 - 按 `Custom -> DeepSeek -> OpenAI -> DeepSeek` 循环切换；选中项、Base URL 和 Model 必须始终属于同一 Provider。DeepSeek 对应 `https://api.deepseek.com` / `deepseek-v4-flash`，OpenAI 对应 `https://api.openai.com/v1` / `gpt-4o-mini`；手工编辑 Base URL 或 Model 后必须切到 Custom。
 - 不保存地修改每个 AI Agent 字段，离开再重新进入 Settings。隐藏期间必须保留同一个 factory 产品，并在再次显示前恢复最近提交的快照，不能残留旧选中态、placeholder 或字段绑定。保存完整草稿后再重复一次，此时必须恢复已保存草稿。
 - 使用有效 Provider/Key 测试时确认底部只出现一个成功 Toast；无效凭据只出现一个错误 Toast。

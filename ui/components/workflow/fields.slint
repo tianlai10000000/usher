@@ -4,6 +4,7 @@ import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 export component GitHubTagField {
     in property <string> label;
     in-out property <string> value;
+    callback edited(string);
     in property <string> placeholder;
     in property <bool> enabled: true;
     in property <length> min-field-width: 220px;
@@ -28,6 +29,8 @@ export component GitHubTagField {
         GitHubCompactTextField {
             width: root.width - 2px;
             text <=> root.value;
+            accessible-name: root.label;
+            edited(value) => { root.edited(value); }
             placeholder: root.placeholder;
             enabled: root.enabled;
             field-height: root.input-height;

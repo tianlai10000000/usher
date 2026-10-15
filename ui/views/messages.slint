@@ -52,6 +52,8 @@ export component GitHubMessagesPage inherits Rectangle {
     callback activate-target(string);
     callback change-filter(int);
     callback change-page(int);
+    callback begin-pointer-page-activation();
+    callback host-key-pressed(string, bool, bool, bool, bool) -> bool;
 
     in property <int> selected-filter: 0;
     private property <bool> clear-confirmation: false;
@@ -83,6 +85,15 @@ export component GitHubMessagesPage inherits Rectangle {
         );
     }
 
+    public function focus-page() {
+        page-keyboard-scope.focus();
+    }
+
+    public function reveal-pagination() {
+        message-scroll.viewport_y = -max(0px,
+            message-scroll.content_height - message-scroll.visible-height);
+    }
+
     changed active => {
         if !root.active {
             root.clear-confirmation = false;
@@ -95,6 +106,23 @@ export component GitHubMessagesPage inherits Rectangle {
         running: root.active && root.clear-confirmation;
         triggered => { root.clear-confirmation = false; }
     }
+
+    // The static factory has no parent link to the root shortcut scope. Keep
+    // keyboard dispatch and Tab boundaries owned by the mounted host window.
+    page-keyboard-scope := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+        capture-key-pressed(event) => {
+            if root.host-key-pressed(event.text, event.modifiers.control,
+                    event.modifiers.alt, event.modifiers.shift, event.modifiers.meta) {
+                return accept;
+            }
+            return reject;
+        }
 
     message-scroll := GitHubScrollView {
         width: root.width;
@@ -235,6 +263,7 @@ export component GitHubMessagesPage inherits Rectangle {
                 current-page: root.current-page;
                 page-count: root.page-count;
                 pages: root.page-links;
+                pointer-activated => { root.begin-pointer-page-activation(); }
                 page-selected(number) => {
                     MessageTooltipOverlayState.dismiss-all();
                     root.change-page(number);
@@ -249,6 +278,7 @@ export component GitHubMessagesPage inherits Rectangle {
         width: parent.width;
         height: parent.height;
         z: 10000;
+    }
     }
 
 }

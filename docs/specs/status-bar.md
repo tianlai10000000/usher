@@ -25,8 +25,8 @@ surface.
   and Toast overlays. Its transparent host remains
   in window coordinates; only the painted surface and transient left lane follow
   the live main-content edge while the docked sidebar moves.
-- `src/shortcuts/` owns shortcut initialization stages, failure/readiness, and
-  the binding detail shown by the shortcut popup.
+- `src/shortcuts/` owns shortcut initialization stages, failure/readiness, the
+  binding detail shown by the shortcut popup and its runtime locale projection.
 - `crates/usher-messages/` owns durable messages and unread count;
   `src/message_center.rs` projects that count into `ui/main.slint`.
 - `src/notification.rs` and `NotificationManager` own only the transient Banner
@@ -35,7 +35,8 @@ surface.
 - `src/network.rs` owns the connectivity probe and publishes
   `AppState.network-online`.
 - `AppState.version` is the single displayed application version value.
-- Update/download state remains owned by the updater and is only presented by
+- Update/download state remains owned by the updater; semantic phase/byte-count
+  projection belongs to `src/update/download_status.rs` and is only presented by
   the status bar.
 
 - `ui/components/status_bar.slint` 负责展示、指针/键盘交互、紧凑条目几何、
@@ -47,14 +48,58 @@ surface.
   透明宿主始终使用窗口坐标；固定侧栏移动时，只有可见表面与左侧
   临时状态区跟随主内容区实时左边缘。
 - `src/shortcuts/` 持有快捷键初始化阶段、失败/就绪状态，以及快捷键浮层显示的
-  键位详情。
+  键位详情及其运行时语言投影。
 - `crates/usher-messages/` 持有持久消息与未读数，`src/message_center.rs` 把计数
   投影到 `ui/main.slint`。
 - `src/notification.rs` 与 `NotificationManager` 只持有短时 Banner 队列，不得驱动
   状态徽标。Inbox 删除/清空可按 `message-id` 裁剪已镜像 Banner，但不改变徽标数据源。
 - `src/network.rs` 持有网络探测并发布 `AppState.network-online`。
 - `AppState.version` 是唯一的应用版本展示值。
-- 更新/下载状态仍由 Updater 持有，状态栏只负责展示。
+- 更新/下载状态仍由 Updater 持有；语义阶段/字节数投影归
+  `src/update/download_status.rs`，状态栏只负责展示。
+
+### Live popup projection / 浮层实时投影
+
+Opening an item changes only `ActivePopup`. Read-only `popup-title` and
+`popup-content` bindings derive detail from that identity, the shared `I18n`
+catalog and current feature inputs. Switching locale or changing network,
+version, shortcut detail or download progress refreshes the same mounted popup;
+no click-time translated snapshot or reopen is required. Popup selection and
+anchoring remain local presentation state. Finishing an update check/download or
+removing version data closes its now-unavailable popup instead of retaining stale
+operation detail.
+
+打开条目只切换 `ActivePopup`。只读 `popup-title` 与 `popup-content` 由该身份、共享
+`I18n` 和当前 Feature 输入派生；切换语言或更新网络、版本、快捷键详情、下载进度时，
+同一已挂载浮层立即刷新，无需保存点击时译文或重新打开。选择与锚点仍为局部展示状态。更新检查/下载结束或版本数据移除后，对应不可用浮层关闭，
+不得继续保留旧操作详情。
+
+`src/shortcuts/mod.rs` retains an explicit initialization phase with the weak
+window that owns it. `shortcuts::sync_language` reprojects status/detail for that
+phase without resetting progress or restarting native setup. Download progress
+callbacks carry the semantic `DownloadStatus` from
+`src/update/download_status.rs`, including release version or byte counts.
+The event-loop presentation retains that semantic state and
+`update::updater::sync_language` reprojects it; the updater's worker state does
+not store translated download prose. The root locale-success path invokes both
+refreshes. Neither refresh guesses a phase from translated strings.
+
+`src/shortcuts/mod.rs` 保留明确初始化阶段及所属 weak window；`sync_language` 只重投影
+该阶段的状态/详情，不重置进度或重启原生安装。下载 callback 传递
+`src/update/download_status.rs` 的语义 `DownloadStatus`（版本或字节数）；event loop
+保留语义值，由 `update::updater::sync_language` 重投影，Updater Worker 不保存译文。
+根语言成功回调同时调用两项刷新；均不得通过反查译文猜测阶段。
+
+Focused checks are `cargo test --lib --locked status_bar_tests`,
+`cargo test --lib --locked shortcuts::`, and the existing Settings popup-layer
+test. The new tests compile the production status-bar component and exercise
+already-open network/version/update/download/shortcut detail in English and
+Chinese, including byte/progress and phase changes. They do not replace native
+pointer, screen-reader, clipping or multi-scale visual acceptance below.
+
+专项测试编译真实状态栏组件，在 English/简体中文下更新已展开的网络、版本、更新、
+下载和快捷键详情（包括字节/百分比与阶段变化）；仍须下文原生指针、读屏、裁剪及
+多缩放视觉验收。
 
 ## Geometry and order / 几何与顺序
 
@@ -187,6 +232,16 @@ Tooltip 与浮层详情。
 
 ## Regression checklist / 回归清单
 
+`tests/pr_review_status_bar_ui.rs` covers status-bar placement and popups over
+the full-window PR route. The persistent geometry and popup handlers are in
+`ui/components/status_bar.slint`; root layering is in `ui/main.slint`.
+Run `cargo test --test pr_review_status_bar_ui --locked` for that integration
+boundary, then inspect the native sidebar/resize/tooltip matrix below.
+
+集成夹具覆盖全窗口 PR 路由上的状态栏层级及浮层；原生侧栏、Resize 与 Tooltip
+仍按下面矩阵验收。已打开详情的 locale/状态刷新由上文专项测试覆盖，层级夹具通过
+不能代替这些断言或原生视觉验收。
+
 - Verify all four persistent items at 800 px and at a wide window, with the
   sidebar both open and closed.
 - During open, close, and rapid retargeting, verify that the painted surface
@@ -204,6 +259,9 @@ Tooltip 与浮层详情。
   clipping.
 - Activate the bell and verify `Route.Messages`; open each remaining popup and
   verify anchor position, Escape, outside click, and internal scrolling.
+- Keep each popup open while switching English/Chinese and changing its
+  source state. Verify the same title/content nodes update, progress/phase
+  values survive locale changes, and completed operation popups close.
 - Run the full Slint compile and the repository standard checks.
 
 - 在 800px 与宽窗口下分别检查侧栏展开/收起时的四个常驻条目。
@@ -217,6 +275,8 @@ Tooltip 与浮层详情。
 - 确认快捷键就绪/失败、网络在线/离线符合上述语义色。
 - 悬停全部右侧条目，确认 Tooltip 向左展开且不被裁切。
 - 激活铃铛并检查 `Route.Messages`；打开其余浮层，检查锚点、Escape、外部点击与内部滚动。
+- 保持浮层打开时切换 English/简体中文并修改源状态，确认同一标题/正文节点立即更新，
+  语言变化不重置进度/阶段，已结束操作的浮层关闭。
 - 编译完整 Slint 根并运行仓库标准检查。
 
 ## Design references / 设计参考

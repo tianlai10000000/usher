@@ -1,0 +1,105 @@
+FFFFFFFFFF
+======================================================================
+FAIL: test_extracted_owners_cannot_hide_structural_growth (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_extracted_owners_cannot_hide_structural_growth) (label='Preview source reader lines')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/yuankai/yuankai/Demo/rust/usher/scripts/tests/test_architecture_checks.py", line 175, in test_extracted_owners_cannot_hide_structural_growth
+    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1 : Architecture structure checks passed.
+
+
+======================================================================
+FAIL: test_extracted_owners_cannot_hide_structural_growth (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_extracted_owners_cannot_hide_structural_growth) (label='AI Settings state lines')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/yuankai/yuankai/Demo/rust/usher/scripts/tests/test_architecture_checks.py", line 175, in test_extracted_owners_cannot_hide_structural_growth
+    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1 : Architecture structure checks passed.
+
+
+======================================================================
+FAIL: test_extracted_owners_cannot_hide_structural_growth (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_extracted_owners_cannot_hide_structural_growth) (label='AI Settings UI lines')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/yuankai/yuankai/Demo/rust/usher/scripts/tests/test_architecture_checks.py", line 175, in test_extracted_owners_cannot_hide_structural_growth
+    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1 : Architecture structure checks passed.
+
+
+======================================================================
+FAIL: test_extracted_owners_cannot_hide_structural_growth (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_extracted_owners_cannot_hide_structural_growth) (label='Message command worker lines')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/yuankai/yuankai/Demo/rust/usher/scripts/tests/test_architecture_checks.py", line 175, in test_extracted_owners_cannot_hide_structural_growth
+    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1 : Architecture structure checks passed.
+
+
+======================================================================
+FAIL: test_extracted_owners_cannot_hide_structural_growth (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_extracted_owners_cannot_hide_structural_growth) (label='Notification ingress lines')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/yuankai/yuankai/Demo/rust/usher/scripts/tests/test_architecture_checks.py", line 175, in test_extracted_owners_cannot_hide_structural_growth
+    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1 : Architecture structure checks passed.
+
+
+======================================================================
+FAIL: test_extracted_leaves_cannot_import_controller_or_ui (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_extracted_leaves_cannot_import_controller_or_ui) (path='crates/usher-preview/src/file_source.rs', source='use crate::MainWindow;')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/yuankai/yuankai/Demo/rust/usher/scripts/tests/test_architecture_checks.py", line 199, in test_extracted_leaves_cannot_import_controller_or_ui
+    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1 : Architecture structure checks passed.
+
+
+======================================================================
+FAIL: test_extracted_leaves_cannot_import_controller_or_ui (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_extracted_leaves_cannot_import_controller_or_ui) (path='src/ai/settings_state.rs', source='use crate::SettingsPageBridge;')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/yuankai/yuankai/Demo/rust/usher/scripts/tests/test_architecture_checks.py", line 199, in test_extracted_leaves_cannot_import_controller_or_ui
+    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1 : Architecture structure checks passed.
+
+
+======================================================================
+FAIL: test_extracted_leaves_cannot_import_controller_or_ui (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_extracted_leaves_cannot_import_controller_or_ui) (path='src/message_center/commands.rs', source='use slint::ComponentHandle;')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/yuankai/yuankai/Demo/rust/usher/scripts/tests/test_architecture_checks.py", line 199, in test_extracted_leaves_cannot_import_controller_or_ui
+    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1 : Architecture structure checks passed.
+
+
+======================================================================
+FAIL: test_extracted_leaves_cannot_import_controller_or_ui (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_extracted_leaves_cannot_import_controller_or_ui) (path='src/ai/settings_ui.rs', source='use usher_state_store::PersistentStore;')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/yuankai/yuankai/Demo/rust/usher/scripts/tests/test_architecture_checks.py", line 199, in test_extracted_leaves_cannot_import_controller_or_ui
+    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1 : Architecture structure checks passed.
+
+
+======================================================================
+FAIL: test_extracted_leaves_cannot_import_controller_or_ui (scripts.tests.test_architecture_checks.ArchitectureGateTests.test_extracted_leaves_cannot_import_controller_or_ui) (path='src/notification/ingress.rs', source='use usher_state_store::LocalStateStore;')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/yuankai/yuankai/Demo/rust/usher/scripts/tests/test_architecture_checks.py", line 199, in test_extracted_leaves_cannot_import_controller_or_ui
+    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1 : Architecture structure checks passed.
+
+
+----------------------------------------------------------------------
+Ran 2 tests in 4.763s
+
+FAILED (failures=10)

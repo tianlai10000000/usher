@@ -3,11 +3,11 @@
 ## Scope and ownership / 范围与职责
 
 This contract covers application-owned credential routing, HTTP diagnostics,
-update download files and external file/process launching. It does not certify
+update download files, Preview file budgets and external file/process launching. It does not certify
 third-party code, release authenticity or every application execution path.
 User-authored Hook scripts retain their explicit opt-in contract in [Hooks](hooks.md).
 
-本文约束应用自有凭据路由、HTTP 诊断、更新下载文件和外部文件/进程启动；不代表
+本文约束应用自有凭据路由、HTTP 诊断、更新下载文件、Preview 文件预算和外部文件/进程启动；不代表
 第三方代码、发布包真实性或所有执行路径已通过安全审计。用户编写的 Hook 脚本
 继续遵循 [Hooks](hooks.md) 的显式启用契约。
 
@@ -17,6 +17,27 @@ User-authored Hook scripts retain their explicit opt-in contract in [Hooks](hook
 | `src/http/mod.rs` | Shared clients, redirect selection after interceptors, bounded diagnostics / 共享 client、拦截器执行后的重定向策略选择及有界诊断 |
 | `src/update/download_archive.rs`, `src/update/updater.rs` | Atomic download-file ownership through extraction and direct executable restart / 原子下载文件从创建到解包的所有权及直接重启进程 |
 | `src/platform/mod.rs` | Explicit external file opening without shell interpretation / 显式外部打开文件，禁止 shell 解释 |
+| `crates/usher-preview/src/file_source.rs` | Single-handle regular-file reads with a hard payload budget / 单句柄普通文件读取与载荷预算 |
+
+## Implementation and focused checks / 实现与专项检查
+
+| Boundary / 边界 | Entry and regression / 入口与回归 |
+| --- | --- |
+| GitLab credentials / GitLab 凭据 | `configured_token_for_api_origin` in `src/git/locator.rs`, `gitlab_authenticated` in `src/git/gitlab.rs`; `locator::tests` covers fake hosts, schemes, ports and explicit origins |
+| Redirects and diagnostics / 重定向与诊断 | `request_has_credentials`, `HttpClient::client_for_request`, `redacted_url` and `HttpError` formatting in `src/http/mod.rs`; `redirect_policy_tests.rs` and `privacy_tests.rs` beside it |
+| Download handles / 下载句柄 | `DownloadArchive::create_in` / `reader`; tests in `src/update/download_archive.rs` cover cleanup and substituted Unix pathnames |
+| Process/path arguments / 进程与路径参数 | `executable_restart_command` in `src/update/updater.rs`, `windows_file_open_command` in `src/platform/mod.rs`; argument-construction controls and a real Unix restart-argument fixture |
+| HTTP ownership / HTTP 职责 | `scripts/check-architecture-structure.sh`, positive/negative fixtures in `scripts/tests/test_architecture_checks.py` |
+| Preview file growth / Preview 文件增长 | `crates/usher-preview/src/file_source/tests.rs`: growth after metadata, one overflow byte, exact-limit and ordinary controls, path replacement and Unix FIFO |
+
+Run the corresponding root library filters: `http::`, `git::locator::`,
+`update::download_archive::`, `update::updater::`, and `platform::tests::`, using
+`cargo test --lib --locked <filter>`. These are automated coverage entry points,
+not evidence of native Windows/macOS acceptance. Keep the platform/manual gaps
+below explicit; no clean gate certifies all credential mechanisms or processes.
+
+专项入口使用 `cargo test --lib --locked <filter>`；上述过滤器不能代替 Windows/macOS
+原生验收。自动测试范围、下文未完成项与所有路径已安全是不同结论。
 
 ## Credential destinations / 凭据目标
 
@@ -66,6 +87,13 @@ HTTP URL 诊断保留协议、主机、端口和路径，去除用户信息、�
 
 ## Files and processes / 文件与进程
 
+- Generic Preview file sources validate and read the same opened regular-file
+  handle. Metadata is only an allocation hint: payload length and requested Vec
+  capacity stay at or below 16 MiB, and one extra stack byte detects growth past
+  the limit. Unix nonblocking open rejects FIFOs without waiting for a writer.
+  Generic file sources allow ordinary symlinks; repository Markdown activation
+  still requires its separate canonical containment and verified-handle policy.
+  See [Preview](artifact-preview.md) for cancellation and platform limits.
 - `DownloadArchive` atomically creates a random temporary file, retains its owner
   through installation and lends its opened handle to the writer/readers. Flush
   and close the writer before extraction; drop each reader before rewinding.
@@ -78,6 +106,11 @@ HTTP URL 诊断保留协议、主机、端口和路径，去除用户信息、�
   Do not use `cmd /C start`, expand environment variables or interpolate paths
   into a shell. Existing explicit user-action and file-existence checks remain.
 
+- 通用 Preview 文件来源校验并读取同一普通文件句柄，metadata 只作为分配提示；
+  payload 长度与 Vec 请求容量不超过 16 MiB，额外一个栈字节检测增长溢出。Unix
+  nonblocking open 不会等待 FIFO writer。通用来源允许普通 symlink；仓库 Markdown
+  激活仍遵守独立的 canonical containment 与验证句柄策略。取消及平台限制见
+  [Preview](artifact-preview.md)。
 - `DownloadArchive` 原子创建随机临时文件，持续持有到安装结束；写入和读取都使用
   已打开句柄。解包前 flush 并关闭 writer；各 reader 释放后才 rewind，禁止按路径
   重新打开。owner 析构清理未完成、失败和成功下载；解包目录由独立临时目录 owner 管理。

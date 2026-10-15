@@ -1,0 +1,6 @@
+Candidate: rustc --edition=2024 build.rs, linked existing usher_i18n rlib; no Cargo invocation
+.
+----------------------------------------------------------------------
+Ran 1 test in 0.421s
+
+OK

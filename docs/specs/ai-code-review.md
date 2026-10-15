@@ -19,11 +19,15 @@ review task does not own a route or require a visible page.
   catalog and typed, bounded request assembly shared with AI Chat.
 - `src/ai_review/config.rs`: `usher-state-store` facade plus automatic
   configuration persistence.
+- `src/ai_review/storage.rs`: JSON loading, corruption preservation,
+  and atomic-write primitives used by configuration/tasks/sessions.
 - `src/ai_review/task_persistence.rs`: ordered task snapshot persistence,
   shutdown barriers, and checked post-write reconciliation through the Session owner.
 - `src/ai_review/controller.rs`: task orchestration, Git/provider diff loading,
   AI calls, cancellation, session I/O scheduling, notifications, and on-demand UI
   projection.
+- `src/ai_review/producers.rs`: production whole-operation admission and completion
+  barriers; accepted controller continuations finish before persistence workers stop.
 - `src/ai_review/review_input.rs`: immutable request and Provider-diff normalization,
   UTF-8-safe 48 KiB Ask context, model validation and worker-only rule snapshots;
   no controller/UI dependency.
@@ -38,6 +42,9 @@ review task does not own a route or require a visible page.
 - `src/agent_response/`: width-independent, bounded projection of agent-authored
   Markdown, content-identity caching, and opaque repository-file actions. It
   performs no file I/O and owns no Preview host.
+- `src/ai_review/response.rs`: adapter from structured/plain projections to Slint
+  response rows and runtime baseline/formatted selection; the controller selects
+  the bounded history projection window.
 - `src/artifact_preview/`: worker-side resolution and reading of explicitly
   activated repository Markdown plus delivery through the shared Preview
   provider/host pipeline.
@@ -51,10 +58,13 @@ review task does not own a route or require a visible page.
 - `src/ai/prompts.toml` 与 `src/ai/prompts.rs`：与 AI Chat 共用、受版本控制的 Prompt
   catalog，以及强类型、有界的请求组装。
 - `src/ai_review/config.rs`：基于 `usher-state-store` 的门面和自动配置持久化。
+- `src/ai_review/storage.rs`：配置/任务/Session 共用的 JSON 读取、损坏文件保留与原子写入。
 - `src/ai_review/task_persistence.rs`：有序任务快照持久化、关闭屏障，以及通过 Session
   owner 执行并返回失败的写后对账。
 - `src/ai_review/controller.rs`：任务编排、Git/Provider diff 获取、AI 调用、取消、
   Session I/O 调度、通知和按需 UI 投影。
+- `src/ai_review/producers.rs`：生产环境完整操作的准入与完成屏障；已接收的 controller
+  后续处理完成后才停止持久化 Worker。
 - `src/ai_review/review_input.rs`：不可变请求、Provider diff 规范化、UTF-8 安全的
   48 KiB Ask 上下文、模型校验及仅在 Worker 读取的规则快照，不依赖 controller/UI。
 - `src/ai_review/session_transactions.rs`：生产环境的 Review/PR Chat 读改写事务、
@@ -66,11 +76,24 @@ review task does not own a route or require a visible page.
   下编译，用于损坏文件保留测试。
 - `src/agent_response/`：Agent Markdown 的宽度无关有界投影、内容身份缓存和不透明
   仓库文件 action；不执行文件 I/O，也不拥有 Preview Host。
+- `src/ai_review/response.rs`：结构化/纯文本投影到 Slint 回复行的适配与 baseline/formatted 选择；
+  有界历史投影窗口由 controller 选择。
 - `src/artifact_preview/`：由 Worker 解析并读取用户显式激活的仓库 Markdown，再经
   共用 Preview Provider/Host 管线交付。
 - `ui/features/ai_review/`：Feature 包协议和可选 PR 右侧面板；Primer finding row
   与严重级标签位于 `ui/components/ai_review/`，紧凑回复 block 位于
   `ui/components/agent_response/`；两层视觉代码都不承担解析或 I/O。
+
+Iteration navigation / 迭代导航：Session races belong to the
+[transaction contract](#session-transaction-contract--会话事务契约), task scheduling to
+[lifecycle](#lifecycle-and-concurrency--生命周期与并发), and response rendering to
+[projection](#agent-response-projection--agent-回复投影). Finding reveal is owned by
+`src/workflow/pr_review/controller.rs::reveal_location`, under [PR Review](pr-review.md);
+provider timeouts and prompts also follow [AI Agent](ai-agent.md) and [HTTP](http.md).
+The acceptance protocols below remain required checks, not a declaration that every
+platform or candidate has passed. / Session 竞态、任务调度、回复展示按对应章节与 owner
+修改；Finding 定位归 PR Review，超时与 Prompt 同时遵循共用规范。后文验收协议不代表
+所有平台或候选已经通过，测试专用接口及未采用的候选必须保持明确标识。
 
 ## Session transaction contract / 会话事务契约
 
@@ -112,9 +135,9 @@ review task does not own a route or require a visible page.
    checked reconciliation, and returns completion counts or bounded failures.
    This test receipt does not represent the current production exit drain or
    cover the controller's final Task actions, Message Center publications, or
-   Hook emits. Production shutdown cancels Review/Ask work, stops task
-   persistence, then stops configuration persistence without invoking global
-   Session drain. Production operation receipts and per-attempt waits remain active.
+   Hook emits. Production shutdown instead awaits the controller's whole-producer
+   barrier, including its operation receipts and per-attempt waits, before stopping
+   task and configuration persistence; it does not invoke global Session drain.
 6. The event-loop delivery boundary checks both mount/task identity and the Ask
    delivery generation. Semantic status keys check that generation under their
    mutex. Old terminal callbacks and initial reads cannot overwrite a newer
@@ -150,9 +173,9 @@ review task does not own a route or require a visible page.
    在此验收边界内，关闭准入会拒绝新用户消息、允许已接收工作完成；drain 等待实际
    持有的 Session IO（包括 checked 对账），返回完成计数或有界失败样本。
    此测试 receipt 不代表当前生产退出 drain，也不覆盖 controller 最后的 Task Action、
-   Message Center 发布或 Hook emit。生产关闭仍先取消 Review/Ask，再停止任务
-   持久化，最后停止配置持久化，不调用全局 Session drain。生产操作 receipt 与
-   按 attempt 的等待继续生效。
+   Message Center 发布或 Hook emit。生产关闭使用 controller 的完整发布方屏障，
+   包含生产操作 receipt 与按 attempt 的等待；屏障完成后才停止任务和配置持久化，
+   不调用全局 Session drain。
 6. Event-loop 投递边界同时核验 mount/task 身份与 Ask delivery generation；语义
    状态 key 在自己的 mutex 内核验 generation。旧终态回调与首次读取不能覆盖新
    Ask 的对话、action 或 sending 状态。新 Ask 已启动时，合法 Review 完成仍可
@@ -206,24 +229,26 @@ Settings 持久化 1 到 8 的并发上限、具名本地 Markdown 规则、一�
    performs the same cleanup and cancels the current Ask so a late completion
    cannot enter a reopened mount. Independently scheduled Review tasks continue
    without a UI dependency.
-7. Cancellation uses a task flag and queued-task removal. Shutdown stops the
-   configuration and task persistence workers in the registered shutdown order.
-   Cancelling a running task immediately marks it cancelled and aborts the
-   in-flight provider completion before another diff chunk can start.
+7. Cancellation uses a task flag and queued-task removal. A user cancellation
+   immediately marks a running task cancelled and aborts the in-flight provider
+   completion before another diff chunk can start. Application shutdown closes
+   producer admission and cancels Review/Ask work, then awaits accepted operations
+   before stopping task and configuration persistence. A Review whose Session
+   completion was already admitted can finish its terminal continuation.
 8. Panel close or PR-route exit also dismisses an active PR-context Preview only
-   when its current host is Docked. An already Detached Preview remains open as
-   an independent application window. Closing only the Docked Preview restores
+   when its current host is in-app (Docked or Floating). An already Detached Preview remains open as
+   an independent application window. Closing only the in-app Preview restores
    the intact AI conversation and does not execute panel cleanup.
 9. Task UI subscriptions use separate selectors: task rows include progress,
    while PR-list badges exclude per-chunk progress. Existing Slint rows are
    updated in place with `set_row_data`; progress commits must not rebuild or
-   rescan the PR list. Application shutdown cancels every running review before
-   joining persistence workers.
+   rescan the PR list.
    Task persistence retains at most one pending snapshot plus one active write. It must
    process the latest preceding snapshot and then exit without waiting for
    senders to be dropped. Disabled/failed writes must still honor the barrier;
-   repeated shutdown is safe. This drains already queued commits, not a promise
-   to capture future commits from producers that have not stopped.
+   repeated shutdown is safe. This writer barrier drains already queued commits;
+   the production producer barrier first stops and awaits the controller operations
+   that could submit later commits.
 10. Oversized diffs split on file/line boundaries. Every continuation repeats
     the file header and a numeric synthetic hunk header for the next old/new
     line positions, remains within the byte budget, and preserves the original
@@ -245,23 +270,75 @@ Settings 持久化 1 到 8 的并发上限、具名本地 Markdown 规则、一�
    model、输入、行内回复投影、不透明 action 映射和 task 仓库绑定。离开 PR Review
    执行同样清理并取消当前 Ask，避免迟到结果进入重新打开的 mount；独立调度的 Review
    task 不依赖 UI，继续运行。
-7. 取消使用任务标记和队列移除；关闭应用时按已注册顺序停止配置与任务持久化 Worker。
-   取消运行中任务时立即标记为已取消，并中止在途 Provider completion，后续 diff
-   分段不得继续启动。
-8. 关闭面板或离开 PR 路由时，仅在当前 PR 上下文 Preview 处于 Docked Host 时同时将其
-   关闭；已经 Detached 的 Preview 作为独立应用窗口继续存在。只关闭 Docked Preview
+7. 取消使用任务标记和队列移除；用户取消运行中任务时立即标记为已取消，并中止在途
+   Provider completion，后续 diff 分段不得继续启动。应用关闭先关闭发布方准入并取消
+   Review/Ask，再等待已接收操作，最后停止任务和配置持久化。已经准入 Session 完成
+   写入的 Review 可以继续完成其终态处理。
+8. 关闭面板或离开 PR 路由时，仅在当前 PR 上下文 Preview 处于内嵌 Host（Docked 或 Floating）时同时将其
+   关闭；已经 Detached 的 Preview 作为独立应用窗口继续存在。只关闭内嵌 Preview
    会恢复完整 AI 对话，不执行面板清理。
 9. Task UI 订阅使用两个独立 selector：任务行包含进度，PR 列表徽标排除逐 chunk 进度；
    既有 Slint 行使用 `set_row_data` 原地更新，进度 commit 不得重建或重扫 PR 列表。
-   应用 shutdown 必须先取消全部运行中 Review，再 join 持久化 Worker。
    任务持久化最多保留一个待写快照和一个正在写入的快照，关闭必须处理此前最新快照后退出，
    不得依赖 sender 被释放。禁用写入或写入失败仍必须尊重关闭屏障，重复关闭安全。
-   此契约排空已经入队的 commit，不承诺捕获尚未停止的发布方在未来提交的状态。
+   此 Writer 屏障排空已经入队的 commit；生产发布方屏障先停止并等待可能继续提交
+   commit 的 controller 操作。
 10. 超大 diff 按文件/行边界切分；每个续块重复文件头与指向下一旧/新行位置的数字 hunk
     头，保持在字节预算内，去除续块头后必须精确还原原 payload。真实 hunk header 之外的
     `@@` 文本不得被误判为 hunk。
 11. 每个真实 Review chunk 都使用带版本的 `review_chunk` catalog 条目；完成 Session
     保存实际回复 locale、请求数及聚合后的纯元数据上下文清单。Fixture Review 保持空 provenance。
+
+### Producer shutdown / 发布方关闭
+
+`AiReviewController::shutdown_async` closes production admission before cancellation.
+Permits are acquired synchronously before accepting Session work or spawning a future,
+and cover the whole operation: Review Session completion, terminal Task actions,
+Message Center publication and awaited Hook emit; Ask's real user-write receipt and
+admitted attempt I/O; and result/session reads. Scheduling and queued-task retirement
+also settle before the final persistence barrier. New operations are rejected after
+admission closes.
+
+Startup task recovery reserves a permit when the controller is created. The first-frame
+callback and shutdown take the same recovery obligation once; shutdown before the
+first frame still loads, hydrates and offers the recovered task state before stopping
+its writer. One owned finalizer awaits all permits, then stops task persistence and
+configuration persistence on a worker. Cancelling one shutdown waiter does not cancel
+that finalizer, and repeated callers await its shared result. The registered synchronous
+pre-shutdown callback only observes the completed barrier. The application registers
+the AI Review drain to run before downstream Hooks and Message Center close.
+
+This production barrier does not consult the test-only aggregate Session failure
+history. A failed Ask remains an operation failure; a successful explicit same-text
+submission after repairing I/O does not inherit that older failure at shutdown.
+
+`AiReviewController::shutdown_async` 在取消前关闭生产准入。接受 Session 工作或 spawn
+Future 之前同步取得 permit，覆盖完整操作：Review 的 Session 完成、终态 Task Action、
+Message Center 发布和所等待的 Hook emit；Ask 的真实 user 写入 receipt 与已准入的
+attempt IO；以及结果/Session 读取。调度与排队任务退役也必须在最终持久化屏障前完成。
+关闭准入后拒绝新操作。
+
+Controller 创建时为启动任务恢复预留 permit。首帧回调与关闭路径只会取得同一份恢复
+义务一次；即使首帧前退出，也先读取、hydrate 并提交恢复后的任务状态，再停止 Writer。
+单个自持有 finalizer 等待所有 permit，再由 Worker 依次停止任务持久化和配置持久化。
+取消一个关闭等待方不会取消 finalizer；重复调用等待同一结果。已注册的同步 pre-shutdown
+回调只观察已完成屏障。应用将 AI Review drain 注册为先于下游 Hooks 和 Message Center
+关闭执行。
+
+此生产屏障不读取测试专用的 Session 聚合失败历史。Ask 失败仍是该操作的失败；修复 IO
+后显式再次提交相同文本并成功，不会在关闭时继承旧失败。
+
+### Snapshot delivery and persistence / 快照投递与持久化
+
+Task persistence uses the shared latest writer. Store revisions may not regress;
+explicitly persisting the same hydration revision after enabling writes remains
+supported and receives a new submission revision for the flush/shutdown barrier.
+Task, current-result, PR badge and configuration UI snapshots use one queued
+latest-value delivery; scheduler actions are still processed individually.
+
+任务持久化复用共享 latest writer，Store revision 不得回退。启用写入后仍支持显式
+补写同一 hydration revision，以新的提交版本纳入 flush/shutdown 屏障。任务、当前
+结果、PR 标记和配置 UI 快照最多一个最新值投递回调；调度器动作仍逐项处理。
 
 ## Presentation / 展示
 
@@ -458,7 +535,7 @@ native system UI stack. Usher follows the desktop path: response prose directly
 uses the application platform face. On macOS this resolves Latin and Chinese
 through SF Pro and PingFang without an unrelated line-metric anchor. Codex's
 document-level weight 445 is applied at Usher's root `Window`, allowing ordinary
-`Text` and Slint 1.17 `StyledText` to use the same inherited value while preserving
+`Text` and Slint 1.18.1 `StyledText` to use the same inherited value while preserving
 Markdown formatting. Fenced blocks carry a
 worker-computed line count so their
 minimum height is independent of Slint font fallback; headings and prose retain
@@ -481,7 +558,7 @@ Surface（无标签/有标签顶部空间分别为 10px/32px，底部 10px）；
 但默认 Codex Light/Dark 桌面主题没有指定 Electron UI 字体，而是继承原生系统 UI 字体栈。
 Usher 对齐桌面端路径，回复正文直接使用应用的平台字体；macOS 上拉丁字和中文分别由
 SF Pro 与 PingFang 显示，不再借用无关字体作为行盒锚点。Codex 文档级的字重 445 设置在
-Usher 根 `Window`，让普通 `Text` 与 Slint 1.17 `StyledText` 继承同一个值，同时保留
+Usher 根 `Window`，让普通 `Text` 与 Slint 1.18.1 `StyledText` 继承同一个值，同时保留
 Markdown 格式。
 围栏代码及其语言标签显式使用 400 常规字重和正体，不继承正文 445 字重，也不得选中
 已注册的 Italic 字体 face。
@@ -551,7 +628,7 @@ from that directory descriptor with no-follow semantics, and reads the verified
 regular-file handle. On Windows it compares the final paths of the opened root
 and target handles. The same target handle enforces the Preview source-size and
 UTF-8 limits before reading. Failure is bounded and does not fall back
-to an external opener or another project. In Docked mode the resulting Preview
+to an external opener or another project. In either in-app mode the resulting Preview
 temporarily occupies the same PR trailing slot and width as AI Review, so the
 conversation stays mounted and the diff width is reserved exactly once. Closing
 Preview restores the conversation. Detached mode opens the same prepared payload
@@ -563,7 +640,7 @@ in the independent Preview window while AI Review remains visible.
 再从该目录句柄逐 component 以 no-follow 语义遍历并读取已验证的普通文件句柄；Windows
 比较已打开根目录与目标句柄的最终路径。同一目标句柄执行 Preview 来源大小与 UTF-8
 限制后再读取。失败信息必须有界，不得回退到外部打开器或其他
-项目。Docked 模式让结果 Preview 临时占用 AI Review 相同的 PR trailing slot 和宽度，
+项目。两种内嵌模式均让结果 Preview 临时占用 AI Review 相同的 PR trailing slot 和宽度，
 conversation 保持挂载且 Diff 宽度只预留一次；关闭 Preview 后恢复对话。Detached 模式
 在独立 Preview 窗口显示同一 prepared payload，同时 AI Review 继续可见。
 
@@ -656,14 +733,16 @@ cargo check --locked --no-default-features --features renderer-femtovg
 cargo test -p usher-preview --locked
 cargo test --locked --test ai_review_response_ui
 cargo test --lib --locked
-cargo build --release --locked
+cargo build --release --locked --features test-fixtures
 git diff --check
 ./scripts/benchmark-ai-review-response.sh --runs 3 --no-build
 ```
 
-The final command must reuse the already-built Release binary; the harness records
-and verifies that both cells use the same SHA. / 最后一条命令必须复用已构建的 Release
-binary；Harness 会记录并核对两个 cell 的同一 SHA。
+The final command must reuse the already-built `test-fixtures` Release binary;
+the harness records and verifies that both cells use the same SHA. Normal Release
+packaging does not enable this development fixture feature. / 最后一条命令必须复用
+已构建且启用 `test-fixtures` 的 Release binary；普通发布产物不启用此开发 feature。
+Harness 会记录并核对两个 cell 的同一 SHA。
 
 ## Build and failure behavior / 构建与失败
 
@@ -686,8 +765,10 @@ response remain supported.
 SSE content is committed only after `[DONE]` or a `finish_reason`. A top-level
 provider error event fails immediately, and a connection that closes before a
 completion marker must not persist or present its partial content as success.
-Other AI completions retain the shared 30-second
-total and body-idle timeouts. Ordinary application diagnostics record the task
+Other AI completions capture the shared configurable `[http].request_timeout_ms`
+for both total and body-idle timeouts when creating request options (30,000 ms by
+default, `0` disables both); Review/Ask's explicit overrides remain independent.
+Ordinary application diagnostics record the task
 stage, chunk index, completion message counts and byte totals, serialized request
 body size, response framing, elapsed time, and bounded response-body chunk sizes,
 arrival intervals, and progress classification. They never record authorization
@@ -713,7 +794,9 @@ streaming 响应限制在 16 MiB；每个收到的传输 chunk 都会重置空�
 streaming 请求返回一次性 JSON，仍保持兼容。
 SSE 只有在收到 `[DONE]` 或 `finish_reason` 后才提交内容；顶层 Provider error event
 立即失败，连接在完成标记前关闭时不得把已收部分正文当作成功结果落盘或上屏。其他 AI
-completion 继续使用共享的 30 秒总时限和响应体空闲时限。普通应用诊断会记录任务阶段、
+completion 在创建请求选项时读取共享可配置的 `[http].request_timeout_ms`，同时用于总时限和
+响应体空闲时限（默认 30,000 ms，`0` 关闭两者）；Review/Ask 的显式覆盖独立于该设置。
+普通应用诊断会记录任务阶段、
 chunk 序号、completion 消息数量与字节总量、序列化请求体大小、响应 framing、耗时，以及
 有界的响应体 chunk 大小、到达间隔和进度分类；绝不记录鉴权数据、Prompt/规则/源码内容
 或 Provider 响应正文。
@@ -723,6 +806,29 @@ Prompt 诊断另外只记录 catalog id/version、实际回复 locale、消息�
 [响应超时排查记录](../archive/ai-review-response-timeout-investigation.md) 中。
 
 ## Regression checklist / 回归检查
+
+Use `cargo test -p usher-ai-review --locked` for the domain package and
+`cargo test --lib --locked ai_review::` for application transactions, controller
+delivery and persistence. `src/ai_review/session_transactions_tests.rs` and
+`src/ai_review/controller_session_tests.rs` are the race/failure entry points;
+`tests/ai_review_response_ui.rs` exercises the compiled response UI. / 领域包、应用事务与
+UI 的测试入口分别如上；修改某层时先跑对应入口，交付仍执行仓库统一检查。
+
+Production shutdown regressions are in `src/ai_review/controller_producer_tests.rs`
+(`cargo test --lib --locked ai_review::controller::producer_tests::`) and
+`src/ai_review/producers.rs` (`cargo test --lib --locked ai_review::producers::`).
+They gate real controller continuations after Review Session completion and real Ask
+blocking writes, check closed-admission rejection and queued cancellation, cancel a
+shutdown waiter, recover before the first frame, and verify a repaired same-text Ask
+does not poison shutdown. Fixtures use isolated configuration and temporary Session
+paths. The scope and validation outcomes belong to the
+[producer shutdown record](../validation/spec-gap-followups-20261015/ai-review-producers.md).
+
+生产关闭回归入口为 `src/ai_review/controller_producer_tests.rs` 与
+`src/ai_review/producers.rs`，过滤命令如上。测试在真实 controller 的 Review Session
+完成后续处理与 Ask blocking 写入处设置屏障，核验关闭准入拒绝、排队任务取消、取消关闭
+等待方、首帧前恢复，以及 IO 修复后同文案 Ask 成功不污染关闭。夹具使用隔离配置和临时
+Session 路径；覆盖边界和验证结果见[发布方关闭记录](../validation/spec-gap-followups-20261015/ai-review-producers.md)。
 
 Session tests use controlled write/admission barriers to cover early Stop,
 same-operation retry versus a distinct identical submission, Review promotion,
@@ -761,16 +867,18 @@ promotion、receipt 被丢弃、活跃临时文件、对账期间退役，以及
   Stop, and Stop ends only that response. With its user write gated, verify the
   stopping state and duplicate-start protection remain until actual I/O settles;
   then verify terminal delivery freezes the duration and reopening retains the user.
-- Let a review run for more than 300 seconds and verify it continues until the
-  provider completes or the user cancels it. Verify ordinary AI Chat still
-  reports a timeout at the shared 30-second deadline.
+- Keep body progress flowing past 300 seconds and verify the Review continues
+  until completion, cancellation, or the 600-second chunk deadline. With the
+  shared setting at its default 30,000 ms, verify ordinary AI Chat times out at
+  that deadline; change it and verify new Chat requests capture the new value.
 - While a multi-chunk review runs, verify the panel identifies the current and
   total chunk. Stall a successful response body and verify the task fails after
   300 seconds of no body progress rather than remaining at one percentage.
 - Keep transport chunks trickling so the idle threshold continues to reset and
   verify one review chunk still fails at the 600-second wall-clock deadline.
 - Shut down with queued and running reviews; verify queued work does not start
-  and all in-flight completions cancel before persistence workers join.
+  and new work is rejected, queued work is cancelled, and accepted terminal/I/O
+  continuations settle before persistence workers join.
 - Cancel or fail a review before a session is created, then focus Ask and send
   a question. Verify the configured Agent answers using PR context and that no
   hosting-provider write request is issued.
@@ -825,10 +933,11 @@ promotion、receipt 被丢弃、活跃临时文件、对账期间退役，以及
 - 发送 Ask 后确认用户行在 Agent 完成前立即出现；确认等待行从准备上下文进入思考状态，
   实时耗时持续增长，Send 操作切换为 Stop，且 Stop 只终止该次回复。阻住用户写入时，
   确认实际 IO 完成前保持正在停止与防重入保护；随后终态投递冻结耗时，重开仍保留用户行。
-- 让 Review 运行超过 300 秒，确认 Provider 完成或用户取消前任务继续运行；同时确认普通
-  AI Chat 仍在共享的 30 秒截止时间触发超时。
+- 保持响应体进度并让 Review 运行超过 300 秒，确认持续到完成、取消或 chunk 的 600 秒上限。
+  共享设置为默认 30,000 ms 时确认普通 AI Chat 在该截止时间超时；修改设置后确认新请求采用新值。
 - 让传输 chunk 持续零散到达并不断重置空闲阈值，确认单个 Review chunk 仍在 600 秒
-  墙钟上限失败；带排队/运行任务关闭应用时，确认在持久化 Worker join 前全部取消。
+  墙钟上限失败；带排队/运行任务关闭应用时，确认拒绝新操作、取消排队工作，并在持久化
+  Worker join 前完成已接收的终态/IO 后续处理。
 - 多 chunk Review 运行时确认面板显示当前 chunk 与总数；让成功响应的 body 停止产生
   进度，确认任务在 300 秒后失败，而不是永久停在百分之一。
 - 在 Session 创建前取消 Review 或让其失败，再聚焦 Ask 并发送问题；确认配置的 Agent
@@ -860,13 +969,3 @@ promotion、receipt 被丢弃、活跃临时文件、对账期间退役，以及
 - 切换到 Detached 后激活同一回复；确认 AI Review 仍可见。随后关闭面板并离开 PR
   Review，确认投影 action 已清空，而 Detached Preview 和后台工作继续存在。
 - 分别编译启用/关闭 feature，运行库测试，并记录编译时间/产物及首次使用/关闭稳定 RSS。
-
-Task persistence uses the shared latest writer. Store revisions may not regress;
-explicitly persisting the same hydration revision after enabling writes remains
-supported and receives a new submission revision for the flush/shutdown barrier.
-Task, current-result, PR badge and configuration UI snapshots use one queued
-latest-value delivery; scheduler actions are still processed individually.
-
-任务持久化复用共享 latest writer，Store revision 不得回退。启用写入后仍支持显式
-补写同一 hydration revision，以新的提交版本纳入 flush/shutdown 屏障。任务、当前
-结果、PR 标记和配置 UI 快照最多一个最新值投递回调；调度器动作仍逐项处理。

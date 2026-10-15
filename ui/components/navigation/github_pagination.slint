@@ -17,6 +17,7 @@ component GitHubPaginationLink inherits FocusScope {
         : root.current ? GitHubTheme.fg-on-emphasis
         : root.directional ? GitHubTheme.accent-fg : GitHubTheme.fg-default;
     callback activated();
+    callback pointer-activated();
 
     width: max(GitHubMetrics.control-medium-size,
         label-measure.preferred-width + GitHubMetrics.size-12
@@ -32,11 +33,11 @@ component GitHubPaginationLink inherits FocusScope {
 
     function activate() {
         if root.link-enabled {
-            root.focus();
             root.activated();
         }
     }
     key-pressed(event) => {
+        if !root.link-enabled { return reject; }
         root.keyboard-focus-visible = true;
         if event.text == Key.Return || event.text == " " {
             root.activate();
@@ -48,6 +49,11 @@ component GitHubPaginationLink inherits FocusScope {
         root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
     }
     focus-lost => { root.keyboard-focus-visible = false; }
+    // Slint ignores FocusOut for disabled FocusScopes. Clear the painted state
+    // when a direction becomes unavailable, including after keyboard paging.
+    changed link-enabled => {
+        if !root.link-enabled { root.keyboard-focus-visible = false; }
+    }
 
     label-measure := Text {
         visible: false;
@@ -100,7 +106,11 @@ component GitHubPaginationLink inherits FocusScope {
         mouse-cursor: self.enabled ? pointer : default;
         clicked => {
             root.keyboard-focus-visible = false;
-            root.activate();
+            if root.link-enabled {
+                root.focus();
+                root.pointer-activated();
+                root.activate();
+            }
         }
     }
 }
@@ -111,6 +121,7 @@ export component GitHubPagination inherits Rectangle {
     // Zero is a noninteractive truncation indicator; the bridge bounds the set.
     in property <[int]> pages: [];
     callback page-selected(int);
+    callback pointer-activated();
     // Account for multi-digit last pages as well as translated direction labels.
     private property <length> maximum-page-width: max(GitHubMetrics.control-medium-size,
         page-width-measure.preferred-width + GitHubMetrics.size-12);
@@ -135,6 +146,7 @@ export component GitHubPagination inherits Rectangle {
             label: I18n.common-previous;
             previous: true;
             link-enabled: root.current-page > 1;
+            pointer-activated => { root.pointer-activated(); }
             activated => { root.page-selected(root.current-page - 1); }
         }
         HorizontalLayout {
@@ -153,6 +165,7 @@ export component GitHubPagination inherits Rectangle {
                     accessible-name: parent.page <= 0 ? "" : I18n.common-page + " " + parent.page;
                     current: parent.page == root.current-page;
                     link-enabled: parent.shown && parent.page > 0;
+                    pointer-activated => { root.pointer-activated(); }
                     activated => { root.page-selected(parent.page); }
                 }
             }
@@ -161,6 +174,7 @@ export component GitHubPagination inherits Rectangle {
             label: I18n.common-next;
             next: true;
             link-enabled: root.current-page < root.page-count;
+            pointer-activated => { root.pointer-activated(); }
             activated => { root.page-selected(root.current-page + 1); }
         }
     }

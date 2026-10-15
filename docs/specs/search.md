@@ -19,6 +19,23 @@ live in `controller/diff_bindings.rs` and use the feature-owned stateless
 `src/workflow/pr_review/find_bridge.rs`；event-loop 几何与定位绑定位于
 `controller/diff_bindings.rs`，使用 Feature 自有的无状态 `PrDiffBridge` global。
 
+## Ownership and iteration entry points / 职责与迭代入口
+
+| Responsibility / 职责 | Owner / 入口 |
+| --- | --- |
+| Matching, result stepping and reveal primitives / 匹配、结果导航与揭示原语 | `crates/usher-search/src/lib.rs` |
+| Immutable source scan and bounded result conversion / 不可变源码扫描与有界结果转换 | `src/workflow/pr_review/find_worker.rs` |
+| Domain ordering, row/pane mapping and wrapped offsets / 领域顺序、行/侧映射与换行偏移 | `src/workflow/pr_review/find.rs` |
+| Cancellation, latest delivery and row cache / 取消、最新值投递与行缓存 | `src/workflow/pr_review/find_bridge.rs` |
+| Shaped glyph geometry and exact virtual extent / 字形几何与精确虚拟 extent | `src/workflow/pr_review/text_geometry.rs`, `src/workflow/pr_review/virtual_list.rs` |
+| Rust callback bindings and Slint contract / Rust 绑定与 Slint 协议 | `src/workflow/pr_review/controller/diff_bindings.rs`, `ui/features/pr_review/diff_bridge.slint`, `ui/views/workflow/pr_review_workspace.slint` |
+
+Search navigation and source/diff presentation must also obey [PR Review](pr-review.md),
+[text layout](text-layout.md), and [virtual scrolling](virtual-scrolling.md).
+Pure convergence primitives are available to adapters; they are not authorization
+to add a positioning timer to the PR scroll path. / 修改搜索时同时核对领域行、文字几何和
+虚拟 extent；共用纯收敛原语不代表可给 PR 滚动路径增加定位 Timer。
+
 ## Invariants / 不变量
 
 1. Matches are returned in source order and do not overlap. Each occurrence on
@@ -135,7 +152,7 @@ that lifecycle because its row extents are deterministic at the stable width:
 <https://docs.rs/virtualizer/0.4.0/virtualizer/>
 <https://codemirror.net/docs/ref/#view.EditorView.requestMeasure>
 
-## Regression Checklist / 回归清单
+## PR asynchronous adaptation / PR 异步适配
 
 PR Find scans shared immutable source on the shared blocking pool after the
 180 ms debounce. Typing cancels previous work and clears stale presentation;
@@ -151,6 +168,20 @@ PR Find 在 180 ms 去抖后于共享 blocking pool 扫描共享不可变源码�
 一个待发布输出，命中转换和行 model 缓存分别最多 128 项。完成时选中首项但不揭示；
 结果未完成时的导航仅刷新去抖，不排队重放，后续显式命令才导航已完成结果。
 关闭、源码替换和审核状态重置取消计算并释放缓存。
+
+## Regression Checklist / 回归清单
+
+Targeted entry points / 专项入口：
+
+```sh
+cargo test -p usher-search --locked
+cargo test --lib --locked workflow::pr_review::find
+```
+
+The first covers matching/navigation/reveal without Slint; the second includes
+the PR domain and worker tests. Compiled UI and native wheel/thumb/resize checks
+below remain separate acceptance requirements. / 共用原语与 PR 适配分别测试，仍须完成
+下列编译后 UI 与原生滚轮/滑块/resize 验收。
 
 - Cover case-sensitive and insensitive matching, CJK text, Unicode lowercase
   expansion, repeated occurrences on one line, empty results, and wraparound.

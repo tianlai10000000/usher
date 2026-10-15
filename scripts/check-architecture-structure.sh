@@ -67,6 +67,81 @@ check_max "Project bridge callbacks" "$(slint_declaration_count ui/features/proj
 check_max "Project bridge properties" "$(slint_declaration_count ui/features/project/bridge.slint '^[[:space:]]*(in|out|in-out|private)[[:space:]]+property')" 24
 check_max "Project dialog host lines" "$(line_count ui/features/project/dialog.slint)" 90
 
+# Spec-gap fixes retain bounded feature owners and keep worker code UI-free.
+check_max "Preview source reader lines" "$(line_count crates/usher-preview/src/file_source.rs)" 145
+check_max "AI Settings state lines" "$(line_count src/ai/settings_state.rs)" 320
+check_max "AI Settings UI lines" "$(line_count src/ai/settings_ui.rs)" 220
+check_max "Message command worker lines" "$(line_count src/message_center/commands.rs)" 260
+check_max "Message factory focus bridge lines" "$(line_count src/message_center/focus.rs)" 200
+check_max "Message factory tab navigation lines" "$(line_count src/message_center/focus/navigation.rs)" 200
+check_max "Notification ingress lines" "$(line_count src/notification/ingress.rs)" 370
+check_max "Shutdown pipeline lines" "$(line_count src/shutdown/pipeline.rs)" 250
+check_max "Shutdown phase lines" "$(line_count src/shutdown/pipeline/phase.rs)" 200
+check_max "Diagnostics archive lines" "$(line_count src/diagnostics/archive.rs)" 240
+check_max "Download status projection lines" "$(line_count src/update/download_status.rs)" 120
+check_max "Workflow facade lines" "$(line_count src/workflow/state/facade.rs)" 400
+check_max "Workflow reducer lines" "$(line_count src/workflow/state/reducer.rs)" 220
+check_max "Workflow equality lines" "$(line_count src/workflow/state/equality.rs)" 80
+check_max "Tag controller lines" "$(line_count src/workflow/tag/controller.rs)" 240
+check_max "Tag execution lines" "$(line_count src/workflow/tag/execution.rs)" 620
+check_max "Tag state lines" "$(line_count src/workflow/tag/state.rs)" 450
+check_max "Tag initialization lines" "$(line_count src/workflow/tag/initialization.rs)" 200
+check_max "Tag initialization diagnostics lines" "$(line_count src/workflow/tag/initialization_error.rs)" 160
+check_max "Tag progress lines" "$(line_count src/workflow/tag/progress.rs)" 130
+check_max "Tag activity lines" "$(line_count src/workflow/tag/activity.rs)" 90
+check_max "AI Review producers lines" "$(line_count src/ai_review/producers.rs)" 200
+
+unexpected_focus_work=$(rg -n 'std::fs|std::process|std::thread|tokio::|reqwest|crate::http|LocalStateStore|PersistentStore' \
+    src/message_center/focus.rs src/message_center/focus/navigation.rs || true)
+if [ -n "$unexpected_focus_work" ]; then
+    echo "Architecture structure: message focus bridge depends on I/O, workers or Store engines:" >&2
+    echo "$unexpected_focus_work" >&2
+    failed=1
+fi
+
+unexpected_worker_ui=$(rg -n 'MainWindow|SettingsPageBridge|slint::|controller::' \
+    crates/usher-preview/src/file_source.rs src/ai/settings_state.rs \
+    src/message_center/commands.rs src/shutdown/pipeline.rs src/shutdown/pipeline/phase.rs \
+    src/diagnostics/archive.rs src/ai_review/producers.rs || true)
+if [ -n "$unexpected_worker_ui" ]; then
+    echo "Architecture structure: source/state command workers depend on UI/controller types:" >&2
+    echo "$unexpected_worker_ui" >&2
+    failed=1
+fi
+
+unexpected_workflow_core_ui=$(rg -n 'MainWindow|slint::|controller::|std::process::' \
+    src/workflow/state/reducer.rs src/workflow/state/equality.rs \
+    src/workflow/tag/state.rs src/workflow/tag/activity.rs || true)
+if [ -n "$unexpected_workflow_core_ui" ]; then
+    echo "Architecture structure: Workflow reducer/state leaves depend on UI/process internals:" >&2
+    echo "$unexpected_workflow_core_ui" >&2
+    failed=1
+fi
+
+unexpected_download_status_io=$(rg -nH 'std::fs|reqwest::|http::|controller::' \
+    src/update/download_status.rs || true)
+if [ -n "$unexpected_download_status_io" ]; then
+    echo "Architecture structure: download status projection owns I/O/controller dependencies:" >&2
+    echo "$unexpected_download_status_io" >&2
+    failed=1
+fi
+
+unexpected_ai_ui_engine=$(rg -nH 'LocalStateStore|PersistentStore|std::fs::' \
+    src/ai/settings_ui.rs || true)
+if [ -n "$unexpected_ai_ui_engine" ]; then
+    echo "Architecture structure: AI Settings UI bypasses its feature facade:" >&2
+    echo "$unexpected_ai_ui_engine" >&2
+    failed=1
+fi
+
+unexpected_notification_engine=$(rg -nH 'LocalStateStore|PersistentStore|controller::|settings_state::' \
+    src/notification/ingress.rs || true)
+if [ -n "$unexpected_notification_engine" ]; then
+    echo "Architecture structure: notification ingress bypasses its message command facade:" >&2
+    echo "$unexpected_notification_engine" >&2
+    failed=1
+fi
+
 reverse_controller_dependencies=$(rg -n 'interactive::|controller::|use super::\*' \
     src/chat/viewport_policy.rs src/chat/message_model.rs src/ai_review/sessions.rs \
     src/workflow/pr_review/controller/diff_bindings.rs \

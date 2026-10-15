@@ -1,0 +1,51 @@
+   Compiling usher-messages v0.0.9-alpha.1 (/Users/yuankai/yuankai/Demo/rust/usher/crates/usher-messages)
+   Compiling usher-ui v0.0.9-alpha.1 (/Users/yuankai/yuankai/Demo/rust/usher/crates/usher-ui)
+   Compiling usher v0.0.9-alpha.4 (/Users/yuankai/yuankai/Demo/rust/usher)
+error[E0369]: binary operation `==` cannot be applied to type `vtable::vrc::VRc<i_slint_core::item_tree::ItemTreeVTable>`
+  --> src/message_center/focus.rs:43:30
+   |
+43 |         if *item.item_tree() == page_tree {
+   |            ----------------- ^^ --------- vtable::vrc::VRc<i_slint_core::item_tree::ItemTreeVTable>
+   |            |
+   |            vtable::vrc::VRc<i_slint_core::item_tree::ItemTreeVTable>
+   |
+note: `vtable::vrc::VRc<i_slint_core::item_tree::ItemTreeVTable>` does not implement `PartialEq`
+  --> /Users/yuankai/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vtable-0.5.0/src/vrc.rs:98:1
+   |
+98 | pub struct VRc<VTable: VTableMetaDropInPlace + 'static, X = Dyn> {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `vtable::vrc::VRc<i_slint_core::item_tree::ItemTreeVTable>` is defined in another crate
+
+error[E0369]: binary operation `==` cannot be applied to type `vtable::vrc::VRc<i_slint_core::item_tree::ItemTreeVTable>`
+  --> src/message_center/focus.rs:81:30
+   |
+81 |         if *item.item_tree() == page_tree {
+   |            ----------------- ^^ --------- vtable::vrc::VRc<i_slint_core::item_tree::ItemTreeVTable>
+   |            |
+   |            vtable::vrc::VRc<i_slint_core::item_tree::ItemTreeVTable>
+   |
+note: `vtable::vrc::VRc<i_slint_core::item_tree::ItemTreeVTable>` does not implement `PartialEq`
+  --> /Users/yuankai/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vtable-0.5.0/src/vrc.rs:98:1
+   |
+98 | pub struct VRc<VTable: VTableMetaDropInPlace + 'static, X = Dyn> {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `vtable::vrc::VRc<i_slint_core::item_tree::ItemTreeVTable>` is defined in another crate
+
+error[E0369]: binary operation `==` cannot be applied to type `vtable::vrc::VRc<i_slint_core::item_tree::ItemTreeVTable>`
+   --> src/message_center/paging_tests.rs:172:9
+    |
+172 | /         assert_ne!(
+173 | |             *previous_focus.item_tree(),
+174 | |             WindowInner::from_pub(page.window()).component()
+175 | |         );
+    | |         ^
+    | |         |
+    | |_________vtable::vrc::VRc<i_slint_core::item_tree::ItemTreeVTable>
+    |           vtable::vrc::VRc<i_slint_core::item_tree::ItemTreeVTable>
+    |
+note: `vtable::vrc::VRc<i_slint_core::item_tree::ItemTreeVTable>` does not implement `PartialEq`
+   --> /Users/yuankai/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vtable-0.5.0/src/vrc.rs:98:1
+    |
+ 98 | pub struct VRc<VTable: VTableMetaDropInPlace + 'static, X = Dyn> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `vtable::vrc::VRc<i_slint_core::item_tree::ItemTreeVTable>` is defined in another crate
+
+For more information about this error, try `rustc --explain E0369`.
+error: could not compile `usher` (lib test) due to 3 previous errors

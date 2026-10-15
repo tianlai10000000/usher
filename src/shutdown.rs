@@ -3,8 +3,9 @@
 //! Team conventions (important):
 //! - Stages run in fixed order:
 //!   1) `pre_shutdown`  -> stop producers / timers / inflight work
-//!   2) `ui_shutdown`   -> detach UI and OS integrations
-//!   3) `post_shutdown` -> best-effort tail cleanup
+//!   2) `background_shutdown` -> join writers and delivery workers off UI
+//!   3) `ui_shutdown`   -> detach UI and OS integrations
+//!   4) `post_shutdown` -> best-effort tail cleanup
 //! - Inside the same stage, task execution order is:
 //!   - higher `priority` first
 //!   - if equal priority, later registration first (LIFO tie-break)
@@ -24,13 +25,31 @@
 //! 2) Choose priority intentionally (default `PRIORITY_NORMAL`; avoid unnecessary escalation).
 //! 3) Ensure cleanup is idempotent, non-blocking when possible, and emits useful logs.
 
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::Instant;
 use std::{future::Future, pin::Pin};
 
 use crate::constants::shutdown_priority::PRIORITY_NORMAL;
+
+static MAIN_WINDOW: Mutex<Option<slint::Weak<crate::MainWindow>>> = Mutex::new(None);
+
+pub(crate) fn register_main_window(window: &crate::MainWindow) {
+    use slint::ComponentHandle;
+    *MAIN_WINDOW.lock().unwrap_or_else(|p| p.into_inner()) = Some(window.as_weak());
+}
+
+/// Original-thread input gate, before async drains. Keep the cleanup registry
+/// open until those drains finish so late lazy-worker registrations are kept.
+fn close_ui_admission() {
+    use slint::ComponentHandle;
+    let window = MAIN_WINDOW
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone();
+    if let Some(window) = window.and_then(|window| window.upgrade()) {
+        let _ = window.hide();
+    }
+}
 
 type CleanupFn = Box<dyn Fn() + Send + Sync + 'static>;
 type AsyncCleanupFn = Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send>;
@@ -58,26 +77,8 @@ pub(crate) async fn drain_async_tasks() {
     }
 }
 
-struct CleanupTask {
-    name: &'static str,
-    priority: i32,
-    order: u64,
-    callback: CleanupFn,
-}
-
-#[derive(Default)]
-struct CleanupRegistry {
-    pre_shutdown: Vec<CleanupTask>,
-    ui_shutdown: Vec<CleanupTask>,
-    post_shutdown: Vec<CleanupTask>,
-}
-
-#[derive(Copy, Clone)]
-enum ShutdownStage {
-    Pre,
-    Ui,
-    Post,
-}
+mod pipeline;
+use pipeline::{CleanupRegistry, CleanupRun, CleanupTask, ShutdownStage};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum CleanupMode {
@@ -91,18 +92,8 @@ impl CleanupMode {
     }
 }
 
-impl ShutdownStage {
-    fn as_str(self) -> &'static str {
-        match self {
-            ShutdownStage::Pre => "pre_shutdown",
-            ShutdownStage::Ui => "ui_shutdown",
-            ShutdownStage::Post => "post_shutdown",
-        }
-    }
-}
-
 static CLEANUP_REGISTRY: OnceLock<Mutex<CleanupRegistry>> = OnceLock::new();
-static CLEANUP_EXECUTED: AtomicBool = AtomicBool::new(false);
+static CLEANUP_RUN: OnceLock<std::sync::Arc<CleanupRun>> = OnceLock::new();
 static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 static SIGNAL_HANDLERS_INITIALIZED: AtomicBool = AtomicBool::new(false);
 static TASK_ORDER_COUNTER: OnceLock<std::sync::atomic::AtomicU64> = OnceLock::new();
@@ -128,6 +119,7 @@ fn register_task(
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let stage_tasks = match stage {
         ShutdownStage::Pre => &mut registry.pre_shutdown,
+        ShutdownStage::Background => &mut registry.background_shutdown,
         ShutdownStage::Ui => &mut registry.ui_shutdown,
         ShutdownStage::Post => &mut registry.post_shutdown,
     };
@@ -160,6 +152,15 @@ pub fn register_pre_shutdown_task_with_priority(
     callback: impl Fn() + Send + Sync + 'static,
 ) {
     register_task(ShutdownStage::Pre, name, priority, callback);
+}
+
+/// Register a blocking final barrier after producers stop and before UI cleanup.
+pub(crate) fn register_background_shutdown_task_with_priority(
+    name: &'static str,
+    priority: i32,
+    callback: impl Fn() + Send + Sync + 'static,
+) {
+    register_task(ShutdownStage::Background, name, priority, callback);
 }
 
 /// Register a task executed during UI shutdown.
@@ -229,109 +230,40 @@ pub fn init_signal_handlers() {
     log::info!("[Shutdown] OS signal handlers are not enabled on this platform");
 }
 
-/// Run all registered cleanup tasks once.
+fn cleanup_run(trigger: &str) -> std::sync::Arc<CleanupRun> {
+    CLEANUP_RUN
+        .get_or_init(|| {
+            log::info!("[Shutdown] Cleanup pipeline started (trigger: {trigger})");
+            let registry =
+                std::mem::take(&mut *cleanup_registry().lock().unwrap_or_else(|p| p.into_inner()));
+            CleanupRun::new(registry)
+        })
+        .clone()
+}
+
+/// Natural event-loop return still owns cleanup on the original thread. There
+/// is no live event loop to block, but final writer joins run on the worker.
 pub fn run_cleanup_once(trigger: &str) {
-    run_cleanup_once_with_mode(trigger, CleanupMode::EventLoop);
-}
-
-fn run_cleanup_once_with_mode(trigger: &str, mode: CleanupMode) {
-    if CLEANUP_EXECUTED.swap(true, Ordering::SeqCst) {
-        log::info!(
-            "[Shutdown] Cleanup already executed, skipping (trigger: {})",
-            trigger
-        );
+    if CLEANUP_RUN.get().is_some_and(|run| run.is_current_owner()) {
+        log::warn!("[Shutdown] Ignored reentrant cleanup from its own callback");
         return;
     }
-
-    let total_start = Instant::now();
-    log::info!("[Shutdown] Cleanup pipeline started (trigger: {})", trigger);
-
-    let mut registry = {
-        let mut guard = cleanup_registry()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        std::mem::take(&mut *guard)
-    };
-
-    run_stage_tasks(ShutdownStage::Pre, &mut registry.pre_shutdown);
-    if mode.runs_ui_cleanup() {
-        run_stage_tasks(ShutdownStage::Ui, &mut registry.ui_shutdown);
-    } else {
-        log::warn!(
-            "[Shutdown] Background fallback skipped {} UI/AppKit cleanup task(s)",
-            registry.ui_shutdown.len()
-        );
-        registry.ui_shutdown.clear();
-    }
-    run_stage_tasks(ShutdownStage::Post, &mut registry.post_shutdown);
-
-    #[cfg(target_os = "macos")]
-    if mode.runs_ui_cleanup() {
-        cleanup_associated_helpers();
-    }
-
-    log::info!(
-        "[Shutdown] Cleanup pipeline finished in {} ms",
-        total_start.elapsed().as_millis()
-    );
-    crate::logger::debug_logger::flush_application_log();
+    close_ui_admission();
+    crate::app_runtime::shared_runtime().block_on(drain_async_tasks());
+    let run = cleanup_run(trigger);
+    run.stop_producers();
+    crate::app_runtime::shared_runtime().block_on(run.drain());
+    finish_cleanup(&run, CleanupMode::EventLoop);
 }
 
-fn run_stage_tasks(stage: ShutdownStage, tasks: &mut Vec<CleanupTask>) {
-    let stage_start = Instant::now();
-    let task_count = tasks.len();
-    log::info!(
-        "[Shutdown] Stage '{}' started (tasks: {})",
-        stage.as_str(),
-        task_count
-    );
-
-    if task_count == 0 {
-        log::info!("[Shutdown] Stage '{}' skipped (no tasks)", stage.as_str());
-        return;
-    }
-
-    tasks.sort_by(|a, b| b.priority.cmp(&a.priority).then(b.order.cmp(&a.order)));
-
-    log::info!(
-        "[Shutdown] Stage '{}' sorted by priority (desc), order (desc)",
-        stage.as_str()
-    );
-
-    for (index, task) in tasks.drain(..).enumerate() {
-        let task_start = Instant::now();
-        log::info!(
-            "[Shutdown] Stage '{}' task {}/{} '{}' started (priority: {}, order: {})",
-            stage.as_str(),
-            index + 1,
-            task_count,
-            task.name,
-            task.priority,
-            task.order
-        );
-
-        if catch_unwind(AssertUnwindSafe(|| (task.callback)())).is_err() {
-            log::error!(
-                "[Shutdown] Stage '{}' task '{}' panicked after {} ms",
-                stage.as_str(),
-                task.name,
-                task_start.elapsed().as_millis()
-            );
-        } else {
-            log::info!(
-                "[Shutdown] Stage '{}' task '{}' finished in {} ms",
-                stage.as_str(),
-                task.name,
-                task_start.elapsed().as_millis()
-            );
+fn finish_cleanup(run: &CleanupRun, mode: CleanupMode) {
+    run.finish_with(mode, || {
+        #[cfg(target_os = "macos")]
+        if mode.runs_ui_cleanup() {
+            cleanup_associated_helpers();
         }
-    }
-
-    log::info!(
-        "[Shutdown] Stage '{}' finished in {} ms",
-        stage.as_str(),
-        stage_start.elapsed().as_millis()
-    );
+        crate::logger::debug_logger::flush_application_log();
+    });
 }
 
 /// Request graceful shutdown through a single shared entry point.
@@ -349,22 +281,53 @@ pub fn request_shutdown(trigger: &str) {
         trigger
     );
     let trigger_owned = trigger.to_string();
+    let fallback = trigger_owned.clone();
+    if slint::invoke_from_event_loop(move || start_shutdown(&trigger_owned)).is_err() {
+        crate::app_runtime::shared_runtime().spawn(async move {
+            shutdown_without_ui(fallback).await;
+        });
+    }
+}
+
+fn start_shutdown(trigger: &str) {
+    close_ui_admission();
+    let trigger = trigger.to_owned();
     crate::app_runtime::shared_runtime().spawn(async move {
         drain_async_tasks().await;
-        let fallback_trigger = trigger_owned.clone();
-        if slint::invoke_from_event_loop(move || perform_shutdown(&trigger_owned)).is_err() {
-            log::error!("[Shutdown] Failed to dispatch shutdown to UI loop, running fallback path");
-            run_cleanup_once_with_mode(&fallback_trigger, CleanupMode::BackgroundFallback);
-            std::process::exit(0);
+        let fallback = trigger.clone();
+        if slint::invoke_from_event_loop(move || perform_shutdown(&trigger)).is_err() {
+            shutdown_without_ui(fallback).await;
         }
     });
 }
 
+async fn shutdown_without_ui(trigger: String) {
+    log::error!("[Shutdown] UI dispatch unavailable; completing owned background barriers");
+    drain_async_tasks().await;
+    let run = cleanup_run(&trigger);
+    run.stop_producers();
+    run.drain().await;
+    finish_cleanup(&run, CleanupMode::BackgroundFallback);
+    std::process::exit(0);
+}
+
 fn perform_shutdown(trigger: &str) {
-    log::info!("[Shutdown] perform_shutdown started (trigger: {})", trigger);
-    run_cleanup_once(trigger);
-    log::info!("[Shutdown] Calling platform termination API");
-    terminate_application();
+    let run = cleanup_run(trigger);
+    run.stop_producers();
+    crate::app_runtime::shared_runtime().spawn(async move {
+        run.drain().await;
+        let fallback = run.clone();
+        if slint::invoke_from_event_loop(move || {
+            finish_cleanup(&run, CleanupMode::EventLoop);
+            terminate_application();
+        })
+        .is_err()
+        {
+            log::error!("[Shutdown] Final UI cleanup dispatch failed");
+            finish_cleanup(&fallback, CleanupMode::BackgroundFallback);
+            std::process::exit(0);
+        }
+    });
 }
 
 fn terminate_application() {

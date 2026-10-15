@@ -1,0 +1,15 @@
+{
+  "bundle": "/private/tmp/usher-ui120-final-20261015/Usher UI120 final.app",
+  "bundle_id": "com.usher.ui120.final",
+  "binary_source": "/Users/yuankai/yuankai/Demo/rust/usher/target/debug/usher",
+  "binary_sha256": "67a26c1a215b475c1e6875e783a120e60e73cb60bc43e2f8be6179db28469b56",
+  "locale": "en",
+  "messages": 1000,
+  "state": "/private/tmp/usher-ui120-final-20261015/state/default/run-0",
+  "environment": {
+    "USHER_BENCHMARK_OFFLINE": "1",
+    "USHER_BENCHMARK_STATE_ROOT": "/private/tmp/usher-ui120-final-20261015/state",
+    "USHER_BENCHMARK_INSTANCE_NAMESPACE": "ui120-final",
+    "SLINT_BACKEND": "winit-femtovg"
+  }
+}

@@ -1,0 +1,134 @@
+   Compiling serde_core v1.0.229
+   Compiling num-traits v0.2.19
+   Compiling bytemuck v1.25.2
+   Compiling memmap2 v0.9.11
+   Compiling arrayvec v0.7.8
+   Compiling pulldown-cmark v0.13.4
+   Compiling png v0.18.1
+   Compiling percent-encoding v2.3.2
+   Compiling crossbeam-utils v0.8.23
+   Compiling crossbeam-epoch v0.9.21
+   Compiling form_urlencoded v1.2.2
+   Compiling font-types v0.12.5
+   Compiling tiny-skia-path v0.12.0
+   Compiling rgb v0.8.53
+   Compiling polycool v0.4.0
+   Compiling read-fonts v0.41.0
+   Compiling tiny-skia v0.12.0
+   Compiling indexmap v2.14.2
+   Compiling rspolib v0.1.2
+   Compiling crossbeam-deque v0.8.8
+   Compiling euclid v0.22.14
+   Compiling moxcms v0.8.1
+   Compiling toml_edit v0.25.15+spec-1.1.0
+   Compiling kurbo v0.13.1
+   Compiling rayon-core v1.13.0
+   Compiling proc-macro-crate v3.5.0
+   Compiling bitflags v2.13.2
+   Compiling objc2-core-foundation v0.3.2
+   Compiling objc2-foundation v0.3.2
+   Compiling objc2-core-graphics v0.3.2
+   Compiling objc2-core-text v0.3.2
+   Compiling serde v1.0.229
+   Compiling svgtypes v0.16.1
+   Compiling skrifa v0.44.0
+   Compiling harfrust v0.12.0
+   Compiling fontique v0.11.1
+   Compiling lyon_geom v1.0.19
+   Compiling lyon_path v1.0.19
+   Compiling usvg v0.48.1
+   Compiling resvg v0.48.1
+   Compiling objc2-quartz-core v0.3.2
+   Compiling objc2-app-kit v0.3.2
+   Compiling i-slint-common v1.18.1
+   Compiling field-offset v0.3.6
+   Compiling num_enum_derive v0.7.6
+   Compiling core-foundation v0.9.4
+   Compiling core-graphics-types v0.1.3
+   Compiling objc2-foundation v0.2.2
+   Compiling const-field-offset v0.2.1
+   Compiling lyon_extra v1.1.0
+   Compiling url v2.5.8
+   Compiling rayon v1.12.0
+   Compiling serde_json v1.0.151
+   Compiling swash v0.2.10
+   Compiling image v0.25.10
+   Compiling num_enum v0.7.6
+   Compiling tracing-core v0.1.36
+   Compiling vtable v0.5.0
+   Compiling chrono v0.4.45
+   Compiling i-slint-core-macros v1.18.1
+   Compiling i-slint-compiler v1.18.1
+   Compiling tracing v0.1.44
+   Compiling parley v0.11.1
+   Compiling objc2-app-kit v0.2.2
+   Compiling core-graphics v0.23.2
+   Compiling lyon_algorithms v1.0.21
+   Compiling dispatch2 v0.3.1
+   Compiling taffy v0.10.1
+   Compiling cgl v0.3.2
+   Compiling slab v0.4.12
+   Compiling glutin v0.32.3
+   Compiling usher-i18n v0.0.9-alpha.1 (/Users/yuankai/yuankai/Demo/rust/usher/crates/usher-i18n)
+   Compiling crossbeam-channel v0.5.17
+   Compiling keyboard-types v0.7.0
+   Compiling i-slint-core v1.18.1
+   Compiling femtovg v0.27.0
+   Compiling winit v0.30.13
+   Compiling muda v0.19.3
+   Compiling glutin-winit v0.5.0
+   Compiling webbrowser v1.2.4
+   Compiling mac-notification-sys v0.6.15
+   Compiling i-slint-backend-selector v1.18.1
+   Compiling arboard v3.6.1
+   Compiling time v0.3.55
+   Compiling i-slint-renderer-femtovg v1.18.1
+   Compiling uuid v1.26.1
+   Compiling i-slint-backend-winit v1.18.1
+   Compiling dirs-sys v0.5.0
+   Compiling directories v6.0.0
+   Compiling slint-build v1.18.1
+   Compiling notify-rust v4.18.1
+   Compiling slint-macros v1.18.1
+   Compiling usher-messages v0.0.9-alpha.1 (/Users/yuankai/yuankai/Demo/rust/usher/crates/usher-messages)
+   Compiling slint v1.18.1
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 13s
+     Running unittests src/lib.rs (target/debug/deps/usher_messages-ea3118e78f7a132a)
+
+running 27 tests
+test center::persistence_tests::checked_shutdown_reports_durable_failure_without_retrying ... ok
+test center::persistence_tests::checked_shutdown_retains_both_durable_and_native_failure_causes ... ok
+test center::persistence_tests::native_byte_budget_includes_inflight_and_oversized_single_event_is_rejected ... ok
+test center::persistence_tests::deferred_shutdown_reports_accepted_state_without_finished_hydration ... ok
+test center::persistence_tests::deferred_shutdown_without_business_changes_is_successful ... ok
+test center::persistence_tests::native_notifier_shutdown_reentry_fails_without_self_join ... ok
+test center::persistence_tests::deferred_empty_hydration_persists_revision_zero ... ok
+test center::persistence_tests::shutdown_closes_new_actions_but_drains_an_already_admitted_publish ... ok
+test center::persistence_tests::ordinary_native_error_degrades_delivery_but_keeps_durable_flush_successful ... ok
+test center::persistence_tests::native_panic_is_observable_by_native_barrier_and_checked_shutdown ... ok
+test center::persistence_tests::failed_durable_flush_requires_explicit_same_revision_retry ... ok
+test center::persistence_tests::subscriber_shutdown_reentry_fails_before_an_external_shutdown_serial_lock ... ok
+test center::persistence_tests::subscribers_can_reenter_snapshot_and_action_creators ... ok
+test center::tests::native_delivery_defaults_to_unfocused_and_honors_explicit_policies ... ok
+test center::persistence_tests::checked_shutdown_waits_for_pending_durable_state_and_admitted_native_events ... ok
+test center::persistence_tests::slow_native_delivery_does_not_block_durable_flush_or_lose_inbox_messages ... ok
+test center::tests::persisted_messages_reload_in_newest_first_order ... ok
+test paging::tests::a_shrinking_result_clamps_to_the_last_nonempty_page ... ok
+test paging::tests::filtering_precedes_paging_and_borrows_the_original_records ... ok
+test paging::tests::pages_cover_history_once_with_a_fixed_projection_bound ... ok
+test center::persistence_tests::blocked_writer_keeps_only_active_and_latest_snapshot_then_reloads_newest ... ok
+test center::tests::every_changed_action_is_automatically_persisted ... ok
+test center::tests::publish_and_read_state_update_unread_count ... ok
+test center::tests::adapter_retries_are_idempotent_within_the_same_channel ... ok
+test center::persistence_tests::subscriber_shutdown_reentry_fails_without_closing_the_center ... ok
+test center::tests::subscribers_hydrate_immediately_and_follow_off_page_publishes ... ok
+test center::tests::deferred_hydration_merges_messages_published_during_startup ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+
+   Doc-tests usher_messages
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

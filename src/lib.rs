@@ -27,6 +27,8 @@ use dialog::setup_dialog;
 
 mod diagnostics;
 mod persistence_benchmark;
+#[cfg(test)]
+mod status_bar_tests;
 
 mod tray;
 use tray::setup_tray;
@@ -49,7 +51,7 @@ mod message_center;
 use message_center::MessagePageBridge;
 
 mod constants;
-use constants::shutdown_priority::PRIORITY_HIGH;
+use constants::shutdown_priority::{PRIORITY_HIGH, PRIORITY_NORMAL};
 
 mod chat;
 use chat::setup_chat;
@@ -147,8 +149,29 @@ fn ui(
     let ai_agent_settings =
         ai::settings_state::AiAgentSettingsFacade::open(loaded_settings.ai.agent.clone())
             .context("Failed to start AI Agent settings state")?;
+    let ai_settings_for_drain = ai_agent_settings.clone();
+    shutdown::register_async_drain("ai_agent_settings", move || {
+        Box::pin(async move {
+            if let Err(error) = ai_settings_for_drain.shutdown_async().await {
+                log::error!("[AI Agent][Settings] Shutdown failed: {error}");
+            }
+        })
+    });
     settings_page.configure_ai_agent_settings(ai_agent_settings.clone());
     let (message_center, message_page) = MessagePageBridge::open_deferred(startup_timeline)?;
+    let messages_for_drain = message_page.clone();
+    shutdown::register_async_drain("message_commands", move || {
+        Box::pin(async move {
+            messages_for_drain.shutdown_async().await;
+        })
+    });
+    // Final writer/delivery joins follow producer stops on a background worker.
+    let message_center_for_shutdown = message_center.clone();
+    shutdown::register_background_shutdown_task_with_priority(
+        "shutdown_message_center",
+        PRIORITY_HIGH,
+        move || message_center_for_shutdown.shutdown(),
+    );
     app.set_platform_is_macos(cfg!(target_os = "macos"));
     message_center.set_application_active(app.get_native_window_active());
     let message_center_for_activity = message_center.clone();
@@ -261,6 +284,8 @@ fn ui(
                 settings_page_for_language.sync_language(canonical);
                 message_page_for_language.sync_language(canonical);
                 workflow::sync_language(&app);
+                shortcuts::sync_language(&app);
+                update::updater::sync_language(&app);
                 artifact_preview::sync_language(&app);
                 terminal::sync_language(&app);
                 project::sync_language(&app);
@@ -399,21 +424,7 @@ fn ui(
     );
 
     // ========= AI Agent Settings ========= //
-    let app_weak_ai_agent_save = app.as_weak();
-    let settings_page_for_ai_save = settings_page.clone();
-    let ai_agent_settings_for_save = ai_agent_settings.clone();
-    AppState::get(&app).on_save_ai_agent_settings(move |_, _, _, _, _| {
-        let ai_agent_settings = ai_agent_settings_for_save.clone();
-        save_settings_with_feedback(
-            app_weak_ai_agent_save.clone(),
-            settings_page_for_ai_save.clone(),
-            SettingsSaveTarget::AiAgent,
-            "AI Agent settings",
-            "settings.feedback.ai_agent_saved",
-            "settings.feedback.ai_agent_save_failed",
-            move || ai_agent_settings.flush(),
-        );
-    });
+    ai::settings_ui::bind(&app, &settings_page, ai_agent_settings.clone());
 
     let app_weak_ai_agent_test = app.as_weak();
     let settings_page_for_ai_test = settings_page.clone();
@@ -649,7 +660,7 @@ fn ui(
 
     // ========= Notification ========= //
     // Single window: don't pass shared queue (use None)
-    setup_notifications(&app, None, message_center.clone());
+    setup_notifications(&app, None, message_center.clone(), message_page.commands());
     memory_diagnostics::log_checkpoint("startup.notifications_ready");
 
     // If multi-window application, want to truly share queue:
@@ -800,7 +811,22 @@ fn ui(
     //     }
     // }).ok();
 
+    shutdown::register_main_window(&app);
     shutdown::init_signal_handlers();
+    shutdown::register_async_drain("workflow", || Box::pin(workflow::state::shutdown_async()));
+    #[cfg(feature = "ai-code-review")]
+    {
+        // Registered after Hooks: whole Review/Ask continuations finish before
+        // Hook admission and downstream MessageCenter admission close.
+        let controller = ai_review_controller.clone();
+        shutdown::register_async_drain("ai_review_producers", move || {
+            Box::pin(async move {
+                if let Err(error) = controller.shutdown_async().await {
+                    log::error!("[AI Review] Shutdown drain failed: {error}");
+                }
+            })
+        });
+    }
     shutdown::register_pre_shutdown_task_with_priority("stop_auto_update", PRIORITY_HIGH, || {
         stop_auto_update();
     });
@@ -814,7 +840,7 @@ fn ui(
     shutdown::register_pre_shutdown_task_with_priority("shutdown_terminal", PRIORITY_HIGH, || {
         shutdown_terminal();
     });
-    shutdown::register_pre_shutdown_task_with_priority(
+    shutdown::register_background_shutdown_task_with_priority(
         "shutdown_request_preferences",
         PRIORITY_HIGH,
         move || {
@@ -829,7 +855,7 @@ fn ui(
         PRIORITY_HIGH,
         move || ai_agent_settings.shutdown(),
     );
-    shutdown::register_pre_shutdown_task_with_priority(
+    shutdown::register_background_shutdown_task_with_priority(
         "shutdown_project_state",
         PRIORITY_HIGH,
         move || project_controller.shutdown(),
@@ -840,14 +866,12 @@ fn ui(
         PRIORITY_HIGH,
         move || ai_review_controller.shutdown(),
     );
-    let message_center_for_shutdown = message_center.clone();
-    shutdown::register_pre_shutdown_task_with_priority(
-        "shutdown_message_center",
-        PRIORITY_HIGH,
-        move || message_center_for_shutdown.shutdown(),
-    );
     // Normal priority flushes preferences after the high-priority feature workers stop.
-    shutdown::register_pre_shutdown_task("flush_settings", settings::shutdown_saves);
+    shutdown::register_background_shutdown_task_with_priority(
+        "flush_settings",
+        PRIORITY_NORMAL,
+        settings::shutdown_saves,
+    );
     shutdown::register_ui_shutdown_task_with_priority("remove_tray", PRIORITY_HIGH, || {
         tray::remove_tray();
     });
@@ -1057,7 +1081,6 @@ pub fn main() {
             log::error!("[ArtifactPreview::Performance] failed to write trace: {error}")
         }
     }
-    app_runtime::shared_runtime().block_on(shutdown::drain_async_tasks());
     shutdown::run_cleanup_once("event-loop-exit");
     drop(ui);
     log::info!("[Shutdown] MainWindow dropped, native resources released");

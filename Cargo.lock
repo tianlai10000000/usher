@@ -7324,7 +7324,10 @@ name = "usher-preview"
 version = "0.0.9-alpha.1"
 dependencies = [
  "image",
+ "libc",
  "pulldown-cmark",
+ "rustix 1.1.5",
+ "tempfile",
  "tree-sitter",
  "tree-sitter-bash",
  "tree-sitter-go",

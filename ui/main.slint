@@ -570,6 +570,7 @@ export component MainWindow inherits Window {
     in property <string> workflow-tag-current-version: "v0.0.0";
     in-out property <string> workflow-tag-next-version: "v0.0.1";
     in-out property <string> workflow-tag-remove-target: "";
+    in-out property <string> workflow-tag-description: "";
     in property <bool> workflow-tag-add-initializing: false;
     in property <bool> workflow-tag-remove-initializing: false;
     in property <bool> workflow-tag-running: false;
@@ -829,6 +830,7 @@ export component MainWindow inherits Window {
     in-out property <bool> shell-drawer-fullscreen: false;
     in-out property <string> shell-drawer-title: I18n.common-terminal;
     callback workflow-branch-submit(string, string, bool);
+    callback workflow-tag-draft-edited(string,string,string);
     callback workflow-tag-change-mode(string);
     callback workflow-tag-select-version-mode(string);
     callback workflow-tag-run(string, string);
@@ -1372,6 +1374,7 @@ export component MainWindow inherits Window {
                             tag-current-version: root.workflow-tag-current-version;
                             tag-next-version <=> root.workflow-tag-next-version;
                             tag-remove-target <=> root.workflow-tag-remove-target;
+                            tag-description <=> root.workflow-tag-description;
                             tag-add-initializing: root.workflow-tag-add-initializing;
                             tag-remove-initializing: root.workflow-tag-remove-initializing;
                             tag-running: root.workflow-tag-running;
@@ -1426,6 +1429,7 @@ export component MainWindow inherits Window {
                             branch-submit(source, target, recreate-remote) => {
                                 root.workflow-branch-submit(source, target, recreate-remote);
                             }
+                            tag-draft-edited(next,target,description) => { root.workflow-tag-draft-edited(next,target,description); }
                             tag-change-mode(mode) => {
                                 root.workflow-tag-change-mode(mode);
                             }

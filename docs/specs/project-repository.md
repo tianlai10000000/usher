@@ -6,6 +6,23 @@ This specification covers provider metadata resolved on the Project page and the
 
 本文约束 Project 页面解析的 Provider 元数据，以及现有 Workflow PR Tab 中 Provider-neutral PR 列表所依赖的仓库上下文。完整的列表/审核/建议行为见 [Pull Request 工作流](pr-review.md)；不改变 RAG Chat 行为。
 
+## Change navigation / 修改导航
+
+| Change / 改动 | Start here / 代码入口 | Focused checks / 定向检查 |
+| --- | --- | --- |
+| Form/save and rollback / 表单、保存与回滚 | `src/project/controller.rs`, `state.rs`, `storage.rs`; `ui/features/project/bridge.slint`, `dialog.slint` | `cargo test --lib --locked project::`; `cargo test --test project_bridge_ui --locked` |
+| Provider identity and metadata / Provider 身份与元数据 | `src/git/mod.rs`, `provider.rs`, `locator.rs`, provider adapters | `cargo test --lib --locked git::`; negative origin/remote fixtures in [Security boundaries](security-boundaries.md) / 安全边界负例 |
+| Logo scheduling and projection / Logo 调度与投影 | `src/project/logo_requests.rs`, `logo_loader.rs`, `logo_prepare.rs`, `projection.rs` | `project::logo_requests`, `project::logo_loader`, `project::projection` library tests / 单测 |
+| Hook choices / Hook 选择 | `src/project/hook_selection.rs`; `ui/components/project/github_project_dialog.slint` | `project::hook_selection` library tests; shared draft UI test above / 单测及上方共享草稿 UI 测试 |
+| PR list/query/pagination / PR 列表、查询及分页 | See [PR workflow](pr-review.md#change-navigation--修改导航) / 见 PR 工作流 | Keep list behavior in that spec / 列表行为只在该规格维护 |
+
+These are iteration checks, not a substitute for the repository-wide handoff
+checks in `AGENTS.md`. UI changes also require native inspection and source plus
+one packaged non-source locale.
+
+这些是迭代入口，不替代 `AGENTS.md` 的交付检查。UI 改动还须原生检查，并覆盖源语言
+和至少一种内置非源语言。
+
 ## Ownership / 职责
 
 - `src/project/mod.rs` is the stable feature façade. `controller.rs` validates form data and
@@ -49,6 +66,16 @@ This specification covers provider metadata resolved on the Project page and the
 
 ## Project presentation input boundary / Project 展示输入边界
 
+Opening a Project submits its complete captured context to the ordered Workflow
+facade. The list and grid never navigate optimistically: only the matching
+committed project-selection effect hydrates the new Workflow fields and then
+navigates. Rejected admission stays on Project; it must not expose the previous
+project's editable workflow as if the selected project had opened.
+
+打开 Project 时，捕获完整上下文并提交到有序 Workflow 门面。列表/网格不提前跳转；
+只有身份匹配的项目选择 commit 完成后，才先投影新项目字段再进入 Workflow。
+拒绝准入时停留在 Project，不得展示上一项目的可编辑流程来冒充本次选择。
+
 The list row's open/focus area and pointer area use the same explicit origin and
 exclude trailing Terminal/Edit/Delete actions. An initially unfocused row must
 allow one pointer click on Edit to open the shared draft; tests must not warm it
@@ -79,7 +106,7 @@ GitLab 原文字节 8 MiB，GitHub/Gitee Base64 JSON 包装 12 MiB，`src/git/so
 7. If lookup, parsing, or local persistence fails, no new partial project record is written and an existing record remains unchanged. A failed optimistic add, update, or delete rolls the in-memory registry and Project UI back when that operation is still the current version; it must not overwrite a later edit.
 8. A duplicate save for the same project while a lookup is running is rejected. Network work must not block the Slint event loop.
 9. Opening Workflow selects `repo_project_id` and `repo_type` from the hydrated Project Store, then requests open PRs by default. It must not reread `projects.json` for each lookup. Open, closed, merged, and all are explicit caller-selected filters; provider APIs do not inject a default state query.
-10. The PR tab displays 10 records per page and bottom-centered pagination. It must lazily request only the page selected by the user. Page loads and Open/Closed total loads use independent typed generations so either request class can advance without invalidating the other. GitHub may issue one detail request for each visible row to enrich its search response with source and target branch names; these requests remain scoped to that selected page. All parseable provider `updated_at` timestamps are displayed in UTC+08:00. Branch pairs and Updated timestamps wrap to additional lines instead of eliding; when the list card is narrower than the table floor width, the table scrolls horizontally rather than dropping columns. The documented response `meta.total_count` and `meta.total_pages` determine the exact total and total pages where available. Stale responses must not overwrite the current project/filter/page.
+10. The PR tab displays 10 records per page with bottom-centered pagination and loads only the selected logical page. Page and Open/Closed Totals use independent typed generations. GitHub visible-row detail enrichment stays within that page and a failed row must not discard it. The current presentation uses wrapping titles and compact inline author/time/review/conflict segments, with branch chips alongside or below; there are no separate Branch/Updated table columns or table-floor horizontal-scroll contract. Parseable `updated_at` values use UTC+08:00. Confirmed provider totals/page counts drive numbered pagination; unknown totals remain lower bounds with directional navigation. Stale results cannot overwrite the current project/filter/page. Query, presentation and pagination details belong to [PR workflow](pr-review.md).
 11. `src/codereview/api/` must remain constants-only. It must not execute requests or own provider response models; endpoint changes must not require changing operation call sites.
 12. Project-card and Workflow environment counts use the persisted provider type/id and the same Git façade as the PR list. They run on the shared runtime, count only open requests whose normalized target branch is exactly `fat`, `uat`, or `prod`, and write UI state only from the Slint event loop.
 13. User-triggered project-registry reloads run on the shared runtime with
@@ -147,7 +174,13 @@ GitLab 原文字节 8 MiB，GitHub/Gitee Base64 JSON 包装 12 MiB，`src/git/so
 7. 查询、解析或本地持久化失败时，不写入新的不完整项目记录，已有记录也保持不变。乐观新增、更新或删除写入失败时，若该操作仍是当前版本，必须回滚内存注册表和 Project UI；不得覆盖后续编辑。
 8. 同一项目在查询未完成时重复保存必须被拒绝；网络工作不得阻塞 Slint event loop。
 9. 进入 Workflow 时从已 hydration 的 Project Store selector 读取 `repo_project_id`、`repo_type`，不得为每次查询重新读取 `projects.json`；默认查询 open PR。open、closed、merged、all 均由调用场景显式选择，Provider API 不自行注入默认状态 query。
-10. PR Tab 每页显示 10 条以及底部水平居中的分页，并且必须只懒加载用户选中的页。Page 加载与 Open/Closed 总数加载使用相互独立的强类型代际，任一类请求递增不得使另一类失效。GitHub 可以为当前可见的每一行补充发起一个详情请求，以从搜索响应中补齐源分支和目标分支；这些请求必须始终限定在已选中的页面内。所有可解析的 Provider `updated_at` 时间戳均按东八区（UTC+08:00）显示。Branch 与 Updated 列换行完整显示，不得省略号截断；列表卡片窄于表宽下限时横向滚动，而不是丢列。可用时使用接口响应中定义的 `meta.total_count`、`meta.total_pages` 显示准确总条数和总页数；旧项目、旧筛选或旧页码响应不得覆盖当前视图。
+10. PR Tab 每页 10 条，分页底部居中，只懒加载当前逻辑页。Page 与 Open/Closed
+    Totals 使用独立强类型代际；GitHub 详情补全只覆盖当前页，单行失败不得丢弃整页。
+    当前展示使用换行标题及紧凑的作者/时间/评审/冲突行内片段，分支胶囊跟随或整体换行；
+    不再采用独立 Branch/Updated 表格列或最小表宽横向滚动规则。可解析的 `updated_at`
+    按东八区显示。已确认总数/页数驱动编号分页，未知总数保留为下界并只提供方向导航。
+    旧项目、筛选和页码响应不能覆盖当前视图；查询、展示及分页详情统一见
+    [PR 工作流](pr-review.md)。
 11. `src/codereview/api/` 必须保持仅包含常量，不得执行请求或持有 Provider 响应模型；修改接口地址时不应要求修改业务调用点。
 12. Project 卡片和 Workflow 环境计数使用持久化的 Provider 类型/id，并与 PR 列表共用 Git façade。任务运行在共享 runtime，只统计归一化目标分支严格为 `fat`、`uat`、`prod` 的 open 请求，且只能在 Slint event loop 回写 UI。
 13. 用户主动刷新项目注册表时，存储读取在共享 runtime 的 blocking task 中

@@ -14,7 +14,7 @@ experiments and acceptance reports retain their original historical context.
 | --- | --- |
 | [项目 README](../README.zh.md) · [English](../README.md) | 产品范围、环境与支持的命令 / Product, setup and supported commands |
 | [架构](architecture.zh.md) · [English](architecture.md) | 模块归属、状态与生命周期 / Ownership, state and lifecycle |
-| [规格索引](specs/README.md) | 稳定行为契约与专项验收矩阵 / Behavior contracts and acceptance matrices |
+| [规格索引](specs/README.md) | 按任务选择功能/横切契约、代码入口与专项验收 / Task-based feature/shared contracts, code entry points and acceptance |
 | [构建性能与产物策略](build-performance.md) | 构建、IDE、profile 与清理命令 / Build, IDE, profiles and cleanup |
 | [P6 回归协议](p6-regression.md) | 重复负载、A/B 门禁与原始证据要求 / Repeated-load protocol and evidence gates |
 | [内存待办](memory_optimization_backlog.zh.md) · [English](memory_optimization_backlog.md) | 基线、活跃任务及采用阈值 / Baselines, active tasks and acceptance thresholds |

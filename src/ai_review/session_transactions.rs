@@ -138,6 +138,10 @@ impl SessionTransactions {
         let _completion = self.completion.lock().unwrap_or_else(|p| p.into_inner());
         self.closed.store(true, Ordering::Release);
     }
+    #[cfg(test)]
+    pub(super) fn set_write_probe(&self, probe: Arc<dyn Fn() + Send + Sync>) {
+        *self.write_probe.lock().unwrap() = Some(probe);
+    }
     fn owner(&self, id: &ReviewTaskId) -> Arc<TaskOwner> {
         let mut owners = self.owners.lock().unwrap_or_else(|p| p.into_inner());
         owners.retain(|_, owner| owner.strong_count() != 0);

@@ -4,6 +4,7 @@
 //! conflict-free matching, scope checks, user-facing labels, and command
 //! dispatch so feature modules do not duplicate modifier or platform rules.
 
+use std::cell::RefCell;
 use std::fmt;
 use std::sync::OnceLock;
 
@@ -204,15 +205,7 @@ pub(crate) fn start_initialization(ui: &MainWindow) {
     ui.set_shortcut_initialization_visible(true);
     ui.set_shortcut_initialization_failed(false);
     ui.set_shortcut_initialization_progress(0.1);
-    ui.set_shortcut_initialization_status(crate::i18n::tr("shortcuts.loading").into_owned().into());
-    ui.set_shortcut_initialization_detail(
-        shortcut_status_detail(
-            "shortcuts.status_loading",
-            "shortcuts.status_waiting",
-            "shortcuts.status_waiting",
-        )
-        .into(),
-    );
+    set_initialization_phase(ui, InitializationPhase::Registry);
 
     let ui_weak = ui.as_weak();
     Timer::single_shot(std::time::Duration::from_millis(16), move || {
@@ -225,19 +218,7 @@ pub(crate) fn start_initialization(ui: &MainWindow) {
         }
 
         ui.set_shortcut_initialization_progress(0.6);
-        ui.set_shortcut_initialization_status(
-            crate::i18n::tr("shortcuts.loading_input")
-                .into_owned()
-                .into(),
-        );
-        ui.set_shortcut_initialization_detail(
-            shortcut_status_detail(
-                "shortcuts.status_ready",
-                "shortcuts.status_loading",
-                "shortcuts.status_waiting",
-            )
-            .into(),
-        );
+        set_initialization_phase(&ui, InitializationPhase::Input);
         schedule_platform_bridge(ui.as_weak(), 0);
     });
 }
@@ -266,19 +247,7 @@ fn schedule_platform_bridge(ui_weak: slint::Weak<MainWindow>, attempt: u8) {
         };
         if crate::platform::install_shortcut_input_bridge(&ui) {
             ui.set_shortcut_initialization_progress(1.0);
-            ui.set_shortcut_initialization_status(
-                crate::i18n::tr("status.shortcuts_ready")
-                    .into_owned()
-                    .into(),
-            );
-            ui.set_shortcut_initialization_detail(
-                shortcut_status_detail(
-                    "shortcuts.status_ready",
-                    "shortcuts.status_ready",
-                    "shortcuts.status_ready",
-                )
-                .into(),
-            );
+            set_initialization_phase(&ui, InitializationPhase::Ready);
             log::info!("[Shortcut] Initialization complete");
             return;
         }
@@ -295,18 +264,69 @@ fn schedule_platform_bridge(ui_weak: slint::Weak<MainWindow>, attempt: u8) {
 
 fn fail_initialization(ui: &MainWindow, message: &str) {
     ui.set_shortcut_initialization_failed(true);
-    ui.set_shortcut_initialization_status(
-        crate::i18n::tr("shortcuts.unavailable").into_owned().into(),
-    );
-    ui.set_shortcut_initialization_detail(
-        shortcut_status_detail(
-            "shortcuts.status_failed",
-            "shortcuts.status_failed",
-            "shortcuts.status_failed",
-        )
-        .into(),
-    );
+    set_initialization_phase(ui, InitializationPhase::Failed);
     log::error!("[Shortcut] {message}");
+}
+
+#[derive(Clone, Copy)]
+enum InitializationPhase {
+    Registry,
+    Input,
+    Ready,
+    Failed,
+}
+
+thread_local! {
+    static INITIALIZATION_PHASE: RefCell<Option<(slint::Weak<MainWindow>, InitializationPhase)>> = const { RefCell::new(None) };
+}
+
+fn set_initialization_phase(ui: &MainWindow, phase: InitializationPhase) {
+    INITIALIZATION_PHASE.with(|state| *state.borrow_mut() = Some((ui.as_weak(), phase)));
+    project_initialization_phase(ui, phase);
+}
+
+pub(crate) fn sync_language(ui: &MainWindow) {
+    let phase = INITIALIZATION_PHASE.with(|state| {
+        state.borrow().as_ref().and_then(|(weak, phase)| {
+            weak.upgrade()
+                .filter(|window| std::ptr::eq(window.window(), ui.window()))
+                .map(|_| *phase)
+        })
+    });
+    if let Some(phase) = phase {
+        project_initialization_phase(ui, phase);
+    }
+}
+
+fn project_initialization_phase(ui: &MainWindow, phase: InitializationPhase) {
+    let (status, registry, input, command) = match phase {
+        InitializationPhase::Registry => (
+            "shortcuts.loading",
+            "shortcuts.status_loading",
+            "shortcuts.status_waiting",
+            "shortcuts.status_waiting",
+        ),
+        InitializationPhase::Input => (
+            "shortcuts.loading_input",
+            "shortcuts.status_ready",
+            "shortcuts.status_loading",
+            "shortcuts.status_waiting",
+        ),
+        InitializationPhase::Ready => (
+            "status.shortcuts_ready",
+            "shortcuts.status_ready",
+            "shortcuts.status_ready",
+            "shortcuts.status_ready",
+        ),
+        InitializationPhase::Failed => (
+            "shortcuts.unavailable",
+            "shortcuts.status_failed",
+            "shortcuts.status_failed",
+            "shortcuts.status_failed",
+        ),
+    };
+    ui.set_shortcut_initialization_status(crate::i18n::tr(status).as_ref().into());
+    ui.set_shortcut_initialization_detail(shortcut_status_detail(registry, input, command).into());
 }
 
 fn shortcut_status_detail(
@@ -581,6 +601,52 @@ mod tests {
             ShortcutRegistry::new(DUPLICATES),
             Err(RegistryError::DuplicateBinding { .. })
         ));
+    }
+
+    #[test]
+    fn mounted_shortcut_popup_reprojects_its_explicit_phase_without_resetting_progress() {
+        use i_slint_backend_testing::ElementHandle;
+        use slint::platform::{PointerEventButton, WindowEvent};
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().unwrap();
+        ui.window().dispatch_event(WindowEvent::Resized {
+            size: slint::LogicalSize::new(1000.0, 600.0),
+        });
+        ui.set_platform_is_macos(false);
+        ui.set_show_navigation_drawer(false);
+        ui.set_shortcut_initialization_visible(true);
+        ui.set_shortcut_initialization_progress(1.0);
+        crate::i18n::apply_preference("en").unwrap();
+        set_initialization_phase(&ui, InitializationPhase::Ready);
+        ElementHandle::find_by_accessible_label(&ui, "Shortcuts ready")
+            .next()
+            .unwrap()
+            .mock_single_click(PointerEventButton::Left);
+        let content = ElementHandle::find_by_element_id(&ui, "GitHubStatusBar::popup-content-text")
+            .next()
+            .unwrap();
+        for locale in ["zh-CN", "en"] {
+            crate::i18n::apply_preference(locale).unwrap();
+            sync_language(&ui);
+            assert!(content.is_valid());
+            assert_eq!(
+                content.accessible_label().unwrap(),
+                ui.get_shortcut_initialization_detail()
+            );
+            assert_eq!(ui.get_shortcut_initialization_progress(), 1.0);
+        }
+        ui.set_shortcut_initialization_failed(true);
+        set_initialization_phase(&ui, InitializationPhase::Failed);
+        assert!(content.is_valid());
+        assert_eq!(
+            content.accessible_label().unwrap(),
+            shortcut_status_detail(
+                "shortcuts.status_failed",
+                "shortcuts.status_failed",
+                "shortcuts.status_failed"
+            )
+        );
     }
 
     #[test]

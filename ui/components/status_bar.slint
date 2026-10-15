@@ -173,9 +173,32 @@ export component GitHubStatusBar inherits Rectangle {
     callback open-messages();
     // Internal popup state - using enum to track which popup is active
     property <ActivePopup> active-popup: ActivePopup.None;
-    property <string> popup-title: "";
-    property <string> popup-content: "";
+    // Popup identity stays local; content remains a live catalog/state binding.
+    out property <string> popup-title:
+        root.active-popup == ActivePopup.UpdateCheck ? I18n.status-update-check :
+        root.active-popup == ActivePopup.DownloadProgress ? I18n.status-download-progress :
+        root.active-popup == ActivePopup.Shortcut ? I18n.status-shortcut-status :
+        root.active-popup == ActivePopup.Network ? I18n.status-network-status :
+        root.active-popup == ActivePopup.Version ? I18n.common-version : "";
+    out property <string> popup-content:
+        root.active-popup == ActivePopup.UpdateCheck ? I18n.status-checking-update :
+        root.active-popup == ActivePopup.DownloadProgress
+            ? I18n.status-downloading + ": " + UpdateLogic.new-version + "\n"
+                + I18n.common-progress + ": " + Math.round(UpdateLogic.download-progress * 100) + "%\n"
+                + I18n.status-status + ": " + UpdateLogic.download-status :
+        root.active-popup == ActivePopup.Shortcut ? root.shortcut-initialization-detail :
+        root.active-popup == ActivePopup.Network
+            ? (AppState.network-online ? I18n.status-network-connected : I18n.status-network-disconnected) :
+        root.active-popup == ActivePopup.Version ? I18n.common-version + ": " + AppState.version : "";
     
+    private property <bool> popup-trigger-active:
+        root.active-popup == ActivePopup.UpdateCheck ? UpdateLogic.checking-update :
+        root.active-popup == ActivePopup.DownloadProgress ? UpdateLogic.is-downloading :
+        root.active-popup == ActivePopup.Version ? AppState.version != "" : true;
+    changed popup-trigger-active => {
+        if (!root.popup-trigger-active) { root.active-popup = ActivePopup.None; }
+    }
+
     // Popup dimensions
     property <length> popup-width: root.active-popup == ActivePopup.Shortcut ? 360px : 220px;
     property <color> canvas-default: GitHubTheme.canvas-default;
@@ -311,8 +334,6 @@ export component GitHubStatusBar inherits Rectangle {
                         if (root.active-popup == ActivePopup.UpdateCheck) {
                             root.active-popup = ActivePopup.None;
                         } else {
-                            root.popup-title = I18n.status-update-check;
-                            root.popup-content = I18n.status-checking-update;
                             root.active-popup = ActivePopup.UpdateCheck;
                         }
                     }
@@ -337,10 +358,6 @@ export component GitHubStatusBar inherits Rectangle {
                             if (root.active-popup == ActivePopup.DownloadProgress) {
                                 root.active-popup = ActivePopup.None;
                             } else {
-                                root.popup-title = I18n.status-download-progress;
-                                root.popup-content = I18n.status-downloading + ": " + UpdateLogic.new-version + "\n" +
-                                    I18n.common-progress + ": " + Math.round(UpdateLogic.download-progress * 100) + "%\n" +
-                                    I18n.status-status + ": " + UpdateLogic.download-status;
                                 root.active-popup = ActivePopup.DownloadProgress;
                             }
                         }
@@ -418,8 +435,6 @@ export component GitHubStatusBar inherits Rectangle {
                         if (root.active-popup == ActivePopup.Shortcut) {
                             root.active-popup = ActivePopup.None;
                         } else {
-                            root.popup-title = I18n.status-shortcut-status;
-                            root.popup-content = root.shortcut-initialization-detail;
                             root.active-popup = ActivePopup.Shortcut;
                         }
                     }
@@ -472,10 +487,6 @@ export component GitHubStatusBar inherits Rectangle {
                         if (root.active-popup == ActivePopup.Network) {
                             root.active-popup = ActivePopup.None;
                         } else {
-                            root.popup-title = I18n.status-network-status;
-                            root.popup-content = AppState.network-online
-                                ? I18n.status-network-connected
-                                : I18n.status-network-disconnected;
                             root.active-popup = ActivePopup.Network;
                         }
                     }
@@ -501,8 +512,6 @@ export component GitHubStatusBar inherits Rectangle {
                         if (root.active-popup == ActivePopup.Version) {
                             root.active-popup = ActivePopup.None;
                         } else {
-                            root.popup-title = I18n.common-version;
-                            root.popup-content = I18n.common-version + ": " + AppState.version;
                             root.active-popup = ActivePopup.Version;
                         }
                     }
@@ -557,7 +566,7 @@ export component GitHubStatusBar inherits Rectangle {
                 spacing: 8px;
                 padding: 12px;
 
-                if root.popup-title != "" : Text {
+                if root.popup-title != "" : popup-title-text := Text {
                     width: root.popup-width - 24px;
                     text: root.popup-title;
                     font-size: 14px;
@@ -566,9 +575,10 @@ export component GitHubStatusBar inherits Rectangle {
                     overflow: elide;
                 }
 
-                if root.popup-content != "" : Text {
+                if root.popup-content != "" : popup-content-text := Text {
                     width: root.popup-width - 24px;
                     text: root.popup-content;
+                    line-height-factor: 1.0;
                     font-size: 12px;
                     color: root.fg-muted;
                     wrap: word-wrap;

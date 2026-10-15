@@ -20,6 +20,9 @@ Git 只写临时 bare 对象。进程树 guard 已归入 `app_runtime/process_tr
 共享冲突状态组件仅在检查中挂载 `GitHubSpinner`，列表与工作区共用固定图标占位
 和本地化状态文案，检查完成后恢复静态状态图标。
 已打开的冲突会话重复进入不触发加载，重新加载由显式刷新操作负责。
+工作区 Back 取消读取/准备并释放快照与重型 model，只保留文件数量徽标。再次进入
+重新读取并选择首个文件，不恢复文件选择/滚动；关闭整个 Review 时徽标也清除。
+详见[冲突契约](specs/pr-conflicts.md)。
 冲突工作区独立拥有可拖动文件栏的宽度；入口复用模型驱动的 UnderlineNav，保持标准间距和单行。
 不足时完整的末尾 Tab 收入根层“更多”菜单，Tab 与菜单计数统一超过 99 显示 99+。
 Workflow、Tag 操作和组件演练页复用相同的实测布局。
@@ -199,7 +202,7 @@ i18n catalog 构建脚本从当前 Cargo 调用定位仓库输入；共享 targe
 | --- | --- |
 | `src/main.rs` | 最小二进制入口，转发到库入口。 |
 | `src/lib.rs` | 导入并重新导出生成的 UI API，创建 `MainWindow`、初始化模块、绑定跨模块 callback，并管理窗口和关闭流程。 |
-| `crates/usher-ui/` | 负责 Slint build script 和生成的 Rust API；编译仓库根目录的 `ui/main.slint` 树，并导出窗口、global、model、struct 和 enum；`src/pagination.rs` 负责共享的有界 Primer 页码链接投影。 |
+| `crates/usher-ui/` | 负责 Slint build script 和生成的 Rust API；编译仓库根目录的 `ui/main.slint` 树，并导出窗口、global、model、struct 和 enum；`crates/usher-ui/src/pagination.rs` 负责共享的有界 Primer 页码链接投影。 |
 | `crates/usher-i18n/` | 与框架无关的 locale 注册表和编译后消息 catalog。构建阶段校验根 `i18n/` manifest/PO 资产、生成强类型 Slint `I18n` global，并为每个独立编译的 UI 根准备索引完全一致的翻译 bundle；运行时 locale 解析与 Rust 文案查询不依赖具体 UI 引擎。 |
 | `crates/usher-messages/` | 独立编译的消息中心包：持久领域/存储服务、快照订阅、后台持久化/原生投递 Worker、`notify-rust` OS 适配器及生成的 Inbox 页面 API。可嵌入 Slint 页面使用 library-module 模式编译，不再依赖已废弃的非 Window 根组件兼容路径。 |
 | `crates/usher-search/` | 与框架无关的通用 Find 引擎：Unicode 安全的非重叠文本命中、首尾循环的相邻结果导航，以及 Chromium/Blink `CenterIfNeeded` 视口策略。Feature 只提供领域/model 与视觉换行适配。 |
@@ -210,10 +213,10 @@ i18n catalog 构建脚本从当前 Cargo 调用定位仓库输入；共享 targe
 | `src/ai/` | OpenAI-compatible transport、Feature 自有的强类型/持久化 AI Agent 配置 Store，以及位于 `prompts.toml` 的唯一受版本控制内置 Prompt catalog；`prompts.rs` 以 strict 模式渲染强类型、有界的 AI Chat、AI Review、Review Ask 消息 envelope 与纯元数据 provenance。 |
 | `src/app_runtime.rs` | 进程级 Tokio runtime，生产默认使用 2 个 worker；runtime 线程安装 tracing dispatch，并保留显式环境覆盖用于受控基准。 |
 | `src/memory_diagnostics.rs` | 统一采集进程 RSS/footprint 与生命周期高水位、启动/运行元数据、有界 Slint model 占用、UI 尺寸关联，以及可取消的周期内存采样。 |
-| `src/diagnostics.rs` | 崩溃运行哨兵、保留策略 Worker、日志目录打开与隐私有界的诊断归档导出。共享日志级别契约区分正常生命周期记录与失败/fallback 诊断；`src/logger/debug_logger.rs::flush_application_log` 在最终清理总结与 `MainWindow` 释放记录之后直接 flush 实际应用文件 sink。详见[诊断日志](specs/diagnostics.md)。 |
+| `src/diagnostics.rs`, `src/diagnostics/archive.rs` | 门面保留哨兵、保留策略调度与目录打开；归档 owner 串行完成私有临时文件、唯一发布及成功前最多五份的保留策略。共享日志级别契约区分正常生命周期记录与失败/fallback 诊断；`src/logger/debug_logger.rs::flush_application_log` 在最终清理总结与 `MainWindow` 释放记录之后直接 flush 实际应用文件 sink。详见[诊断日志](specs/diagnostics.md)。 |
 | `src/startup.rs` | 启动 elapsed/delta 时间轴，以及把磁盘 hydration 和高开销图片投影延后到首帧后的单次任务队列。 |
 | `src/platform/` | 跨平台原生集成边界。`macos.rs` 负责 AppKit 外观、标题栏附件、窗口交互通知、原生标题栏点击桥接、PR Review 字体注册、`NSSound` 点击音和 Auto 主题实时跟随；同时成对管理并在正常关闭时注销 NSEvent monitor、窗口/主题 observer 与独立 Preview resize observer。`windows.rs` 负责 Windows 主题检测与 `MessageBeep`；`linux.rs` 负责 XDG Portal 主题检测和不阻塞 UI 的桌面音效播放。`mod.rs` 提供统一 API、Auto 主题监听开关（全平台 1 秒轮询兜底），以及用操作系统文件管理器打开目录（Finder / Explorer / `xdg-open`）。 |
-| `src/shutdown.rs` | 按优先级协调关闭。正常关闭在 event loop 执行 UI/AppKit 清理；若 event-loop dispatch 失败，后台兜底只执行线程安全的 pre/post 清理并跳过 UI/AppKit。 |
+| `src/shutdown.rs`, `src/shutdown/pipeline.rs` | 按序协调异步发布方排空、原线程发布方停止、后台阻塞屏障及原线程 UI/AppKit、Logger 清理。dispatch 失败时跳过 UI/AppKit；共享阶段所有权保持优先级与仅一次完成。 |
 | `src/single_instance.rs` | 进程锁与有界文件信号唤起通道；第二次启动时让已有窗口重新显示并获得焦点。 |
 | `src/tray.rs` | 桌面托盘和托盘触发的生命周期操作。macOS 路由已完成的左/右键 mouse-up，临时挂载 `NSStatusItem.menu` 并通过 `performClick:` 进入原生追踪，返回后解除挂载以恢复主点击。追踪 guard 在嵌套 run loop 期间持有原生对象并抑制激活 observer 唤起。Quit 使用 `tray.quit`，由 `src/lib.rs` 语言 callback 调用 `tray::sync_language` 刷新。`src/tray/animation.rs` 负责虎鲸跳跃的 event-loop Timer 与按实际 elapsed 选帧；平台 adapter 预载原色原生图片（macOS 使用非 template 图片）、恢复启动时选定的静止图，并在托盘清理前停止播放。原生菜单验收仍待完成。详见[托盘行为](specs/tray.md)。 |
 
@@ -246,6 +249,8 @@ i18n catalog 构建脚本从当前 Cargo 调用定位仓库输入；共享 targe
 | `src/toast.rs` | 单条短时 Toast 管理器绑定。 |
 | `src/notification.rs` | 通知队列、计时器、Hover 暂停、操作按钮和图标。 |
 | `src/message_center.rs` | 主窗口与 `usher-messages` 之间的薄桥接层；同步主题/视口、下发 All/Unread/Read 计数，并把不可变快照转换为独立页面 Slint model。 |
+| `src/message_center/focus.rs`, `src/message_center/focus/navigation.rs` | 仅在 event loop 处理 Inbox 键盘所有权：将中立鼠标焦点交给真实宿主 adapter、转发既有应用快捷键，并跨 static factory 按已挂载可用控件遍历。赋予 Tab 焦点前，按真实滚动视口精确显示选中目标。不得承担持久化、reducer 或 Worker 工作。 |
+| `src/message_center/commands.rs`、`src/notification/ingress.rs` | UI 消息的有序有界命令与 ticket 完成；领域 reduction 留在命令 Worker，非 Send Banner payload 在 event loop 以独立预算持有。 |
 | `src/dialog.rs` | 命令式 `DialogManager` 绑定与操作分发；不再拥有独立视觉变体。 |
 
 仓库接口地址与可执行行为必须保持分离：`src/git/` 可以引用 `src/codereview/api/` 中的常量，但 `src/codereview/api/` 不得依赖 `src/git/`、`src/http/`、reqwest 或 serde。
@@ -287,8 +292,19 @@ conversation `message_id` 字段兼容旧 JSON：新操作按 ID 合并，重试
 `retained_task_owners` 及 `SessionDrainReceipt`/`SessionDrainError` 是仅在
 `#[cfg(test)]` 下编译的验收接口。测试 drain 只报告持有的 Session IO 完成与有界
 失败信息，不代表当前生产退出 drain，也不证明 controller 的终态 Task Action、
-Message Center 发布或 Hook 事件已经完成。生产关闭仍先取消 Review/Ask，再停止
-任务持久化，最后停止配置持久化；不调用全局 Session drain。
+Message Center 发布或 Hook 事件已经完成。生产改由 `src/ai_review/producers.rs`
+在首次 poll 前为启动恢复、Review、Ask 和 Session read 捕获完整操作 permit。
+关闭先拒绝新准入、取消工作并完成保留的启动恢复，再等待已接受 continuation
+（包括终态 Message/Hook 发布），随后在后台关闭任务/配置 writer。该 async drain
+早于 Hooks 及最终 MessageCenter close；Session 聚合测试 API 仍独立。同值 Save/
+Ask 显式重试恢复后，不会仅因旧尝试失败而把正常关闭判为失败。
+
+通用 Preview File 来源由 `crates/usher-preview/src/file_source.rs` 校验并读取同一
+普通文件句柄。分块读取在 metadata 后文件增长时仍保证 payload 与 Vec 请求容量
+不超过 16 MiB，以额外一个栈字节检测溢出；Unix nonblocking open 不等待 FIFO writer。
+通用来源允许普通 symlink，仓库 Markdown 仍使用独立的验证 containment 策略。
+取消在每次 read 之间协作检查，Windows device/pipe 尚未原生验证。详见
+[Preview](specs/artifact-preview.md)。
 
 结构门禁保留原 controller/根窗口预算，并增加提取模块规模与反向 controller
 依赖检查。CI 仅支持手工触发；直接 push `main` 或创建 PR 都不会启动第二个
@@ -391,6 +407,11 @@ Material UI 源码。Material palette、typography 和 style metrics 不定义�
 Tooltip 向左展开，状态浮层共享同一父坐标系。各页面不得重复实现这两类 Shell
 Surface。详见 [specs/status-bar.md](specs/status-bar.md)。
 
+展开的状态浮层只保留语义选择与锚点，catalog 标题/正文持续绑定实时 Feature 状态。
+快捷键初始化保留强类型阶段及所属 weak window；`src/update/download_status.rs`
+保留下载语义阶段/字节数。根语言回调重投影两者，不重启工作或重开浮层；操作结束
+后在下一 UI turn 关闭已不可用的浮层。
+
 导航侧栏及其内容边界装饰作为根 Shell 层挂载在包括 PR Review 在内的普通路由
 表面之上，同时仍低于 Modal 遮罩。固定侧栏使用清晰可见且贯穿完整高度的 1px
 边界与克制的内向 Elevation 阴影；临时 Hover 侧栏改为不透明白色、只有边框、尾部上下
@@ -489,14 +510,14 @@ AI Review 回复触发的 Preview 绑定到该 Review task 的仓库上下文。
 action 后，由 Worker 解析并读取文件：Unix 从一次打开的 canonical 根目录 descriptor
 逐 component 遍历并拒绝 link；Windows 比较已打开根目录和目标句柄的最终路径。验证后的
 普通文件句柄执行大小限制并只读取一次，之后才提交给共用 Preview Provider 管线。
-Docked 模式把唯一的应用 Preview host 移入 PR Shell 既有的右侧 trailing slot：Preview
+应用内 Docked/Floating 模式把唯一的 Preview host 移入 PR Shell 既有的右侧 trailing slot：Preview
 Surface 临时替换 AI Review Surface，既不重复预留宽度，也不清空 conversation；关闭
 Preview 后恢复完整对话。Detached 模式保持独立原生窗口，不卸载 AI Review 面板。
 PR Dialog 始终绘制在两种停靠 Surface 之上。
 
 关闭 AI Review 面板或离开 `Route.PrReview` 时，清空行内回复投影、不透明 action 映射
-和 task 仓库绑定；仅当当前 PR 上下文 Preview 处于 Docked 模式时，同时关闭该 Preview。
-已经 Detached 的 Preview 作为独立应用窗口继续存在。只关闭 Docked Preview 不触发
+和 task 仓库绑定；当前 PR 上下文 Preview 处于 Docked 或 Floating 模式时，同时关闭该 Preview。
+已经 Detached 的 Preview 作为独立应用窗口继续存在。只关闭应用内 Preview 不触发
 AI Review 清理。关闭 AI 面板或离开 PR 路由会取消当前 Ask，避免迟到结果进入重开的
 mount；独立调度的 Review task 继续运行。
 
@@ -519,12 +540,13 @@ API，并由 `src/settings_page.rs` 与 `src/message_center.rs` 显式桥接。
 `AppState`、把 callback 转发给 `MainWindow`，并同步后续状态变化，不能假定两边
 global 自动共享。Messages Inbox 行只把动作枚举与锚点矩形发布到专用的 factory 本地
 `MessageTooltipOverlayState`，由页面唯一的 `GitHubMessageTooltipOverlayHost` 在一个
-`GitHubTransientFloatingOverlayHost` 中把枚举映射到三个相互独立的字面量 Surface，
+`GitHubTransientFloatingOverlayHost` 中把枚举映射到三个相互独立的固定动作 I18n Surface，
 任何标签字符串都不穿过列表 delegate。Settings 为共享控件挂载本地通用
 `GitHubTooltipOverlayHost`；该 Portal 同样使用 transient facade，并在每个新 claim token
 到来时重建文本测量 Surface。Settings 与 Messages 都在首次访问后惰性创建一个稳定的
-factory 产品。Slint 1.17.1 销毁并重挂载跨 crate 产品时可能复用错误的控件文案或
-placeholder，因此离开路由只隐藏这些 host；各 Feature bridge 分别负责状态重置生命周期，
+factory 产品。历史 Slint 1.17.1 调查曾观察到跨 crate 产品重挂载后复用错误文案或
+placeholder；在当前固定版本完成新的原生重入验收前，继续保留该 host 契约，离开路由
+只隐藏这些 host；各 Feature bridge 分别负责状态重置生命周期，
 并把 transient host 切为非活动。
 
 Settings factory host 位于窗口根层、状态栏上方；普通 ScrollView 保持内容面板的
@@ -539,8 +561,8 @@ Dialog 打开时，模态可见状态隐藏 Hover 侧栏并禁用边缘触发区
 覆盖处正常遮挡。此时抑制原生绘制并保留输入屏蔽层，原生布局更新同步图像几何；
 关闭后释放图像并按最新导航状态恢复原生控件。
 
-在单次 Settings factory 产品内部，Slint 1.17.1 的选择器内容必须使用固定挂载的
-叶子节点，并通过 `visible` 与显式活动高度选择当前内容。禁止用 `if` 节点重建互斥的
+在单次 Settings factory 产品内部，选择器遵循应用自有 factory 隔离契约，必须使用
+固定挂载的叶子节点，并通过 `visible` 与显式活动高度选择当前内容。禁止用 `if` 节点重建互斥的
 section 或 provider 表单，否则重复 Tab 切换可能保留兄弟节点的标签、
 placeholder、值或选中态。路由级选择索引必须从哨兵值开始，并在下一次 UI tick 切到
 默认值，以便新建视觉树主动失效旧绑定。选择器文字、选中样式和显示字段必须来自同一
@@ -589,8 +611,8 @@ Settings 页面级 Select 以独立页面视口作为碰撞边界，固定状态
 Escape 取消，方向键及 Home/End 移动活动选项，Enter/Space 确认选择。
 选项用前导勾选标记表示当前值，不再复用导航行的选中样式。UI Components 使用同一
 弹层，并包含相邻输入框与禁用触发器；示例浮层挂载在 `MainWindow` 根层。
-分组示例从零偏移普通触发器的视口原点加自身局部偏移计算锚点，避免 Slint 1.17.1
-继承组件的 `absolute-position` 重复计入组件偏移。两个示例菜单的活动选项仅在自身
+分组示例从零偏移普通触发器的视口原点加自身局部偏移计算锚点，避免未经验证的继承
+`absolute-position` 重复计入组件偏移。两个示例菜单的活动选项仅在自身
 所属选择器展开时获取焦点。
 Select 不铺设整页输入遮罩。现有窗口指针观察器在目标处理完点击后报告鼠标释放，
 Settings bridge 将页面局部坐标转发到独立 global graph，排除触发器与实际菜单区域
@@ -610,17 +632,19 @@ Settings 打开期间，凭据、Endpoint 与 AI Agent 文本字段都采用页�
 代码托管分组只有点击各自可见的 Save 命令才提交完整草稿。AI Agent 另用一份已提交的
 强类型 Store 快照供 Settings 之外的 Chat 与 Review 消费。选择预设只在独立页面草稿中
 原子更新 Provider、Base URL 与 Model，其他编辑同样不修改 `MainWindow` 或 Store。
-Save 经 `src/ai/settings_state.rs` 把完整草稿 dispatch 为一个强类型 Action，随后 bridge
-把规范化后的已提交快照投影到页面与 `MainWindow`。有效 commit 自动进入 Store 自有的
-持久化 worker，并通过既有原子 TOML 边界写入 `[ai.agent]`；显式 flush 成功后才显示
-保存反馈。每次进入 Settings 路由时，bridge 都在稳定 factory host 绘制前，用最近提交的
+Save 把完整草稿捕获到 `src/ai/settings_state.rs` 的有界 FIFO（含活动保存最多八项），
+Worker 执行强类型 Action 并等待持久化 flush。`src/ai/settings_ui.rs` 在 event loop
+投影每个 receipt，另持独立八项 UI owner 预算直至回调完成或丢弃：请求顺序保护宿主已提交状态，factory 身份、路由访问与未变化草稿
+保护可编辑字段，仅最新尝试拥有保存反馈。有效 commit 通过既有原子 TOML 边界写入
+`[ai.agent]`；显式同值 Save 可重试失败写入。每次进入 Settings 路由时，bridge 都在稳定 factory host 绘制前，用最近提交的
 宿主/Store 快照覆盖这些页面局部草稿，不能再分别读取多个选择器字段。因此未点击 Save
 就离开再返回时，编辑会被丢弃，但视觉树不会重挂载。
 
 Messages 同样在首次访问后保留稳定 factory 根与页面外壳。`MessageSnapshot::page`
 先筛选不可变历史，再选取每页 20 条；`src/message_center.rs` 只把当前页转换为
 Slint 行。总数/未读/已读计数仍描述完整 Store。切换筛选回到第一页但保留滚动位置，
-仅在筛选后内容变短导致位置越界时校正；主动翻页滚动到顶部。删除导致页码
+仅在筛选后内容变短导致位置越界时校正；鼠标翻页滚动到顶部，键盘翻页保持焦点所在
+分页栏可见。删除导致页码
 越界时回退到新的末页。页面只持有筛选、页码与滚动展示状态，列表下方使用 Primer
 分页控件。逐行边框拼成完整外框并保留四个 6px 圆角；圆角裁剪仅用于首末行，禁止
 生成整表离屏纹理。保留 20 个轻量 delegate 槽位并逐行更新，避免重建 delegate
@@ -628,15 +652,15 @@ Slint 行。总数/未读/已读计数仍描述完整 Store。切换筛选回到
 清空全部消息数据，重新进入时查询最新 Store 快照再激活，因此非活动 Inbox 不保留
 投影消息数据。逐次重建页面外壳的
 Release A/B 没有测得实质 RSS 节省，且 physical footprint 出现混合回退，因此该
-候选被拒绝。Messages 操作 Portal 因而把三个固定字面量 Surface 保留在单一 transient
+候选被拒绝。Messages 操作 Portal 因而把三个固定动作 catalog Surface 保留在单一 transient
 host 中，并在类型为 `None` 或离开路由时把该 host 切为非活动。两个 factory 页面都
 通过共享生命周期 facade 复用与 `MainWindow` 相同的锚点式 offset/flip/shift/size
 实现，但不尝试跨 factory 边界共享 global 实例。修改 `settings.slint` 或
 `messages.slint` 不得重新生成或编译
 `usher-ui`；修改主壳仍会重编主生成 crate。启用 `SLINT_LIVE_PREVIEW` 时，两套独立
-build script 都会刻意保持 factory 产品为静态生成，因为 Slint 1.17 的
-`ComponentFactory` 不能接收 live
-preview 动态 handle；主窗口与 UI Components 路由仍可正常热更新。
+build script 都在编译静态 factory 产品期间临时移除该环境变量，随后恢复。主窗口与
+UI Components 路由仍可正常热更新；这是当前构建边界，不表示每次升级后都重新验收了
+历史 Slint 限制。
 
 设置页宽屏导航在距视口顶部 16px 处吸顶，并受导航列底部约束。
 Hook 选择浮层按索引乘以统一的 32px 行高定位选项，确保执行历史和事件
@@ -693,15 +717,29 @@ Hook 选择浮层按索引乘以统一的 32px 行高定位选项，确保执行
 `usher-state-store::StateStore` 接口与稳定 Feature 门面之后。强类型 Action 是唯一
 变更入口；有效 reduction 安装带单调 revision 的不可变快照并自动通知订阅者，新
 订阅者立即从当前快照 hydration。订阅者 revision guard 防止延迟回调覆盖更新的 UI
-状态。Slint bridge 仍只是 event-loop adapter，不能成为 Store 引擎。
+状态。Slint bridge 仍只是 event-loop adapter，不能成为 Store 引擎。UI 变更回调在
+非阻塞准入前捕获强类型命令和身份，由 Feature 自有的有序 Worker 执行 reducer 与
+持久化屏障；Action 不像 pending 快照那样合并。Inbox 操作和 Banner 镜像共用
+`src/message_center/commands.rs`，通知完成以独立 ticket 经 weak handle 回写 UI。
+异步命令 drain 完成已接受变更并 flush；最终 MessageCenter close 在
+`src/shutdown/pipeline.rs` 的后台阶段执行，位于有优先级的发布方停止之后、
+回到原线程清理 UI/AppKit 之前。并发退出路径共享同一个实际屏障。
 
 需要持久化的 Store owner 使用通用 `PersistentStore` 门面：每个有效 revision 排队到
 单一 Worker，相邻待处理快照合并为最新 State，flush/shutdown 保持应用关闭边界；
 reducer 与 Slint event loop 不执行文件 I/O。deferred store 在强类型启动 hydration 后
-才启用持久化，使首帧后加载不会冗余回写已读取快照。包括内置 `LocalStateStore` 在内
+才启用持久化；避免冗余回写已读取快照仍是契约。消息 hydration 只成功初始化一次，
+在安装自动 observer 后比较当前合并状态与磁盘基线；纯磁盘/空状态恢复不写盘，
+有效差异仍持久化，详见[消息规格](specs/messages.md)。包括内置 `LocalStateStore` 在内
 的具体引擎都隐藏在 trait 之后。未来社区 Redux/Pinia 类库只能以 adapter 方式接入，
 并保持 Action、Feature 门面、Schema、revision/hydration 契约和测试不变。详见
 [specs/state-store.md](specs/state-store.md)。
+
+普通 subscriber 忙碌时合并为最新 revision，不保证每个 Action 一次回调；顺序事件
+另用事件通道。`PersistentStore::shutdown` 当前返回 `()` 并移除持久化 observer，
+既不返回 Worker 关闭错误，也不关闭 Store Action 准入。checked 关闭/flush 与准入
+屏障由 Feature 生命周期门面负责；不能把它当作会返回错误的
+`LatestPersistence::shutdown` 或 `MessageCenter::shutdown_checked` 的替代品。
 
 ## 构建产物策略
 
@@ -757,6 +795,15 @@ unpacked 策略升级后，开发者应执行一次完整 `cargo clean`；后续
 9. 首帧渲染完成后，在下一次 event-loop turn 统一调度：由 blocking worker 读取 Project JSON、投影并解码 Logo、hydration 持久消息与 AI Review Task State。强类型 Hydrate Action 会合并启动期间新增的数据，随后才恢复自动持久化。
 10. 安装托盘并进入 Slint event loop。第二个进程只向唤起通道写入 nonce；主进程在 event loop 重新显示已有窗口并置前。
 11. 关闭时通过优先级清理 Terminal、Updater、Tray、Runtime 和子进程。创建主窗口、`show()`、原生输入桥和 event loop 失败时显示平台原生启动告警并以非零状态退出，不再 panic。
+
+显式退出先在 event loop 隐藏根窗口，关闭 UI 准入，再通过共享 async drain 完成
+已接受工作；AI Review 与 Workflow 的终态发布先于 Hooks 关闭。之后才取出清理
+注册表，保留排空期间新增的注册。按优先级在原线程执行 pre 回调，停止其余发布方；
+Message Center、Project 和请求偏好的阻塞 join 进入后台阶段，普通优先级 Settings
+flush 位于高优先级 Feature join 之后。UI/AppKit 卸载和最终 Logger flush 回到
+原线程；同优先级保持注册逆序。自然 event-loop 返回共用这些 drain 与完成屏障，
+取消或并发等待方不能越过正在执行的阶段或 finalizer。本次保留既有失败日志/退出
+策略，不采用历史已拒绝的 P7 #77 策略。
 
 macOS 原生句柄暂未就绪的预期重试使用 `DEBUG`；到达 1200 ms 显示截止时间时，
 若 Chrome 仍未就绪，显示可见 fallback 时记录一次 `WARN`。普通关闭生命周期
@@ -865,7 +912,7 @@ MainWindow、Settings 与 Messages root 在同一个 event-loop turn 重新绘�
 Slint event loop 之外执行。完成结果回到 event loop 后，只有持久化成功
 才更新临时 Saved 标签，并为最终结果显示一个底部 Toast。
 `settings/save_worker.rs` 拥有单个最新状态偏好 Writer；每次请求重置 100ms 去抖
-截止时间，最多一个正在执行的保存和一个待处理请求。普通优先级 pre-shutdown 在
+截止时间，最多一个正在执行的保存和一个待处理请求。普通优先级后台关闭阶段在
 高优先级 Feature 关闭后跳过去抖、flush 并 join；显式凭据/Provider 保存保留原有
 反馈和串行原子写路径。Provider 高频读取通过细粒度 `with_settings`/`with_git` 访问，
 不再 clone 整棵 Settings；API base 解析事实按精确配置值进入有界进程缓存。
@@ -885,14 +932,24 @@ model 和键盘交互契约。
 不影响 Inbox 发布；notifier panic 仍可观测。短 Action permit 覆盖 hydration/
 发布，但不跨 subscriber callback 持锁；checked shutdown 排空两个 Worker 并
 保留双方失败原因，生命周期重入在等待前拒绝。deferred State 已变化但 hydration
-未启用持久化时不得报告保存成功。Shell 仍使用既有 pre-shutdown 接线；P7 #77
-候选已拒绝，将关闭等待移出 event loop 的迁移尚未完成。
+未启用持久化时不得报告保存成功。Shell 在发布方停止之后、UI 清理之前的后台阶段
+关闭中心；自然 event-loop 返回共享相同 async drain 与后台屏障。本次范围小于历史
+已拒绝的 P7 #77，不引入累计历史错误的退出判定。
 投递策略与分类、语义级别正交：普通事件使用 `WhenUnfocused`，明确的应用内事件使用
 `Never`，严重或诊断事件可使用 `Always`。Shell 把窗口活动状态传给消息服务，避免
 应用聚焦时 Banner 与系统通知重复。
 已读状态、单条删除和批量操作都会发布不可变快照；根桥接层在 event loop 更新未读数
 和独立页面 model。关闭短时 Banner 不得修改持久 Inbox。详见
 [specs/messages.md](specs/messages.md)。
+
+Inbox 分页显式区分鼠标激活：鼠标翻页仍回到顶部，再由中立页面 scope 接管宿主焦点，
+使 Return/Space 不会激活旧侧栏或业务动作；键盘翻页保留已挂载链接槽位的焦点并显示
+分页栏，数字标签可随相邻页窗口重投影而改变，Previous/Next 的方向语义不变。
+Factory capture scope 将 Tab/Shift+Tab 与独立 Backtab 委托给已挂载宿主焦点 owner；
+赋予 Tab 焦点前，先按真实 Flickable 边界以最小垂直位移显示选中目标，避免离屏行的
+Clip 使反向遍历落入 Slint 固定向前 fallback。它继续转发既有根快捷键；
+非活动/Modal 页面按键被阻断，离开路由只释放本页焦点。行和分页槽位
+继续稳定挂载；固定 Slint 适配边界及原生验收见 Messages spec。
 
 消息契约把入口 `channel` 与业务 `category` 分开。内置键覆盖通用、Webhook、软件更新
 和 CD 流程消息，但分类使用开放字符串词表，因此 Feature 新增分类无需修改消息中心。
@@ -972,7 +1029,15 @@ Workflow 顶层 PR/Tag/Branch/CD 导航和 Tag Add/Remove 导航统一复用
 Result 统一位于 `ui/components/workflow/`，在紧凑宽度下自适应，并使用应用自有
 GitHub 控件。
 
-`WorkflowStore` 保存当前项目和各项目的 `WorkflowViewState`。切换项目必须重新绑定 UI，避免日志、步骤和 running 标记串到其他项目。`Route.Workflow` 与 `Route.PrReview` 构成同一生命周期域：两者之间切换保留 Workflow 列表/model 状态；临时进入域外路由时，只要仍可通过 Back 返回任一 Workflow 路由，也继续保留这些状态。
+`WorkflowStore` 通过强类型 `SharedWorkflowState` 门面与 `StateStore` 接口保存
+当前项目及项目级 `WorkflowViewState`。有界 FIFO 在 blocking Worker reduce，
+有效 commit 自动投影最新 revision；64 个操作 owner 覆盖排队命令、副作用、取消中的
+任务和待消费 UI callback。项目身份加选择代际拒绝迟到的 A→B→A 结果。Project
+卡片/列表只在身份匹配的选择 commit 投影新字段后跳转；拒绝准入时留在 Project。
+Tag 草稿保留完整原始输入，并以 pending-input 护栏保护新编辑。`Route.Workflow`
+与 `Route.PrReview` 构成同一生命周期域：两者之间切换保留 Workflow 列表/model
+状态；临时进入域外路由时，只要仍可通过 Back 返回任一 Workflow 路由，也继续保留。
+详见 [Tag](specs/tag.md)。
 
 跨页面 Back/Forward 由 `src/router/` 统一维护有界双历史栈：直接导航把当前路由压入 Back 并清空 Forward；Back 把当前路由移入 Forward；Forward 执行相反操作。Slint 只渲染当前路由并委托历史动作，不再自行改写单槽位的 `previous-route`。不改变 Route 的页内下钻返回点由对应 feature controller 管理。Back 先消费 feature 页内返回点，再弹出全局路由历史。只要任一历史栈仍保留 Workflow 路由，它就是可恢复的活动目标，因此从 PR 详情临时打开设置、关于或其他页面时不得清理审核状态；只有 Workflow 域既不是当前路由、也无法通过历史导航恢复时，才释放重状态。`RouteLifecycleHooks` 同时提供普通 transition hook 与命名 scope-unreachable hook；Chat 可见性和 Workflow 清理由 `src/app_lifecycle.rs` 而不是 Router 注册。hook 只在 Router history lock 与 hook registry borrow 释放后执行，因此回调可以安全重入应用代码。
 
@@ -996,7 +1061,7 @@ GitHub 控件。
 
 应用 Shell 统一拥有一个 240px 桌面侧栏。持久化固定状态驱动同一个可中断、按显示帧推进的弹簧，移动侧栏、内容表面、标题栏分割线和状态栏绘制起点。Slint 显示动画时钟把真实帧间隔交给闭式阻尼振子，因此在 120Hz 屏幕上每个渲染帧都会更新位置，延迟帧也不会积累固定步长误差；目标反转保留当前进度和速度。路由只在运动开始时采用一次目标布局宽度，状态栏透明宿主与右侧常驻工具组保持窗口坐标。连续点击标题栏按钮重定向同一运动，不排队旧回调。原生 Live Resize 会把侧栏运动吸附到目标，冻结已挂载路由宽度，并在拖拽结束后一次应用最终宽度。固定态边界 Elevation 由主内容面拥有并只向侧栏方向投射；取消固定后，窗口左侧 8px Hover 热区把同一侧栏作为只有边框、尾部上下圆角的根层临时浮层打开。macOS 通过原生标题栏附件提供侧栏、Back 和 Forward。面包屑占用剩余原生标题栏安全区，原生附件、Slint 面包屑和尾部操作统一按完整 46px inset 中轴线对齐。macOS 的 `NSVisualEffectView` 固定为 240px 宽，只在侧栏下方提供 Menu/BehindWindow 材质；Slint 渲染器下方另有与当前主题 Canvas 一致的全窗口不透明原生底面，GPU Surface resize 晚一帧时也不会在右侧露出壁纸蓝色。Vibrancy 安装先切换全尺寸透明标题栏样式，再在窗口仍不透明时挂上 Effect 与底面，最后才打开透明窗口路径并使用近透明背景而非 `clearColor`；整个过程在启动窗口 alpha 门控期间的同一个 AppKit 事务内完成，避免启动瞬间侧栏透出桌面内容。固定侧栏按 Codex 桌面 Settings 的实现，在 Effect 上先绘制深色 `#131313cc` 页面底层，再绘制 `#212121a6` 导航层；两层按 source-over 合成后的不透明 fallback 取整为 `#1d1d1d`。激活状态浅色仍为 `#ffffffa6`。失去 Key 后隐藏 Effect，原生 `#000000` 深色或 `#f9f9f9` 浅色 fallback 保留在渲染层下方。按钮可用状态由 Router 历史驱动；三端共享 Router callback 和侧栏偏好，平台代码不持有路由历史。
 
-Workflow PR 列表与全窗口审核工作区统一通过 `src/git/` 的 Provider-neutral façade 请求数据。`RepoContext` 一次性校验当前项目持久化的 Provider/id 与 `remote_repo`，随后列表、详情/diff、仓库文件、review state、review submit、merge 和 revert 均由对象安全的 `GitProvider` 分发；`ProviderCapabilities` 统一暴露 endpoint 能力，UI 不自行推断。共享 JSON 解码与分页 helper 归 `src/git/json.rs` 所有。`workflow/pr_review.rs` 是稳定 façade，`workflow/pr_review/controller.rs` 负责异步编排和 UI 回写；共享缓存/Diff 所有权与头像 I/O 分别位于 `cache.rs`、`avatar.rs`。固定源码对齐与 hunk 展开纯算法位于 `workflow/pr_review/hunk.rs`，本地文件树构建与分类位于 `workflow/pr_review/file_tree.rs`，Unified/Split 行映射位于 `workflow/pr_review/diff_projection.rs`，Slint 惰性行适配器位于 `workflow/pr_review/diff_model.rs`，选择几何与剪贴板投影位于 `workflow/pr_review/selection.rs`，Conversation/Commit 展示与范围映射位于 `workflow/pr_review/timeline.rs`。审核控制器只持有一份共享且不可变的归一化 diff，其 feature 自有 state-store façade 为 diff、高亮、展开、Conversation、Commits、远端 action-state 读取和远端 mutation 保存七类独立强类型 generation。归一化详情会把每个基础文件移动到独立 `Arc` 中，当前文件的惰性 model 与高亮任务直接共享该分配，不再深拷贝全部行；只有展开 hunk 时才创建对应文件的写时复制 override。Provider HTML 与 Diff 别名在 adapter 边界解码。`DiffChangeType` 和 `DiffLineKind` 在仓库、hunk、搜索、高亮与 AI unified-diff 逻辑中保持强类型，仅由 Slint 惰性适配器投影为既有字符串。每条 diff 记录在进入固定高度的 Slint 行渲染前都会归一为不含 CR/LF 控制符的单个视觉源码行。收起文件时删除 override 并重新使用共享基础文件。hunk 展开或应用内查看完整文件时按固定 head/base commit 懒加载源码；修改文件展开时会在本地对齐两份固定版本，确保单侧独有行不会丢失。每文件 Diff 高亮使用 4 项 LRU，固定源码文本使用 3 项 LRU；完整文件高亮 model 只是临时 UI 状态。当前 Diff 通过只读惰性适配器暴露给 Slint，最多物化 64 行转换后的 UI 数据；完整高亮结果继续由 Rust 持有，以保留任意语言支持和快速滚动。所有异步回写均由对应 generation 防止迟到响应污染当前项目或 PR。
+Workflow PR 列表与全窗口审核工作区统一通过 `src/git/` 的 Provider-neutral façade 请求数据。`RepoContext::discover` 解析 remote locator，`ProjectContext::from_saved` 再校验当前项目持久化的 Provider/id，随后列表、详情/diff、仓库文件、review state、review submit、merge 和 revert 均由对象安全的 `GitProvider` 分发；`ProviderCapabilities` 统一暴露 endpoint 能力，UI 不自行推断。共享 JSON 解码与分页 helper 归 `src/git/json.rs` 所有。`workflow/pr_review.rs` 是稳定 façade，`workflow/pr_review/controller.rs` 负责异步编排和 UI 回写；共享缓存/Diff 所有权与头像 I/O 分别位于 `cache.rs`、`avatar.rs`。固定源码对齐与 hunk 展开纯算法位于 `workflow/pr_review/hunk.rs`，本地文件树构建与分类位于 `workflow/pr_review/file_tree.rs`，Unified/Split 行映射位于 `workflow/pr_review/diff_projection.rs`，Slint 惰性行适配器位于 `workflow/pr_review/diff_model.rs`，选择几何与剪贴板投影位于 `workflow/pr_review/selection.rs`，Conversation/Commit 展示与范围映射位于 `workflow/pr_review/timeline.rs`。审核控制器只持有一份共享且不可变的归一化 diff，其 feature 自有 state-store façade 为 diff、高亮、展开、AI finding Reveal、Conversation、Commits、远端 action-state 读取和远端 mutation 保存八类独立强类型 generation。归一化详情会把每个基础文件移动到独立 `Arc` 中，当前文件的惰性 model 与高亮任务直接共享该分配，不再深拷贝全部行；只有展开 hunk 时才创建对应文件的写时复制 override。Provider HTML 与 Diff 别名在 adapter 边界解码。`DiffChangeType` 和 `DiffLineKind` 在仓库、hunk、搜索、高亮与 AI unified-diff 逻辑中保持强类型，仅由 Slint 惰性适配器投影为既有字符串。每条 diff 记录在进入固定高度的 Slint 行渲染前都会归一为不含 CR/LF 控制符的单个视觉源码行。收起文件时删除 override 并重新使用共享基础文件。hunk 展开或应用内查看完整文件时按固定 head/base commit 懒加载源码；修改文件展开时会在本地对齐两份固定版本，确保单侧独有行不会丢失。每文件 Diff 高亮使用 4 项 LRU，固定源码文本使用 3 项 LRU；完整文件高亮 model 只是临时 UI 状态。当前 Diff 通过只读惰性适配器暴露给 Slint，最多物化 64 行转换后的 UI 数据；完整高亮结果继续由 Rust 持有，以保留任意语言支持和快速滚动。所有异步回写均由对应 generation 防止迟到响应污染当前项目或 PR。
 
 PR Review 将逻辑选区与 shaped-text 几何分离：`selection.rs` 负责行/字符范围和剪贴板
 投影；`text_geometry.rs` 是 styled-run 与软换行 caret 命中及范围边界的可替换数值门面，
@@ -1007,6 +1072,13 @@ PR Review 将逻辑选区与 shaped-text 几何分离：`selection.rs` 负责行
 重叠的绘制矩形。Slint 继续
 原生绘制 `syntect` token model，且不导入 Parley 类型。不嵌入 WebView/浏览器编辑器；
 门面缓存有界，滚动或 resize 路径不执行 Find viewport 定位工作。
+
+Local Tag Add 读取排序后的本地标签。Local Remove 初始化与删除成功后的刷新执行
+`fetch origin --tags --force` 和 `ls-remote --tags --refs origin`，Local 不表示离线。
+初始化复用有界流式进程驱动，每命令 30 秒 deadline，取消时清理进程树。完整 Tag
+草稿（含 description）归 Workflow，由真实 editor `edited` callback 原子提交，
+跨面板/路由重挂保留。进度只有一个可替换 mailbox，终态 commit 前排空；旧运行/
+导航代际不得重置较新输入。Windows 进程/job attach 仍需原生验收，见 [Tag](specs/tag.md)。
 
 Tag 工作流采用相同的 façade 模式：`workflow/tag.rs` 暴露绑定和刷新，
 `tag/controller.rs` 负责项目状态、UI 序列、取消和命令执行，`tag/version.rs`
@@ -1085,7 +1157,7 @@ Gitee 企业版 Conversation 只使用 PAT 鉴权的 v8 API。detail/current-sta
 
 审核页头采用 GitHub 的两步命令模型。标题旁的 GitHub 风格就绪徽标使用 Primer 语义色渲染归一化类型/详情，但合并语义由各 adapter 独立负责：GitHub 映射 REST mergeability，Gitee 企业版映射 v8 `current_state` 条件，Gitee 公有版只映射 v5 字段，GitLab 映射 `detailed_merge_status` 并请求异步重算。共享 enum 只是展示边界，绝不能把一个 Provider 的判定条件套到另一个 Provider。`Review changes` 提交显式的 Provider-neutral Comment、Approve 或 Request changes；不受支持的选项保持可见但禁用。Conversation Tab 底部另有 GitHub 风格纯文本评论框（`Write` + 绿色 `Comment`），提交同一 Comment 动作。符合条件的 `review_summary` 行使用 GitHub 的逐条评审 kebab 与必填原因的 `Dismiss review` 弹窗；页头聚合状态只作展示。Provider-neutral 撤回门面在仓库权限允许时把选中的 review id 交给 GitHub dismissal endpoint；GitLab 先写入原因 note，再撤销当前 Token 用户的 approval；Gitee 企业版通过实际可用的 Web API 路由 `/api/code/api/{full_path}/-/pull_requests/{iid}/reviews` 撤回当前 Token 用户的评审，请求体严格为 `{"state":"initialized"}`。没有该 Web 路由的企业版部署会静默回退到文档规定的 v8 reviews 路由，成功后再以 best-effort MR note 记录必填原因；Gitee 公有版 v5 不具备撤回能力。Provider 成功后刷新远端状态，绝不自动开始合并。`Merge pull request` 只由最新的归一化 `PullRequestActionState` 启用，并且只展示 adapter 返回的策略。GitHub 支持仓库启用的 merge、squash、rebase；Gitee 企业 v8 映射评审状态，Approve 未填写 summary 时省略可选的 `comment` 字段，并按 `restrict_merge_type` 支持 merge、squash、rebase、fast-forward；Gitee 公有 v5 支持评论和 merge/squash，但没有 approve/request-changes endpoint。GitLab 支持评论、批准，以及携带 SHA 防护的 merge/squash 和显式删除来源分支；项目 `squash_option` 限制可选策略，稳定版 REST API 没有对应写命令，因此 Request changes 保持禁用。
 
-审核文件树使用 GitHub 的平台 UI 字体栈（macOS 使用 SF 系统 UI 字体，Windows 使用 Segoe UI），代码区使用平台等宽字体栈。文件树保留虚拟化 `ListView`；Diff 行改由 `usher-virtual-list` 精确行高门面计算，并在 `ScrollView` 中挂载稳定、有界的 Slint overscan model。宽度/model revision 只重建轻量行 extent，普通滚动则增量移除和追加可见行。分隔线实时调整面板宽度；移动手柄以当前宽度叠加剩余的局部指针位移，使分隔线贴合指针，同时避免重建完整文件树或 Diff。会话宽度限制为 220–520 px 且不超过审核区宽度的 45%，确保 Diff 仍是主要区域。可见性对齐 GitHub Primer `$width-md`（768px）：宽度越过临界值向下时自动折叠、向上时自动展开；工具栏开关在任意宽度下都可用，受限工作区自动收起后仍可手动打开。应用窗口最小宽度为 800px，因此普通桌面 Resize 不再到达该内部断点；响应式规则继续用于受限 Host 和直接工作区测试。
+审核文件树使用 GitHub 的平台 UI 字体栈（macOS 使用 SF 系统 UI 字体，Windows 使用 Segoe UI），代码区使用平台等宽字体栈。文件树保留虚拟化 `ListView`；Diff 行改由 `usher-virtual-list` 精确行高门面计算，并在 `GitHubPassiveScrollView` 中挂载稳定、有界的 Slint overscan model。宽度/model revision 只重建轻量行 extent，普通滚动则增量移除和追加可见行。分隔线实时调整面板宽度；移动手柄以当前宽度叠加剩余的局部指针位移，使分隔线贴合指针，同时避免重建完整文件树或 Diff。会话宽度限制为 220–520 px 且不超过审核区宽度的 45%，确保 Diff 仍是主要区域。可见性对齐 GitHub Primer `$width-md`（768px）：宽度越过临界值向下时自动折叠、向上时自动展开；工具栏开关在任意宽度下都可用，受限工作区自动收起后仍可手动打开。应用窗口最小宽度为 800px，因此普通桌面 Resize 不再到达该内部断点；响应式规则继续用于受限 Host 和直接工作区测试。
 
 审核工作区从 macOS 原生标题栏 inset 下方开始并复用 Shell 原生 Back。根渲染树固定在窗口 `x=0`，普通页头、Tab 和 Diff 内容通过内部左内缩跟随 Shell 弹簧，并在运动开始时只采用一次目标宽度。原生 Live Resize 时工作区保持上一次稳定内部几何直到拖拽结束，避免整棵已冻结/虚拟化审核树反复重排，同时 Dialog 使用全窗口坐标。Shell 先把 Back 交给审核控制器，真正离开时再使请求失效并由 Router 返回 Workflow。PR 操作位于标题栏；就绪 ActionMenu 在窗口根层渲染。文件筛选和文件操作菜单仍是互斥工作区 Popover，并支持第一次点击直接切换目标。
 
@@ -1121,9 +1193,10 @@ Conversation 与 Commits 的 commit 链接会按 SHA 定位并复用 Files chang
 
 PR 展示层遵循统一 UI 边界：列表、筛选、分页、审核外壳、文件树和 diff
 等可复用控件位于 `ui/components/`，组件符号以 `GitHub` 开头；
-`ui/views/workflow/` 只负责全窗口路由装配。公开的 `@material`
-ListView/ScrollView 可以为大型时间线、文件树和 diff 提供虚拟化，但不拥有产品
-排版、配色、焦点状态或控件外观；这些能力全部由项目自有 GitHub 组件负责。
+`ui/views/workflow/` 只负责全窗口路由装配。时间线/文件树通过
+`ui/components/github_scroll_view.slint` 的应用自有精确名称 `ListView` wrapper
+虚拟化；Diff 使用 `GitHubPassiveScrollView` 与精确 `usher-virtual-list` 门面。
+这些底层宿主不拥有产品排版、配色、焦点状态或控件外观；全部由项目自有 GitHub 组件负责。
 空白/错误状态复用 `GitHubBlankslate`，图标操作复用 `GitHubIconButton`。
 
 PR Review 为 diff、高亮、展开、AI finding Reveal、远端 action-state 读取、远端 mutation、Conversation 与 Commits 使用八个相互独立的 typed state-store 代际；启动 action-state 刷新不会使正在执行的 mutation 失效，启动一种惰性读取也不会使另一种失效。切换 PR、手动 Reload 与 ignore-whitespace 变更通过一个 reducer action 使八类代际全部失效；强刷绕过 diff 缓存、清空惰性 Tab model，并重新加载当前 Tab。Provider changed-file 分页共用一个有界收集器；最后一页仍满时把归一化 detail 标记为 `files_truncated`，Files changed 明确展示该限制。Conversation block 按解析后的 RFC3339 时刻而不是 Provider 原始字符串比较。Merge 能力采用 fail-closed：必需的 Review/approval 状态读取失败时，action-state bridge 清空全部写能力并发布不可用 readiness。
@@ -1151,7 +1224,7 @@ Provider adapters
   项目注册表、本地 token/配置、HTTP client/interceptors、runtime
 ```
 
-展示层不接收 Provider JSON 或凭据；Provider adapter 不拥有 UI 状态。仓库服务层通过 `RepoContext` 一次性校验持久化 Provider/id 与 remote URL，再由对象安全的 `GitProvider` 分发全部读写操作；`ProviderCapabilities` 统一暴露空白过滤和服务端回退等能力，UI 不自行推断。通用 JSON 解码与分页 helper 归 `src/git/json.rs` 所有。当前应用通过 Slint、Tokio 和 feature 自有 state-store 门面实现这些层；长期契约是归一化的 page/item/diff/source/action-state 数据，以及 [PR 工作流规格](specs/pr-review.md)定义的“最新请求优先”生命周期。Approve/Comment/Request changes 等决策只通过 Provider review 命令写入远端。
+展示层不接收 Provider JSON 或凭据；Provider adapter 不拥有 UI 状态。仓库服务层通过 `RepoContext::discover` 解析 remote，再由 `ProjectContext::from_saved` 校验持久化 Provider/id，再由对象安全的 `GitProvider` 分发全部读写操作；`ProviderCapabilities` 统一暴露空白过滤和服务端回退等能力，UI 不自行推断。通用 JSON 解码与分页 helper 归 `src/git/json.rs` 所有。当前应用通过 Slint、Tokio 和 feature 自有 state-store 门面实现这些层；长期契约是归一化的 page/item/diff/source/action-state 数据，以及 [PR 工作流规格](specs/pr-review.md)定义的“最新请求优先”生命周期。Approve/Comment/Request changes 等决策只通过 Provider review 命令写入远端。
 
 ### Chat
 
@@ -1312,9 +1385,9 @@ Toast、Dialog demo 路由已删除。关闭 feature 时，两个侧边栏都不
    list。
 4. 点击回复标题会把原始 Markdown 提交给 Artifact Preview；点击仓库 token 时，先在
    当前 task 投影中查表，再由 Worker 相对该 task 的本地仓库解析路径。
-5. 唯一的 Docked Preview host 复用 PR trailing slot，只临时隐藏而不清空 AI Review
+5. 唯一的应用内 Docked/Floating Preview host 复用 PR trailing slot，只临时隐藏而不清空 AI Review
    Surface；关闭 Preview 后恢复。Detached Preview 不参与该替换。
-6. 关闭 AI 面板或离开 PR 路由时，清空回复投影、token 映射和仓库绑定；仅关闭 Docked
+6. 关闭 AI 面板或离开 PR 路由时，清空回复投影、token 映射和仓库绑定；关闭 Docked 或 Floating
    的 PR 上下文 Preview；已经 Detached 的 Preview 和后台 Review 工作继续独立存在，
    当前 Ask 被取消，mount generation 会拒绝迟到 Worker commit。
 7. Ask 投递在 mount/task guard 之外另有独立 generation。状态 key 在 mutex 内核验
@@ -1442,12 +1515,20 @@ Rust 或 Slint 改动至少运行：
 cargo fmt --all
 cargo check --locked
 cargo test --lib --locked
+cargo test --doc --locked
 git diff --check
 ```
 
 Terminal viewport/session、更新取消、托盘关闭和路由布局需要做针对性手工验证。所有未执行检查和新增失败必须单独报告。
 
 ## 已知技术债
+
+- [消息](specs/messages.md) UI-120 的旧侧栏焦点问题已修复。macOS 中英文鼠标与
+  正向键盘分页、禁用方向描边清理、放大还原、快捷键及路由重入已通过专项原生回归。
+  原生反向遍历仍缺可信输入：CUA Shift+Tab 在普通宿主控件
+  间也表现为前进；Windows 和读屏未测。原生应用最小为 800 × 600px，强制 640px
+  组件 fallback 属于 compiled 边界覆盖。详见
+  [专项回归记录](validation/ui120-macos-focus-20261015/README.md)。
 
 - `Route.UiComponents` 是由 `ui-components` 控制的长期维护开发演练场；旧
   Login/Tools/List/Detail/Notification/Toast/Dialog demo 路由已删除。

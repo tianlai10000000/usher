@@ -1,6 +1,6 @@
-//! Typed, persisted state for committed AI Agent configuration.
+//! Typed AI Agent configuration with bounded, ordered worker-owned saves.
 
-use std::sync::OnceLock;
+use std::sync::{Arc, Condvar, Mutex, OnceLock, mpsc};
 
 use usher_state_store::{PersistentStore, Reduction, StoreSnapshot};
 
@@ -10,6 +10,7 @@ const DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com";
 const DEEPSEEK_MODEL: &str = "deepseek-v4-flash";
 const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 const OPENAI_MODEL: &str = "gpt-4o-mini";
+const SAVE_CAPACITY: usize = 8;
 
 #[derive(Debug)]
 enum AiAgentSettingsAction {
@@ -21,67 +22,225 @@ type AiAgentStore = PersistentStore<AiAgentSettings, AiAgentSettingsAction, ()>;
 #[derive(Clone)]
 pub(crate) struct AiAgentSettingsFacade {
     store: AiAgentStore,
+    commands: Arc<Mutex<SaveAdmission>>,
+    stopped: Arc<(Mutex<Option<Result<(), String>>>, Condvar)>,
+}
+
+struct SaveAdmission {
+    sender: Option<tokio::sync::mpsc::Sender<SaveCommand>>,
+    pending: Vec<(u64, AiAgentSettings)>,
+    next_id: u64,
+}
+
+struct SaveCommand {
+    id: u64,
+    draft: AiAgentSettings,
+    completion: mpsc::Sender<AiAgentSaveOutcome>,
+}
+
+pub(crate) struct AiAgentSaveReceipt {
+    pub(crate) id: u64,
+    result: mpsc::Receiver<AiAgentSaveOutcome>,
+}
+
+pub(crate) struct AiAgentSaveOutcome {
+    pub(crate) snapshot: StoreSnapshot<AiAgentSettings>,
+    pub(crate) persisted: Result<(), String>,
+}
+
+impl AiAgentSaveReceipt {
+    /// A receipt is awaited only by a worker, never by a Slint callback.
+    pub(crate) fn wait(self) -> Result<AiAgentSaveOutcome, String> {
+        self.result
+            .recv()
+            .map_err(|_| "AI Agent settings command worker stopped".into())
+    }
 }
 
 static REGISTERED_STATE: OnceLock<AiAgentSettingsFacade> = OnceLock::new();
 
 impl AiAgentSettingsFacade {
     pub(crate) fn open(initial: AiAgentSettings) -> std::io::Result<Self> {
-        let store = PersistentStore::new(
-            settings::normalize_ai_agent_settings(initial),
-            reduce_ai_agent_settings,
-            "ai-agent-settings",
-            |state| {
-                settings::save_ai_agent_settings(
-                    &state.provider,
-                    &state.base_url,
-                    &state.api_key,
-                    &state.model,
-                    &state.reply_language,
-                )
-            },
-            |_, error| log::error!("[AI Agent][Settings] Persistence failed: {error}"),
-        )?;
-        let facade = Self { store };
+        let facade = Self::with_persistence(initial, reduce_ai_agent_settings, |state| {
+            settings::save_ai_agent_settings(
+                &state.provider,
+                &state.base_url,
+                &state.api_key,
+                &state.model,
+                &state.reply_language,
+            )
+        })?;
         let _ = REGISTERED_STATE.set(facade.clone());
         Ok(facade)
     }
 
     #[cfg(test)]
     pub(crate) fn memory(initial: AiAgentSettings) -> Self {
-        Self {
-            store: PersistentStore::new(
-                settings::normalize_ai_agent_settings(initial),
-                reduce_ai_agent_settings,
-                "ai-agent-settings-test",
-                |_| Ok(()),
-                |_, error| panic!("in-memory AI Agent settings persistence failed: {error}"),
-            )
-            .expect("failed to start in-memory AI Agent settings state"),
-        }
+        Self::with_persistence(initial, reduce_ai_agent_settings, |_| Ok(()))
+            .expect("failed to start in-memory AI Agent settings state")
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_test_persistence(
+        initial: AiAgentSettings,
+        persist: impl Fn(&AiAgentSettings) -> Result<(), String> + Send + Sync + 'static,
+    ) -> Self {
+        Self::with_persistence(initial, reduce_ai_agent_settings, persist).unwrap()
+    }
+
+    fn with_persistence(
+        initial: AiAgentSettings,
+        reducer: impl Fn(&AiAgentSettings, AiAgentSettingsAction) -> Reduction<AiAgentSettings, ()>
+        + Send
+        + Sync
+        + 'static,
+        persist: impl Fn(&AiAgentSettings) -> Result<(), String> + Send + Sync + 'static,
+    ) -> std::io::Result<Self> {
+        let store = PersistentStore::new(
+            settings::normalize_ai_agent_settings(initial),
+            reducer,
+            "ai-agent-settings",
+            persist,
+            |_, error| log::error!("[AI Agent][Settings] Persistence failed: {error}"),
+        )?;
+        let (sender, mut receiver) = tokio::sync::mpsc::channel::<SaveCommand>(SAVE_CAPACITY);
+        let commands = Arc::new(Mutex::new(SaveAdmission {
+            sender: Some(sender),
+            pending: Vec::new(),
+            next_id: 0,
+        }));
+        let stopped = Arc::new((Mutex::new(None), Condvar::new()));
+        let worker_commands = Arc::downgrade(&commands);
+        let worker_stopped = stopped.clone();
+        let worker_store = store.clone();
+        crate::app_runtime::shared_runtime().spawn(async move {
+            while let Some(command) = receiver.recv().await {
+                let id = command.id;
+                let save_store = worker_store.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    let commit = save_store.dispatch(AiAgentSettingsAction::Replace(command.draft));
+                    let persisted = if commit.changed {
+                        save_store.flush()
+                    } else {
+                        save_store.retry_failed().and_then(|_| save_store.flush())
+                    };
+                    AiAgentSaveOutcome {
+                        snapshot: commit.snapshot,
+                        persisted,
+                    }
+                })
+                .await;
+                if let Some(commands) = worker_commands.upgrade() {
+                    commands
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .pending
+                        .retain(|(pending_id, _)| *pending_id != id);
+                }
+                match result {
+                    Ok(outcome) => {
+                        let _ = command.completion.send(outcome);
+                    }
+                    Err(error) => {
+                        log::error!("[AI Agent][Settings] Save worker failed: {error}");
+                    }
+                }
+            }
+            let result = tokio::task::spawn_blocking(move || {
+                let result = worker_store.flush();
+                worker_store.shutdown();
+                result
+            })
+            .await
+            .unwrap_or_else(|error| Err(format!("AI Agent settings shutdown failed: {error}")));
+            *worker_stopped.0.lock().unwrap() = Some(result);
+            worker_stopped.1.notify_all();
+        });
+        Ok(Self {
+            store,
+            commands,
+            stopped,
+        })
     }
 
     pub(crate) fn snapshot(&self) -> StoreSnapshot<AiAgentSettings> {
         self.store.snapshot()
     }
 
-    pub(crate) fn replace(&self, settings: AiAgentSettings) -> StoreSnapshot<AiAgentSettings> {
-        self.dispatch(AiAgentSettingsAction::Replace(settings))
+    /// Capture the complete draft and FIFO identity synchronously. Admission is
+    /// bounded/nonblocking; reduction, retries and durable barriers run off UI.
+    /// An identical in-flight draft shares the existing operation (no new Toast).
+    pub(crate) fn save_draft(
+        &self,
+        draft: AiAgentSettings,
+    ) -> Result<Option<AiAgentSaveReceipt>, String> {
+        let mut admission = self
+            .commands
+            .lock()
+            .map_err(|_| "AI settings admission poisoned")?;
+        if admission.sender.is_none() {
+            return Err("AI Agent settings are closed".into());
+        }
+        if admission
+            .pending
+            .last()
+            .is_some_and(|(_, pending)| *pending == draft)
+        {
+            return Ok(None);
+        }
+        if admission.pending.len() >= SAVE_CAPACITY {
+            return Err("AI Agent settings save queue is full".into());
+        }
+        let id = admission.next_id.wrapping_add(1);
+        let (completion, result) = mpsc::channel();
+        admission
+            .sender
+            .as_ref()
+            .unwrap()
+            .try_send(SaveCommand {
+                id,
+                draft: draft.clone(),
+                completion,
+            })
+            .map_err(|_| "AI Agent settings command worker unavailable")?;
+        admission.next_id = id;
+        admission.pending.push((id, draft));
+        Ok(Some(AiAgentSaveReceipt { id, result }))
     }
 
-    pub(crate) fn flush(&self) -> Result<(), String> {
-        // This is the explicit Settings Save barrier, including a same-value
-        // retry after a previously failed automatic commit.
-        self.store.retry_failed()?;
-        self.store.flush()
+    /// Close admission before draining every accepted save. The caller must be
+    /// a worker; the app's async drain owns this barrier before UI teardown.
+    pub(crate) fn shutdown_checked(&self) -> Result<(), String> {
+        self.commands
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .sender
+            .take();
+        let result = self
+            .stopped
+            .0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        self.stopped
+            .1
+            .wait_while(result, |result| result.is_none())
+            .unwrap_or_else(|error| error.into_inner())
+            .as_ref()
+            .unwrap()
+            .clone()
+    }
+
+    pub(crate) async fn shutdown_async(&self) -> Result<(), String> {
+        let facade = self.clone();
+        tokio::task::spawn_blocking(move || facade.shutdown_checked())
+            .await
+            .map_err(|error| format!("AI Agent settings drain failed: {error}"))?
     }
 
     pub(crate) fn shutdown(&self) {
-        self.store.shutdown();
-    }
-
-    fn dispatch(&self, action: AiAgentSettingsAction) -> StoreSnapshot<AiAgentSettings> {
-        self.store.dispatch(action).snapshot
+        if let Err(error) = self.shutdown_checked() {
+            log::error!("[AI Agent][Settings] Shutdown flush failed: {error}");
+        }
     }
 }
 
@@ -125,95 +284,5 @@ fn reduce_ai_agent_settings(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use std::sync::{Arc, Mutex};
-
-    #[test]
-    fn explicit_save_recovers_an_unchanged_failed_configuration() {
-        let failing = Arc::new(AtomicBool::new(true));
-        let failure = failing.clone();
-        let attempts = Arc::new(AtomicUsize::new(0));
-        let count = attempts.clone();
-        let persisted = Arc::new(Mutex::new(None));
-        let saved = persisted.clone();
-        let facade = AiAgentSettingsFacade {
-            store: PersistentStore::new(
-                AiAgentSettings::default(),
-                reduce_ai_agent_settings,
-                "ai-agent-same-value-retry-test",
-                move |state| {
-                    count.fetch_add(1, Ordering::SeqCst);
-                    if failure.load(Ordering::SeqCst) {
-                        return Err("injected write failure".into());
-                    }
-                    *saved.lock().unwrap() = Some(state.clone());
-                    Ok(())
-                },
-                |_, _| {},
-            )
-            .unwrap(),
-        };
-        let configuration = apply_provider_preset(&AiAgentSettings::default(), "openai");
-        let committed = facade.replace(configuration.clone());
-        assert_eq!(facade.store.flush().unwrap_err(), "injected write failure");
-        assert!(persisted.lock().unwrap().is_none());
-        failing.store(false, Ordering::SeqCst);
-        let retried = facade.replace(configuration.clone());
-        assert_eq!(retried.revision(), committed.revision());
-        facade.flush().unwrap();
-        assert_eq!(attempts.load(Ordering::SeqCst), 2);
-        assert_eq!(persisted.lock().unwrap().as_ref(), Some(&configuration));
-        facade.shutdown();
-    }
-
-    #[test]
-    fn provider_selection_updates_the_complete_preset_atomically() {
-        let initial = AiAgentSettings {
-            provider: "deepseek".into(),
-            base_url: DEEPSEEK_BASE_URL.into(),
-            api_key: "secret".into(),
-            model: DEEPSEEK_MODEL.into(),
-            reply_language: "en".into(),
-        };
-        let draft = apply_provider_preset(&initial, "openai");
-
-        assert_eq!(draft.provider, "openai");
-        assert_eq!(draft.base_url, OPENAI_BASE_URL);
-        assert_eq!(draft.model, OPENAI_MODEL);
-        assert_eq!(draft.api_key, "secret");
-        assert_eq!(draft.reply_language, "en");
-    }
-
-    #[test]
-    fn changed_commits_persist_the_complete_snapshot_on_the_worker() {
-        let persisted = Arc::new(Mutex::new(Vec::new()));
-        let persisted_for_worker = persisted.clone();
-        let store = PersistentStore::new(
-            AiAgentSettings::default(),
-            reduce_ai_agent_settings,
-            "ai-agent-settings-persistence-test",
-            move |state| {
-                persisted_for_worker.lock().unwrap().push(state.clone());
-                Ok(())
-            },
-            |_, error| panic!("AI Agent persistence failed: {error}"),
-        )
-        .unwrap();
-
-        store.dispatch(AiAgentSettingsAction::Replace(apply_provider_preset(
-            &AiAgentSettings::default(),
-            "openai",
-        )));
-        store.flush().unwrap();
-        store.shutdown();
-
-        let persisted = persisted.lock().unwrap();
-        assert_eq!(persisted.len(), 1);
-        assert_eq!(persisted[0].provider, "openai");
-        assert_eq!(persisted[0].base_url, OPENAI_BASE_URL);
-        assert_eq!(persisted[0].model, OPENAI_MODEL);
-        assert_eq!(persisted[0].reply_language, usher_i18n::AUTO_LANGUAGE);
-    }
-}
+#[path = "settings_state_tests.rs"]
+mod tests;

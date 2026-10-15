@@ -1,6 +1,5 @@
-use crate::app_runtime::shared_runtime;
 use crate::i18n::LocalizedText;
-use crate::workflow::bindings::{show_error, show_success};
+use crate::workflow::bindings::show_error;
 use crate::workflow::state::SharedWorkflowState;
 use crate::{
     CustomComponentType, MainWindow, NotificationDelivery, NotificationManager, NotificationOptions,
@@ -50,7 +49,7 @@ pub(crate) enum RollbackStage {
     Done,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CdSnapshot {
     pub(crate) running: bool,
     pub(crate) summary: LocalizedText,
@@ -79,15 +78,15 @@ pub(crate) fn default_cd_snapshot() -> CdSnapshot {
     }
 }
 
-pub(crate) fn validate_cd_request(req: &CdRequest) -> Result<(), String> {
+pub(crate) fn validate_cd_request(req: &CdRequest) -> Result<(), LocalizedText> {
     if req.environment.trim().is_empty() {
-        return Err(crate::i18n::tr("cd.environment_required").into_owned());
+        return Err(LocalizedText::message("cd.environment_required"));
     }
     if req.release.trim().is_empty() {
-        return Err(crate::i18n::tr("cd.release_required").into_owned());
+        return Err(LocalizedText::message("cd.release_required"));
     }
     if req.commit.trim().is_empty() {
-        return Err(crate::i18n::tr("cd.commit_required").into_owned());
+        return Err(LocalizedText::message("cd.commit_required"));
     }
     Ok(())
 }
@@ -208,7 +207,7 @@ pub(crate) fn apply_cd_snapshot(ui: &MainWindow, snapshot: &CdSnapshot) {
     ui.set_workflow_cd_verify_detail(snapshot.verify_detail.resolve().into());
 }
 
-fn show_completion(ui: &MainWindow, title: &str, message: &str) {
+pub(crate) fn show_completion(ui: &MainWindow, title: &str, message: &str) {
     NotificationManager::get(ui).invoke_success(NotificationOptions {
         title: title.into(),
         message: message.into(),
@@ -223,177 +222,90 @@ fn show_completion(ui: &MainWindow, title: &str, message: &str) {
     });
 }
 
-pub(crate) fn bind_cd(ui: &MainWindow, shared_state: SharedWorkflowState) {
-    let runtime = shared_runtime();
-
-    let ui_weak = ui.as_weak();
-    let runtime_start = runtime.clone();
-    let state_start = shared_state.clone();
+pub(crate) fn bind_cd(ui: &MainWindow, state: SharedWorkflowState) {
+    let weak = ui.as_weak();
+    let start = state.clone();
     ui.on_workflow_cd_start(move |environment, release, commit| {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
-        let req = CdRequest {
-            environment: environment.to_string(),
-            release: release.to_string(),
-            commit: commit.to_string(),
-        };
-
-        if let Err(error) = validate_cd_request(&req) {
-            show_error(&ui, &error);
-            ui.set_workflow_cd_summary(error.into());
-            return;
-        }
-
-        {
-            let Ok(mut guard) = state_start.lock() else {
-                return;
-            };
-            if guard.cd_running {
-                show_error(&ui, crate::i18n::tr("cd.already_running").as_ref());
-                return;
+        if let Some(ui) = weak.upgrade() {
+            if let Err(error) = start.submit(crate::workflow::state::WorkflowAction::Cd(
+                crate::workflow::state::CdCommand::Deploy(CdRequest {
+                    environment: environment.to_string(),
+                    release: release.to_string(),
+                    commit: commit.to_string(),
+                }),
+            )) {
+                log::warn!("[Workflow][CD] Admission rejected: {error}");
+                show_error(&ui, crate::i18n::tr("workflow.command_rejected").as_ref());
             }
-            guard.cd_running = true;
         }
-
-        let first_snapshot = deployment_snapshot(&req, DeploymentStage::Build);
-        {
-            let Ok(mut guard) = state_start.lock() else {
-                return;
-            };
-            guard.upsert_current(|view| view.cd = first_snapshot.clone());
+    });
+    let weak = ui.as_weak();
+    ui.on_workflow_cd_rollback(move |commit| {
+        if let Some(ui) = weak.upgrade() {
+            if let Err(error) = state.submit(crate::workflow::state::WorkflowAction::Cd(
+                crate::workflow::state::CdCommand::Rollback(commit.to_string()),
+            )) {
+                log::warn!("[Workflow][CD] Admission rejected: {error}");
+                show_error(&ui, crate::i18n::tr("workflow.command_rejected").as_ref());
+            }
         }
-        apply_cd_snapshot(&ui, &first_snapshot);
-        show_success(&ui, crate::i18n::tr("cd.started").as_ref());
+    });
+}
 
-        let ui_weak_task = ui_weak.clone();
-        let state_task = state_start.clone();
-        let project_id = state_start
-            .lock()
-            .ok()
-            .map(|guard| guard.current_project.id.clone())
-            .unwrap_or_else(|| "default".to_string());
-        runtime_start.spawn(async move {
-            let stages = [
+pub(crate) fn execute(
+    state: SharedWorkflowState,
+    identity: crate::workflow::state::WorkflowIdentity,
+    (command, generation): (crate::workflow::state::CdCommand, u64),
+) {
+    use crate::workflow::state::{CdCommand, WorkflowAction};
+    let facade = state.clone();
+    state.spawn(async move {
+        let snapshots = match &command {
+            CdCommand::Deploy(request) => [
                 DeploymentStage::Test,
                 DeploymentStage::Deploy,
                 DeploymentStage::Verify,
                 DeploymentStage::Done,
-            ];
-            for stage in stages {
-                tokio::time::sleep(Duration::from_millis(700)).await;
-                let snapshot = deployment_snapshot(&req, stage);
-                let completed = stage == DeploymentStage::Done;
-                let _ = slint::invoke_from_event_loop({
-                    let ui_weak_task = ui_weak_task.clone();
-                    let state_task = state_task.clone();
-                    let project_id = project_id.clone();
-                    move || {
-                        if let Ok(mut guard) = state_task.lock() {
-                            let current_project_id = guard.current_project.id.clone();
-                            guard.projects.entry(project_id.clone()).or_default().cd =
-                                snapshot.clone();
-                            if current_project_id != project_id {
-                                return;
-                            }
-                        }
-                        if let Some(ui) = ui_weak_task.upgrade() {
-                            apply_cd_snapshot(&ui, &snapshot);
-                            if completed {
-                                let summary = snapshot.summary.resolve();
-                                show_completion(
-                                    &ui,
-                                    crate::i18n::tr("cd.completed").as_ref(),
-                                    summary.as_str(),
-                                );
-                            }
-                        }
-                    }
-                });
-            }
-            if let Ok(mut guard) = state_task.lock() {
-                guard.cd_running = false;
-            }
-        });
-    });
-
-    let ui_weak = ui.as_weak();
-    let runtime_rollback = runtime.clone();
-    let state_rollback = shared_state.clone();
-    ui.on_workflow_cd_rollback(move |commit| {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
+            ]
+            .into_iter()
+            .map(|stage| deployment_snapshot(request, stage))
+            .collect::<Vec<_>>(),
+            CdCommand::Rollback(commit) => [RollbackStage::Verify, RollbackStage::Done]
+                .into_iter()
+                .map(|stage| rollback_snapshot(commit, stage))
+                .collect(),
         };
-        let commit = commit.to_string();
-        if commit.trim().is_empty() {
-            show_error(&ui, crate::i18n::tr("cd.rollback_required").as_ref());
-            return;
-        }
-
-        {
-            let Ok(mut guard) = state_rollback.lock() else {
+        for snapshot in snapshots {
+            tokio::time::sleep(Duration::from_millis(700)).await;
+            if facade.is_closing() || facade.identity() != identity {
                 return;
+            }
+            let completed = !snapshot.running;
+            let completion = if completed {
+                Some(LocalizedText::message(match &command {
+                    CdCommand::Deploy(_) => "cd.completed",
+                    CdCommand::Rollback(_) => "cd.rollback_completed",
+                }))
+            } else {
+                None
             };
-            if guard.cd_running {
-                show_error(&ui, crate::i18n::tr("cd.finish_before_rollback").as_ref());
+            if !facade
+                .publish(
+                    identity.clone(),
+                    WorkflowAction::CdProgress {
+                        generation,
+                        snapshot,
+                        completion,
+                    },
+                )
+                .await
+            {
                 return;
             }
-            guard.cd_running = true;
-        }
-
-        let first_snapshot = rollback_snapshot(&commit, RollbackStage::Deploy);
-        {
-            let Ok(mut guard) = state_rollback.lock() else {
-                return;
-            };
-            guard.upsert_current(|view| view.cd = first_snapshot.clone());
-        }
-        apply_cd_snapshot(&ui, &first_snapshot);
-        show_success(&ui, crate::i18n::tr("cd.rollback_started").as_ref());
-
-        let ui_weak_task = ui_weak.clone();
-        let state_task = state_rollback.clone();
-        let project_id = state_rollback
-            .lock()
-            .ok()
-            .map(|guard| guard.current_project.id.clone())
-            .unwrap_or_else(|| "default".to_string());
-        runtime_rollback.spawn(async move {
-            for stage in [RollbackStage::Verify, RollbackStage::Done] {
-                tokio::time::sleep(Duration::from_millis(700)).await;
-                let snapshot = rollback_snapshot(&commit, stage);
-                let completed = stage == RollbackStage::Done;
-                let _ = slint::invoke_from_event_loop({
-                    let ui_weak_task = ui_weak_task.clone();
-                    let state_task = state_task.clone();
-                    let project_id = project_id.clone();
-                    move || {
-                        if let Ok(mut guard) = state_task.lock() {
-                            let current_project_id = guard.current_project.id.clone();
-                            guard.projects.entry(project_id.clone()).or_default().cd =
-                                snapshot.clone();
-                            if current_project_id != project_id {
-                                return;
-                            }
-                        }
-                        if let Some(ui) = ui_weak_task.upgrade() {
-                            apply_cd_snapshot(&ui, &snapshot);
-                            if completed {
-                                let summary = snapshot.summary.resolve();
-                                show_completion(
-                                    &ui,
-                                    crate::i18n::tr("cd.rollback_completed").as_ref(),
-                                    summary.as_str(),
-                                );
-                            }
-                        }
-                    }
-                });
+            if completed {
+                break;
             }
-            if let Ok(mut guard) = state_task.lock() {
-                guard.cd_running = false;
-            }
-        });
+        }
     });
 }
 

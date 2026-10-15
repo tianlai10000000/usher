@@ -9,6 +9,8 @@ use std::time::Duration;
 use tokio::runtime::Runtime;
 
 use super::download_archive::DownloadArchive;
+pub use super::download_status::DownloadStatus;
+pub(crate) use super::download_status::sync_language;
 use crate::http::{self, RequestOptions};
 use crate::settings_page::{SettingsPageBridge, mirror_update_checking};
 use crate::{
@@ -25,13 +27,13 @@ pub struct UpdateState {
     // Download status
     pub is_downloading: bool,
     pub download_progress: f32,
-    pub download_status: String,
+    pub download_status: DownloadStatus,
     pub downloaded_bytes: u64,
     pub total_bytes: u64,
 }
 
 /// Progress callback type
-pub type ProgressCallback = Arc<dyn Fn(f32, u64, u64, &str) + Send + Sync>;
+pub type ProgressCallback = Arc<dyn Fn(f32, u64, u64, &DownloadStatus) + Send + Sync>;
 
 /// Cancel flag
 pub type CancelFlag = Arc<AtomicBool>;
@@ -215,7 +217,7 @@ pub async fn check_for_update(state: &Arc<Mutex<UpdateState>>) -> Result<bool> {
 ///
 /// # Arguments
 /// * `state` - Update state
-/// * `progress_callback` - Progress callback function (progress: f32, downloaded: u64, total: u64, status: &str)
+/// * `progress_callback` - Progress callback function (progress: f32, downloaded: u64, total: u64, status: &DownloadStatus)
 /// * `cancel_flag` - Cancel flag
 pub async fn perform_update_with_progress(
     state: &Arc<Mutex<UpdateState>>,
@@ -231,15 +233,10 @@ pub async fn perform_update_with_progress(
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         s.is_downloading = true;
         s.download_progress = 0.0;
-        s.download_status = crate::i18n::tr("update.preparing_download").into_owned();
+        s.download_status = DownloadStatus::PreparingDownload;
     }
 
-    progress_callback(
-        0.0,
-        0,
-        0,
-        crate::i18n::tr("update.preparing_download").as_ref(),
-    );
+    progress_callback(0.0, 0, 0, &DownloadStatus::PreparingDownload);
 
     // Check if cancelled
     if cancel_flag.load(Ordering::Relaxed) {
@@ -262,7 +259,7 @@ pub async fn perform_update_with_progress(
                 0.05,
                 0,
                 0,
-                crate::i18n::tr("update.connecting").as_ref(),
+                &DownloadStatus::Connecting,
             );
 
             let updater = create_updater()?;
@@ -271,7 +268,7 @@ pub async fn perform_update_with_progress(
                 0.1,
                 0,
                 0,
-                crate::i18n::tr("update.fetching_release").as_ref(),
+                &DownloadStatus::FetchingRelease,
             );
 
             let releases = updater.get_newer_releases()?.into_vec();
@@ -372,11 +369,7 @@ pub async fn perform_update_with_progress(
         return Err(anyhow::anyhow!("Download cancelled"));
     }
 
-    let downloading_version = crate::i18n::tr_args(
-        "update.downloading_release",
-        &[("version", version.as_str())],
-    );
-    progress_callback(0.15, 0, 0, &downloading_version);
+    progress_callback(0.15, 0, 0, &DownloadStatus::Release(version.clone()));
 
     // Use the shared HTTP pipeline while retaining reqwest streaming.
     let mut response = http::send(
@@ -432,22 +425,9 @@ pub async fn perform_update_with_progress(
             0.5 // If total size is unknown, show 50%
         };
 
-        // Format downloaded size
-        let downloaded_mb = format!("{:.1}", downloaded as f64 / 1_048_576.0);
-        let total_mb = format!("{:.1}", total_size as f64 / 1_048_576.0);
-        let status = if total_size > 0 {
-            crate::i18n::tr_args(
-                "update.downloading_progress",
-                &[
-                    ("downloaded_mb", downloaded_mb.as_str()),
-                    ("total_mb", total_mb.as_str()),
-                ],
-            )
-        } else {
-            crate::i18n::tr_args(
-                "update.downloading_amount",
-                &[("downloaded_mb", downloaded_mb.as_str())],
-            )
+        let status = DownloadStatus::Bytes {
+            downloaded,
+            total: total_size,
         };
 
         progress_callback(progress, downloaded, total_size, &status);
@@ -472,7 +452,7 @@ pub async fn perform_update_with_progress(
         0.85,
         downloaded,
         total_size,
-        crate::i18n::tr("update.download_installing").as_ref(),
+        &DownloadStatus::DownloadInstalling,
     );
 
     // Check if cancelled
@@ -485,12 +465,7 @@ pub async fn perform_update_with_progress(
     let state_for_install = state_clone.clone();
 
     let install_result = tokio::task::spawn_blocking(move || -> Result<(), anyhow::Error> {
-        progress_callback_for_install(
-            0.90,
-            downloaded,
-            total_size,
-            crate::i18n::tr("update.extracting").as_ref(),
-        );
+        progress_callback_for_install(0.90, downloaded, total_size, &DownloadStatus::Extracting);
 
         // Record current executable path (for debugging)
         let current_exe =
@@ -616,12 +591,7 @@ pub async fn perform_update_with_progress(
                 .context("Failed to set executable permissions")?;
         }
 
-        progress_callback_for_install(
-            0.95,
-            downloaded,
-            total_size,
-            crate::i18n::tr("update.installing").as_ref(),
-        );
+        progress_callback_for_install(0.95, downloaded, total_size, &DownloadStatus::Installing);
 
         // Replace current executable file
         // Use self_replace to safely replace executable file
@@ -634,12 +604,7 @@ pub async fn perform_update_with_progress(
             log::debug!("After update, executable file path: {:?}", updated_exe);
         }
 
-        progress_callback_for_install(
-            1.0,
-            downloaded,
-            total_size,
-            crate::i18n::tr("update.complete").as_ref(),
-        );
+        progress_callback_for_install(1.0, downloaded, total_size, &DownloadStatus::Complete);
 
         // Update state
         {
@@ -647,7 +612,7 @@ pub async fn perform_update_with_progress(
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             s.download_progress = 1.0;
-            s.download_status = crate::i18n::tr("update.complete_restarting").into_owned();
+            s.download_status = DownloadStatus::Restarting;
         }
 
         // Download ownership also cleans up every cancellation/error path.
@@ -661,7 +626,7 @@ pub async fn perform_update_with_progress(
             1.0,
             downloaded,
             total_size,
-            crate::i18n::tr("update.restarting").as_ref(),
+            &DownloadStatus::RestartingApplication,
         );
 
         // Restart application
@@ -779,7 +744,7 @@ pub fn reset_update_state(state: &Arc<Mutex<UpdateState>>) {
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     s.is_downloading = false;
     s.download_progress = 0.0;
-    s.download_status = String::new();
+    s.download_status = DownloadStatus::None;
     s.downloaded_bytes = 0;
     s.total_bytes = 0;
     s.error = String::new();
@@ -1049,21 +1014,21 @@ pub fn setup_updater(
                 let logic = ui.global::<UpdateLogic>();
                 logic.set_is_downloading(true);
                 logic.set_download_progress(0.0);
-                logic.set_download_status(crate::i18n::tr("update.preparing").into_owned().into());
+                super::download_status::present(&ui, DownloadStatus::Preparing);
                 log::debug!(" Download progress modal shown");
             }
 
             // Create progress callback
             let ui_weak_for_progress = ui_weak.clone();
             let progress_callback = Arc::new(
-                move |progress: f32, downloaded: u64, total: u64, status: &str| {
+                move |progress: f32, downloaded: u64, total: u64, status: &DownloadStatus| {
                     let ui_weak = ui_weak_for_progress.clone();
-                    let status_str = status.to_string();
+                    let status = status.clone();
                     slint::invoke_from_event_loop(move || {
                         if let Some(ui) = ui_weak.upgrade() {
                             let logic = ui.global::<UpdateLogic>();
                             logic.set_download_progress(progress);
-                            logic.set_download_status(status_str.into());
+                            super::download_status::present(&ui, status);
                             logic.set_downloaded_bytes(downloaded as i32);
                             logic.set_total_bytes(total as i32);
                         }
@@ -1100,7 +1065,7 @@ pub fn setup_updater(
                                 let logic = ui.global::<UpdateLogic>();
                                 logic.set_is_downloading(false);
                                 logic.set_download_progress(0.0);
-                                logic.set_download_status("".into());
+                                super::download_status::present(&ui, DownloadStatus::None);
 
                                 if !is_cancelled {
                                     // Only show error notification for non-cancelled cases
@@ -1149,7 +1114,7 @@ pub fn setup_updater(
                 let logic = ui.global::<UpdateLogic>();
                 logic.set_is_downloading(false);
                 logic.set_download_progress(0.0);
-                logic.set_download_status("".into());
+                super::download_status::present(&ui, DownloadStatus::None);
                 logic.set_update_available(false);
 
                 // Show cancel notification

@@ -1,0 +1,22 @@
+   Compiling sys-locale v0.3.2
+   Compiling usher-i18n v0.0.9-alpha.1 (/Users/yuankai/yuankai/Demo/rust/usher/crates/usher-i18n)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.61s
+     Running unittests src/lib.rs (target/debug/deps/usher_i18n-6b857ea6d6dd05c4)
+
+running 7 tests
+test tests::named_interpolation_preserves_unknown_placeholders_and_argument_braces ... ok
+test tests::named_interpolation_supports_locale_specific_argument_order ... ok
+test tests::locale_activation_is_manifest_driven ... ok
+test tests::catalogs_fall_back_to_source_for_unknown_locale ... ok
+test tests::locale_aliases_are_case_and_separator_insensitive ... ok
+test tests::unknown_locale_uses_configured_fallback ... ok
+test tests::rust_only_platform_copy_does_not_change_the_slint_catalog ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests usher_i18n
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

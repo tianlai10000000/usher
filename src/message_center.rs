@@ -13,6 +13,10 @@ use usher_messages::{
 
 use crate::{AppState, MainWindow, app_paths, app_runtime, startup};
 
+mod commands;
+mod focus;
+pub(crate) use commands::MessageCommandWorker;
+
 struct LocalizedDesktopNotifier;
 impl usher_messages::DesktopNotifier for LocalizedDesktopNotifier {
     fn show(&self, message: &usher_messages::Message) -> std::result::Result<(), String> {
@@ -30,8 +34,10 @@ impl usher_messages::DesktopNotifier for LocalizedDesktopNotifier {
 #[derive(Clone)]
 pub(crate) struct MessagePageBridge {
     center: MessageCenter,
+    commands: MessageCommandWorker,
     page: Arc<Mutex<Option<slint::Weak<GitHubMessagesPage>>>>,
     subscription: Arc<Mutex<Option<Subscription>>>,
+    host: Arc<Mutex<Option<slint::Weak<MainWindow>>>>,
 }
 
 impl MessagePageBridge {
@@ -46,39 +52,54 @@ impl MessagePageBridge {
         .context("Failed to initialize message center")?;
         timeline.checkpoint("message_center_ready");
 
-        let center_for_hydration = center.clone();
+        let commands = MessageCommandWorker::start(center.clone(), true)
+            .context("Failed to initialize message commands")?;
+        let commands_for_hydration = commands.clone();
         let timeline_for_messages = timeline.clone();
         startup::run_after_first_frame(move || {
-            app_runtime::shared_runtime().spawn(async move {
-                let result = tokio::task::spawn_blocking(move || {
-                    center_for_hydration.hydrate_from_storage()
-                })
-                .await;
-                match result {
-                    Ok(Ok(count)) => {
-                        log::info!("[Messages] Deferred hydration loaded {count} messages");
-                        timeline_for_messages.checkpoint("messages_hydrated");
-                    }
-                    Ok(Err(error)) => log::error!("[Messages] Deferred hydration failed: {error}"),
-                    Err(error) => log::error!("[Messages] Hydration worker failed: {error}"),
-                }
-            });
+            if let Err(error) = commands_for_hydration.hydrate(timeline_for_messages) {
+                log::error!("[Messages] Hydration admission failed: {error}");
+            }
         });
 
-        Ok((center.clone(), Self::new(center)))
+        Ok((center.clone(), Self::with_commands(center, commands)))
     }
 
+    #[cfg(test)]
     pub(crate) fn new(center: MessageCenter) -> Self {
+        let commands = MessageCommandWorker::start(center.clone(), false)
+            .expect("failed to initialize message command worker");
+        Self::with_commands(center, commands)
+    }
+
+    fn with_commands(center: MessageCenter, commands: MessageCommandWorker) -> Self {
         Self {
             center,
+            commands,
             page: Arc::new(Mutex::new(None)),
             subscription: Arc::new(Mutex::new(None)),
+            host: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    pub(crate) fn commands(&self) -> MessageCommandWorker {
+        self.commands.clone()
+    }
+
+    pub(crate) async fn shutdown_async(&self) {
+        let commands = self.commands.clone();
+        match tokio::task::spawn_blocking(move || commands.shutdown()).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => log::error!("[Messages] Command shutdown failed: {error}"),
+            Err(error) => log::error!("[Messages] Command shutdown task failed: {error}"),
         }
     }
 
     pub(crate) fn install(&self, window: &MainWindow) {
+        *self.host.lock().expect("message host bridge poisoned") = Some(window.as_weak());
         let page_slot = self.page.clone();
         let center = self.center.clone();
+        let commands = self.commands.clone();
         let window_weak = window.as_weak();
         window.set_messages_page_factory(ComponentFactory::new(move |_| {
             let window = window_weak.upgrade()?;
@@ -93,7 +114,7 @@ impl MessagePageBridge {
             sync_language(&window, &page);
             page.set_viewport_width(window.get_messages_page_viewport_width());
             page.set_viewport_height(window.get_messages_page_viewport_height());
-            bind_page_callbacks(&center, &page, &window);
+            bind_page_callbacks(&center, &commands, &page, &window);
             apply_page_snapshot(&page, center.snapshot());
             page.set_active(window.get_messages_page_active());
             *page_slot.lock().expect("message page bridge poisoned") = Some(page.as_weak());
@@ -176,7 +197,16 @@ impl MessagePageBridge {
                 );
             });
         } else {
+            let host = self
+                .host
+                .lock()
+                .ok()
+                .and_then(|host| host.clone())
+                .and_then(|host| host.upgrade());
             self.with_page(|page| {
+                if let Some(host) = host.as_ref() {
+                    focus::release(page, host);
+                }
                 page.set_active(false);
                 release_page_rows(page);
                 log::debug!("[Messages][Lifecycle] active=false projected_rows=0");
@@ -201,7 +231,13 @@ fn release_page_rows(page: &GitHubMessagesPage) {
     update_page_rows(page, Vec::new());
 }
 
-fn bind_page_callbacks(center: &MessageCenter, page: &GitHubMessagesPage, window: &MainWindow) {
+fn bind_page_callbacks(
+    center: &MessageCenter,
+    commands: &MessageCommandWorker,
+    page: &GitHubMessagesPage,
+    window: &MainWindow,
+) {
+    focus::bind(page, window);
     let center_for_filter = center.clone();
     let weak_page = page.as_weak();
     page.on_change_filter(move |filter| {
@@ -214,39 +250,60 @@ fn bind_page_callbacks(center: &MessageCenter, page: &GitHubMessagesPage, window
 
     let center_for_page = center.clone();
     let weak_page = page.as_weak();
+    let weak_window = window.as_weak();
+    let pointer_activation = std::rc::Rc::new(std::cell::Cell::new(false));
+    let pointer_signal = pointer_activation.clone();
+    page.on_begin_pointer_page_activation(move || pointer_signal.set(true));
     page.on_change_page(move |number| {
+        let pointer = pointer_activation.replace(false);
         if let Some(page) = weak_page.upgrade() {
+            let window = weak_window.upgrade();
+            let keep_focus_visible = !pointer
+                && window
+                    .as_ref()
+                    .is_some_and(|window| focus::owns_page_focus(&page, window));
             let number = number.clamp(1, page.get_page_count().max(1));
             if number != page.get_current_page() {
                 page.set_current_page(number);
                 apply_page_snapshot(&page, center_for_page.snapshot());
-                page.set_scroll_y(0.0);
+                if keep_focus_visible {
+                    page.invoke_reveal_pagination();
+                } else {
+                    page.set_scroll_y(0.0);
+                }
+            }
+            if pointer && let Some(window) = window.as_ref() {
+                // Mouse paging preserves the established top-of-page behavior.
+                // The neutral scope owns Return/Space without activating an
+                // unrelated sidebar or a destructive first-row action.
+                page.invoke_focus_page();
+                focus::transfer_pointer(&page, window);
             }
         }
     });
 
-    let center_for_read = center.clone();
+    let center_for_read = commands.clone();
     page.on_set_read(move |id, read| {
-        if let Err(error) = center_for_read.set_read(id.as_str(), read) {
+        if let Err(error) = center_for_read.set_read(id.to_string(), read) {
             log::error!("[Messages] Failed to update read state: {error}");
         }
     });
 
-    let center_for_all = center.clone();
+    let center_for_all = commands.clone();
     page.on_mark_all_read(move || {
         if let Err(error) = center_for_all.mark_all_read() {
             log::error!("[Messages] Failed to mark all as read: {error}");
         }
     });
 
-    let center_for_delete = center.clone();
+    let center_for_delete = commands.clone();
     page.on_delete_message(move |id| {
-        if let Err(error) = center_for_delete.remove(id.as_str()) {
+        if let Err(error) = center_for_delete.remove(id.to_string()) {
             log::error!("[Messages] Failed to delete notification: {error}");
         }
     });
 
-    let center_for_clear = center.clone();
+    let center_for_clear = commands.clone();
     page.on_clear_messages(move || {
         if let Err(error) = center_for_clear.clear() {
             log::error!("[Messages] Failed to clear notifications: {error}");

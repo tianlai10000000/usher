@@ -1,0 +1,11 @@
+    Blocking waiting for file lock on build directory
+   Compiling usher v0.0.9-alpha.4 (/Users/yuankai/yuankai/Demo/rust/usher)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 39.79s
+     Running unittests src/lib.rs (target/debug/deps/usher_lib-fa63b6a37e703dbe)
+
+running 2 tests
+test status_bar_tests::mounted_download_and_update_check_popups_keep_live_catalog_and_semantic_progress ... ok
+test status_bar_tests::mounted_network_and_version_popups_follow_locale_and_current_feature_state ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 879 filtered out; finished in 0.11s
+

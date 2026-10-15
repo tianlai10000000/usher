@@ -1,5 +1,6 @@
 mod config;
 mod controller;
+mod producers;
 mod response;
 mod review_input;
 mod session_transactions;

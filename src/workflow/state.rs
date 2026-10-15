@@ -4,17 +4,21 @@ use crate::jobs::{JobRunDescriptor, JobSnapshot, JobStepData, apply_job_run};
 use crate::workflow::cd::{CdSnapshot, apply_cd_snapshot, default_cd_snapshot};
 use crate::workflow::tag::{VersionBump, default_create_tag_steps};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
-
-pub(crate) type SharedWorkflowState = Arc<Mutex<WorkflowStore>>;
+use std::sync::OnceLock;
+mod equality;
+mod facade;
+mod reducer;
+pub(crate) use facade::{SharedWorkflowState, WorkflowIdentity};
+pub(crate) use reducer::{CdCommand, WorkflowAction};
 
 static WORKFLOW_SHARED_STATE: OnceLock<SharedWorkflowState> = OnceLock::new();
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct WorkflowStore {
     pub(crate) current_project: WorkflowProjectContext,
     pub(crate) projects: HashMap<String, WorkflowViewState>,
-    pub(crate) cd_running: bool,
+    pub(crate) identity: WorkflowIdentity,
+    pub(crate) cd_generation: u64,
 }
 
 impl WorkflowStore {
@@ -25,41 +29,9 @@ impl WorkflowStore {
             .get(&self.current_project.id)
             .unwrap_or(&DEFAULT_VIEW)
     }
-
-    pub(crate) fn upsert_current<F>(&mut self, updater: F)
-    where
-        F: FnOnce(&mut WorkflowViewState),
-    {
-        let entry = self
-            .projects
-            .entry(self.current_project.id.clone())
-            .or_default();
-        updater(entry);
-    }
-
-    pub(crate) fn with_current<R, F>(&self, reader: F) -> R
-    where
-        F: FnOnce(&WorkflowProjectContext, &WorkflowViewState) -> R,
-    {
-        static DEFAULT_VIEW: std::sync::LazyLock<WorkflowViewState> =
-            std::sync::LazyLock::new(WorkflowViewState::default);
-        let view = self
-            .projects
-            .get(&self.current_project.id)
-            .unwrap_or(&DEFAULT_VIEW);
-        reader(&self.current_project, view)
-    }
-
-    pub(crate) fn set_project(&mut self, context: WorkflowProjectContext) -> WorkflowViewState {
-        self.current_project = context;
-        let current_id = self.current_project.id.clone();
-        self.projects
-            .retain(|id, _| id == "default" || id == &current_id);
-        self.projects.entry(current_id).or_default().clone()
-    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WorkflowProjectContext {
     pub(crate) id: String,
     pub(crate) name: String,
@@ -92,6 +64,8 @@ pub(crate) struct WorkflowViewState {
     pub(crate) tag_current_version: String,
     pub(crate) tag_next_version: String,
     pub(crate) tag_remove_target: String,
+    pub(crate) tag_description: String,
+    pub(crate) tag_run_generation: u64,
     pub(crate) tag_add_initializing: bool,
     pub(crate) tag_remove_initializing: bool,
     pub(crate) tag_add_ready: bool,
@@ -115,6 +89,8 @@ impl Default for WorkflowViewState {
             tag_current_version: "v0.0.0".to_string(),
             tag_next_version: "v0.0.1".to_string(),
             tag_remove_target: "v0.0.0".to_string(),
+            tag_description: String::new(),
+            tag_run_generation: 0,
             tag_add_initializing: false,
             tag_remove_initializing: false,
             tag_add_ready: false,
@@ -136,17 +112,22 @@ impl WorkflowViewState {
     }
 }
 
+impl Default for WorkflowStore {
+    fn default() -> Self {
+        let context = WorkflowProjectContext::default();
+        Self {
+            projects: HashMap::from([(context.id.clone(), WorkflowViewState::default())]),
+            current_project: context,
+            identity: WorkflowIdentity {
+                project: "default".into(),
+                generation: 0,
+            },
+            cd_generation: 0,
+        }
+    }
+}
 pub(crate) fn new_shared_state() -> SharedWorkflowState {
-    let mut initial_store = WorkflowStore {
-        current_project: WorkflowProjectContext::default(),
-        projects: HashMap::new(),
-        cd_running: false,
-    };
-    initial_store.projects.insert(
-        initial_store.current_project.id.clone(),
-        WorkflowViewState::default(),
-    );
-    Arc::new(Mutex::new(initial_store))
+    SharedWorkflowState::new()
 }
 
 pub(crate) fn register_shared_state(shared_state: &SharedWorkflowState) {
@@ -158,11 +139,9 @@ pub(crate) fn clear_current_project_heavy_state() {
         return;
     };
 
-    let Ok(mut guard) = shared_state.lock() else {
-        return;
-    };
-
-    guard.upsert_current(clear_heavy_view_state);
+    if let Err(error) = shared_state.submit(WorkflowAction::ClearHeavy) {
+        log::warn!("[Workflow] Cleanup admission rejected: {error}");
+    }
 }
 
 fn clear_heavy_view_state(view: &mut WorkflowViewState) {
@@ -177,14 +156,11 @@ fn clear_heavy_view_state(view: &mut WorkflowViewState) {
 }
 
 pub(crate) fn initialize_current_ui(ui: &MainWindow, shared_state: &SharedWorkflowState) {
-    let Ok(guard) = shared_state.lock() else {
-        let ctx = WorkflowProjectContext::default();
-        let st = WorkflowViewState::default();
-        initialize_ui(ui, &ctx, &st);
-        return;
-    };
-    let state = guard.current_state_ref();
-    initialize_ui(ui, &guard.current_project, state);
+    shared_state.install(ui);
+    let snapshot = shared_state.snapshot();
+    if snapshot.state().identity == shared_state.identity() {
+        shared_state.project_ui(ui, &snapshot);
+    }
 }
 
 pub(crate) fn reproject_registered_ui(ui: &MainWindow) {
@@ -193,48 +169,65 @@ pub(crate) fn reproject_registered_ui(ui: &MainWindow) {
     }
 }
 
+thread_local! { static PROJECTING_UI: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+pub(crate) fn is_projecting_ui() -> bool {
+    PROJECTING_UI.with(std::cell::Cell::get)
+}
+pub(crate) fn with_ui_projection<T>(apply: impl FnOnce() -> T) -> T {
+    struct Guard(bool);
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            PROJECTING_UI.with(|flag| flag.set(self.0));
+        }
+    }
+    let _guard = Guard(PROJECTING_UI.with(|flag| flag.replace(true)));
+    apply()
+}
 pub(crate) fn initialize_ui(
     ui: &MainWindow,
     context: &WorkflowProjectContext,
     state: &WorkflowViewState,
 ) {
-    ui.set_workflow_project_id(context.id.clone().into());
-    let project_name = if context.id == "default" {
-        crate::i18n::tr("projects.default_project").into_owned()
-    } else {
-        context.name.clone()
-    };
-    ui.set_workflow_project_name(project_name.into());
-    ui.set_workflow_project_alias(context.alias.clone().into());
-    ui.set_workflow_project_local_repo(context.local_repo.clone().into());
-    ui.set_workflow_project_remote_repo(context.remote_repo.clone().into());
-    ui.set_workflow_project_logo(context.logo.clone().into());
-    ui.set_workflow_branch_result(state.branch_result.resolve().into());
-    ui.set_workflow_tag_result(state.tag_result.resolve().into());
-    ui.set_workflow_tag_selected_tab(state.tag_selected_tab);
-    ui.set_workflow_tag_mode(state.tag_mode.clone().into());
-    ui.set_workflow_tag_version_mode(state.tag_version_mode.as_ui_str().into());
-    if state.tag_mode == "remote" {
-        let unavailable = crate::i18n::tr("common.unavailable").into_owned();
-        ui.set_workflow_tag_current_version(unavailable.clone().into());
-        ui.set_workflow_tag_next_version(unavailable.clone().into());
-        ui.set_workflow_tag_remove_target(unavailable.into());
-    } else {
-        ui.set_workflow_tag_current_version(state.tag_current_version.clone().into());
-        ui.set_workflow_tag_next_version(state.tag_next_version.clone().into());
-        ui.set_workflow_tag_remove_target(state.tag_remove_target.clone().into());
-    }
-    ui.set_workflow_tag_add_initializing(state.tag_add_initializing);
-    ui.set_workflow_tag_remove_initializing(state.tag_remove_initializing);
-    ui.set_workflow_tag_running(state.tag_running);
-    apply_job_run(
-        ui,
-        &state.job_run,
-        &state.tag_job,
-        &state.tag_result,
-        state.tag_running,
-    );
-    apply_cd_snapshot(ui, &state.cd);
+    with_ui_projection(|| {
+        ui.set_workflow_project_id(context.id.clone().into());
+        let project_name = if context.id == "default" {
+            crate::i18n::tr("projects.default_project").into_owned()
+        } else {
+            context.name.clone()
+        };
+        ui.set_workflow_project_name(project_name.into());
+        ui.set_workflow_project_alias(context.alias.clone().into());
+        ui.set_workflow_project_local_repo(context.local_repo.clone().into());
+        ui.set_workflow_project_remote_repo(context.remote_repo.clone().into());
+        ui.set_workflow_project_logo(context.logo.clone().into());
+        ui.set_workflow_branch_result(state.branch_result.resolve().into());
+        ui.set_workflow_tag_result(state.tag_result.resolve().into());
+        ui.set_workflow_tag_selected_tab(state.tag_selected_tab);
+        ui.set_workflow_tag_description(state.tag_description.clone().into());
+        ui.set_workflow_tag_mode(state.tag_mode.clone().into());
+        ui.set_workflow_tag_version_mode(state.tag_version_mode.as_ui_str().into());
+        if state.tag_mode == "remote" {
+            let unavailable = crate::i18n::tr("common.unavailable").into_owned();
+            ui.set_workflow_tag_current_version(unavailable.clone().into());
+            ui.set_workflow_tag_next_version(unavailable.clone().into());
+            ui.set_workflow_tag_remove_target(unavailable.into());
+        } else {
+            ui.set_workflow_tag_current_version(state.tag_current_version.clone().into());
+            ui.set_workflow_tag_next_version(state.tag_next_version.clone().into());
+            ui.set_workflow_tag_remove_target(state.tag_remove_target.clone().into());
+        }
+        ui.set_workflow_tag_add_initializing(state.tag_add_initializing);
+        ui.set_workflow_tag_remove_initializing(state.tag_remove_initializing);
+        ui.set_workflow_tag_running(state.tag_running);
+        apply_job_run(
+            ui,
+            &state.job_run,
+            &state.tag_job,
+            &state.tag_result,
+            state.tag_running,
+        );
+        apply_cd_snapshot(ui, &state.cd);
+    });
 }
 
 pub(crate) fn normalize_project_id(alias: &str, name: &str) -> String {
@@ -343,5 +336,11 @@ mod tests {
         initialize_ui(&ui, &WorkflowProjectContext::default(), &view);
 
         assert_eq!(ui.get_workflow_tag_version_mode().as_str(), "major");
+    }
+}
+
+pub(crate) async fn shutdown_async() {
+    if let Some(state) = WORKFLOW_SHARED_STATE.get() {
+        state.shutdown_async().await;
     }
 }

@@ -1,0 +1,3 @@
+    Blocking waiting for file lock on build directory
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.38s
+i18n catalog checks passed.

@@ -52,7 +52,8 @@ debounce 测量、按源行数估算、取已见高度最大值，都不能保�
    [Multiline text layout](text-layout.md). Cancel obsolete requests and reject
    results whose key no longer matches.
 3. Install the complete positive row extents into `VirtualList` once per key.
-   Use its `content_extent` as the only document-height source. Keep the extent
+   Use the projected `VirtualWindow.content_extent` as the only document-height
+   source (`VirtualList` has no public `content_extent` property). Keep the extent
    stable until an actual source or layout change is committed.
 4. Give Flickable/ScrollView that exact document height. Render only the bounded
    virtual window, with each row at its exact start and extent. Reuse a stable
@@ -85,8 +86,9 @@ debounce 测量、按源行数估算、取已见高度最大值，都不能保�
    选定的字体 collection；字体、`line-height-factor` 或已记录的 fallback pitch、wrap
    mode、padding、安全余量及 line-box rounding 必须与绘制一致，并遵循
    [多行文本排版规范](text-layout.md)。取消旧请求，拒绝 key 不匹配结果。
-3. 每个 key 只安装一次完整正数行 extent；唯一总高度为 `VirtualList.content_extent`，
-   只有真实内容或布局提交才能改变它。
+3. 每个 key 只安装一次完整正数行 extent；唯一总高度来自投影的
+   `VirtualWindow.content_extent`，`VirtualList` 没有同名公开属性；只有真实内容或
+   布局提交才能改变它。
 4. 视口使用精确文档高度，仅挂载有界虚拟窗口，行使用精确 start/extent。复用稳定
    ModelRc；滚动不得解析、排版或转换整个源 model。
 5. 滑块使用同一套 content/visible extent 和 offset，禁止混用精确滑块与估算范围。
@@ -121,6 +123,21 @@ debounce 测量、按源行数估算、取已见高度最大值，都不能保�
 
 ## Reference Implementations / 参考实现
 
+`VirtualList::set_viewport` updates the offset/visible extent;
+`write_window(&mut VirtualWindow)` reuses caller-owned visible-item storage.
+`window()` is a convenience that creates a new projection. Scroll bridges should
+prefer `write_window`. `reveal_center_if_needed` accepts `RevealTarget` for an
+intra-item target; `reveal_item_center_if_needed` reveals a whole item.
+
+Production `LatestCompute` completion must first call `acknowledge()` for its
+coalesced wake, then consume `take_output()` and check the feature layout key.
+`take()` and `shutdown()` are test-only helpers, not production APIs. Computation
+tokens provide cooperative cancellation; expensive loops must check them.
+
+滚动桥接使用 `set_viewport` 与复用存储的 `write_window`，总高度从结果读取。
+Worker 完成先解除合并唤醒标记，再取结果并核验 Feature key；不能照搬仅测试的
+`take`/`shutdown`。长循环仍需主动检查取消 token。
+
 - Markdown: `src/artifact_preview/virtual_layout.rs` and
   `ui/components/artifact_preview/github_artifact_preview.slint`.
 - PR Diff: `src/workflow/pr_review/virtual_list.rs` and
@@ -129,6 +146,11 @@ debounce 测量、按源行数估算、取已见高度最大值，都不能保�
   `ui/components/jobs/job.slint` (background wrapping, source-numbered rows,
   pinned mounted rows, and 16-entry / 16 MiB soft eviction targets for the
   accounted unmounted cache).
+
+Focused infrastructure checks: `cargo test -p usher-virtual-list --locked` and
+`cargo test --lib --locked app_runtime::latest_compute::tests`. Feature worker,
+reflow and mounted-owner regressions remain in their respective adapters; these
+infrastructure checks alone do not satisfy the native acceptance matrix above.
 
 Read the feature contract for its content-update/reflow policy before copying
 an adapter. Share the infrastructure and invariants, not feature-specific state.

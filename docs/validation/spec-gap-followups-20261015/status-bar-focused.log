@@ -1,0 +1,25 @@
+   Compiling usher v0.0.9-alpha.4 (/Users/yuankai/yuankai/Demo/rust/usher)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 14.73s
+     Running unittests src/lib.rs (target/debug/deps/usher_lib-fa63b6a37e703dbe)
+
+running 2 tests
+test status_bar_tests::mounted_download_and_update_check_popups_keep_live_catalog_and_semantic_progress ... FAILED
+test status_bar_tests::mounted_network_and_version_popups_follow_locale_and_current_feature_state ... ok
+
+failures:
+
+---- status_bar_tests::mounted_download_and_update_check_popups_keep_live_catalog_and_semantic_progress stdout ----
+
+thread 'status_bar_tests::mounted_download_and_update_check_popups_keep_live_catalog_and_semantic_progress' (12953374) panicked at src/status_bar_tests.rs:174:5:
+assertion `left == right` failed
+  left: "正在下载: 9.8.7\n进度: 75%\n状态: 正在下载… 3.0 / 4.0 MB"
+ right: ""
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    status_bar_tests::mounted_download_and_update_check_popups_keep_live_catalog_and_semantic_progress
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 878 filtered out; finished in 0.12s
+
+error: test failed, to rerun pass `--lib`

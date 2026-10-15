@@ -1,0 +1,17 @@
+{
+  "bundle": "/private/tmp/usher-ui120-final-20261015/Usher UI120 final.app",
+  "bundle_id": "com.usher.ui120.final",
+  "binary_source": "/Users/yuankai/yuankai/Demo/rust/usher/target/debug/usher",
+  "binary_sha256": "edd845e81b826bd1e88ca5457a37f6f835b80db3028a0e80376b09d9b956b69c",
+  "locale": "en",
+  "messages": 1000,
+  "state": "/private/tmp/usher-ui120-final-20261015/state/default/run-0",
+  "environment": {
+    "USHER_BENCHMARK_OFFLINE": "1",
+    "USHER_BENCHMARK_STATE_ROOT": "/private/tmp/usher-ui120-final-20261015/state",
+    "USHER_BENCHMARK_INSTANCE_NAMESPACE": "ui120-final",
+    "SLINT_BACKEND": "winit-femtovg"
+  },
+  "revision": "Includes exact target reveal before Tab focus; same isolated registered bundle restarted after owned process exit.",
+  "fixture_reset": "After exact owned PID absence, preserved prior state/log and restored original 1000 unread synthetic messages plus isolated baseline settings; no previous crash sentinel retained."
+}

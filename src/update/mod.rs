@@ -1,5 +1,6 @@
 pub mod check_update;
 mod download_archive;
+pub(crate) mod download_status;
 pub mod updater;
 
 // Re-export setup_updater for easy access

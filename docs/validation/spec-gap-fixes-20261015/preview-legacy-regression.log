@@ -1,0 +1,73 @@
+COMMAND: cargo test -p usher-preview --locked growth_after_metadata_is_rejected_after_only_one_overflow_probe_byte
+   Compiling usher-preview v0.0.9-alpha.1 (/Users/yuankai/yuankai/Demo/rust/usher/crates/usher-preview)
+warning: constant `READ_CHUNK_BYTES` is never used
+ --> crates/usher-preview/src/file_source.rs:9:7
+  |
+9 | const READ_CHUNK_BYTES: usize = 8 * 1024;
+  |       ^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `usher-preview` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.80s
+     Running unittests src/lib.rs (target/debug/deps/usher_preview-6ad90dfb3192d92e)
+
+running 1 test
+test file_source::tests::growth_after_metadata_is_rejected_after_only_one_overflow_probe_byte ... FAILED
+
+failures:
+
+---- file_source::tests::growth_after_metadata_is_rejected_after_only_one_overflow_probe_byte stdout ----
+
+thread 'file_source::tests::growth_after_metadata_is_rejected_after_only_one_overflow_probe_byte' (12672795) panicked at crates/usher-preview/src/file_source/tests.rs:67:5:
+assertion `left == right` failed
+  left: SourceTooLarge { bytes: 67108864, limit: 16777216 }
+ right: SourceTooLarge { bytes: 16777217, limit: 16777216 }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    file_source::tests::growth_after_metadata_is_rejected_after_only_one_overflow_probe_byte
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 40 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `-p usher-preview --lib`
+EXIT: 101
+COMMAND: cargo test -p usher-preview --locked ordinary_file_materializes_from_the_opened_handle
+warning: constant `READ_CHUNK_BYTES` is never used
+ --> crates/usher-preview/src/file_source.rs:9:7
+  |
+9 | const READ_CHUNK_BYTES: usize = 8 * 1024;
+  |       ^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `usher-preview` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.17s
+     Running unittests src/lib.rs (target/debug/deps/usher_preview-6ad90dfb3192d92e)
+
+running 1 test
+test file_source::tests::ordinary_file_materializes_from_the_opened_handle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 40 filtered out; finished in 0.00s
+
+EXIT: 0
+COMMAND: cargo test -p usher-preview --locked exact_budget_regular_file_is_accepted_without_an_extra_payload_byte
+warning: constant `READ_CHUNK_BYTES` is never used
+ --> crates/usher-preview/src/file_source.rs:9:7
+  |
+9 | const READ_CHUNK_BYTES: usize = 8 * 1024;
+  |       ^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `usher-preview` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.15s
+     Running unittests src/lib.rs (target/debug/deps/usher_preview-6ad90dfb3192d92e)
+
+running 1 test
+test file_source::tests::exact_budget_regular_file_is_accepted_without_an_extra_payload_byte ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 40 filtered out; finished in 0.00s
+
+EXIT: 0

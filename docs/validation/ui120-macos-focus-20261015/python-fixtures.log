@@ -1,0 +1,18 @@
+..................Running project (repeatability)
+{"project": {"passed": false, "error": "runner exited 7; see project.log"}}
+Running job (repeatability)
+{"job": {"passed": false, "error": "runner exited 7; see job.log"}}
+Running preview-code (repeatability)
+{"preview-code": {"passed": false, "error": "runner exited 7; see preview-code.log"}}
+Running preview-paragraphs (repeatability)
+{"preview-paragraphs": {"passed": false, "error": "runner exited 7; see preview-paragraphs.log"}}
+Running find (repeatability)
+{"find": {"passed": false, "error": "runner exited 7; see find.log"}}
+...........batch=65 paired_exit=7
+batch=69 paired_exit=7
+batch=70 soak_errors=[]
+..............................................................................
+----------------------------------------------------------------------
+Ran 107 tests in 56.716s
+
+OK

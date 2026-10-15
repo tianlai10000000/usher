@@ -77,14 +77,14 @@ Keep Usher a responsive desktop application with explicit module ownership, even
 ### HTTP / 网络请求
 
 - Do not call `reqwest::Client::new`, `reqwest::blocking::get`, or build another shared client outside `src/http/mod.rs`.
-- Build requests with the shared module and execute through `send`, `send_json`, or `send_blocking`.
+- Build requests with the shared module and execute through its async `send` or `send_json` entry points on the shared runtime; no `send_blocking` API exists.
 - Give every request a meaningful `RequestOptions.operation`.
 - Background polling, probes, prefetching, retries, and fallback attempts must use silent feedback.
 - User-triggered terminal failures may select toast/notification feedback, but avoid duplicating an existing feature-owned error UI.
 - Never log authorization headers, tokens, complete sensitive payloads, or unbounded response bodies.
 
 - 禁止在 `src/http/mod.rs` 外调用 `reqwest::Client::new`、`reqwest::blocking::get` 或创建其他共享 client。
-- 使用统一模块构建请求，并通过 `send`、`send_json`、`send_blocking` 执行。
+- 使用统一模块构建请求，在共享 Runtime 通过异步 `send` 或 `send_json` 执行；当前没有 `send_blocking` API。
 - 每个请求必须设置有意义的 `RequestOptions.operation`。
 - 后台轮询、探测、预取、重试和 fallback 必须静默。
 - 用户主动操作可以启用 Toast/Notification，但不要与 feature 自有错误 UI 重复提示。

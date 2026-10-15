@@ -225,7 +225,6 @@ export component GitHubProjectPage {
                     first: index == 0;
                     open-requested => {
                         root.open-project(project.project_name, project.project_alias, project.local_repo, project.remote_repo, project.logo, project.logo_image, project.is_pr_auto_update);
-                        root.navigate(Route.Workflow);
                     }
                     terminal-requested => {
                         ProjectBridge.open-terminal(project.project_name, project.project_alias, project.local_repo);
@@ -278,7 +277,6 @@ export component GitHubProjectPage {
                         project: ProjectBridge.items[grid-row.start-index + column-index];
                         open-requested => {
                             root.open-project(self.project.project_name, self.project.project_alias, self.project.local_repo, self.project.remote_repo, self.project.logo, self.project.logo_image, self.project.is_pr_auto_update);
-                            root.navigate(Route.Workflow);
                         }
                         terminal-requested => {
                             ProjectBridge.open-terminal(self.project.project_name, self.project.project_alias, self.project.local_repo);

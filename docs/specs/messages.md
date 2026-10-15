@@ -29,14 +29,15 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
 - `src/message_center.rs` is the only root-window bridge. It converts immutable
   snapshots to Slint models, mirrors theme/viewport state, pushes explicit
   total/unread/read filter counts, and forwards page commands to the domain
-  service. Inbox row actions use dedicated hardcoded-glyph controls and literal
-  Tooltip labels so dynamic list delegates cannot alias icon or label bindings.
+  service. Inbox row actions use dedicated fixed-glyph controls and direct
+  semantic `I18n` bindings so dynamic list delegates cannot alias icon or label bindings.
   The independently compiled page owns a dedicated enum-only
   `MessageTooltipOverlayState` and root-layer
   `GitHubMessageTooltipOverlayHost`. Delegates publish only an action kind and
   anchor rectangle; the page Portal owns one `GitHubTransientFloatingOverlayHost`
-  plus three permanently mounted factory-root surfaces for the literal
-  **Mark as read**, **Mark as unread**, and **Delete** labels. This prevents
+  plus three permanently mounted factory-root surfaces for
+  `I18n.messages-mark-as-read`, `I18n.messages-mark-as-unread`, and
+  `I18n.common-delete`. This prevents
   both delegate string aliasing and stale preferred-width reuse while retaining
   the shared anchor-based flip/shift/size geometry without reaching into
   `MainWindow` globals. The action kind selects one Surface with `visible`; the
@@ -56,8 +57,9 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
   snapshot before making the page active. The stable visual tree remains
   mounted: a three-run release A/B found no material RSS saving from rebuilding
   it on each visit and observed mixed physical-footprint regressions.
-- `src/notification.rs` continues to own transient queued Banners and mirrors
-  every created application notification into the durable message center.
+- `src/message_center/commands.rs` owns bounded FIFO admission and the worker
+  for UI-originated typed mutations; `src/notification/ingress.rs` owns pending
+  UI payloads and ticketed completion. `src/notification.rs` owns transient Banners.
 - `ui/components/messages/github_message_components.slint` owns reusable Inbox
   row visuals and is registered in the UI Components playground.
 - `ui/components/status_bar.slint` presents the unread count supplied by the
@@ -75,12 +77,13 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
   快照覆盖较新的内存 State。具体 Store 引擎类型不得越过该门面。
 - `src/message_center.rs` 是唯一主窗口桥接层，负责把不可变快照转换为 Slint model、
   同步主题/视口、下发 All/Unread/Read 整型计数，并把页面命令转给领域服务。Inbox
-  行动作使用写死 SVG 和 Tooltip 字面量文案，避免动态列表 delegate 串用图标或文案
+  行动作使用固定 SVG 和直接绑定语义 `I18n` 的 Tooltip 文案，避免动态列表 delegate 串用图标或文案
   binding。独立编译页面拥有专用、只传枚举的
   `MessageTooltipOverlayState` 与根层 `GitHubMessageTooltipOverlayHost`。Delegate
   只发布动作类型和锚点矩形；页面 Portal 只拥有一个
-  `GitHubTransientFloatingOverlayHost`，页面根部三个常驻独立 Surface 分别持有 **Mark as read**、
-  **Mark as unread** 和 **Delete** 字面量，既避免 delegate 字符串串用，也避免复用旧的
+  `GitHubTransientFloatingOverlayHost`，页面根部三个常驻独立 Surface 分别绑定
+  `I18n.messages-mark-as-read`、`I18n.messages-mark-as-unread` 和 `I18n.common-delete`，
+  既避免 delegate 字符串串用，也避免复用旧的
   preferred-width。定位仍复用共享的锚点式 flip/shift/size 算法，但不读取
   `MainWindow` global。动作类型通过 `visible` 选择一个 Surface；类型为 `None` 或离开
   路由时 transient host 收到 `active=false`，由它隐藏私有全窗口定位树。Portal 禁止为
@@ -95,11 +98,35 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
   并跳过页面投影；Store 仍继续接收 Action、更新全局未读 selector。重新进入时先从
   最新 Store 快照 hydration 行 model，再激活页面。视觉树保持稳定挂载：三轮 Release
   A/B 未测得逐次重建带来的实质 RSS 节省，且 physical footprint 结果出现混合回退。
-- `src/notification.rs` 继续负责短时排队 Banner，并把每条应用通知镜像到持久消息中心。
+- `src/message_center/commands.rs` 负责 UI 强类型变更的有界 FIFO 与 Worker；
+  `src/notification/ingress.rs` 负责 UI pending payload 和 ticket 完成，
+  `src/notification.rs` 负责短时 Banner。
 - `ui/components/messages/github_message_components.slint` 负责可复用 Inbox 行视觉，
   并登记到 UI Components 演练场。
 - `ui/components/status_bar.slint` 只展示消息服务提供的未读数，不得从短时 Banner
   队列推导持久计数。
+
+## Implementation and focused checks / 实现与专项检查
+
+| Change / 改动 | Inspect together / 配套核对 |
+| --- | --- |
+| Domain, durability, close / 领域、持久化、关闭 | `crates/usher-messages/src/{center,storage,center_tests}.rs`, `crates/usher-state-store/src/latest.rs` |
+| Native delivery / 原生投递 | `crates/usher-messages/src/{model,desktop,native_worker}.rs`, application adapter in `src/message_center.rs` |
+| Page/filter/locale projection / 页面、筛选与语言投影 | `src/message_center.rs`, `src/message_center/paging_tests.rs`, `ui/views/messages.slint` |
+| Factory keyboard ownership / Factory 键盘所有权 | `src/message_center/focus.rs`, `src/message_center/focus/navigation.rs`, shared pagination and the page capture scope |
+| UI mutation admission / UI 变更准入 | `src/message_center/commands.rs`, `src/message_center/commands_tests.rs` |
+| Row actions and Tooltip portal / 行动作与 Tooltip Portal | `ui/components/messages/github_message_{components,actions,tooltip}.slint`, `ui/state/message_tooltip_overlay_state.slint` |
+| Banner mirroring/queue / Banner 镜像与队列 | `src/notification.rs`, `src/notification/ingress.rs`, `src/notification/ingress_tests.rs`, `ui/components/notify/`, root hosts in `ui/main.slint` |
+
+Focused commands: `cargo test -p usher-messages --locked`,
+`cargo test --lib --locked message_center::` and
+`cargo test --lib --locked notification::`. Root tests include compiled Inbox
+paging, host-focus and route-reentry cases. Their simulated input is separate
+from the scoped [macOS native regression](../validation/ui120-macos-focus-20261015/README.md)
+below; neither establishes renderer memory behavior or acceptance on other platforms.
+
+专项命令覆盖领域、真实编译 Inbox 分页、宿主焦点与重入；模拟输入与下文单独记录的
+macOS 原生回归分开，不代表渲染内存或其它平台已验收。
 
 ## Domain and extension contract / 领域与扩展契约
 
@@ -140,9 +167,9 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
 
 ## Delivery, persistence, and threading / 投递、持久化与线程
 
-1. Publishing updates the in-memory snapshot synchronously and returns the new
-   message. It must not perform filesystem or OS-notification work on the Slint
-   event loop.
+1. The domain `MessageCenter::publish` reduces synchronously on its caller and
+   returns the message. UI callbacks therefore use the command worker described
+   below; they never call domain mutation methods on the Slint event loop.
 2. Every changed Store revision automatically offers its immutable shared
    snapshot to `LatestPersistence`: one active write and one replaceable latest
    pending/dirty snapshot. Actions never call save manually. JSON lives at
@@ -176,12 +203,17 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
    Calling close from this center's synchronous Action/subscriber or native
    worker returns `ReentrantShutdown` before acquiring the shutdown lock, so it
    cannot self-wait. The compatibility `shutdown()` logs checked errors.
-   These blocking barriers belong on a background lifecycle owner. The shell
-   still uses its existing pre-shutdown registration; migration remains pending
-   after the P7 #77 candidate was rejected.
+   The shell runs these barriers in the background cleanup phase after async
+   producer drains and original-thread producer stops, before UI/AppKit cleanup.
+   AI Review whole-operation receipts include terminal Message/Hook continuations;
+   its drain precedes Hooks and final center close. Concurrent exit paths share
+   the actual phase/tail barriers, including a cancelled waiter or natural loop
+   return. The root window hides before async drains to stop new pointer input.
+   Existing failure logging/exit policy remains; the historical rejected P7 #77
+   implementation is not restored.
 
-1. 发布操作同步更新内存快照并返回新消息；不得在 Slint event loop 执行文件系统或
-   OS 通知工作。
+1. 领域 `MessageCenter::publish` 在调用线程同步 reduce 并返回消息；UI callback
+   因此必须使用下述命令 Worker，禁止在 Slint event loop 调用领域变更方法。
 2. 每个有效 Store revision 自动把共享不可变快照交给 `LatestPersistence`：最多
    一个活动写入和一个可替换的最新 pending/dirty 快照，Action 禁止手工 save。
    JSON 位于平台本地数据目录的 `messages/messages.json`。`flush()` 观察已接受
@@ -206,8 +238,101 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
    Worker；保留持久化/原生 Worker 的失败原因，并发/重复调用共享完成屏障。
    从本中心的同步 Action/subscriber 或原生 Worker 中调用关闭时，在获取关闭锁前
    返回 `ReentrantShutdown`，避免自等待。兼容 `shutdown()` 记录 checked 错误。
-   这些阻塞屏障应由后台生命周期 owner 调用。Shell 仍使用既有 pre-shutdown
-   接线；P7 #77 候选已拒绝，此迁移尚未完成。
+   Shell 在 async producer drain 与原线程停止回调后、UI/AppKit 清理前的后台阶段
+   执行这些屏障。AI Review 完整操作 receipt 覆盖终态 Message/Hook continuation，
+   drain 早于 Hooks 与最终中心 close。并发退出、等待方取消和自然 loop 返回共享
+   实际阶段及尾部屏障。根窗口在 async drain 前隐藏以阻止新指针操作。保留既有
+   失败日志/退出政策，不恢复历史已拒绝的 P7 #77 实现。
+
+### UI command admission and completion / UI 命令准入与完成
+
+Inbox set-read, mark-all-read, delete, clear, Banner mirroring and deferred
+hydration enter one feature-owned FIFO. Slint callbacks capture IDs/drafts and
+use nonblocking admission: at most 256 active-plus-pending business commands and
+1 MiB accounted owned payload capacity (including envelopes). Overflow rejects
+the new command and logs a bounded reason; accepted mutations execute in order,
+without coalescing. Hydration has one reserved, coalesced control slot. Before
+first-frame hydration, accepted UI commands stay buffered within the same budget;
+hydration runs first so mark-all/clear also apply to stored history. The worker
+performs domain reduction, and closes UI admission before draining and flushing
+on the async shutdown stage. Closing before the first frame still hydrates and
+merges disk history. Final center close runs on the background cleanup owner
+after producers have drained/stopped, retaining HIGH priority and LIFO order
+within that phase. Project/request-preference writer joins and the final NORMAL
+settings flush also run there. UI/native detach remains on the original thread.
+
+Notification UI payloads have an independent 256-entry / 1 MiB accounting budget
+until UI completion takes them, including when the worker has already finished.
+Accounting includes UTF-8 text, action slots/text and estimated RGBA icon bytes;
+it is not an allocator/RSS ceiling. Actions are snapshotted into an owned model
+at admission. `WhenUnfocused` is resolved using window activity at admission;
+message ID and creation time are assigned at worker publication. Workers carry
+only typed drafts and ticketed completion through weak event-loop handles.
+Only the latest ticket for a caller-supplied Banner ID can mount, and mounted
+Banner IDs stay unique. Completion rechecks that the durable row still exists,
+so accepted delete/clear cannot leave an orphan Banner. Worker admission failures
+retain the existing transient Banner fallback. UI-budget overload retains only
+one bounded latest fallback (including bounded actions and default icon), one
+timer and a logged rejection; it does not silently claim Inbox publication.
+Cleanup drops pending UI payloads. This does not change direct background
+publishers' domain API or native delivery's separate queue budget.
+
+Inbox 已读/全部已读/删除/清空、Banner 镜像与 deferred hydration 共用 Feature FIFO。
+Slint callback 捕获 ID/完整 draft 后非阻塞准入：业务命令含活动项最多 256 项，
+自有 payload capacity（含 envelope）记账最多 1 MiB。超限拒绝新命令并记录原因；
+已接受变更按序执行，不合并。Hydration 有一个保留且去重的控制槽；首帧前已接受
+UI 命令仍计预算并缓冲，先 hydration 再执行，使全部已读/清空也作用于磁盘历史。异步关闭阶段
+先关闭 UI 准入，再排空并 flush；首帧前关闭仍会 hydration 合并磁盘历史。最终
+中心 close 在发布方排空/停止之后由后台 owner 执行，保留该阶段内的 HIGH 优先级
+和 LIFO；Project/请求偏好 writer join 及最后 NORMAL Settings flush 也在后台，
+UI/原生集成的卸载仍在原线程。
+
+通知 UI payload 另有含活动项 256 项/1 MiB 记账预算，直到 UI 完成取走才释放，
+不随 Worker 提前完成释放；统计 UTF-8、action 槽/文案与估算 RGBA 图像，不代表
+allocator/RSS 上限。Action 在准入时形成独占 model；`WhenUnfocused` 使用准入时
+焦点，消息 ID/时间在 Worker publish 时生成。Worker 只接收强类型 draft，完成经
+ticket 与 weak handle 回到 event loop。同一调用方 Banner ID 只有最新 ticket 可
+挂载，已挂载 ID 保持唯一；完成会重新检查 durable row，避免后续删除/清空产生孤立
+Banner。Worker 准入失败保留原短时 Banner fallback；UI 预算超限只保留一个有界
+最新 fallback（动作截断、默认图标）、一个 timer 和拒绝日志，不声称已进入 Inbox。
+清理时释放 pending UI payload。后台直接 publish API 与原生投递队列预算保持独立。
+
+## Failure behavior and implementation gaps / 失败行为与实现缺口
+
+Invalid JSON/storage-schema data is logged and loads as an empty history. Without
+a changed business state the original corrupt bytes remain available for recovery;
+the next valid changed state atomically replaces them through normal persistence.
+Other storage I/O errors are returned, leave accepted in-memory changes intact and
+allow an explicit hydration retry; durability remains unavailable until it succeeds.
+Deferred hydration merges disk and memory, installs the automatic commit observer,
+then compares the current message snapshot with the normalized disk baseline. Only
+a different snapshot needs an initial persistence offer. Disk-only loads and an
+empty revision zero never trigger a write or create a missing JSON file. Concurrent
+or subscriber-reentrant business changes before observer installation are included
+in that comparison; later changed commits enqueue automatically. Concurrent hydration
+calls share the first successful result; later calls do not reload or resurrect
+deleted rows. A hydration subscriber cannot wait for its own hydration operation:
+same-thread reentry returns `ReentrantHydration` without closing the center.
+`crates/usher-messages/src/hydration_tests.rs` covers real writes, absence of redundant
+writes, read/delete/clear races, retries, reentry and checked shutdown.
+The center-close worker barrier is covered by `src/shutdown/pipeline/tests.rs`.
+UI-120's native failing-before case and corrected pointer/keyboard behavior are
+recorded below; package and event-loop fixtures do not replace the remaining
+native window/notification acceptance.
+
+无效 JSON/存储 Schema 记录日志后按空历史加载；没有业务变化时保留原损坏字节供恢复，
+下一次合法的有效状态变更再通过普通持久化原子替换。其余存储 IO 错误向调用方返回，
+保留已接受的内存变更并允许显式重试 hydration；成功前不得报告业务变更已持久化。
+deferred hydration 先合并磁盘与内存、安装自动 commit observer，再将当前消息快照
+与规范化磁盘基线比较，仅有差异时补交首次持久化。纯磁盘加载与空 revision 0 不写盘，
+缺失 JSON 文件也不因此创建。observer 安装前的并发或 subscriber 重入业务变更进入
+最终比较；后续有效 commit 自动提交。并发 hydration 共用首次成功结果，之后不再
+重读磁盘或复活已删记录；同线程 subscriber 重入 hydration 返回
+`ReentrantHydration`，避免等待自身，中心继续可用。
+`crates/usher-messages/src/hydration_tests.rs` 覆盖真实写入/零冗余写入、已读/删除/清空
+竞争、重试、重入及 checked 关闭。中心最终关闭的后台屏障由
+`src/shutdown/pipeline/tests.rs` 覆盖。UI-120 的原生修复前失败及修复后鼠标/键盘
+行为见下文记录；包测试和 event-loop 夹具不能替代尚未完成的原生窗口/通知验收。
 
 ## Inbox and unread behavior / Inbox 与未读行为
 
@@ -228,13 +353,16 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
   the group cannot fit, retain Previous/Next without overflowing. Keyboard
   activation and visible focus are required. Changing filters resets to page
   one while preserving the current scroll offset, clamped only to the new
-  content bounds; explicit page changes reset scroll to the top. Store updates preserve
+  content bounds. Pointer page changes reset scroll to the top and leave neutral
+  page focus; keyboard activation keeps the pagination visible for continued
+  navigation. Store updates preserve
   the page unless it is out of range, then clamp to the new last page. Mark all
   as read and confirmed Clear all still apply to the entire durable history.
   The pagination surface and its nine link slots stay mounted when hidden to
   avoid stale factory labels after single-page/multi-page transitions.
-  Known validation gap (UI-120): native macOS factory focus does not transfer
-  from a sidebar control on a pagination click; keyboard acceptance is pending.
+  The host-focus adapter fixes UI-120: pointer pagination clears stale sidebar
+  focus, and keyboard pagination uses the actual host adapter. Native regression
+  scope and remaining acceptance limits are recorded under Factory keyboard focus.
 - The list keeps its continuous 1px outline and all four Primer medium (6px)
   corners, including hover/unread fills. Only the first and last rows use
   rounded clipping; middle rows use rectangular clipping. Never place the
@@ -251,10 +379,12 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
   省略区域为不可交互的省略号。边界方向禁用，空结果或单页隐藏分页；宽度不足时只
   显示上一页/下一页，不能溢出。支持键盘激活与可见焦点。切换筛选回到第一页，
   保留当前滚动位置，仅在超出新内容范围时校正；
-  主动翻页回到顶部；Store 更新保留页码，越界则回退到新的末页。全部已读与确认后的
+  鼠标翻页回到顶部并保留中立页面焦点，键盘翻页保持分页控件可见以继续操作；
+  Store 更新保留页码，越界则回退到新的末页。全部已读与确认后的
   清空全部仍作用于完整持久历史。
   隐藏时保留分页控件与九个页码槽位，避免单页/多页切换后 factory 页码文字残留。
-  已知验证缺口（UI-120）：macOS 原生 factory 中点击分页未能转移侧栏焦点，键盘验收待完成。
+  宿主焦点适配已修复 UI-120：鼠标分页清除旧侧栏焦点，键盘分页使用真实宿主 adapter。
+  原生回归范围与剩余验收限制见下文 Factory 键盘焦点。
 - 列表保留连续 1px 外框与四个 Primer medium（6px）圆角，包括 Hover/未读底色。
   只有首末行使用圆角裁剪，中间行采用矩形裁剪；禁止把完整列表放进会分配整表 GPU
   图层的圆角裁剪容器。
@@ -330,6 +460,8 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
 - Inbox 提供 All/Unread/Read 筛选、单条已读/未读切换、单条删除、全部已读以及显式两步
   Clear all。
 - 每行展示分类标签；原始分类键保留在行模型中，未来增加分类筛选无需迁移存储。
+- 持久化的应用诊断文案只有同时满足 channel/source/category 限定，并精确匹配
+  内置 catalog 值时才在当前语言重投影；远端、用户及未知文案保持原样。
 - 激活未读行时先标记已读，再转发可选目标；目标路由仍由 Feature 持有，无目标合法。
 - 已读与删除状态都持久化；关闭短时 Banner 不得把对应持久消息标记已读或删除。
   删除或清空 Inbox 消息时，按 `message-id` 移除仍排队的对应 Banner；Clear all
@@ -365,7 +497,155 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
   行透明底 + muted 标题。Hover 使用 `accent-subtle`。前导类型图标保留 Primer
   语义色。改变已读状态不得重排最新优先序列。
 
+## Factory keyboard focus / Factory 键盘焦点
+
+`src/message_center/focus.rs` owns the Inbox's focus on the actual MainWindow
+adapter. The independently compiled page's generated `.focus()` targets its
+private adapter; leaving focus there does not route native host key events to
+the page. A valid pointer pagination activation carries an explicit synchronous
+signal, rather than inferring its origin from residual private focus. After the
+page updates and scrolls to the top, its neutral capture scope takes host focus
+and the private owner is cleared. Return/Space on that scope performs no business
+action: it must not navigate Home or mark messages read.
+
+Keyboard pagination retains the mounted link slot's focus and reveals the footer
+within the new content bounds. A numbered slot's label can change when the
+neighboring-page window is reprojected; focus does not promise to follow the same
+semantic page number. Previous/Next retain their directional identity. Shared
+links do not run generated `.focus()` again during
+keyboard activation. `focus/navigation.rs` traverses the mounted host's eligible
+controls for Tab/Shift+Tab across the factory boundary. A standalone `Key.Backtab`
+also requests reverse traversal without requiring the Shift modifier; unrelated
+Control/Alt/Meta combinations remain outside this Tab handler. Disabled/hidden controls,
+ellipsis slots and transparent/offscreen sidebar copies are excluded. Each chosen
+target retains its actual mounted rectangle and enclosing Flickable viewport.
+Before assigning Tab focus, the owner applies the minimum vertical movement to
+reveal that target, clamped to the viewport's actual content bounds. This avoids
+an offscreen row's own Clip rejecting reverse focus and triggering Slint's fixed
+forward fallback. The [before trace](../validation/ui120-macos-focus-20261015/backtab-trace-before.log)
+records that local loop; the [compiled regression](../validation/ui120-macos-focus-20261015/focused-reveal-after.log)
+passes complete reverse traversal and exit. This uses live geometry without
+estimated row heights, extent changes or rebuilding the 20-slot message model.
+
+When keyboard paging disables the focused Previous/Next direction, the shared
+link must clear its painted keyboard outline and ignore further activation. The
+pinned Slint FocusScope can ignore FocusOut after disabling, so clearing only in
+`focus-lost` is insufficient. A subsequent Tab must move to an eligible control
+without leaving a second focus ring on the disabled direction. The compiled
+regression inspects the actual border width, expecting zero after disabling;
+the [recorded before case](../validation/ui120-macos-focus-20261015/disabled-outline-before.log)
+fails with 2px rather than zero. The final native build also passes the page
+49 → Space on Next → page 50 → Tab to host sequence with only the host focus ring.
+
+The page capture scope forwards application shortcuts through the existing root
+callback and consumes them only when executed. Ordinary unmatched keys are
+rejected. Modal or inactive page input is blocked from reaching background
+controls. Route exit releases only host focus owned by this page. These rules
+use the pinned Slint focus APIs; a toolkit upgrade must rerun compiled and native
+focus acceptance before removing the adapter.
+
+`src/message_center/focus.rs` 将 Inbox 焦点归真实 MainWindow adapter 所有。
+独立编译页面的 `.focus()` 指向私有 adapter，不能单靠它接收宿主原生键盘事件。
+有效鼠标分页激活通过显式同步信号标记来源，不反查残留私有焦点。更新页码并回到
+顶部后，中立 capture scope 接管宿主焦点并清除私有 owner；其 Return/Space 不执行
+业务动作，不能跳 Home 或把消息标为已读。
+
+键盘翻页保留已挂载链接槽位的焦点，并按新内容边界显示分页栏。相邻页窗口重投影时，
+数字槽位的标签可变化，不保证焦点一直跟随同一个语义页码；Previous/Next 的方向语义
+保持不变。共享链接在键盘激活时不再次调用
+生成的 `.focus()`。`focus/navigation.rs` 按已挂载宿主顺序处理 Tab/Shift+Tab，
+独立 `Key.Backtab` 也按反向处理，不要求同时带 Shift；带 Control/Alt/Meta 的其它
+组合不进入该 Tab 处理。跨越 factory 边界时排除禁用/隐藏控件、省略号、透明或屏外
+侧栏副本。选中目标保留真实挂载矩形及所属 Flickable 视口；赋予 Tab 焦点前按最小
+垂直位移精确显示该目标，并夹紧到真实内容边界，避免离屏行自身 Clip 拒绝反向焦点后
+触发 Slint 固定向前 fallback。[修复前 trace](../validation/ui120-macos-focus-20261015/backtab-trace-before.log)
+保留了该局部循环；[compiled 回归](../validation/ui120-macos-focus-20261015/focused-reveal-after.log)
+已通过完整反向遍历并离开 factory。该过程使用实时几何，不估算行高、不改变 extent，
+也不重建 20 个消息槽位。
+
+键盘翻页使当前 Previous/Next 方向禁用时，共享链接必须清除键盘焦点描边并拒绝继续
+激活。固定版本的 Slint FocusScope 在禁用后可能忽略 FocusOut，仅靠 `focus-lost`
+清理不足；后续 Tab 到可用控件时，禁用方向不能残留第二个焦点环。Compiled 回归检查
+真实 border width，要求禁用后为零；保留的修复前用例实际得到 2px，因而失败。
+最终原生构建也通过第 49 页聚焦 Next → Space 到 50 页 → Tab 到宿主的序列，
+只保留宿主焦点环。
+
+页面 capture scope 通过既有根 callback 转发应用快捷键，只有确实执行才接受；
+活动页面的其余按键返回未处理。Modal 或非活动状态阻止按键进入背景控件；离开路由
+只释放属于本页的宿主焦点。适配依赖固定 Slint 焦点 API，升级 toolkit 后须重新完成
+compiled 与原生验收，再判断是否移除。
+
+### Native regression scope / 原生回归范围
+
+The [2026-10-15 macOS record](../validation/ui120-macos-focus-20261015/README.md)
+uses the complete application on macOS 27.0.1 arm64, Slint 1.18.1 and
+Winit/FemtoVG, with an isolated store of 1,000 synthetic messages. CUA supplies
+native input; the acceptance steps do not dispatch `WindowEvent` or invoke UI
+callbacks. The baseline establishes the sidebar Home focus ring, clicks page 4,
+then reproduces Return navigating Home. On the final build, the same English
+sequence followed by Return and Space stays in Messages at first row 0940 with
+all 1,000 messages unread. Runtime switching through Settings to Chinese keeps
+the factory mounted; Home keyboard focus followed by page 1 and Return/Space
+also stays in Messages at first row 1000 with unread state intact.
+
+Native forward Tab reaches the footer, Return/Space changes pages while keeping
+it visible, and Tab leaves the factory for host controls. At the last-page
+boundary, Next becomes disabled without retaining a second focus ring after
+Tab leaves it. The 800 × 600 logical window was zoomed to a 5120 × 2692 physical
+window at scale 2 and restored to 1600 × 1200 physical without overflow. Command+B
+toggles the sidebar in both directions. Home/bell reentry preserves the selected
+page. Empty Read results hide pagination; after marking one message read, Read
+contains one row and no footer, while All restores full-history paging. A final
+pointer page change followed by Return/Space preserves the remaining 999 unread
+messages. Numbered-slot label reprojection was observed and follows the slot
+focus contract above. See the linked record for the exact sequences and binary.
+
+This closes the reproduced UI-120 core failure; it is not a blanket keyboard
+acceptance claim. Reverse traversal remains a native verification limit: the
+current CUA Shift+Tab input also moved forward between ordinary host controls,
+so it could not supply a trustworthy native reverse case. Compiled Shift+Tab
+coverage remains separate. Windows and screen reader behavior have not been
+inspected. The application minimum is 800 × 600px; forced 640px direction-only
+coverage belongs to the compiled component fixture, not an available native
+window mode. The linked record owns final build identities and executed checks.
+
+[2026-10-15 macOS 记录](../validation/ui120-macos-focus-20261015/README.md)使用完整
+应用、macOS 27.0.1 arm64、Slint 1.18.1 和 Winit/FemtoVG，消息与设置均在隔离目录，
+包含 1,000 条合成消息。实际输入由 CUA 提供，不通过 `WindowEvent` 或 UI callback
+代替。修复前先建立侧栏 Home 的蓝色焦点环，再点第 4 页、按 Return，重现跳 Home；
+最终构建执行相同英文前置条件后，Return/Space 仍停留消息页、首条为 0940，
+1,000 条消息仍全部未读。从 Settings 运行时切到中文时保留 factory；重新建立 Home
+键盘焦点，再点第 1 页、按 Return/Space，也停留消息页、首条为 1000，未读状态保持。
+
+原生正向 Tab 可到达分页栏，Return/Space 翻页后分页栏继续可见，Tab 也能离开
+factory 到宿主控件。末页边界 Next 禁用后，Tab 移走只保留宿主焦点环。原生窗口从
+800 × 600 逻辑尺寸放大至 scale 2 下的 5120 × 2692 物理尺寸，再还原到 1600 × 1200
+物理尺寸，未见溢出。Command+B 可来回切换侧栏，Home/铃铛重入保留所选页。
+空 Read 隐藏分页；标记一条已读后，Read 仅一条且无分页，All 恢复完整历史分页；
+最后鼠标翻页再按 Return/Space，剩余 999 条未读保持。数字槽位标签重投影也已观察，
+遵守上文槽位焦点契约。精确操作序列与二进制身份见链接记录。
+
+已复现的 UI-120 核心问题由此关闭，但不表示整个键盘矩阵已通过。原生反向遍历仍受
+验证工具限制：当前 CUA 的 Shift+Tab 在普通宿主控件之间也表现为前进，不能作为可信
+反向输入；compiled Shift+Tab 覆盖单独记录。Windows 和读屏行为未做原生检查。
+应用窗口最小为 800 × 600px；强制 640px 的仅方向模式属于 compiled 组件边界夹具，
+不是可到达的原生窗口模式。最终二进制身份与实际检查结果以链接记录为准。
+
 ## Regression checklist / 回归清单
+
+- Establish real sidebar Home keyboard focus before clicking pagination; verify
+  the first click changes page, scrolls to top, and Return/Space cannot activate
+  Home or mutate read state. A pointer-selected Home without keyboard focus is
+  not a sufficient before/after test.
+- In source/non-source locales, verify keyboard pagination, visible focus,
+  complete Tab/Shift+Tab and standalone Backtab entry/exit, disabled boundaries
+  with no residual focus outline, ellipses, narrow
+  direction-only mode, modal blocking, root shortcuts and route reentry.
+- 先建立侧栏 Home 的真实键盘焦点，再单击分页；验证首次点击翻页并回顶部，随后
+  Return/Space 不跳 Home、不改变已读状态。仅鼠标选择 Home 不足以证明修复。
+- 源语言/非源语言下覆盖键盘翻页、可见焦点、完整 Tab/Shift+Tab 与独立 Backtab 出入、
+  禁用边界无残留焦点环、
+  省略号、窄屏仅方向、Modal 阻断、根快捷键和路由重入。
 
 - Block the real persistence adapter, dispatch 1,000 changes and verify only
   active/latest shared owners remain; flush and restart must recover the final
@@ -432,8 +712,8 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
   close that Banner with its X button. Verify the next head appears with its
   overflow ActionMenu closed.
 - Open the Banner overflow and verify the menu is end-aligned with the kebab
-  but begins below the complete card with a visible gap; it must not overlap
-  the footer.
+  and anchors to its 24 px button with a 6 px gap below, or above when flipped;
+  it must not overlap the trigger.
 - With the overflow open, click the Banner body or footer count and verify the
   menu closes; then verify action buttons, X, and the kebab still activate on
   their first click.
@@ -472,8 +752,8 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
   ActionMenu 入口应一次切换（互斥，无需点两次），一键关闭后 Inbox 行仍在。
 - 至少排队两条 Banner，展开第一条队首的 overflow 菜单后直接点击 X 关闭，确认
   下一条队首出现时其 overflow ActionMenu 默认关闭。
-- 展开 Banner overflow，确认菜单横向与三点按钮尾对齐、纵向在完整卡片底边下方
-  留有可见间距，不能覆盖底栏。
+- 展开 Banner overflow，确认菜单横向与三点按钮尾对齐、纵向以 24px 按钮为锚点，
+  向下或翻转向上都保持 6px 间距，不能覆盖触发按钮。
 - overflow 展开时点击 Banner 正文或底栏计数区域，确认菜单关闭；再确认操作按钮、
   X 与三点入口仍能在第一次点击时正常响应。
 - 在 All 中把多条不相邻消息标记为已读，确认相对顺序与滚动位置稳定，筛掉的行不留下空白。

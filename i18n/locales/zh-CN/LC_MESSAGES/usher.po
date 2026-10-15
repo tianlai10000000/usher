@@ -5489,3 +5489,11 @@ msgstr "无法保存默认 PR 合并方式。"
 msgctxt "tray.quit"
 msgid "Quit"
 msgstr "退出"
+
+msgctxt "tag.initialization_timeout"
+msgid "Tag initialization timed out. Try again."
+msgstr "Tag 初始化超时，请重试。"
+
+msgctxt "workflow.command_rejected"
+msgid "Workflow is busy or closing. Try again."
+msgstr "Workflow 正忙或正在关闭，请重试。"

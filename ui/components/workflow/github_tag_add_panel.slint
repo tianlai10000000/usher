@@ -14,9 +14,10 @@ export component GitHubTagAddPanel {
     in property <bool> has-run: false;
     callback select-version-mode(string);
     callback run(string, string);
+    callback draft-edited(string,string);
     callback view-run();
 
-    private property <string> description: "";
+    in-out property <string> description: "";
     private property <bool> stacked-fields: root.width < 1020px;
     width: 100%;
     height: panel-content.preferred-height;
@@ -75,6 +76,7 @@ export component GitHubTagAddPanel {
                 width: parent.width / 2;
                 label: I18n.tag-new-version;
                 value <=> root.next-version;
+                edited(value) => { root.draft-edited(value,root.description); }
                 placeholder: "v1.2.3";
                 enabled: !root.running && !root.initializing;
                 min-field-width: 160px;
@@ -95,6 +97,7 @@ export component GitHubTagAddPanel {
                 width: parent.width;
                 label: I18n.tag-new-version;
                 value <=> root.next-version;
+                edited(value) => { root.draft-edited(value,root.description); }
                 placeholder: "v1.2.3";
                 enabled: !root.running && !root.initializing;
                 min-field-width: 160px;
@@ -105,6 +108,7 @@ export component GitHubTagAddPanel {
             width: 100%;
             label: I18n.tag-description;
             value <=> root.description;
+            edited(value) => { root.draft-edited(root.next-version,value); }
             placeholder: "";
             enabled: !root.running && !root.initializing;
         }

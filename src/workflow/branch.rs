@@ -1,6 +1,6 @@
 use crate::MainWindow;
 use crate::i18n::LocalizedText;
-use crate::workflow::bindings::{show_error, show_success};
+use crate::workflow::bindings::show_error;
 use crate::workflow::state::SharedWorkflowState;
 use slint::ComponentHandle;
 
@@ -41,26 +41,15 @@ pub(crate) fn bind_branch(ui: &MainWindow, shared_state: SharedWorkflowState) {
         let Some(ui) = ui_weak.upgrade() else {
             return;
         };
-        match recreate_branch_plan(BranchRequest {
-            source: source.to_string(),
-            target: target.to_string(),
-            recreate_remote,
-        }) {
-            Ok(result) => {
-                if let Ok(mut guard) = shared_state.lock() {
-                    guard.upsert_current(|view| view.branch_result = result.clone());
-                }
-                ui.set_workflow_branch_result(result.resolve().into());
-                show_success(&ui, crate::i18n::tr("branch.validated").as_ref());
-            }
-            Err(error) => {
-                if let Ok(mut guard) = shared_state.lock() {
-                    guard.upsert_current(|view| view.branch_result = error.clone());
-                }
-                let message = error.resolve();
-                ui.set_workflow_branch_result(message.clone().into());
-                show_error(&ui, message.as_str());
-            }
+        if let Err(error) = shared_state.submit(crate::workflow::state::WorkflowAction::Branch(
+            BranchRequest {
+                source: source.to_string(),
+                target: target.to_string(),
+                recreate_remote,
+            },
+        )) {
+            log::warn!("[Workflow][Branch] Admission rejected: {error}");
+            show_error(&ui, crate::i18n::tr("workflow.command_rejected").as_ref());
         }
     });
 }

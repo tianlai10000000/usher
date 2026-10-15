@@ -45,6 +45,8 @@ Markdown 只是一个 Provider，不拥有整个框架。
 | `ui/components/artifact_preview/` | Shared Primer preview shell, Markdown/text/image surfaces, docked panel, and detached native window. It performs no I/O or parsing. |
 | `ui/main.slint` | Root placement of the docked host and the stable Rust-facing preview contract. |
 | `src/artifact_preview/presentation.rs`, `src/settings.rs`, `src/settings_page.rs` | Typed placement Store, ordered worker actions, automatic persistence and explicit projection into the independently generated Settings page. |
+| `src/artifact_preview/measurement.rs`, `virtual_layout.rs`, `projection_model.rs` | Worker text measurement, exact extent/window ownership, and bounded lazy Slint row conversion. |
+| `crates/usher-preview/src/file_source.rs` | Single-open, regular-handle validation and cancellable bounded reading for generic explicit file bodies; independent from repository containment. |
 | Feature callers | Construct `ArtifactSource` and call the facade. They do not select providers or hosts. |
 
 The AI Review controller owns token lookup and task binding; the agent-response
@@ -76,15 +78,22 @@ Provider 轴回答“它是什么、如何解码”；Host 轴回答“已准备
 
 ## Core contracts / 核心契约
 
-`ArtifactSource` contains a stable id, title, optional path, declared MIME type,
-and either UTF-8 text or bytes. File-backed sources are bounded before loading.
+`ArtifactSource` contains a stable id, title, optional MIME type, `ArtifactHint`,
+and an `ArtifactBody::Text`, `Bytes`, or `File(PathBuf)`. The path belongs to the
+file body rather than a separate descriptor field. All source variants enforce
+`MAX_SOURCE_BYTES` (16 MiB); file-backed sources must also be bounded during reading.
 
 Every `PreviewProvider` exposes:
 
 - a stable provider id and human-readable label;
-- `probe(&ArtifactDescriptor) -> MatchScore`, using magic bytes/MIME before the extension;
-- `prepare(ArtifactSource, CancellationToken) -> PreparedArtifact`;
-- declared capabilities such as copy, search, zoom, or external-open.
+- `probe(&MaterializedSource) -> u16`, using magic bytes/MIME before the extension;
+- `prepare(&MaterializedSource, &CancellationToken) -> Result<PreparedArtifact, PreviewError>`;
+- prepared payload capabilities such as copy, search, zoom, or external-open.
+
+The registry materializes the source once before probing. The current host exposes
+Copy and External Open; the `search`/`zoom` capability flags do not imply existing
+Find or zoom controls. / Registry 在 probe 前只物化一次 source；当前 Host 提供复制和
+外部打开，capability 中的 search/zoom 标记不代表已经实现对应交互控件。
 
 `PreviewRegistry` filters disabled providers before probing, selects the highest
 score deterministically, and returns Unsupported when no provider accepts the
@@ -92,8 +101,9 @@ source. A disabled provider must not read, parse, decode, or cache the artifact.
 Provider failure must not silently route sensitive content through a lower-score
 provider.
 
-`ArtifactSource` 包含稳定 id、标题、可选路径、声明 MIME，以及 UTF-8 文本或字节；
-文件来源在读取前必须执行大小限制。`PreviewProvider` 提供稳定 id、探测分值、可取消
+`ArtifactSource` 包含稳定 id、标题、可选 MIME、hint，以及文本/字节/文件路径三种 body；
+文件路径位于 `ArtifactBody::File`，不是独立 descriptor 字段。所有来源上限为 16 MiB，
+文件来源还必须在实际读取中执行预算。`PreviewProvider` 提供稳定 id、探测分值、可取消
 prepare 和能力声明。Registry 先过滤已禁用 Provider，再确定性选择最高分；禁用后的
 Provider 不得读取、解析、解码或缓存内容。高优先级 Provider 失败后不得静默把敏感
 内容交给低优先级解析器。
@@ -121,17 +131,21 @@ an external opener, a remote fetch, or another project's root.
 
 | Provider | Recognition | Prepared payload | Default |
 | --- | --- | --- | --- |
-| Markdown | `text/markdown`, `.md`/`.markdown`, or explicit Chat Markdown | Width-independent block model parsed by `pulldown-cmark` | Enabled |
-| Image | PNG/JPEG/GIF/WebP magic or matching image MIME/extension | Decoded bounded RGBA pixels plus dimensions | Enabled |
+| Markdown | `text/markdown`, `.md`/`.markdown`/`.mdown`, or explicit Markdown hint | Width-independent block model parsed by `pulldown-cmark` | Enabled |
+| Image | Recognized image magic, image MIME, explicit hint, or PNG/JPEG/GIF/WebP/BMP/ICO extension | Decoded RGBA pixels capped at 32 MiB (`width × height × 4`) plus dimensions | Enabled |
 | Plain text | explicit text MIME or UTF-8 text file after stronger providers decline | Bounded UTF-8 text | Enabled |
 
 Provider source modules are individually Cargo-feature gated. Runtime settings
 control registered providers without restarting. A build that excludes a feature
 contains neither that provider nor its optional parser dependency.
+These are `usher-preview` package features (`markdown`, `image`, `plain-text`);
+the root application currently depends on that package with all default providers.
+Do not assume root `--no-default-features` excludes Preview providers.
 
 首版注册 Markdown、图片和纯文本三个独立 Provider。源码分别受 Cargo feature
 控制；运行时设置无需重启即可控制已注册 Provider。构建时排除 feature 后，对应
-Provider 和可选解析依赖都不得进入安装包。
+Provider 和可选解析依赖都不得进入安装包。此处 feature 属于 `usher-preview` 包；根应用
+目前使用其全部默认 Provider，根 `--no-default-features` 不会自动排除它们。
 
 ## Presentation behavior / 展示行为
 
@@ -312,7 +326,7 @@ Tree-sitter configurations cover Rust (`rs`/`rust`), Shell
 Python (`py`/`python`/`python3`), and Go (`go`/`golang`). Unknown, omitted, and
 currently unsupported languages share one source-preserving plain monospace
 parser. The Preview Markdown path does not load a complete multi-language syntax
-repository. Slint 1.17 `StyledText` owns inline emphasis/link
+repository. Slint 1.18.1 `StyledText` owns inline emphasis/link
 shaping. The shared Preview surface maps those semantics to the same Codex-style
 tokens used by compact AI Review responses: a 14 px body in a 22 px line box,
 24/20/17/15 px H1-H6 steps, 20 px between adjacent paragraphs, 10 px between
@@ -351,7 +365,7 @@ Markdown 保持原生实现：`MarkdownParserLoader` 持有 `pulldown-cmark` 解
 Python（`py`/`python`/`python3`）与 Go（`go`/`golang`）分别使用 Tree-sitter 配置。
 未知、未声明及当前未支持的语言统一复用一个保留完整源码的纯等宽文本 parser；Preview
 Markdown 路径不再加载完整的多语言语法 Repository。
-Slint 1.17 `StyledText` 负责行内强调和链接排版。
+Slint 1.18.1 `StyledText` 负责行内强调和链接排版，其行高例外遵循 [文字排版规范](text-layout.md)。
 共享 Preview Surface 延续紧凑 AI Review 回复使用的 Codex 排版 token：14px 正文与
 22px 行盒、24/20/17/15px 的 H1-H6、相邻段落 20px、正文与列表组 10px、连续列表项
 不额外加间距。列表使用 24px 悬挂 gutter，并结构化显示有序/任务 marker。Surface
@@ -470,7 +484,7 @@ AI Review Assistant 行内保留有界结构投影；leading heading 本身就�
 变体继续显示原始文本；生产
 默认使用 `formatted` 变体。
 
-When such an artifact opens in Docked mode on `Route.PrReview`, Preview occupies
+When such an artifact opens in either in-app mode (Docked or Floating) on `Route.PrReview`, Preview occupies
 the existing AI Review trailing slot and width. It replaces only the visible AI
 surface by moving the one application Preview host into that slot; no second
 Markdown surface is mounted. The conversation model stays mounted, PR content reserves the slot once,
@@ -479,7 +493,7 @@ Closing Preview restores the intact AI surface. Detached mode uses the independe
 native window and leaves AI Review visible; it never participates in the slot
 replacement.
 
-在 `Route.PrReview` 以 Docked 模式打开这类 Artifact 时，Preview 占用既有 AI Review
+在 `Route.PrReview` 以任一内嵌模式（Docked 或 Floating）打开这类 Artifact 时，Preview 占用既有 AI Review
 trailing slot 与宽度，并把唯一的应用 Preview host 移入该 slot，只替换可见 AI Surface；
 不会挂载第二棵 Markdown Surface。conversation model 保持挂载，PR 内容只
 预留一次 slot，既有分隔线控制两种 Surface，PR Dialog 始终位于其上。关闭 Preview
@@ -488,14 +502,14 @@ trailing slot 与宽度，并把唯一的应用 Preview host 移入该 slot，�
 
 Closing the AI panel or leaving PR Review clears its response projection,
 opaque-action map, and task repository binding. It dismisses the active Preview
-only when that Preview has PR-side context and is currently Docked. An already
+only when that Preview has PR-side context and is currently Docked or Floating. An already
 Detached Preview remains open and owns its prepared payload independently.
 Closing only Preview never clears the AI conversation or cancels background
 Review/Ask work. Closing the AI panel or leaving the route does cancel the current
 Ask response, while the independently scheduled Review task continues.
 
 关闭 AI 面板或离开 PR Review 会清空其回复投影、不透明 action 映射和 task 仓库绑定；
-仅当活动 Preview 属于 PR 侧上下文且当前为 Docked 时，才同时关闭 Preview。已经
+仅当活动 Preview 属于 PR 侧上下文且当前为 Docked 或 Floating 时，才同时关闭 Preview。已经
 Detached 的 Preview 继续打开并独立拥有 prepared payload。只关闭 Preview 绝不清空
 AI conversation，也不取消后台 Review/Ask 工作。关闭 AI 面板或离开路由会取消当前 Ask
 回复，但独立调度的 Review task 继续运行。
@@ -543,8 +557,11 @@ fixture id，在启动时经生产 facade 自动打开对应 payload，用于可
 
 ## Failure and security behavior / 失败与安全行为
 
-- Unsupported or disabled content shows metadata and an optional system-open action;
-  it is not interpreted by a fallback provider.
+- If no enabled provider accepts the source, the host shows the source title and
+  a localized Unsupported error. The current `UiPayload::error` exposes neither
+  Copy nor External Open. A selected provider's failure is not retried through a
+  lower-score provider. Disabling one provider still allows other enabled providers
+  to probe future sources normally.
 - Remote URLs embedded in Markdown and images are never fetched automatically.
 - File paths are opened only from an explicit application/user action.
 - Windows system-open passes one absolute file path to `explorer.exe`, without a
@@ -554,6 +571,33 @@ fixture id，在启动时经生产 facade 自动打开对应 payload，用于可
   环境变量展开；参数测试覆盖空格、中文、`&`、`%`，仍须原生文件关联验收。
 - Parser/decode errors are bounded and user-safe; logs never dump full content.
 - Disabling the provider used by the active session closes it and clears its cache entries.
+
+Generic file-read contract / 通用文件读取契约：`materialize` delegates file bodies to
+`file_source.rs`. Open the source once, validate that opened handle is a regular
+file, and reject an oversized handle length before allocation. Metadata provides
+only a bounded allocation hint. Read in at most 8 KiB chunks, retain at most
+`MAX_SOURCE_BYTES` payload bytes, and probe at most one additional stack byte to
+distinguish an exact-budget file from a growing/oversized source. Overflow reports
+the observed lower bound (`MAX_SOURCE_BYTES + 1`), not an invented final file size.
+Check cancellation before opening and between reads; an OS read already in
+progress cannot be interrupted by this cooperative token.
+
+On Unix, nonblocking open prevents a FIFO with no writer from hanging before
+handle validation. Directories and other non-regular handles are rejected. An
+explicit generic file action may follow a symlink to a regular file; it does not
+provide repository containment. `open_project_markdown` keeps its separate
+no-follow/verified-handle `read_bounded_regular_file` boundary. Windows native
+special-device/named-pipe behavior still requires platform acceptance. The payload
+budget is not a process heap/RSS limit.
+
+通用 File body 交给 `file_source.rs`：只打开一次并验证句柄为普通文件，超限长度在分配前
+拒绝，metadata 仅作有界容量提示。每块最多 8 KiB，累计正文最多 16 MiB；到达上限后
+只额外读取一个栈字节探测增长/超限，错误字节数为已观察下界而非文件最终大小。
+打开前及块间检查取消；已进入的 OS read 不能被该协作 token 强行中断。
+Unix 非阻塞 open 避免 FIFO 等待 writer，目录和其他非普通句柄拒绝。显式通用文件可
+跟随指向普通文件的 symlink，但不提供仓库 containment；仓库 Markdown 的 no-follow、
+已验证句柄和有界读取保持独立。Windows 特殊设备/命名管道仍待原生验收；正文预算不等于
+进程堆或 RSS 上限。
 
 ## Performance acceptance / 性能验收
 
@@ -603,6 +647,22 @@ known retained-memory caveat are recorded in
 [`docs/archive/performance/artifact-preview-performance.md`](../archive/performance/artifact-preview-performance.md)。
 
 ## Regression checklist / 回归清单
+
+Targeted entry points / 专项入口：
+
+```sh
+cargo test -p usher-preview --locked
+cargo test -p usher-preview --locked file_source::
+cargo check -p usher-preview --no-default-features --locked
+cargo test --lib --locked artifact_preview::
+cargo test --locked --test artifact_preview_resize_ui
+```
+
+The package tests cover registry/parser behavior, the library tests cover source
+containment/layout/host preparation, and the compiled UI test covers divider
+capture in Docked/Floating and PR-side placement. Native detached-window, theme
+and Release performance checks below still require their own acceptance. / 包测试、
+应用测试与编译后 UI 测试分别负责上述边界，不替代独立窗口原生验收与 Release 性能协议。
 
 - Old settings load with Docked and all built-ins enabled.
 - Verify all three placement choices survive TOML reload; unknown values default

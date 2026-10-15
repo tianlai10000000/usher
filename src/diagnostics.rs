@@ -1,11 +1,10 @@
-use std::fs::{self, File, OpenOptions};
+use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
-use flate2::Compression;
-use flate2::write::GzEncoder;
 use slint::{ComponentHandle, Global};
 
 use crate::settings_feedback::settings_toast;
@@ -15,9 +14,16 @@ use crate::{
 };
 
 const LOG_RETENTION: Duration = Duration::from_secs(14 * 24 * 60 * 60);
-const DIAGNOSTIC_ARCHIVE_LIMIT: usize = 5;
-const DIAGNOSTIC_FILE_LIMIT: u64 = 8 * 1024 * 1024;
-const DIAGNOSTIC_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
+mod archive;
+
+static EXPORT_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+struct ExportPermit;
+impl Drop for ExportPermit {
+    fn drop(&mut self) {
+        EXPORT_ACTIVE.store(false, Ordering::Release);
+    }
+}
 
 #[derive(Default)]
 pub(crate) struct RunGuard {
@@ -91,6 +97,13 @@ pub(crate) fn setup(window: &MainWindow, run_guard: RunGuard) {
 
     let weak = window.as_weak();
     window.on_export_diagnostics(move || {
+        if EXPORT_ACTIVE
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return;
+        }
+        let permit = ExportPermit;
         let weak = weak.clone();
         app_runtime::shared_runtime().spawn(async move {
             let result = tokio::task::spawn_blocking(export_bundle)
@@ -98,6 +111,7 @@ pub(crate) fn setup(window: &MainWindow, run_guard: RunGuard) {
                 .map_err(anyhow::Error::from)
                 .and_then(|result| result);
             let _ = slint::invoke_from_event_loop(move || {
+                let _permit = permit;
                 let Some(window) = weak.upgrade() else {
                     return;
                 };
@@ -129,7 +143,7 @@ pub(crate) fn setup(window: &MainWindow, run_guard: RunGuard) {
                 prune_old_logs(&root)?;
             }
             if let Some(root) = diagnostics_root() {
-                prune_diagnostic_archives(&root)?;
+                archive::prune(&root)?;
             }
             Ok::<_, io::Error>(())
         })
@@ -152,89 +166,7 @@ fn diagnostics_root() -> Option<PathBuf> {
 
 fn export_bundle() -> Result<PathBuf> {
     let output_root = diagnostics_root().context("Diagnostic directory is unavailable")?;
-    fs::create_dir_all(&output_root)?;
-    let output = output_root.join(format!(
-        "usher-diagnostics-{}-{}.tar.gz",
-        chrono::Local::now().format("%Y%m%d-%H%M%S-%3f"),
-        std::process::id()
-    ));
-    let file = create_private_archive(&output)?;
-    let encoder = GzEncoder::new(file, Compression::default());
-    let mut archive = tar::Builder::new(encoder);
-    let manifest = serde_json::to_vec_pretty(&serde_json::json!({
-        "application": "Usher",
-        "version": env!("CARGO_PKG_VERSION"),
-        "os": std::env::consts::OS,
-        "arch": std::env::consts::ARCH,
-        "exported_at": chrono::Utc::now().to_rfc3339(),
-        "contents": "Bounded application and tracing logs only; settings and user data are excluded."
-    }))?;
-    let mut header = tar::Header::new_gnu();
-    header.set_size(manifest.len() as u64);
-    header.set_mode(0o600);
-    header.set_cksum();
-    archive.append_data(&mut header, "manifest.json", manifest.as_slice())?;
-
-    let mut included = 0u64;
-    if let Some(root) = log_root() {
-        for path in collect_log_files(&root)? {
-            let metadata = fs::symlink_metadata(&path)?;
-            if !metadata.file_type().is_file()
-                || metadata.len() > DIAGNOSTIC_FILE_LIMIT
-                || included.saturating_add(metadata.len()) > DIAGNOSTIC_TOTAL_LIMIT
-            {
-                continue;
-            }
-            let relative = path.strip_prefix(&root)?;
-            archive.append_path_with_name(&path, Path::new("logs").join(relative))?;
-            included = included.saturating_add(metadata.len());
-        }
-    }
-    archive.finish()?;
-    Ok(output)
-}
-
-fn create_private_archive(path: &Path) -> io::Result<File> {
-    let mut options = OpenOptions::new();
-    options.create_new(true).write(true);
-    configure_private_mode(&mut options);
-    options.open(path)
-}
-
-#[cfg(unix)]
-fn configure_private_mode(options: &mut OpenOptions) {
-    use std::os::unix::fs::OpenOptionsExt;
-
-    options.mode(0o600);
-}
-
-#[cfg(not(unix))]
-fn configure_private_mode(_options: &mut OpenOptions) {}
-
-fn collect_log_files(root: &Path) -> io::Result<Vec<PathBuf>> {
-    let mut files = Vec::new();
-    if !root.is_dir() {
-        return Ok(files);
-    }
-    let mut directories = vec![root.to_path_buf()];
-    while let Some(directory) = directories.pop() {
-        for entry in fs::read_dir(directory)? {
-            let entry = entry?;
-            let file_type = entry.file_type()?;
-            if file_type.is_dir() {
-                directories.push(entry.path());
-            } else if file_type.is_file()
-                && entry
-                    .path()
-                    .extension()
-                    .is_some_and(|extension| extension == "log")
-            {
-                files.push(entry.path());
-            }
-        }
-    }
-    files.sort();
-    Ok(files)
+    archive::export(&output_root, log_root().as_deref())
 }
 
 fn prune_old_logs(root: &Path) -> io::Result<()> {
@@ -252,78 +184,4 @@ fn prune_old_logs(root: &Path) -> io::Result<()> {
         }
     }
     Ok(())
-}
-
-fn prune_diagnostic_archives(root: &Path) -> io::Result<()> {
-    if !root.is_dir() {
-        return Ok(());
-    }
-    let mut archives = fs::read_dir(root)?
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            entry.file_type().is_ok_and(|kind| kind.is_file())
-                && entry.file_name().to_str().is_some_and(|name| {
-                    name.starts_with("usher-diagnostics-") && name.ends_with(".tar.gz")
-                })
-        })
-        .collect::<Vec<_>>();
-    archives.sort_by_key(|entry| entry.file_name());
-    let remove_count = archives.len().saturating_sub(DIAGNOSTIC_ARCHIVE_LIMIT);
-    for entry in archives.into_iter().take(remove_count) {
-        fs::remove_file(entry.path())?;
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{collect_log_files, prune_diagnostic_archives};
-
-    #[test]
-    fn diagnostic_collection_ignores_symlinks_and_orders_regular_files() {
-        let root = tempfile::tempdir().unwrap();
-        std::fs::create_dir(root.path().join("2026-08-30")).unwrap();
-        std::fs::write(root.path().join("2026-08-30/usher.log"), "log").unwrap();
-        std::fs::write(root.path().join("2026-08-30/usher_tracing.log"), "trace").unwrap();
-        std::fs::write(root.path().join("2026-08-30/settings.toml"), "secret").unwrap();
-
-        let files = collect_log_files(root.path()).unwrap();
-        assert_eq!(files.len(), 2);
-        assert!(files[0] < files[1]);
-        assert!(files.iter().all(|path| path.extension().unwrap() == "log"));
-    }
-
-    #[test]
-    fn diagnostic_archive_retention_keeps_the_newest_five() {
-        let root = tempfile::tempdir().unwrap();
-        for index in 0..7 {
-            std::fs::write(
-                root.path()
-                    .join(format!("usher-diagnostics-{index}.tar.gz")),
-                "x",
-            )
-            .unwrap();
-        }
-        std::fs::write(root.path().join("keep-me.txt"), "x").unwrap();
-        prune_diagnostic_archives(root.path()).unwrap();
-        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 6);
-        assert!(root.path().join("keep-me.txt").exists());
-        assert!(!root.path().join("usher-diagnostics-0.tar.gz").exists());
-        assert!(root.path().join("usher-diagnostics-6.tar.gz").exists());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn diagnostic_archives_are_owner_only() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("usher-diagnostics-test.tar.gz");
-        super::create_private_archive(&path).unwrap();
-
-        assert_eq!(
-            std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
-            0o600
-        );
-    }
 }

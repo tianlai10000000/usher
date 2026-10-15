@@ -6,7 +6,6 @@ use slint::{ComponentHandle, Global, Timer};
 pub(crate) enum SettingsSaveTarget {
     GitTokens,
     GitHosting,
-    AiAgent,
     RequestPreferences,
 }
 
@@ -25,10 +24,6 @@ fn set_settings_saved(
         SettingsSaveTarget::GitHosting => {
             ui.set_settings_git_hosting_config_saved(saved);
             page.set_git_hosting_config_saved(saved);
-        }
-        SettingsSaveTarget::AiAgent => {
-            ui.set_settings_ai_agent_saved(saved);
-            page.set_ai_agent_saved(saved);
         }
     }
 }

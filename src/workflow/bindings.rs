@@ -5,8 +5,8 @@ use crate::terminal::{reset_terminal_for_project, terminal_title_for_project};
 use crate::workflow::pr_list::WorkflowPrListController;
 use crate::workflow::pr_review::WorkflowPrReviewController;
 use crate::workflow::state::{
-    SharedWorkflowState, WorkflowProjectContext, initialize_ui, normalize_project_alias,
-    normalize_project_id, normalize_project_name,
+    SharedWorkflowState, WorkflowProjectContext, normalize_project_alias, normalize_project_id,
+    normalize_project_name,
 };
 use crate::workflow::tag::refresh_tag_context;
 use crate::{MainWindow, ToastManager, ToastOptions};
@@ -42,20 +42,11 @@ pub(crate) fn bind_project_context(
                 logo: logo.to_string(),
             };
             let previous_project_id = ui.get_workflow_project_id().to_string();
-            let snapshot = {
-                let Ok(mut guard) = shared_state.lock() else {
-                    return;
-                };
-                guard.cd_running = false;
-                guard.upsert_current(|view| {
-                    view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
-                    view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
-                    view.tag_add_initializing = false;
-                    view.tag_remove_initializing = false;
-                });
-                guard.set_project(context.clone())
-            };
-            initialize_ui(&ui, &context, &snapshot);
+            if let Err(error) = shared_state.select_project(context.clone()) {
+                log::warn!("[Workflow] Project selection rejected: {error}");
+                show_error(&ui, crate::i18n::tr("workflow.command_rejected").as_ref());
+                return;
+            }
             ui.set_shell_drawer_title(terminal_title_for_project(&context.name).into());
             reset_terminal_for_project(
                 &ui,

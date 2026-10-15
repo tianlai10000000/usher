@@ -6,6 +6,28 @@ This specification defines user-controlled application log destinations, optiona
 
 本文定义用户可控制的应用日志输出目标、可选高频诊断、异常运行检测、保留策略与隐私有界的诊断包导出。由显式环境变量启用的基准专用输出仍属于开发工具，不属于普通设置行为。
 
+## Implementation and focused checks / 实现与专项检查
+
+| Concern / 关注点 | Inspect together / 配套核对 |
+| --- | --- |
+| Settings schema, runtime switches / 设置 Schema 与运行时开关 | `src/settings.rs`, `src/lib.rs` diagnostic callbacks, `src/settings_page.rs`, `ui/views/settings.slint` and `ui/components/settings/github_settings_controls.slint` |
+| Ordinary/tracing sinks and final flush / 普通与 tracing sink、最终 flush | `src/logger/{mod,debug_logger,tracing_logger}.rs`, `src/shutdown.rs`, `src/lib.rs` after event-loop exit |
+| Sentinel and export UI / 哨兵与导出 UI | `src/diagnostics.rs::{begin_run,setup,export_bundle}` |
+| Archive publication and retention / 归档发布与保留 | `src/diagnostics/archive.rs::{export,prune}`, `archive_tests.rs` beside it |
+| Detailed diagnostic sources / 详细诊断来源 | `src/memory_diagnostics.rs`, `src/terminal/diagnostics.rs`, `src/platform/macos.rs` |
+| Performance gate / 性能门禁 | `.github/workflows/nightly-performance.yml`, `scripts/check-memory-benchmark-thresholds.py`, [P6 protocol](../p6-regression.md) |
+
+Focused tests use `cargo test --lib --locked diagnostics::` and
+`cargo test --lib --locked settings::tests::`, plus the Python threshold fixture
+below. They cover the archive export transaction (consecutive/concurrent exports,
+retention order, current-path protection and failure cleanup), collection helpers,
+private permissions and Settings migration; actual sink toggles, crash/restart and native startup/shutdown still
+need the acceptance checklist below.
+
+专项测试覆盖连续/并发导出事务、排序清理、当前返回路径保护、失败清理、收集 helper、
+归档私有权限与 Settings 迁移；真实 sink 切换、崩溃重启、文件管理器展示及原生启动/
+关闭仍须下文验收，不能把归档单测当作完整原生验收。
+
 ## Controls / 控制项
 
 The five diagnostic settings are stored under `[diagnostics]` in `settings.toml`.
@@ -75,17 +97,22 @@ macOS 原生 View/Window 暂未就绪的预期重试使用 `DEBUG`；普通关�
     orderly shutdown removes it; finding it on the next launch produces one
     bounded warning and never includes user content.
 11. Date-partitioned log directories older than 14 days are removed on a worker.
-    Diagnostic archives are retained newest-first with a maximum of five.
+    Diagnostic archive publication and pruning share one worker-side transaction;
+    every successful export leaves at most five completed archives and retains
+    its returned path. Startup pruning uses the same serialization gate.
 12. Settings can reveal the log directory and export a `.tar.gz` containing only
     regular `.log` files plus a non-sensitive runtime manifest. Symlinks, files
     larger than 8 MiB, and content beyond a 64 MiB aggregate budget are skipped.
     Settings, tokens, messages, chat histories, repository content, and other
     user data are never collected.
-13. The scheduled macOS performance gate runs the Release Home fixture in three
+13. The macOS performance workflow runs the Release Home fixture in three
     isolated processes with two settled cycles. It must observe the expected
     route, keep RSS and physical-footprint peaks at or below 256 MiB, and keep
     the median cycle-two growth for both metrics at or below 16 MiB. Raw logs,
     summaries, and the threshold report are retained as workflow artifacts.
+    Its hosted `schedule` is currently commented out; run it via
+    `workflow_dispatch`. It also runs hot-path and P6 gates from the same Release
+    binary; the Home limits do not replace those scenario-specific thresholds.
 
 1. 关闭 Console 与两个文件输出后，普通应用日志立即停止，无需重启。
 2. 关闭全部控制项后，不再产生普通 `log`/`tracing` 输出，也不再产生 Terminal 或内存诊断记录。
@@ -102,14 +129,48 @@ macOS 原生 View/Window 暂未就绪的预期重试使用 `DEBUG`；普通关�
    不得为此新增常驻 flush 线程。
 10. UI 装配前在应用数据目录写入崩溃哨兵；正常关闭时删除。下次启动发现哨兵时只显示一条
     有界警告，且哨兵不包含用户内容。
-11. 在 Worker 上删除早于 14 天的日期日志目录；诊断归档按时间保留最新文件，最多 5 个。
+11. 在 Worker 上删除早于 14 天的日期日志目录；归档发布与清理共用 Worker 事务，
+    每次成功导出后最多保留 5 个完成归档且保留当前返回路径。启动清理使用同一串行门。
 12. Settings 可打开日志目录并导出 `.tar.gz`；归档只包含普通 `.log` 文件和不敏感的运行
     manifest。跳过符号链接、单文件超过 8 MiB 或累计超过 64 MiB 的内容；不得收集 Settings、
     Token、消息、Chat 历史、仓库内容或其他用户数据。
-13. 定时 macOS 性能门禁使用 Release Home fixture 运行 3 个隔离进程和两个稳定周期；必须
+13. macOS 性能 workflow 使用 Release Home fixture 运行 3 个隔离进程和两个稳定周期；必须
     观察到预期路由，将 RSS 与 physical footprint 峰值分别限制在 256 MiB 以内，并将两项
     指标第二周期相对第一周期的中位增长限制在 16 MiB 以内。原始日志、汇总和阈值报告作为
     workflow artifact 保留。
+    托管 `schedule` 当前已注释，仅通过 `workflow_dispatch` 手动执行；同一 Release
+    binary 还执行 hot-path 与 P6 门禁，Home 阈值不能代替各场景专项阈值。
+
+## Archive completion and retention / 归档完成与保留
+
+`src/diagnostics/archive.rs` owns the complete archive transaction. Startup prune
+and export both use one process-local mutex off the event loop. Export writes a
+private, atomically created temporary file in the destination directory, checks
+tar completion, gzip footer completion and `sync_all`, then publishes a unique
+`.tar.gz` name without overwriting an existing path. Only completed archives are
+eligible for retention; failed construction leaves no partial public archive.
+The Settings callback admits one export until its completion is delivered or
+dropped, so repeated clicks cannot start overlapping export jobs.
+
+`src/diagnostics/archive.rs` 持有完整归档事务。启动清理与导出在 event loop 外共用
+进程内 Mutex。导出先写同目录原子创建的私有临时文件，检查 tar、gzip footer 与
+`sync_all` 完成后，以唯一 `.tar.gz` 名称发布且不得覆盖已有路径。保留策略只处理
+完成归档；构建失败不留下公开的半成品。Settings callback 从准入到完成投递/丢弃
+只保留一个活动导出，重复点击不启动并发任务。
+
+After publication, prune runs before success is returned. Archive names encode
+a timestamp, process ID and fixed-width sequence; pruning removes the oldest
+lexicographic names, ignoring unrelated files, directories and symlinks. The
+current publication is protected even after a wall-clock rollback; it and the
+four newest other archives remain. Failure to enumerate or delete an archive is
+an export failure: the new publication is removed by its owner and no success
+Toast is emitted. This is a process-local serialization contract, not a lock
+against independent processes writing the directory.
+
+发布后、返回成功前立即清理。归档名包含时间、进程 ID 与定宽序号，按文件名排序
+删除最旧项，忽略无关文件、目录与符号链接。即使系统时钟回拨，也保护当前发布的
+返回路径，保留它与另外最新四项。枚举/删除失败属于导出失败，新发布归档由 owner
+清理，不得提示成功。此串行化限定于本进程，不是针对其他独立写入进程的跨进程锁。
 
 ## Troubleshooting workflow / 问题排查流程
 
@@ -160,8 +221,10 @@ Record the reproduction start time, actions, affected project/route, and expecte
   clean shutdown and verify the following launch does not warn.
 - Export diagnostics with unrelated files and symlinks present under the log
   tree; inspect the archive and verify only bounded `.log` files and the
-  manifest are included. Create more than five exports and verify only the five
-  newest remain.
+  manifest are included. Create more than five exports in one process and verify
+  the cap after every successful return. Interleave exports/startup prune, verify
+  unique names and current-path retention even with future-dated old archives,
+  and inject retention/publication failure to verify failure feedback and cleanup.
 - Run `python3 -m unittest scripts/tests/test_memory_benchmark_thresholds.py`
   and verify both the passing fixture and intentional over-budget fixture are
   classified correctly. Dispatch the nightly workflow and inspect its retained
@@ -183,7 +246,8 @@ Record the reproduction start time, actions, affected project/route, and expecte
   fallback 也必须保留最后的清理总结，不得留下未冲刷的日志尾部。
 - 模拟一次异常退出，确认下次启动只警告一次；随后正常关闭，确认再启动时不再警告。
 - 在日志树中放入无关文件和符号链接后导出，检查归档仅含有界 `.log` 与 manifest；连续创建
-  超过 5 个归档，确认只保留最新 5 个。
+  超过 5 个归档，每次返回成功后立即核验上限；交错导出/启动清理，核验名称唯一、
+  已有未来时间归档时仍保留当前返回路径。注入清理/发布失败，确认返回失败并清理新文件。
 - 运行 `python3 -m unittest scripts/tests/test_memory_benchmark_thresholds.py`，确认正常 fixture
   与故意超限 fixture 分别判定为通过和失败；手动触发 nightly workflow，检查保留的
   `thresholds.md` 与原始采样。

@@ -9,8 +9,17 @@ This spec covers application-owned HTTP requests. It does not replace reqwest an
 ## Canonical implementation / 主实现
 
 - `src/http/mod.rs`
-- Initialization: `setup_http` in `src/lib.rs`, after Toast and Notification setup.
+- Initialization: `src/lib.rs` calls `http::setup_http` from `src/http/mod.rs`, after Toast and Notification setup.
 - Async execution: shared Tokio runtime from `src/app_runtime.rs`.
+- Request construction/execution: `get`, `post`, `put`, `send`, and `send_json`
+  in `src/http/mod.rs`; there is currently no `send_blocking` entry point.
+- Timeout preference and General form: `src/settings/request_preferences.rs`,
+  `src/settings/request_preferences_ui.rs`, `ui/views/settings.slint`.
+- Focused regressions: inline `http::tests`, `src/http/budget_tests.rs`,
+  `src/http/privacy_tests.rs`, and `src/http/redirect_policy_tests.rs`.
+
+修改管线先核对上述执行入口、偏好门面与 UI 表单；`send_blocking` 当前并不存在。
+可用 `cargo test --lib --locked http::` 运行 HTTP 领域回归；本地监听夹具属于该测试集。
 
 ## Response budgets / 响应预算
 
@@ -236,7 +245,11 @@ message prose. Endpoint paths and operation labels must remain non-secret.
 
 ## Error model / 错误模型
 
-`HttpErrorKind` distinguishes build, timeout, connect, request, status, decode, and interceptor errors. Callers should match the kind/status when behavior differs; user messages must come from the normalized error rather than fragile substring matching.
+`HttpErrorKind` distinguishes `Build`, `Timeout`, `Connect`, `Request`, `Status`,
+`Decode`, `ResponseTooLarge`, and `Interceptor`. Callers should match the
+kind/status when behavior differs; user messages must come from the normalized
+error rather than fragile substring matching. Production feedback uses
+`localized_user_message`; the English `user_message` helper is test-only.
 
 Response-body reading may fail or stop making progress after successful headers.
 Every buffered body format uses the same chunk loop, and each received transport
@@ -246,30 +259,38 @@ errors retain reqwest's classification, and only invalid buffered JSON becomes
 the timeout. Streaming callers use the same transport progress semantics and
 own higher-level protocol heartbeats and wall-clock limits.
 
-`HttpErrorKind` 区分构建、超时、连接、请求、状态码、解码和拦截器错误。业务分支应匹配 kind/status，不应继续依赖错误字符串包含关系。
+`HttpErrorKind` 区分构建、超时、连接、请求、状态码、解码、响应超限和拦截器错误。
+业务分支应匹配 kind/status，不应继续依赖错误字符串包含关系。生产提示通过
+`localized_user_message` 获取 catalog 文案；英文 `user_message` 仅用于测试。
 
 响应头成功后，读取 body 仍可能失败或停止前进。所有缓冲响应格式使用同一 chunk 循环，
 收到的每个传输 chunk 都会重置空闲计时。空闲超限归类为 `Timeout`，transport 错误保留
 reqwest 分类，只有缓冲后的 JSON 内容无效才归类为 `Decode`。非 2xx 的错误响应体卡住时
 也遵循同一规则；流式调用使用相同的传输进度语义，并自行负责更高层协议心跳和墙钟上限。
 
-## Migration status / 迁移状态
+## Call-site audit / 调用点检查
 
-The following direct calls are migrated:
+The pipeline serves Chat/AI transport, connectivity probes, streamed update assets,
+project Logos, and Provider reads/mutations. New callers use the existing entry
+points rather than extending an old migration checklist. Third-party release
+discovery remains outside this spec's scope.
 
-- Chat JSON requests.
-- Connectivity probes.
-- Streamed update asset downloads.
-- Remote project-logo downloads.
-- GitHub/GitLab/Gitee PR/MR statistics.
+管线已用于 Chat/AI、网络探测、更新资产、Project Logo 和 Provider 读写；新增调用方
+直接复用入口，不延续旧迁移清单。第三方 Release discovery 仍不属于本规格。
 
-Search guard:
+Run `scripts/check-architecture-structure.sh` and its positive/negative regression fixtures
+in `scripts/tests/test_architecture_checks.py`. For source navigation:
 
 ```sh
-rg -n "reqwest::Client::new|reqwest::Client::builder|reqwest::blocking|\.send\(\)" src --glob '*.rs'
+rg -n 'reqwest::Client::new|reqwest::Client::builder|reqwest::blocking' src --glob '*.rs'
 ```
 
-Only the shared HTTP module should contain client creation or raw execution.
+Only the shared HTTP module should contain client creation or raw HTTP execution.
+The architecture gate also checks common aliases/imports, but remains lexical;
+macros, renamed dependencies, and re-exports require caller inspection.
+
+架构门禁另覆盖常见别名/导入，但仍是词法检查；宏、重命名依赖和 re-export
+不能仅凭上述搜索判断已覆盖。
 
 ## Regression checklist / 回归检查
 

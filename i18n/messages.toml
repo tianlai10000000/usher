@@ -5530,3 +5530,13 @@ text = "More"
 key = "tray.quit"
 text = "Quit"
 slint = false
+
+[[messages]]
+key = "tag.initialization_timeout"
+text = "Tag initialization timed out. Try again."
+slint = false
+
+[[messages]]
+key = "workflow.command_rejected"
+text = "Workflow is busy or closing. Try again."
+slint = false

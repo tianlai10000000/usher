@@ -14,6 +14,9 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
 - Async request and route interaction: `src/chat/interactive.rs`.
 - Viewport coverage, bounded shifts and anchor settlement: `src/chat/viewport_policy.rs`.
 - Stable incremental Slint message model: `src/chat/message_model.rs`.
+- Locale-aware timestamp and application-error projection:
+  `src/chat/timestamp.rs`, `src/chat/renderer.rs`.
+- AI completion and independent RAG transport: `src/ai/agent.rs`, `src/chat/chat.rs`.
 - Production bounded height estimation, prefix cache, and virtual-window selection:
   `src/chat/virtual_layout.rs`.
 - Presentation: `ui/views/chat.slint`, bridged through `ui/main.slint`.
@@ -23,8 +26,19 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
 - 异步请求与路由交互：`src/chat/interactive.rs`。
 - 视口覆盖、有界窗口移动与锚点收敛：`src/chat/viewport_policy.rs`。
 - 稳定增量 Slint 消息 model：`src/chat/message_model.rs`。
+- 按 locale 投影时间和应用错误：`src/chat/timestamp.rs`、`src/chat/renderer.rs`。
+- AI completion 与独立 RAG transport：`src/ai/agent.rs`、`src/chat/chat.rs`。
 - 生产使用的有界高度估算、prefix cache 与虚拟窗口选择：`src/chat/virtual_layout.rs`。
 - 展示：`ui/views/chat.slint`，通过 `ui/main.slint` 桥接。
+
+Iteration starts with the matching Rust owner and `ui/components/chat/` or
+`ui/views/chat.slint`; the root callbacks are declared in `ui/main.slint`.
+History/pagination behavior is tested in `src/chat/pagination_tests.rs` and
+`tests/chat_history_ui.rs`; geometry also follows [text layout](text-layout.md)
+and [virtual scrolling](virtual-scrolling.md). Complete Markdown rendering follows
+[artifact preview](artifact-preview.md), and AI settings/prompts follow
+[AI Agent](ai-agent.md). / 迭代先定位对应 Rust owner 与 Chat 组件/页面，再核对根 callback；
+分页回归、文字几何、完整 Markdown 和 AI 配置分别沿上述入口修改，避免复制共用实现。
 
 ## Invariants / 不变量
 
@@ -60,7 +74,8 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
     It reserves its own height and never overlays a message. Ready, loading, and inline retry/error states
     share one 64 px slot and the same 32 px action geometry, so state changes do
     not displace that message.
-14. New user-facing request errors use concise English recovery text. Provider,
+14. New user-facing request errors use concise recovery text from the shared
+    semantic catalog in the active locale. Provider,
     HTTP status, and decode details remain in logs and are not exposed verbatim
     in message bubbles.
 15. An assistant row retains a readable width-independent plain-text projection.
@@ -117,7 +132,8 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
     the last model-commit direction. Input suppressed during anchor settlement
     is replayed once when user input cancels that settlement.
 24. New persisted messages store a complete RFC 3339 instant with the local
-    offset. Message rows derive a compact local-time label from calendar dates:
+    offset. `timestamp.rs` converts that instant to the viewer's local offset
+    and derives a catalog-localized compact label from calendar dates. For `zh-CN`:
     `HH:mm` today, `昨天 HH:mm` yesterday, `前天 HH:mm` two calendar days ago,
     `星期X HH:mm` for three through six days ago, `M月D日 HH:mm` earlier in the current year, and
     `YYYY年M月D日 HH:mm` across years. Legacy `HH:mm` values remain unchanged
@@ -226,7 +242,7 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
     不得跟随移动的挂载窗口出现在会话中间。控件占据自身高度且不得覆盖消息。
     Ready、Loading 与内联重试/错误状态共用 64 px 槽位
     和相同的 32 px 操作区几何，状态切换不得挤动该消息。
-14. 新产生的用户可见请求错误统一使用简洁英文恢复文案；Provider、HTTP 状态和
+14. 新产生的用户可见请求错误统一使用共享语义 catalog 中当前 locale 的简洁恢复文案；Provider、HTTP 状态和
     解码技术详情只写日志，不得原样暴露在消息气泡中。
 15. Assistant 行保留宽度无关的可读纯文本投影。为限制 Slint 文本布局开销，长内联投影
     最多保留 1,200 个 Unicode scalar value，并提供在通用文件预览中打开完整回复的入口；
@@ -263,8 +279,9 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
     全部留在 spacer 中；视口在原锚点上方呈现最近的前一条消息，不跳到新页开头。
     同一滚动 bucket 内的移动也必须检查覆盖，不能仅依赖上次 model 提交时的方向。
     用户输入取消锚点收敛时，必须补处理一次此前被收敛阶段抑制的滚动请求。
-24. 新持久化消息使用带本地时区偏移的完整 RFC 3339 时间。消息行按本地自然日生成紧凑
-    标签：今天为 `HH:mm`，昨天为“昨天 `HH:mm`”，前天为“前天 `HH:mm`”，前 3 至 6
+24. 新持久化消息使用带本地时区偏移的完整 RFC 3339 时间。`timestamp.rs` 先转换到查看者
+    的本地时区偏移，再按自然日和当前 locale 的 catalog 生成紧凑标签。`zh-CN` 示例：
+    今天为 `HH:mm`，昨天为“昨天 `HH:mm`”，前天为“前天 `HH:mm`”，前 3 至 6
     个自然日为“星期X `HH:mm`”，同年更早为“`M月D日 HH:mm`”，跨年为
     “`YYYY年M月D日 HH:mm`”。旧版
     `HH:mm` 记录因无法恢复原始日期，继续原样显示。
@@ -322,7 +339,30 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
     因此滚动条不得再次应用窗口标题栏 inset；文档偏移为零时，thumb 必须位于消息 viewport
     轨道顶部。
 
+## History localization compatibility / 历史文案本地化兼容
+
+`StoredChatMessage` still persists `status` plus text, without a semantic error
+key. `renderer.rs::application_error_key` recognizes the seven known application
+errors by exact catalog text in any packaged locale, then renders them in the
+current locale. `interactive.rs::sync_language` clears projection/layout caches
+and reprojects the visible mode. Unknown or edited historic error text remains
+unchanged; matching must not translate arbitrary provider/user content. New
+durable application states must follow [i18n](i18n.md)'s semantic-storage contract;
+the text-matching compatibility path is not a template for new state schemas.
+Verify a known persisted error after restart and an `en` ↔ `zh-CN` switch, plus
+an unknown error control. / 当前 schema 仍保存 status 和正文，无语义 error key；
+已知的七类错误通过各内置语言 catalog 的精确正文匹配恢复语义后即时重译。未知或被编辑的
+历史错误保留原文。新增持久状态仍遵循 i18n 的语义存储约束，不得复制正文匹配机制作为新 schema。
+验收覆盖重启、`en` ↔ `zh-CN` 和未知错误对照。
+
 ## Regression checklist / 回归检查
+
+Targeted entry points / 专项入口：
+
+```sh
+cargo test --lib --locked chat::
+cargo test --locked --test chat_history_ui
+```
 
 - Switch repeatedly between a short history and a history already paged beyond
   32 rows. Check the first revealed frame and the settled frame without wheel

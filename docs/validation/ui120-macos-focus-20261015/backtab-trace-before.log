@@ -1,0 +1,22 @@
+   Compiling usher v0.0.9-alpha.4 (/Users/yuankai/yuankai/Demo/rust/usher)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.38s
+     Running unittests src/lib.rs (target/debug/deps/usher_lib-e8d394fafa588267)
+
+running 1 test
+test message_center::paging_tests::compiled_inbox_pointer_handoff_keyboard_paging_and_hidden_focus_follow_host ... FAILED
+
+failures:
+
+---- message_center::paging_tests::compiled_inbox_pointer_handoff_keyboard_paging_and_hidden_focus_follow_host stdout ----
+
+thread 'message_center::paging_tests::compiled_inbox_pointer_handoff_keyboard_paging_and_hidden_focus_follow_host' (13310993) panicked at src/message_center/paging_tests.rs:401:9:
+Backtab exits the factory in reverse: [(Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0), (Some((14, Some("Mark as read"), true)), -1216.0)]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    message_center::paging_tests::compiled_inbox_pointer_handoff_keyboard_paging_and_hidden_focus_follow_host
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 889 filtered out; finished in 0.19s
+
+error: test failed, to rerun pass `--lib`
