@@ -17,6 +17,7 @@ export component GitHubTagFlow {
     in-out property <string> remove-target: "";
     in-out property <string> description: "";
     in property <bool> add-initializing: false;
+    in property <bool> add-ready: false;
     in property <bool> remove-initializing: false;
     in property <bool> running: false;
     in property <bool> has-run: false;
@@ -102,6 +103,7 @@ export component GitHubTagFlow {
             GitHubTagAddPanel {
                 width: parent.width;
                 initializing: root.add-initializing;
+                ready: root.add-ready;
                 scope-mode: root.mode;
                 version-mode: root.version-mode;
                 current-version: root.current-version;

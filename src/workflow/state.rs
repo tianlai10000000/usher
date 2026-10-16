@@ -217,6 +217,7 @@ pub(crate) fn initialize_ui(
             ui.set_workflow_tag_remove_target(state.tag_remove_target.clone().into());
         }
         ui.set_workflow_tag_add_initializing(state.tag_add_initializing);
+        ui.set_workflow_tag_add_ready(state.tag_add_ready);
         ui.set_workflow_tag_remove_initializing(state.tag_remove_initializing);
         ui.set_workflow_tag_running(state.tag_running);
         apply_job_run(

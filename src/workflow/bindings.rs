@@ -8,7 +8,6 @@ use crate::workflow::state::{
     SharedWorkflowState, WorkflowProjectContext, normalize_project_alias, normalize_project_id,
     normalize_project_name,
 };
-use crate::workflow::tag::refresh_tag_context;
 use crate::{MainWindow, ToastManager, ToastOptions};
 use slint::{ComponentHandle, Global};
 use std::path::Path;
@@ -73,7 +72,6 @@ pub(crate) fn bind_project_context(
             } else {
                 "".into()
             });
-            refresh_tag_context(&ui, &shared_state, false);
             pr_list_controller.select_project(&ui, context.alias.clone());
             pr_review_controller.select_project(&ui, context.alias.clone());
             if is_pr_auto_update {

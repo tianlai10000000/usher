@@ -6,6 +6,26 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
+msgctxt "tag.loading_remote_context"
+msgid "Loading the latest remote Tag for the Tag Workflow."
+msgstr "正在为 Tag Workflow 加载最新远端 Tag。"
+
+msgctxt "tag.load_remote_git_failed"
+msgid "Git failed while querying remote Tags (exit {status}): {detail}"
+msgstr "Git 查询远端 Tag 失败（退出状态 {status}）：{detail}"
+
+msgctxt "tag.load_remote_git_failed_without_detail"
+msgid "Git failed while querying remote Tags with exit status {status}, but returned no diagnostic output."
+msgstr "Git 查询远端 Tag 失败，退出状态为 {status}，但未返回诊断输出。"
+
+msgctxt "tag.load_git_permission_denied"
+msgid "Git could not access the repository or remote because permission was denied. Check Git, repository and remote access permissions."
+msgstr "Git 因权限不足无法访问仓库或远端。请检查 Git、仓库和远端访问权限。"
+
+msgctxt "tag.remote_tag_not_ready"
+msgid "Refresh the remote Tags successfully before creating a Tag."
+msgstr "请成功刷新远端 Tag 后再创建 Tag。"
+
 msgctxt "tag.step.pull_main"
 msgid "Pull main"
 msgstr "拉取 main"

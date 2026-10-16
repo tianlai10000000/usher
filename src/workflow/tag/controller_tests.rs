@@ -54,6 +54,26 @@ fn local_tag_error_identifies_unaccepted_xcode_license() {
 }
 
 #[test]
+fn remote_tag_initialization_copy_retranslates_without_retaining_local_tag_wording() {
+    let _locale_guard = test_locale_guard();
+    let error =
+        LocalTagReadError::classify_failed_output("128".into(), "fixture remote unavailable")
+            .localized();
+    let loading = crate::i18n::LocalizedText::message("tag.loading_remote_context");
+    for (locale, error_fragment, loading_fragment) in [
+        ("en", "querying remote Tags", "latest remote Tag"),
+        ("zh-CN", "查询远端 Tag", "最新远端 Tag"),
+    ] {
+        usher_i18n::activate_preference(locale);
+        assert!(error.resolve().contains(error_fragment));
+        assert!(error.resolve().contains("128"));
+        assert!(error.resolve().contains("fixture remote unavailable"));
+        assert!(loading.resolve().contains(loading_fragment));
+    }
+    usher_i18n::activate_preference(usher_i18n::fallback_locale().id);
+}
+
+#[test]
 fn local_tag_error_classifies_common_git_failures() {
     assert_eq!(
         LocalTagReadError::classify_failed_output(

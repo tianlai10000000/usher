@@ -579,6 +579,7 @@ export component MainWindow inherits Window {
     in-out property <string> workflow-tag-remove-target: "";
     in-out property <string> workflow-tag-description: "";
     in property <bool> workflow-tag-add-initializing: false;
+    in property <bool> workflow-tag-add-ready: false;
     in property <bool> workflow-tag-remove-initializing: false;
     in property <bool> workflow-tag-running: false;
     in property <bool> job-run-animations-enabled: true;
@@ -843,6 +844,7 @@ export component MainWindow inherits Window {
     callback workflow-tag-run(string, string);
     callback workflow-tag-remove(string);
     callback workflow-tag-open-add();
+    callback workflow-tag-enter();
     callback workflow-tag-open-remove();
     callback workflow-tag-stop();
     callback workflow-tag-load-step-log(int);
@@ -1070,6 +1072,8 @@ export component MainWindow inherits Window {
             root.page-scroll-reset-pending = true;
             if root.workflow-selected-flow == 2 {
                 root.workflow-pr-list-resume();
+            } else if root.workflow-selected-flow == 3 {
+                root.workflow-tag-enter();
             }
         }
     }
@@ -1348,6 +1352,7 @@ export component MainWindow inherits Window {
                             tag-remove-target <=> root.workflow-tag-remove-target;
                             tag-description <=> root.workflow-tag-description;
                             tag-add-initializing: root.workflow-tag-add-initializing;
+                            tag-add-ready: root.workflow-tag-add-ready;
                             tag-remove-initializing: root.workflow-tag-remove-initializing;
                             tag-running: root.workflow-tag-running;
                             tag-has-run: root.job-run-active

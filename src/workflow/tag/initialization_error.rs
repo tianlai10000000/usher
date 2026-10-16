@@ -72,9 +72,7 @@ impl LocalTagReadError {
         match self {
             Self::RepositoryMissing => LocalizedText::message("tag.load_local_repo_missing"),
             Self::GitNotFound => LocalizedText::message("tag.load_local_git_not_found"),
-            Self::GitPermissionDenied => {
-                LocalizedText::message("tag.load_local_git_permission_denied")
-            }
+            Self::GitPermissionDenied => LocalizedText::message("tag.load_git_permission_denied"),
             Self::XcodeLicenseNotAccepted => LocalizedText::message("tag.load_local_xcode_license"),
             Self::DeveloperToolsUnavailable => {
                 LocalizedText::message("tag.load_local_developer_tools")
@@ -86,11 +84,11 @@ impl LocalTagReadError {
                 [("detail", detail.clone())],
             ),
             Self::GitFailed { status, detail } => LocalizedText::message_with(
-                "tag.load_local_git_failed",
+                "tag.load_remote_git_failed",
                 [("status", status.clone()), ("detail", detail.clone())],
             ),
             Self::GitFailedWithoutDetail { status } => LocalizedText::message_with(
-                "tag.load_local_git_failed_without_detail",
+                "tag.load_remote_git_failed_without_detail",
                 [("status", status.clone())],
             ),
         }

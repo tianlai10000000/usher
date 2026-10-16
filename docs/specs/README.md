@@ -77,7 +77,7 @@ contracts here rather than duplicating local iteration summaries in navigation.
 | [Project repository / 项目与仓库元数据](project-repository.md) | `src/project/`, `ui/features/project/bridge.slint`, `src/git/`, `src/codereview/api/` |
 | [PR workflow / PR 读取与评审](pr-review.md) | `src/workflow/pr_data.rs`, `pr_list.rs`, `pr_review/`, `src/git/`, `ui/features/pr_review/`, `ui/components/pr_review/` |
 | [PR conflicts / 只读冲突工作区](pr-conflicts.md) | `src/git/conflicts/`, `src/workflow/pr_conflict_status.rs`, `pr_conflict_status_owner.rs`, `src/workflow/pr_review/conflicts/` |
-| [Tag workflow / Tag 流程](tag.md) | `src/workflow/tag.rs`, `src/workflow/tag/` (create pulls main before rebase/tag / 创建时先拉取 main 再 rebase/打 Tag), `src/workflow/state.rs`, `src/workflow/state/`, `ui/components/workflow/` |
+| [Tag workflow / Tag 流程](tag.md) | `src/workflow/tag.rs`, `src/workflow/tag/` (entry reads remote Tags; create pulls main before rebase/tag / 进入时读取远端 Tag；创建时先拉取 main 再 rebase/打 Tag), `src/workflow/state.rs`, `src/workflow/state/`, `ui/components/workflow/` |
 | [Reusable jobs / Job 运行页与日志](jobs.md) | `src/jobs/`, `ui/views/job_run.slint`, `ui/components/jobs/`, feature controllers |
 | [Application Hooks / 应用 Hook](hooks.md) | `src/hooks/`, project selection, Settings search/grouped list and dialogs, PR/AI completion sources and shutdown drains / 设置搜索与分组列表 |
 | [Release CI / 生产构建与缓存](release-ci.md) | `.github/workflows/release.yml`, `scripts/ci_release_metrics.py`, `scripts/tests/test_release_workflow*.py`; typed `cache_only`, exact default-branch ref guard, blocking production/best-effort diagnostics and layered cache restore / 类型化预热开关、默认分支精确校验、生产阻断/尽力诊断与分层恢复 |

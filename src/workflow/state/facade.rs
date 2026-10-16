@@ -300,6 +300,9 @@ impl SharedWorkflowState {
                     }
                     super::initialize_current_ui(window, &facade);
                     window.invoke_navigate(crate::Route::Workflow);
+                    if window.get_workflow_selected_flow() == 3 {
+                        window.invoke_workflow_tag_enter();
+                    }
                 });
             }
             WorkflowEffect::CdCompleted { title, summary } => self.post(identity, move |window| {

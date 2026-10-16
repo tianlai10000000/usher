@@ -1621,7 +1621,7 @@ controller instead of rendering unavailable placeholders. CD uses separate deplo
 rollback stage enums and keeps step status typed until Slint projection. Branch and CD
 fields/actions/results live in `ui/components/workflow/`, adapt at compact
 widths, and use application-owned GitHub controls.
-Local Tag refresh resolves Git state on a blocking worker and commits only when
+Local Tag refresh queries Git on the shared asynchronous runtime and commits only when
 its project ID and request sequence still match. GitLab Closed pagination and
 public Gitee client-side filtering share the `src/git/` TTL/LRU PrefixCache
 boundary. Each adapter incrementally extends complete provider-page prefixes,
@@ -1685,7 +1685,14 @@ continues to paint native `syntect` token models and never imports Parley types.
 No WebView/editor is embedded; the facade cache is bounded and no Find viewport
 positioning work enters scrolling or resizing.
 
-Local Tag Add reads sorted local tags. Its create plan updates `release`, checks out
+Entering the Workflow Tag tab refreshes its current Add/Remove context; Add reads
+`ls-remote --tags --refs origin` directly and derives the current/next version from
+the highest semantic-version core, without mixing in local-only tags. Queries
+are not prefetched at application/project startup; opening a project while Tag is
+already selected queries after hydration. Duplicate entry during a query/run is
+ignored. A query failure clears unknown versions and blocks Create; a successful
+empty result uses `v0.0.0`. Settings/Job Run Back and remounts preserve drafts and
+run history without querying again. Its create plan updates `release`, checks out
 `main`, pulls `origin main`, then rebases onto `release`, pushes `main` and creates/pushes
 the annotated tag. A failed pull stops before rebase or tagging.
 Local Remove initialization and successful
@@ -1698,7 +1705,7 @@ panel/route remounts. Progress has one replaceable mailbox drained before the
 terminal commit; stale run/navigation generations cannot reset newer inputs.
 Windows process/job attachment still requires native acceptance. See [Tag](specs/tag.md).
 
-The Tag workflow follows the same façade pattern: `workflow/tag.rs` exposes binding and refresh,
+The Tag workflow follows the same façade pattern: `workflow/tag.rs` exposes binding,
 `tag/controller.rs` owns project state, UI sequencing and command orchestration;
 `tag/command_output.rs` owns streaming process execution and cancellation,
 `tag/version.rs` owns typed semantic-version bump rules and the Slint string boundary, while
