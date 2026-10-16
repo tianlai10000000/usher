@@ -37,6 +37,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, state: SharedWorkflowState) {
             if let Some(ui)=weak.upgrade(){submit(&ui,&state,$action);}
         });}};
     }
+    bind!(on_workflow_tag_enter, || TagAction::Enter);
     bind!(on_workflow_tag_change_mode, |mode| TagAction::Mode(
         mode.to_string()
     ));
@@ -86,16 +87,6 @@ fn submit(ui: &MainWindow, state: &SharedWorkflowState, action: TagAction) {
             crate::i18n::tr("workflow.command_rejected").as_ref(),
         );
     }
-}
-pub(crate) fn refresh_tag_context(ui: &MainWindow, state: &SharedWorkflowState, _announce: bool) {
-    submit(
-        ui,
-        state,
-        TagAction::Open {
-            remove: false,
-            force: true,
-        },
-    );
 }
 pub(crate) fn execute(state: SharedWorkflowState, identity: WorkflowIdentity, effect: TagEffect) {
     match effect {

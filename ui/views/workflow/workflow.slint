@@ -58,6 +58,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
     in-out property <string> tag-remove-target: "";
     in-out property <string> tag-description: "";
     in property <bool> tag-add-initializing: false;
+    in property <bool> tag-add-ready: false;
     in property <bool> tag-remove-initializing: false;
     in property <bool> tag-running: false;
     in property <bool> tag-has-run: false;
@@ -297,6 +298,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
                 remove-target <=> root.tag-remove-target;
                 description <=> root.tag-description;
                 add-initializing: root.tag-add-initializing;
+                add-ready: root.tag-add-ready;
                 remove-initializing: root.tag-remove-initializing;
                 running: root.tag-running;
                 has-run: root.tag-has-run;

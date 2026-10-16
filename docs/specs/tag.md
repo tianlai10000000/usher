@@ -27,11 +27,23 @@ workflow still performs Git network operations.
 
 ## Initialization and failure behavior / 初始化与失败行为
 
-- Add initialization reads `git -C <repo> tag --list --sort=-version:refname`
-  through the shared-runtime asynchronous process driver and selects the first tag accepted by the core parser.
-  This is Git's version-ref ordering, not commit-date ordering or full SemVer
-  prerelease precedence. No accepted tag yields `v0.0.0`; a Git failure is
-  reported separately even when the displayed version fields fall back to that baseline.
+- Entering the Tag section from another Workflow tab queries
+  `git -C <repo> ls-remote --tags --refs origin` through the shared-runtime
+  asynchronous process driver. Add uses this read-only remote result, without
+  fetching or mixing in local-only tags. The highest numeric major/minor/patch
+  core becomes the current Tag and the selected bump computes the next version;
+  prerelease/build qualifiers do not alter that comparison. A successful query
+  with no accepted tag yields `v0.0.0`. A failed query clears unknown versions,
+  reports the error and disables Create until a refresh succeeds.
+  This Git transport path is shared by GitHub, GitLab, Gitee and self-hosted
+  remotes, including SSH/HTTPS and configured ports; it uses the repository's
+  `origin` and Git authentication configuration without a Provider-specific API.
+- Initialization starts on explicit Tag entry, not application setup or opening
+  another Workflow tab. It bypasses a completed cached result, preserves the
+  selected Add/Remove tab and description, and ignores duplicate entry during
+  an active query or run. Opening a project while Tag is already selected also
+  initializes that project's Tag context after hydration. Settings/Job Run Back
+  and component remounts preserve drafts and run history without another query.
 - Remove initialization refreshes `origin` with `fetch origin --tags --force`,
   then reads `ls-remote --tags --refs origin`. Its parser compares numeric
   major/minor/patch cores and ignores prerelease/build qualifiers for that
@@ -44,9 +56,17 @@ workflow still performs Git network operations.
   succeed before a remote deletion fails. Recovery must inspect actual repository
   state before a retry.
 
-- Add 初始化在共享 Runtime 的异步进程驱动执行本地 `git tag --list --sort=-version:refname`，
-  取核心版本 parser 接受的首项。这是 Git 版本引用排序，不是提交时间或完整 SemVer
-  prerelease 排序；没有合法项回退 `v0.0.0`，Git 失败必须单独报告，即使展示版本也回退基线。
+- 从 Workflow 其他页签进入 Tag 时，在共享 Runtime 的异步进程驱动执行
+  `git ls-remote --tags --refs origin`。Add 直接使用只读远端结果，不 fetch，也不混入
+  本地独有 Tag；数值 major/minor/patch 核心最高的 Tag 作为当前版本，并按选中的
+  bump 计算下一版本，预发布/build 不影响比较。查询成功但无合法 Tag 时使用
+  `v0.0.0`；查询失败清空未知版本、报告错误，并禁用 Create，直到刷新成功。
+  GitHub、GitLab、Gitee 及自托管远端共用这一 Git 传输路径，支持 SSH/HTTPS 和
+  已配置端口，沿用仓库的 `origin` 与 Git 认证配置，不依赖特定 Provider API。
+- 初始化由显式进入 Tag 触发，不在应用启动或打开其他 Workflow 页签时预先查询。
+  进入时绕过已完成缓存，保留 Add/Remove 选中页及描述；查询或运行中重复进入不重启。
+  打开项目时若已选中 Tag，则 hydrate 后初始化该项目上下文。Settings/Job Run Back
+  及组件重建保留草稿和运行记录，不额外查询。
 - Remove 初始化先 `fetch origin --tags --force`，再 `ls-remote --tags --refs origin`；
   parser 按数值 major/minor/patch 核心比较，忽略预发布/build。删除成功后 Job 的
   refresh 步骤再次执行这两项。展示的 refresh definition 是 Job 描述符，不是完整
@@ -59,8 +79,8 @@ workflow still performs Git network operations.
 
 1. Tag state is scoped by the selected project. Switching projects must not reuse another
    project's running flag, selected version, steps, result, or repository path.
-2. Local mode resolves the newest valid semantic tag and falls back to `v0.0.0` when the
-   repository contains none. Tags may use `v`/`V`; prerelease/build qualifiers do not change
+2. Local mode resolves the highest valid semantic tag from `origin` and falls back to
+   `v0.0.0` only when a successful remote query contains none. Tags may use `v`/`V`; prerelease/build qualifiers do not change
    the parsed `major.minor.patch` core.
 3. Major, minor, and patch selection derives the next tag without mutating repository state.
    Invalid current input falls back to the `v0.0.0` baseline.
@@ -110,7 +130,8 @@ workflow still performs Git network operations.
 
 1. Tag 状态按所选项目隔离；切换项目不得复用其他项目的 running 标记、版本、步骤、
    结果或仓库路径。
-2. Local 模式解析最新合法语义 Tag；仓库没有语义 Tag 时回退到 `v0.0.0`。允许
+2. Local 模式从 `origin` 解析最高合法语义 Tag；仅远端查询成功且没有语义 Tag 时
+   回退到 `v0.0.0`。允许
    `v`/`V` 前缀；预发布和 build qualifier 不改变 `major.minor.patch` 核心。
 3. major、minor、patch 选择只计算下一个 Tag，不修改仓库；当前输入非法时以
    `v0.0.0` 为基线。
@@ -146,7 +167,7 @@ workflow still performs Git network operations.
 
 ## Ownership / 职责
 
-- `src/workflow/tag.rs`: stable binding/refresh façade.
+- `src/workflow/tag.rs`: stable binding façade.
 - `src/workflow/tag/controller.rs`: typed UI input capture and guarded effect execution.
 - `src/workflow/tag/state.rs`: pure Tag lifecycle/configuration Actions and reducer.
 - `src/workflow/tag/execution.rs`: Git plans, step timing and cancellation-aware orchestration.
@@ -162,7 +183,7 @@ workflow still performs Git network operations.
 - `src/workflow/state.rs`: project-scoped in-memory workflow view state (not disk persistence),
   including one `JobSnapshot` for Tag.
 
-- `src/workflow/tag.rs`：稳定的绑定/刷新 façade。
+- `src/workflow/tag.rs`：稳定的绑定 façade。
 - `src/workflow/tag/controller.rs`：强类型 UI 输入与有保护的 effect 执行。
 - `src/workflow/tag/state.rs`：纯 Tag 生命周期/配置 Action 与 reducer。
 - `src/workflow/tag/execution.rs`：Git 计划、步骤计时及可取消编排。
@@ -264,6 +285,15 @@ running 标记；Stop 后重置配置会拒绝旧终态。退出先关 UI 准入
 - Verify major/minor/patch results and invalid-input fallback.
 - Verify paths and descriptions containing spaces remain one argv item.
 - Verify create/remove command ordering.
+- Verify Tag entry refreshes a completed cached result and projects the remote
+  current Tag plus Patch/Minor/Major next versions. Keep local-only higher tags,
+  remote-only new tags, empty remote tags and a failed remote query as controls.
+- Verify entry fires once on PR → Tag and again after leaving/reentering Tag,
+  but not on a repeated click, Settings/Job Run Back or component remount;
+  in-flight initialization and running jobs reject duplicate entry.
+- Use isolated Git URL-rewrite fixtures for GitHub/GitLab/Gitee HTTPS and SSH
+  origins plus self-hosted custom ports; these test the shared Git path, not
+  live hosting-service authentication.
 - With a temporary bare origin, verify a stale local main includes the latest remote main
   in the created annotated tag; keep an already-synchronized main control and a failed
   main pull that leaves rebase/push/tag steps queued and creates no tag.
@@ -280,6 +310,12 @@ running 标记；Stop 后重置配置会拒绝旧终态。退出先关 UI 准入
 - 验证 major/minor/patch 结果与非法输入回退。
 - 验证包含空格的路径和描述仍是单个 argv 参数。
 - 验证创建/删除命令顺序。
+- 验证进入 Tag 刷新已完成缓存，显示远端当前 Tag 并按 Patch/Minor/Major 计算下一版；
+  覆盖本地独有更高 Tag、远端独有新 Tag、远端无 Tag 及远端查询失败。
+- 验证 PR → Tag 仅触发一次，切离再进入再次触发；重复点击、Settings/Job Run Back
+  或组件重建不触发，初始化/运行中不重复启动。
+- 使用隔离 Git URL rewrite 夹具覆盖 GitHub/GitLab/Gitee HTTPS、SSH origin 及
+  自托管自定义端口；此项验证共用 Git 路径，不替代线上托管平台鉴权验收。
 - 使用临时裸远端验证落后的本地 main 拉取后，新 annotated Tag 包含远端最新 main；
   保留 main 已同步对照，并验证 main 拉取失败后 rebase/push/tag 仍待执行且不创建 Tag。
 - 手工验证项目切换、防重复启动、取消、有界进度日志、Remote 模式明确不可用状态，

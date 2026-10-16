@@ -48,7 +48,6 @@ pub fn setup_workflow(ui: &MainWindow) {
     );
     branch::bind_branch(ui, shared_state.clone());
     tag::bind_tag(ui, shared_state.clone());
-    tag::refresh_tag_context(ui, &shared_state, false);
     cd::bind_cd(ui, shared_state);
     log::info!("[Workflow] Workflow module initialized successfully");
 }

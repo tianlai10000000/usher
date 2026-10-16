@@ -57,7 +57,7 @@ fn deadline_and_in_flight_cancel_stop_a_hanging_initialization_process() {
     });
 }
 #[test]
-fn local_and_remote_initialization_use_real_git_with_argv_paths_and_bounded_parsers() {
+fn remote_initialization_uses_real_git_with_argv_paths_and_bounded_parsers() {
     let fixture = tempfile::tempdir().unwrap();
     let global = fixture.path().join("empty-gitconfig");
     std::fs::write(&global, b"").unwrap();
@@ -77,6 +77,7 @@ fn local_and_remote_initialization_use_real_git_with_argv_paths_and_bounded_pars
         .env("GIT_CONFIG_VALUE_0", &no_hooks)
         .env("GIT_CONFIG_KEY_1", "commit.gpgsign")
         .env("GIT_CONFIG_VALUE_1", "false")
+        .env("GIT_ALLOW_PROTOCOL", "file")
         .env_remove("GIT_CONFIG_PARAMETERS")
         .env_remove("GIT_CONFIG")
         .env_remove("GIT_DIR")
@@ -104,8 +105,9 @@ fn isolated_real_git_initialization_fixture() {
         .expect("parent provides a temporary empty global Git config");
     let no_hooks = std::env::var_os("GIT_CONFIG_VALUE_0")
         .expect("parent provides a temporary no-hooks directory");
-    let git = |arguments: &[&std::ffi::OsStr]| {
-        let output = std::process::Command::new("git")
+    let git = |directory: Option<&std::path::Path>, arguments: &[&str]| {
+        let mut command = std::process::Command::new("git");
+        command
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_CONFIG_GLOBAL", &global)
             .arg("-c")
@@ -113,71 +115,163 @@ fn isolated_real_git_initialization_fixture() {
                 "core.hooksPath={}",
                 std::path::Path::new(&no_hooks).display()
             ))
-            .args(["-c", "commit.gpgsign=false"])
-            .args(arguments)
-            .output()
-            .unwrap();
+            .args(["-c", "commit.gpgsign=false"]);
+        if let Some(directory) = directory {
+            command.arg("-C").arg(directory);
+        }
+        let output = command.args(arguments).output().unwrap();
         assert!(
             output.status.success(),
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
+        output
     };
-    use std::ffi::OsStr;
-    git(&[OsStr::new("init"), OsStr::new("--quiet"), repo.as_os_str()]);
-    git(&[
-        OsStr::new("init"),
-        OsStr::new("--bare"),
-        OsStr::new("--quiet"),
-        origin.as_os_str(),
-    ]);
-    git(&[
-        OsStr::new("-C"),
-        repo.as_os_str(),
-        OsStr::new("-c"),
-        OsStr::new("user.name=Fixture"),
-        OsStr::new("-c"),
-        OsStr::new("user.email=fixture@example.invalid"),
-        OsStr::new("commit"),
-        OsStr::new("--allow-empty"),
-        OsStr::new("-m"),
-        OsStr::new("fixture"),
-    ]);
-    git(&[
-        OsStr::new("-C"),
-        repo.as_os_str(),
-        OsStr::new("tag"),
-        OsStr::new("v1.2.3"),
-    ]);
-    git(&[
-        OsStr::new("-C"),
-        repo.as_os_str(),
-        OsStr::new("remote"),
-        OsStr::new("add"),
-        OsStr::new("origin"),
-        origin.as_os_str(),
-    ]);
-    git(&[
-        OsStr::new("-C"),
-        repo.as_os_str(),
-        OsStr::new("push"),
-        OsStr::new("--tags"),
-        OsStr::new("origin"),
-    ]);
+    git(None, &["init", "--quiet", repo.to_str().unwrap()]);
+    git(
+        None,
+        &["init", "--bare", "--quiet", origin.to_str().unwrap()],
+    );
+    git(
+        Some(&repo),
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "fixture",
+        ],
+    );
+    git(Some(&repo), &["tag", "v99.0.0"]);
+    git(
+        Some(&repo),
+        &["remote", "add", "origin", origin.to_str().unwrap()],
+    );
+    git(Some(&repo), &["push", "origin", "HEAD:refs/heads/main"]);
+    git(Some(&origin), &["tag", "release-one", "refs/heads/main"]);
     let token = Arc::new(AtomicBool::new(false));
     crate::app_runtime::shared_runtime().block_on(async {
+        // A local semantic Tag is not a fallback when origin has no accepted Tag.
         assert_eq!(
             inspect(repo.to_str().unwrap(), false, &token)
                 .await
                 .unwrap(),
-            "v1.2.3"
+            "v0.0.0"
+        );
+
+        git(Some(&repo), &["tag", "v1.2.3"]);
+        git(Some(&repo), &["push", "origin", "refs/tags/v1.2.3"]);
+        git(Some(&origin), &["tag", "v2.9.0", "refs/heads/main"]);
+        git(
+            Some(&origin),
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "tag",
+                "-a",
+                "V2.10.0-rc.1",
+                "-m",
+                "remote annotated tag",
+                "refs/heads/main",
+            ],
         );
         assert_eq!(
+            inspect(repo.to_str().unwrap(), false, &token)
+                .await
+                .unwrap(),
+            "V2.10.0-rc.1"
+        );
+        assert!(
+            git(Some(&repo), &["tag", "--list", "v2.9.0", "V2.10.0-rc.1"])
+                .stdout
+                .is_empty(),
+            "Add inspection must leave remote-only Tags absent locally"
+        );
+
+        git(Some(&origin), &["tag", "V3.0.0+build.7", "refs/heads/main"]);
+        assert_eq!(
+            inspect(repo.to_str().unwrap(), false, &token)
+                .await
+                .unwrap(),
+            "V3.0.0+build.7",
+            "a later inspection must see a newly published remote Tag"
+        );
+        assert!(
+            git(Some(&repo), &["tag", "--list", "V3.0.0+build.7"])
+                .stdout
+                .is_empty()
+        );
+
+        // Git owns provider URL handling. Rewrite each transport to the bare
+        // fixture; file-only protocol admission prevents accidental networking.
+        let rewrite_key = format!("url.{}.insteadOf", origin.display());
+        for remote in [
+            "https://github.com/team/app.git",
+            "git@github.com:team/app.git",
+            "https://gitlab.com/team/mobile/app.git",
+            "git@gitlab.com:team/mobile/app.git",
+            "https://gitee.com/team/app.git",
+            "git@gitee.com:team/app.git",
+            "https://code.example.invalid:8443/team/mobile/app.git",
+            "ssh://git@code.example.invalid:2222/team/mobile/app.git",
+        ] {
+            git(Some(&repo), &["config", "--add", &rewrite_key, remote]);
+            git(Some(&repo), &["remote", "set-url", "origin", remote]);
+            assert_eq!(
+                inspect(repo.to_str().unwrap(), false, &token)
+                    .await
+                    .unwrap(),
+                "V3.0.0+build.7",
+                "provider-neutral Git transport must inspect {remote}"
+            );
+        }
+        assert!(
+            git(Some(&repo), &["tag", "--list", "V3.0.0+build.7"])
+                .stdout
+                .is_empty()
+        );
+        git(
+            Some(&repo),
+            &["remote", "set-url", "origin", origin.to_str().unwrap()],
+        );
+
+        // Remove keeps its fetch so remote-only removal targets exist locally.
+        assert_eq!(
             inspect(repo.to_str().unwrap(), true, &token).await.unwrap(),
-            "v1.2.3"
+            "V3.0.0+build.7"
+        );
+        assert_eq!(
+            String::from_utf8(git(Some(&repo), &["tag", "--list", "V3.0.0+build.7"]).stdout)
+                .unwrap()
+                .trim(),
+            "V3.0.0+build.7"
+        );
+
+        git(Some(&repo), &["remote", "remove", "origin"]);
+        assert!(
+            inspect(repo.to_str().unwrap(), false, &token)
+                .await
+                .is_err(),
+            "a missing origin must not silently fall back to a local Tag"
+        );
+        let missing = fixtures.path().join("missing origin.git");
+        git(
+            Some(&repo),
+            &["remote", "add", "origin", missing.to_str().unwrap()],
+        );
+        assert!(
+            inspect(repo.to_str().unwrap(), false, &token)
+                .await
+                .is_err(),
+            "a failed remote query must not silently fall back to a local Tag"
         );
     });
-    let mut parser = TagParser::new(false);
+    let mut parser = RemoteTagParser::default();
     assert!(parser.push(&"x".repeat(8194)).is_err());
 }
 

@@ -2,6 +2,31 @@
 # Keep slint = false and translations in each locale's usher-rust.po.
 
 [[messages]]
+key = "tag.loading_remote_context"
+text = "Loading the latest remote Tag for the Tag Workflow."
+slint = false
+
+[[messages]]
+key = "tag.load_remote_git_failed"
+text = "Git failed while querying remote Tags (exit {status}): {detail}"
+slint = false
+
+[[messages]]
+key = "tag.load_remote_git_failed_without_detail"
+text = "Git failed while querying remote Tags with exit status {status}, but returned no diagnostic output."
+slint = false
+
+[[messages]]
+key = "tag.load_git_permission_denied"
+text = "Git could not access the repository or remote because permission was denied. Check Git, repository and remote access permissions."
+slint = false
+
+[[messages]]
+key = "tag.remote_tag_not_ready"
+text = "Refresh the remote Tags successfully before creating a Tag."
+slint = false
+
+[[messages]]
 key = "tag.step.pull_main"
 text = "Pull main"
 slint = false

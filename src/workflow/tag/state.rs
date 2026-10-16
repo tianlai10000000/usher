@@ -19,6 +19,7 @@ pub(crate) enum TagAction {
         target: String,
         description: String,
     },
+    Enter,
     Open {
         remove: bool,
         force: bool,
@@ -148,13 +149,35 @@ pub(crate) fn reduce(
                 return effects;
             }
             view.tag_version_mode = bump;
-            view.tag_next_version = next_semver(&view.tag_current_version, bump);
             reset_plan(view, view.tag_selected_tab == 1);
+            if view.tag_current_version.is_empty() {
+                return effects;
+            }
+            view.tag_next_version = next_semver(&view.tag_current_version, bump);
             view.tag_result = if view.tag_mode == "remote" {
                 LocalizedText::message("tag.remote_unavailable")
             } else {
                 ready(view)
             };
+        }
+        TagAction::Enter => {
+            let remove = view.tag_selected_tab == 1;
+            let initializing = if remove {
+                view.tag_remove_initializing
+            } else {
+                view.tag_add_initializing
+            };
+            if view.tag_running || initializing {
+                return effects;
+            }
+            effects.extend(reduce(
+                view,
+                context,
+                TagAction::Open {
+                    remove,
+                    force: true,
+                },
+            ));
         }
         TagAction::Open { remove, force } => {
             view.tag_selected_tab = i32::from(remove);
@@ -182,7 +205,7 @@ pub(crate) fn reduce(
             view.tag_remove_ready = false;
             view.tag_add_initializing = !remove;
             view.tag_remove_initializing = remove;
-            view.tag_result = LocalizedText::message("tag.loading_context");
+            view.tag_result = LocalizedText::message("tag.loading_remote_context");
             effects.push(TagEffect::Initialize {
                 remove,
                 sequence: if remove {
@@ -222,9 +245,9 @@ pub(crate) fn reduce(
                     };
                 }
                 Err(error) => {
-                    view.tag_current_version = "v0.0.0".into();
-                    view.tag_next_version = next_semver("v0.0.0", view.tag_version_mode);
-                    view.tag_remove_target = "v0.0.0".into();
+                    view.tag_current_version.clear();
+                    view.tag_next_version.clear();
+                    view.tag_remove_target.clear();
                     view.tag_result = error.clone();
                     effects.push(TagEffect::Toast(false, error));
                 }
@@ -247,6 +270,8 @@ pub(crate) fn reduce(
                 Some("tag.initializing")
             } else if view.tag_mode == "remote" {
                 Some("tag.remote_unavailable")
+            } else if !remove && !view.tag_add_ready {
+                Some("tag.remote_tag_not_ready")
             } else if !is_valid_semver_tag(version.trim()) {
                 Some(if remove {
                     "tag.invalid_remove_version"
@@ -357,6 +382,8 @@ pub(crate) fn reduce(
                     view.tag_remove_target = result.current_version.clone();
                     view.tag_next_version =
                         next_semver(&result.current_version, view.tag_version_mode);
+                    view.tag_add_ready = !cancelled && view.job_run.job_name == "create-tag";
+                    view.tag_remove_ready = !cancelled && view.job_run.job_name == "remove-tag";
                     (result.summary, result.steps, true)
                 }
                 Err(result) => (result.summary, result.steps, false),

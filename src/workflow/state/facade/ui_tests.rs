@@ -174,13 +174,21 @@ fn project_admission_event_loop_fixture() {
     assert_eq!(ui.get_workflow_project_id(), "c");
     assert_eq!(state.inner.owners.available_permits(), CAPACITY);
     crate::workflow::tag::bind_tag(&ui, state.clone());
-    fn select_tags(ui: &crate::MainWindow, locale: &str) {
-        let label = usher_i18n::translate_for(locale, "workflow.tags");
+    // Observe the compiled entry boundary without starting Git against the
+    // deliberately metadata-only project fixture. Draft callbacks still use
+    // the real Tag controller below.
+    let tag_entries = Rc::new(Cell::new(0));
+    let observed = tag_entries.clone();
+    ui.on_workflow_tag_enter(move || observed.set(observed.get() + 1));
+    fn select_flow(ui: &crate::MainWindow, locale: &str, key: &str) {
+        let label = usher_i18n::translate_for(locale, key);
         ElementHandle::find_by_accessible_label(ui, label.as_ref())
             .into_iter()
             .last()
-            .expect("compiled Tag nav action")
+            .expect("compiled Workflow nav action")
             .mock_single_click(PointerEventButton::Left);
+        // Root property changed handlers are deferred to the next UI turn.
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
     }
     fn description_input(ui: &crate::MainWindow, locale: &str) -> ElementHandle {
         let label = usher_i18n::translate_for(locale, "tag.description");
@@ -191,7 +199,13 @@ fn project_admission_event_loop_fixture() {
             })
             .expect("compiled Tag description editor")
     }
-    select_tags(&ui, &locale);
+    assert_eq!(ui.get_workflow_selected_flow(), 2);
+    assert_eq!(tag_entries.get(), 0);
+    select_flow(&ui, &locale, "workflow.tags");
+    assert_eq!(ui.get_workflow_selected_flow(), 3);
+    assert_eq!(tag_entries.get(), 1, "PR to Tag enters once");
+    select_flow(&ui, &locale, "workflow.tags");
+    assert_eq!(tag_entries.get(), 1, "reselecting Tag does not re-enter");
     let draft = "draft 中文 & $() survives remount";
     description_input(&ui, &locale).set_accessible_value(draft);
     crate::app_runtime::shared_runtime().block_on(async {
@@ -219,10 +233,27 @@ fn project_admission_event_loop_fixture() {
         description_input(&ui, &locale).accessible_value().unwrap(),
         draft
     );
-    ui.set_current_route(crate::Route::Settings);
-    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
-    ui.set_current_route(crate::Route::Workflow);
-    select_tags(&ui, &locale);
+    for route in [crate::Route::Settings, crate::Route::JobRun] {
+        ui.set_current_route(route);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        ui.set_current_route(crate::Route::Workflow);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        select_flow(&ui, &locale, "workflow.tags");
+        assert_eq!(tag_entries.get(), 1, "{route:?} remount does not re-enter");
+        assert_eq!(
+            description_input(&ui, &locale).accessible_value().unwrap(),
+            draft
+        );
+    }
+    select_flow(&ui, &locale, "workflow.pull_requests");
+    assert_eq!(ui.get_workflow_selected_flow(), 2);
+    assert_eq!(tag_entries.get(), 1);
+    select_flow(&ui, &locale, "workflow.tags");
+    assert_eq!(
+        tag_entries.get(),
+        2,
+        "leaving and re-entering Tag refreshes"
+    );
     assert_eq!(
         description_input(&ui, &locale).accessible_value().unwrap(),
         draft

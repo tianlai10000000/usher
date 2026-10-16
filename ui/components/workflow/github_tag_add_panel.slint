@@ -10,6 +10,7 @@ export component GitHubTagAddPanel {
     in property <string> current-version: "v0.0.0";
     in-out property <string> next-version: "v0.0.1";
     in property <bool> initializing: false;
+    in property <bool> ready: false;
     in property <bool> running: false;
     in property <bool> has-run: false;
     callback select-version-mode(string);
@@ -69,7 +70,7 @@ export component GitHubTagAddPanel {
             GitHubTagReadonlyField {
                 width: parent.width / 2;
                 label: I18n.tag-current-version;
-                value: root.current-version;
+                value: root.initializing ? I18n.tag-loading : root.current-version == "" ? I18n.common-unavailable : root.current-version;
             }
 
             GitHubTagField {
@@ -90,7 +91,7 @@ export component GitHubTagAddPanel {
             GitHubTagReadonlyField {
                 width: parent.width;
                 label: I18n.tag-current-version;
-                value: root.current-version;
+                value: root.initializing ? I18n.tag-loading : root.current-version == "" ? I18n.common-unavailable : root.current-version;
             }
 
             GitHubTagField {
@@ -123,7 +124,7 @@ export component GitHubTagAddPanel {
             height: 32px;
 
             GitHubTagActionButton {
-                enabled: !root.running && !root.initializing;
+                enabled: root.ready && !root.running && !root.initializing;
                 loading: root.initializing;
                 label: root.initializing ? I18n.tag-loading : I18n.tag-create;
                 clicked => {

@@ -1219,7 +1219,7 @@ Workflow 在所有支持的宽度下统一使用 GitHub 仓库页的 UnderlineNa
 
 PR 行把绝对时间 Tooltip 的命中区限制在时间文字本身，并预留响应式尾部操作组。长标题在操作组之前自动换行；目标/源分支对在宽布局同行展示，在窄布局移到续行。Provider 列表/详情字段可提供 Conversation 数量。Conversation 会直接在 Tab 0 打开审核路由；AI Review 打开既有 Files changed 审核工作区。
 
-本地 Tag 刷新在 blocking worker 解析 Git 状态，并且只有项目 ID 与请求序号仍匹配时才
+本地 Tag 刷新在共享异步 Runtime 查询 Git 状态，并且只有项目 ID 与请求序号仍匹配时才
 提交结果。GitLab Closed 分页与 Gitee 公有版客户端筛选共用 `src/git/` 的 TTL/LRU
 PrefixCache 边界。每个 adapter 只增量补拉缺失的完整 Provider 页，缓存 30 秒且最多保留
 32 项，按 IID 去重；显式访问第 1 页时刷新，并在合并成功后清除该仓库缓存。Gitee 公有版
@@ -1277,7 +1277,12 @@ PR Review 将逻辑选区与 shaped-text 几何分离：`selection.rs` 负责行
 原生绘制 `syntect` token model，且不导入 Parley 类型。不嵌入 WebView/浏览器编辑器；
 门面缓存有界，滚动或 resize 路径不执行 Find viewport 定位工作。
 
-Local Tag Add 读取排序后的本地标签。创建计划更新 `release` 后 checkout `main`，
+进入 Workflow 的 Tag 页签时刷新当前 Add/Remove 上下文；Add 直接读取
+`ls-remote --tags --refs origin`，按最高语义版本核心计算当前/下一版，不混入本地独有
+Tag。应用/项目启动不预取；打开项目时若已选中 Tag，则 hydrate 后查询。查询/运行中
+重复进入不会重启。查询失败清空未知版本并阻止 Create，成功且无合法 Tag 则使用
+`v0.0.0`。Settings/Job Run Back 及重挂载保留草稿和运行记录，不再查询。
+创建计划更新 `release` 后 checkout `main`，
 先拉取 `origin main`，再 rebase 到 `release`、推送 `main` 并创建/推送 annotated Tag；
 拉取失败在 rebase 或打 Tag 前停止。Local Remove 初始化与删除成功后的刷新执行
 `fetch origin --tags --force` 和 `ls-remote --tags --refs origin`，Local 不表示离线。
@@ -1286,7 +1291,7 @@ Local Tag Add 读取排序后的本地标签。创建计划更新 `release` 后 
 跨面板/路由重挂保留。进度只有一个可替换 mailbox，终态 commit 前排空；旧运行/
 导航代际不得重置较新输入。Windows 进程/job attach 仍需原生验收，见 [Tag](specs/tag.md)。
 
-Tag 工作流采用相同的 façade 模式：`workflow/tag.rs` 暴露绑定和刷新，
+Tag 工作流采用相同的 façade 模式：`workflow/tag.rs` 暴露绑定，
 `tag/controller.rs` 负责项目状态、UI 序列、取消和命令执行，`tag/version.rs`
 负责强类型 SemVer 递增规则及 Slint 字符串边界，`tag/commands.rs` 负责强类型
 创建/删除计划及其到不可变 Job Step 定义的投影，并显式追加刷新/完成步骤。应用级 `src/jobs/` model
