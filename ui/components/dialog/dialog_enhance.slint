@@ -40,19 +40,26 @@ export component GitHubDialogEnhance inherits Rectangle {
 
         if DialogManager.visible: GitHubScrollView {
             x: dialog-frame.content-x;
-            y: dialog-frame.content-y;
+            y: dialog-frame.body-y;
             width: dialog-frame.content-width;
-            height: dialog-frame.content-height;
+            height: dialog-frame.body-height;
             z: 3100;
 
-            content-text := Text {
+            body-content := VerticalLayout {
                 width: dialog-frame.content-width;
-                min-height: dialog-frame.content-height;
-                text: DialogManager.content;
-                font-size: 14px;
-                color: GitHubTheme.fg-default;
-                wrap: word-wrap;
-                vertical-alignment: top;
+                min-height: dialog-frame.body-height;
+                padding-top: dialog-frame.body-padding;
+                padding-bottom: dialog-frame.body-padding;
+                alignment: start;
+                content-text := Text {
+                    width: parent.width;
+                    text: DialogManager.content;
+                    font-size: 14px;
+                    color: GitHubTheme.fg-default;
+                    wrap: word-wrap;
+                    line-height-factor: 1.2;
+                    vertical-alignment: top;
+                }
             }
         }
     }

@@ -2,6 +2,23 @@ use super::*;
 
 const PRIVATE_URL: &str = "https://private-user:private-password@example.com:8443/api/projects?access_token=private-token&signature=private-signature&arbitrary=private-value#private-fragment";
 
+#[test]
+fn sensitive_headers_never_reach_transfer_or_rate_limit_diagnostics() {
+    let mut headers = HeaderMap::new();
+    let mut secret = HeaderValue::from_static("synthetic-header-secret");
+    secret.set_sensitive(true);
+    for name in ["content-type", "retry-after", "x-ratelimit-remaining"] {
+        headers.insert(name, secret.clone());
+        assert_eq!(diagnostic_header_value(&headers, name), Some("<redacted>"));
+    }
+    assert!(!format!("{headers:?}").contains("synthetic-header-secret"));
+    headers.insert("content-type", HeaderValue::from_static("application/json"));
+    assert_eq!(
+        diagnostic_header_value(&headers, "content-type"),
+        Some("application/json")
+    );
+}
+
 fn assert_no_private_data(diagnostic: &str) {
     for value in [
         "private-user",

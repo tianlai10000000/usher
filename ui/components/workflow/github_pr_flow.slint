@@ -1,3 +1,5 @@
+import { ShowcaseOpenConversationTooltipAnchor, ShowcaseReviewWithAiTooltipAnchor, ShowcaseQueuedAiTooltipAnchor, ShowcaseRunningAiTooltipAnchor, ShowcaseFailedAiTooltipAnchor } from "github_pr_factory_tooltip_anchors.slint";
+import { ShowcaseCancelReviewTooltipAnchor } from "github_pr_factory_tooltip_anchors.slint";
 import { GitHubTooltip } from "../github_tooltip.slint";
 import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint";
 import { GitHubPrMenuState, GitHubPrMenuProjection, GitHubPrMenuAnchor } from "./github_pr_menu_overlay.slint";
@@ -31,6 +33,7 @@ import { GitHubPullRequestSearchField, GitHubPullRequestClearQueryButton, GitHub
 export { WorkflowPullRequestItem } from "./github_pr_list_components.slint";
 
 export component GitHubPullRequestFlow {
+    in property <bool> fixed-tooltips: false;
     in property <length> viewport-global-x: 0px;
     in property <length> viewport-global-y: 0px;
     in property <length> viewport-width: 0px;
@@ -344,6 +347,7 @@ export component GitHubPullRequestFlow {
                         }
                     }
                     if root.compact-filters: more-btn := GitHubPullRequestFilterMoreButton {
+                    fixed-tooltip: root.fixed-tooltips;
                         private property <GitHubPrMenuAnchor> bounds: {
                             x: self.absolute-position.x, y: self.absolute-position.y,
                             width: self.width, height: self.height,
@@ -990,6 +994,8 @@ export component GitHubPullRequestFlow {
                 }
 
                 conversation-action := Rectangle {
+                    private property <bool> tooltip-dismissed: false;
+                    if root.fixed-tooltips: ShowcaseOpenConversationTooltipAnchor { active: root.fixed-tooltips && conversation-touch.has-hover && !conversation-action.tooltip-dismissed; }
                     x: parent.width - parent.action-width - 16px;
                     y: parent.first-line-center-y - self.height / 2;
                     width: parent.conversation-action-width;
@@ -1024,7 +1030,8 @@ export component GitHubPullRequestFlow {
                         height: parent.height;
                         mouse-cursor: pointer;
                         changed has-hover => {
-                            if self.has-hover {
+                            if !self.has-hover { conversation-action.tooltip-dismissed = false; }
+                            if self.has-hover && !root.fixed-tooltips {
                                 root.hovered-inline-tooltip = I18n.pr-list-open-conversation;
                                 root.hovered-inline-tooltip-x = self.absolute-position.x
                                     - root.absolute-position.x;
@@ -1037,6 +1044,7 @@ export component GitHubPullRequestFlow {
                             }
                         }
                         clicked => {
+                            conversation-action.tooltip-dismissed = true;
                             root.open-detail(
                                 item.number,
                                 item.title,
@@ -1051,6 +1059,12 @@ export component GitHubPullRequestFlow {
                 }
 
                 ai-review-action := Rectangle {
+                    private property <bool> tooltip-dismissed: false;
+                    if root.fixed-tooltips: ShowcaseReviewWithAiTooltipAnchor { active: root.fixed-tooltips && ai-review-touch.has-hover && !ai-review-action.tooltip-dismissed && item.ai-review-status != "queued" && item.ai-review-status != "running" && item.ai-review-status != "completed" && item.ai-review-status != "failed"; }
+                    if root.fixed-tooltips: ShowcaseQueuedAiTooltipAnchor { active: root.fixed-tooltips && ai-review-touch.has-hover && !ai-review-action.tooltip-dismissed && item.ai-review-status == "queued"; }
+                    if root.fixed-tooltips: ShowcaseRunningAiTooltipAnchor { active: root.fixed-tooltips && ai-review-touch.has-hover && !ai-review-action.tooltip-dismissed && item.ai-review-status == "running"; }
+                    if root.fixed-tooltips: ShowcaseFailedAiTooltipAnchor { active: root.fixed-tooltips && ai-review-touch.has-hover && !ai-review-action.tooltip-dismissed && item.ai-review-status == "failed"; }
+
                     x: parent.width - parent.stop-action-width - parent.stop-action-gap
                         - parent.ai-action-width - 16px;
                     y: parent.first-line-center-y - self.height / 2;
@@ -1086,7 +1100,8 @@ export component GitHubPullRequestFlow {
                         height: parent.height;
                         mouse-cursor: pointer;
                         changed has-hover => {
-                            if self.has-hover {
+                            if !self.has-hover { ai-review-action.tooltip-dismissed = false; }
+                            if self.has-hover && (!root.fixed-tooltips || item.ai-review-status == "completed") {
                                 root.hovered-inline-tooltip = item.ai-review-status == "queued"
                                     ? I18n.pr-list-ai-review-queued
                                     : (item.ai-review-status == "running"
@@ -1107,6 +1122,7 @@ export component GitHubPullRequestFlow {
                             }
                         }
                         clicked => {
+                            ai-review-action.tooltip-dismissed = true;
                             root.hovered-inline-tooltip = "";
                             if item.ai-review-status == "completed"
                                 || item.ai-review-status == "queued"
@@ -1134,6 +1150,8 @@ export component GitHubPullRequestFlow {
                     glyph-size: GitHubMetrics.icon-medium;
                     icon: @image-url("../../assets/icons/github-stop-square-fill-16.svg");
                     tooltip-text: I18n.pr-list-cancel-review;
+                    show-tooltip: !root.fixed-tooltips;
+                    if root.fixed-tooltips: ShowcaseCancelReviewTooltipAnchor { active: root.fixed-tooltips && cancel-ai-review-action.tooltip-active; }
                     tooltip-align-right: true;
                     inverse: true;
                     circular: true;

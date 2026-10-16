@@ -175,8 +175,10 @@ every descendant when the ancestor clip moves. Header, background, divider, and
 route surfaces remain painted through the complete transition. The lightweight
 loading spinner and its current parser label remain visible; document-paint
 suspension applies only after a payload is prepared. The
-leading hairline has a wider invisible resize hit target. Hover emphasizes the
-line and shows a column-resize cursor; direct dragging changes the panel width
+leading hairline uses the shared `GitHubResizeHandle`: a mounted 9 px hit band,
+one neutral 1 px idle line, a 2 px hover/drag line, and an `ew-resize` cursor.
+Its pointer/cancel lifecycle follows the [shared divider contract](ui-design.md#resizable-dividers--可拖拽分割线);
+direct dragging changes the panel width
 within bounded panel/main-content limits. The preferred width survives close,
 reopen, mode changes, route changes, and temporary window clamps for the current
 application session, but is not durable user configuration.
@@ -270,8 +272,9 @@ Changing the setting is immediate:
 可见/overscan Markdown block。停靠 Shell 过渡期间保留完整准备后 model，但暂停文档绘制，因为 FemtoVG 会在祖先
 clip 移动时逐帧重放所有后代；Header、背景、分隔线和路由 Surface 在完整动画期间继续绘制。
 轻量 loading spinner 与当前解析器文案保持可见；文档绘制暂停只作用于准备完成后的 payload。
-分隔线
-拥有更宽的透明 resize 命中区；hover 时强化线条并显示列缩放光标，直接拖拽在面板和主内容
+分隔线复用共享 `GitHubResizeHandle`：常驻 9px 命中带、单条中性 1px 空闲线、
+2px hover/拖拽线与 `ew-resize` 光标；指针/取消生命周期遵循
+[共享分割线契约](ui-design.md#resizable-dividers--可拖拽分割线)。直接拖拽在面板和主内容
 的安全宽度范围内调整尺寸。用户偏好宽度在当前应用会话内跨关闭、重开、模式切换、路由切换
 和临时窗口 clamp 保留，但不作为持久设置保存。
 分割线完整命中区必须位于预览 Host 及其滚动视口上方，确保各所属路由从分割线两侧

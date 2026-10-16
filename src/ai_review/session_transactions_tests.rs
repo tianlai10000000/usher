@@ -19,6 +19,7 @@ fn fixture() -> PullRequestChatSession {
 }
 fn message(content: &str) -> ReviewConversationMessage {
     ReviewConversationMessage {
+        agent: None,
         message_id: None,
         role: ReviewConversationRole::User,
         content: content.into(),

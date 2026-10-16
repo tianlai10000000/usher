@@ -816,7 +816,13 @@ fn request_total_timeout(timeout: Duration) -> Option<Duration> {
 }
 
 fn diagnostic_header_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
-    headers.get(name).and_then(|value| value.to_str().ok())
+    headers.get(name).and_then(|value| {
+        if value.is_sensitive() {
+            Some("<redacted>")
+        } else {
+            value.to_str().ok()
+        }
+    })
 }
 
 async fn await_with_read_idle_timeout<T>(

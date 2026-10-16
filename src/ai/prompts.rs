@@ -588,6 +588,7 @@ mod tests {
         input.unified_diff = format!("{}中", "x".repeat(MAX_REVIEW_CHAT_DIFF_BYTES));
         let conversation = (0..25)
             .map(|index| ReviewConversationMessage {
+                agent: None,
                 message_id: None,
                 role: if index % 2 == 0 {
                     ReviewConversationRole::User
@@ -642,7 +643,7 @@ mod tests {
         );
 
         let _guard = crate::i18n::test_locale_guard();
-        let mut settings = crate::settings::load_settings().ai.agent;
+        let mut settings = crate::ai::settings_state::current_profile().connection;
 
         usher_i18n::activate_locale("zh-CN");
         settings.reply_language = usher_i18n::AUTO_LANGUAGE.to_string();

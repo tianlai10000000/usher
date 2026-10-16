@@ -1,0 +1,274 @@
+import { I18n } from "@i18n";
+import { FloatingOverlayRect } from "../../state/floating_overlay_bridge.slint";
+import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint";
+import { GitHubToggle } from "./github_settings_controls.slint";
+import { GitHubIconButton } from "../button/github_icon_button.slint";
+import { GitHubFixedTooltipAnchor } from "../github_fixed_tooltip_anchor.slint";
+import { GitHubTransientFloatingOverlayHost } from "../github_floating_overlay.slint";
+import { GitHubTooltipSurface } from "../github_tooltip.slint";
+
+export enum AgentTooltipKind { None, Add, Activate, Current, TestConnection, Edit, Delete, DeleteDisabled }
+
+// A claim carries action identity and geometry only. Tokens reject stale
+// releases/renewals after a new row, dialog or lifecycle boundary takes over.
+export global AgentTooltipState {
+    in-out property <bool> enabled: false;
+    in-out property <FloatingOverlayRect> viewport;
+    in-out property <AgentTooltipKind> kind: AgentTooltipKind.None;
+    in-out property <length> anchor-x;
+    in-out property <length> anchor-y;
+    in-out property <length> anchor-width;
+    in-out property <length> anchor-height;
+    in-out property <int> token: 0;
+    in-out property <int> lease: 0;
+    in-out property <int> dismiss-revision: 0;
+    callback show(AgentTooltipKind, length, length, length, length) -> int;
+    callback renew(int, AgentTooltipKind, length, length, length, length);
+    callback hide(int);
+    callback dismiss();
+    show(kind, x, y, width, height) => {
+        if !root.enabled || kind == AgentTooltipKind.None || width <= 0px || height <= 0px { return 0; }
+        root.token += 1; root.kind = kind;
+        root.anchor-x = x; root.anchor-y = y;
+        root.anchor-width = width; root.anchor-height = height;
+        root.lease += 1;
+        return root.token;
+    }
+    renew(token, kind, x, y, width, height) => {
+        if root.enabled && token == root.token && root.kind == kind {
+            root.anchor-x = x; root.anchor-y = y;
+            root.anchor-width = width; root.anchor-height = height;
+            root.lease += 1;
+        }
+    }
+    hide(token) => {
+        if token == root.token { root.kind = AgentTooltipKind.None; }
+    }
+    dismiss() => {
+        root.kind = AgentTooltipKind.None;
+        root.token += 1; root.dismiss-revision += 1;
+    }
+}
+
+// Shared chrome and lifecycle have no action/label parameter. Every semantic
+// leaf below owns its literal kind and its own permanently mounted anchor.
+component GitHubAiAgentAction inherits GitHubIconButton {
+    in property <FloatingOverlayRect> tooltip-viewport;
+    in property <bool> tooltip-eligible: true;
+    in property <bool> tip-requested: root.tooltip-active;
+    out property <bool> tip-publishable: AgentTooltipState.enabled
+        && root.visible && root.tooltip-eligible && root.tip-requested && !root.suppressed;
+    private property <bool> suppressed: false;
+    private property <int> dismiss-revision: AgentTooltipState.dismiss-revision;
+    callback activated();
+    show-tooltip: false;
+    changed dismiss-revision => { root.suppressed = root.tip-requested; }
+    changed tip-requested => { if !root.tip-requested { root.suppressed = false; } }
+    clicked => { AgentTooltipState.dismiss(); root.activated(); }
+}
+
+export component GitHubAiAgentAddAction inherits GitHubAiAgentAction {
+    private property <int> claim: 0;
+    tooltip-text: I18n.settings-ai-agent-add;
+    icon: @image-url("../../assets/icons/octicon-plus-16.svg");
+    primary: true; invisible: false;
+    GitHubFixedTooltipAnchor {
+        active: root.tip-publishable;
+        bounded: true; viewport: root.tooltip-viewport;
+        publish(x, y, w, h) => { root.claim = AgentTooltipState.show(AgentTooltipKind.Add, x, y, w, h); }
+        release(x, y) => { AgentTooltipState.hide(root.claim); }
+        renew(x, y, w, h) => { AgentTooltipState.renew(root.claim, AgentTooltipKind.Add, x, y, w, h); }
+    }
+}
+
+// Preserve the shared Toggle's click, keyboard, focus and checked rendering.
+component GitHubAiAgentActivationToggle inherits GitHubToggle {
+    in property <FloatingOverlayRect> tooltip-viewport;
+    in property <bool> tooltip-eligible: true;
+    in property <bool> tip-requested: root.has-hover || root.tooltip-focus;
+    out property <bool> tip-publishable: AgentTooltipState.enabled
+        && root.visible && root.tooltip-eligible && root.tip-requested && !root.suppressed;
+    private property <bool> suppressed: false;
+    private property <int> dismiss-revision: AgentTooltipState.dismiss-revision;
+    callback activated();
+    changed dismiss-revision => { root.suppressed = root.tip-requested; }
+    changed tip-requested => { if !root.tip-requested { root.suppressed = false; } }
+    toggled(value) => { AgentTooltipState.dismiss(); if value { root.activated(); } }
+}
+
+export component GitHubAiAgentActivateToggle inherits GitHubAiAgentActivationToggle {
+    private property <int> claim: 0;
+    checked: false;
+    accessible-label: I18n.settings-ai-agent-activate;
+    GitHubFixedTooltipAnchor {
+        active: root.tip-publishable;
+        bounded: true; viewport: root.tooltip-viewport;
+        publish(x, y, w, h) => { root.claim = AgentTooltipState.show(AgentTooltipKind.Activate, x, y, w, h); }
+        release(x, y) => { AgentTooltipState.hide(root.claim); }
+        renew(x, y, w, h) => { AgentTooltipState.renew(root.claim, AgentTooltipKind.Activate, x, y, w, h); }
+    }
+}
+
+export component GitHubAiAgentCurrentToggle inherits GitHubAiAgentActivationToggle {
+    private property <int> claim: 0;
+    checked: true; interaction-enabled: false;
+    accessible-label: I18n.settings-ai-agent-active-badge;
+    tip-requested: disabled-hover.has-hover;
+    disabled-hover := TouchArea { width: 100%; height: 100%; mouse-cursor: default; clicked => { AgentTooltipState.dismiss(); } }
+    GitHubFixedTooltipAnchor {
+        active: root.tip-publishable;
+        bounded: true; viewport: root.tooltip-viewport;
+        publish(x, y, w, h) => { root.claim = AgentTooltipState.show(AgentTooltipKind.Current, x, y, w, h); }
+        release(x, y) => { AgentTooltipState.hide(root.claim); }
+        renew(x, y, w, h) => { AgentTooltipState.renew(root.claim, AgentTooltipKind.Current, x, y, w, h); }
+    }
+}
+
+export component GitHubAiAgentTestConnectionAction inherits GitHubAiAgentAction {
+    private property <int> claim: 0;
+    tooltip-text: I18n.common-test-connection;
+    icon: @image-url("../../assets/icons/octicon-plug-16.svg");
+    GitHubFixedTooltipAnchor {
+        active: root.tip-publishable;
+        bounded: true; viewport: root.tooltip-viewport;
+        publish(x, y, w, h) => { root.claim = AgentTooltipState.show(AgentTooltipKind.TestConnection, x, y, w, h); }
+        release(x, y) => { AgentTooltipState.hide(root.claim); }
+        renew(x, y, w, h) => { AgentTooltipState.renew(root.claim, AgentTooltipKind.TestConnection, x, y, w, h); }
+    }
+}
+
+export component GitHubAiAgentEditAction inherits GitHubAiAgentAction {
+    private property <int> claim: 0;
+    tooltip-text: I18n.settings-ai-agent-edit;
+    icon: @image-url("../../assets/icons/octicon-pencil-16.svg");
+    GitHubFixedTooltipAnchor {
+        active: root.tip-publishable;
+        bounded: true; viewport: root.tooltip-viewport;
+        publish(x, y, w, h) => { root.claim = AgentTooltipState.show(AgentTooltipKind.Edit, x, y, w, h); }
+        release(x, y) => { AgentTooltipState.hide(root.claim); }
+        renew(x, y, w, h) => { AgentTooltipState.renew(root.claim, AgentTooltipKind.Edit, x, y, w, h); }
+    }
+}
+
+export component GitHubAiAgentDeleteAction inherits GitHubAiAgentAction {
+    private property <int> claim: 0;
+    tooltip-text: I18n.common-delete;
+    icon: @image-url("../../assets/icons/octicon-trash-16.svg");
+    danger: true;
+    GitHubFixedTooltipAnchor {
+        active: root.tip-publishable;
+        bounded: true; viewport: root.tooltip-viewport;
+        publish(x, y, w, h) => { root.claim = AgentTooltipState.show(AgentTooltipKind.Delete, x, y, w, h); }
+        release(x, y) => { AgentTooltipState.hide(root.claim); }
+        renew(x, y, w, h) => { AgentTooltipState.renew(root.claim, AgentTooltipKind.Delete, x, y, w, h); }
+    }
+}
+
+export component GitHubAiAgentDeleteDisabledAction inherits GitHubAiAgentAction {
+    private property <int> claim: 0;
+    tooltip-text: I18n.settings-ai-agent-delete-active-disabled;
+    icon: @image-url("../../assets/icons/octicon-trash-16.svg");
+    danger: true; button-enabled: false;
+    tip-requested: disabled-hover.has-hover;
+    disabled-hover := TouchArea { width: 100%; height: 100%; mouse-cursor: default; clicked => { AgentTooltipState.dismiss(); } }
+    GitHubFixedTooltipAnchor {
+        active: root.tip-publishable;
+        bounded: true; viewport: root.tooltip-viewport;
+        publish(x, y, w, h) => { root.claim = AgentTooltipState.show(AgentTooltipKind.DeleteDisabled, x, y, w, h); }
+        release(x, y) => { AgentTooltipState.hide(root.claim); }
+        renew(x, y, w, h) => { AgentTooltipState.renew(root.claim, AgentTooltipKind.DeleteDisabled, x, y, w, h); }
+    }
+}
+
+// One transient locator, seven independent mounted measure/paint surfaces.
+export component GitHubAiAgentTooltipOverlay inherits Rectangle {
+    in property <bool> tooltip-enabled: false;
+    in property <FloatingOverlayRect> anchor-viewport;
+    out property <bool> active: root.tooltip-enabled && AgentTooltipState.kind != AgentTooltipKind.None;
+    private property <int> observed-lease: 0;
+    width: 100%; height: 100%; background: transparent; clip: false;
+    init => { AgentTooltipState.enabled = root.tooltip-enabled; AgentTooltipState.viewport = root.anchor-viewport; }
+    changed tooltip-enabled => {
+        AgentTooltipState.enabled = root.tooltip-enabled;
+        if !root.tooltip-enabled { AgentTooltipState.dismiss(); }
+    }
+    changed anchor-viewport => {
+        AgentTooltipState.viewport = root.anchor-viewport;
+        AgentTooltipState.dismiss();
+    }
+    floating := GitHubTransientFloatingOverlayHost {
+        active: root.active;
+        anchor-x: AgentTooltipState.anchor-x; anchor-y: AgentTooltipState.anchor-y;
+        anchor-width: AgentTooltipState.anchor-width; anchor-height: AgentTooltipState.anchor-height;
+        preferred-placement: GitHubTooltipPlacement.Top;
+        alignment: GitHubTooltipAlignment.Center;
+        floating-width:
+            AgentTooltipState.kind == AgentTooltipKind.Add ? surface-add.width :
+            AgentTooltipState.kind == AgentTooltipKind.Activate ? surface-activate.width :
+            AgentTooltipState.kind == AgentTooltipKind.Current ? surface-current.width :
+            AgentTooltipState.kind == AgentTooltipKind.TestConnection ? surface-test-connection.width :
+            AgentTooltipState.kind == AgentTooltipKind.Edit ? surface-edit.width :
+            AgentTooltipState.kind == AgentTooltipKind.Delete ? surface-delete.width :
+            AgentTooltipState.kind == AgentTooltipKind.DeleteDisabled ? surface-deletedisabled.width :
+            0px;
+        floating-height:
+            AgentTooltipState.kind == AgentTooltipKind.Add ? surface-add.height :
+            AgentTooltipState.kind == AgentTooltipKind.Activate ? surface-activate.height :
+            AgentTooltipState.kind == AgentTooltipKind.Current ? surface-current.height :
+            AgentTooltipState.kind == AgentTooltipKind.TestConnection ? surface-test-connection.height :
+            AgentTooltipState.kind == AgentTooltipKind.Edit ? surface-edit.height :
+            AgentTooltipState.kind == AgentTooltipKind.Delete ? surface-delete.height :
+            AgentTooltipState.kind == AgentTooltipKind.DeleteDisabled ? surface-deletedisabled.height :
+            0px;
+        surface-add := GitHubTooltipSurface {
+            visible: AgentTooltipState.kind == AgentTooltipKind.Add;
+            text: I18n.settings-ai-agent-add;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-activate := GitHubTooltipSurface {
+            visible: AgentTooltipState.kind == AgentTooltipKind.Activate;
+            text: I18n.settings-ai-agent-activate;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-current := GitHubTooltipSurface {
+            visible: AgentTooltipState.kind == AgentTooltipKind.Current;
+            text: I18n.settings-ai-agent-active-badge;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-test-connection := GitHubTooltipSurface {
+            visible: AgentTooltipState.kind == AgentTooltipKind.TestConnection;
+            text: I18n.common-test-connection;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-edit := GitHubTooltipSurface {
+            visible: AgentTooltipState.kind == AgentTooltipKind.Edit;
+            text: I18n.settings-ai-agent-edit;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-delete := GitHubTooltipSurface {
+            visible: AgentTooltipState.kind == AgentTooltipKind.Delete;
+            text: I18n.common-delete;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-deletedisabled := GitHubTooltipSurface {
+            visible: AgentTooltipState.kind == AgentTooltipKind.DeleteDisabled;
+            text: I18n.settings-ai-agent-delete-active-disabled;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+    }
+    Timer {
+        interval: 48ms; running: root.active;
+        triggered => {
+            if AgentTooltipState.lease == root.observed-lease { AgentTooltipState.dismiss(); }
+            else { root.observed-lease = AgentTooltipState.lease; }
+        }
+    }
+}
+

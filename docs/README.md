@@ -20,7 +20,7 @@ experiments and acceptance reports retain their original historical context.
 | [内存待办](memory_optimization_backlog.zh.md) · [English](memory_optimization_backlog.md) | 基线、活跃任务及采用阈值 / Baselines, active tasks and acceptance thresholds |
 | [UI 迁移计划](ui-github-migration-plan.md) | 尚待实施或验收的批次 / Remaining implementation and acceptance work |
 | [PR 冲突后续迭代](pr-conflicts-iterations.md) | 编辑、标记与提交的后续阶段 / Planned editing, resolution and commit stages |
-| [本地归档恢复](local-archives.md) | 被清理的基准输出和旧发布产物 / Restoring local benchmark and release evidence |
+| [本地归档恢复](local-archives.md) | 被清理的基准、验证输出和旧发布产物 / Restoring local benchmark, validation and release evidence |
 | [Coding Agent 规则](../AGENTS.md) · [旧入口](ARCHITECTURE_FOR_AI.md) | 仓库操作规则 / Repository rules |
 
 根目录的 [优化方案](../optimizing-proposal.md)、[代码质量方案](../code-quality-proposal.md)
@@ -37,7 +37,7 @@ decisions by date; a proposal or failed candidate does not supersede a specifica
 | --- | --- |
 | [specs/](specs/README.md) | 当前行为契约 / Current contracts |
 | [designs/](designs/pr-conflicts/README.md) | 设计参考入口与采用的视觉基线 / Design references and adopted visual baselines |
-| [validation/](validation/) | 原始测试输出、正反例与基线/候选证据 / Raw checks and baseline/candidate evidence |
+| [validation/](validation/README.md) | 本地验证输出规范；实验材料不提交 / Local validation output policy; experiment materials stay out of Git |
 | [archive/](archive/README.md) | 完成或否决的实验、设计研究与历次验收 / Completed or rejected experiments and historical acceptance |
 
 `archive/` 随 Git 保存；`.local-archives/` 是本机忽略的大型证据归档，恢复方式见

@@ -1,0 +1,100 @@
+import { AppState, AiAgentListItem } from "../../state/app_state.slint";
+import { I18n } from "@i18n";
+import { GitHubTheme } from "../../theme/github_theme.slint";
+import { FloatingOverlayRect } from "../../state/floating_overlay_bridge.slint";
+import { GitHubAiAgentActivateToggle, GitHubAiAgentCurrentToggle,
+    GitHubAiAgentTestConnectionAction, GitHubAiAgentEditAction, GitHubAiAgentDeleteAction,
+    GitHubAiAgentDeleteDisabledAction } from "./github_ai_agent_tooltip.slint";
+
+// Fixed Agent rows share Hooks geometry while reserving their trailing actions.
+export component GitHubAiAgentListRow inherits Rectangle {
+    in property <int> slot;
+    in property <FloatingOverlayRect> tooltip-viewport;
+    private property <bool> shown: root.slot < AppState.ai-agent-list.length;
+    private property <AiAgentListItem> item: root.shown ? AppState.ai-agent-list[root.slot] : { };
+    private property <length> row-height: 72px;
+    width: 100%; min-width: 0px;
+    height: root.shown ? root.row-height : 0px;
+    visible: root.shown;
+    background: transparent;
+    // Match the Hooks group's row geometry; the group owns the only frame.
+    Text {
+        x: 13px; y: 11px;
+        width: max(0px, actions.x - 26px);
+        height: 24px;
+        text: root.item.name != "" ? root.item.name : I18n.settings-ai-agent-title;
+        font-size: 14px; font-weight: 600; color: GitHubTheme.fg-default;
+        vertical-alignment: center; overflow: elide;
+    }
+    Text {
+        x: 13px; y: 39px;
+        width: max(0px, actions.x - 26px);
+        height: 20px;
+        text: root.item.model + (root.item.model == "" ? "" : " · ")
+            + (root.item.provider == "deepseek" ? "DeepSeek"
+                : root.item.provider == "openai" ? "OpenAI" : I18n.common-custom);
+        font-size: 12px; color: GitHubTheme.fg-muted; overflow: elide;
+    }
+    main-focus := FocusScope {
+        x: 0px; y: 0px;
+        width: max(0px, actions.x - 8px);
+        height: root.row-height;
+        accessible-role: button; accessible-label: root.item.name;
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " {
+                AppState.edit-ai-agent(root.item.id); return accept;
+            }
+            return reject;
+        }
+    }
+    TouchArea {
+        x: 0px; y: 0px; width: main-focus.width; height: main-focus.height;
+        mouse-cursor: pointer;
+        clicked => { main-focus.focus(); AppState.edit-ai-agent(root.item.id); }
+    }
+    actions := HorizontalLayout {
+        x: parent.width - self.width - 16px; y: 20px;
+        width: 168px; height: 32px; spacing: 8px;
+        Rectangle {
+            width: 48px; height: 32px;
+            GitHubAiAgentActivateToggle {
+                x: 0px; y: 4px; visible: !root.item.active;
+                tooltip-viewport: root.tooltip-viewport; tooltip-eligible: root.shown;
+                activated => { AppState.activate-ai-agent(root.item.id); }
+            }
+            GitHubAiAgentCurrentToggle {
+                x: 0px; y: 4px; visible: root.item.active;
+                tooltip-viewport: root.tooltip-viewport; tooltip-eligible: root.shown;
+            }
+        }
+        test-connection := GitHubAiAgentTestConnectionAction {
+            tooltip-viewport: root.tooltip-viewport; tooltip-eligible: root.shown;
+            loading: root.shown && AppState.ai-agent-list-testing-id != ""
+                && AppState.ai-agent-list-testing-id == root.item.id;
+            button-enabled: root.shown && (AppState.ai-agent-list-testing-id == ""
+                || AppState.ai-agent-list-testing-id == root.item.id);
+            activated => { AppState.test-ai-agent(root.item.id); }
+        }
+        GitHubAiAgentEditAction {
+            tooltip-viewport: root.tooltip-viewport; tooltip-eligible: root.shown;
+            activated => { AppState.edit-ai-agent(root.item.id); }
+        }
+        Rectangle {
+            width: 32px; height: 32px;
+            GitHubAiAgentDeleteAction {
+                x: 0px; y: 0px; visible: !root.item.active;
+                tooltip-viewport: root.tooltip-viewport; tooltip-eligible: root.shown;
+                activated => { AppState.delete-ai-agent(root.item.id); }
+            }
+            GitHubAiAgentDeleteDisabledAction {
+                x: 0px; y: 0px; visible: root.item.active;
+                tooltip-viewport: root.tooltip-viewport; tooltip-eligible: root.shown;
+            }
+        }
+    }
+    separator := Rectangle {
+        x: 0px; y: root.row-height - 1px; width: parent.width; height: 1px;
+        background: GitHubTheme.border-default;
+        visible: root.shown && root.slot + 1 < AppState.ai-agent-list.length;
+    }
+}

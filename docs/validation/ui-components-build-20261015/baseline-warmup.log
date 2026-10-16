@@ -1,7 +1,0 @@
-   Compiling usher-ui v0.0.9-alpha.1 (/Users/yuankai/yuankai/Demo/rust/usher/crates/usher-ui)
-   Compiling usher v0.0.9-alpha.4 (/Users/yuankai/yuankai/Demo/rust/usher)
-      Timing report saved to /Users/yuankai/yuankai/Demo/rust/usher/target/cargo-timings/cargo-timing-20261015T055143569Z-ac7933ce5b34ca2a.html
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 41.31s
-real 41.43
-user 31.81
-sys 5.63

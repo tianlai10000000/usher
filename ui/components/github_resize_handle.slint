@@ -1,0 +1,80 @@
+import { GitHubTheme } from "../theme/github_theme.slint";
+
+// The divider orientation determines its resize axis. Consumers keep ownership
+// of their size, bounds and rollback value; delta is relative to the moving
+// handle, so apply it to the current size rather than the size at pointer-down.
+export component GitHubResizeHandle inherits Rectangle {
+    in property <bool> horizontal: false;
+    in property <bool> resize-enabled: true;
+    // Hosts that own only one side of a boundary keep the hit band inside
+    // their bounds and align its painted line with the leading surface edge.
+    in property <bool> leading-edge: false;
+    // Keep rounded corners clear without shortening the interactive hit band.
+    in property <length> line-inset: 0px;
+    out property <bool> dragging: false;
+    out property <bool> hovered: root.resize-enabled && resize-touch.has-hover;
+    callback drag-started();
+    callback drag-delta(length);
+    callback drag-finished(bool);
+
+    // Consumers supply the long dimension; the cross-axis band stays 9px.
+    width: 9px;
+    height: 9px;
+    background: transparent;
+
+    changed resize-enabled => {
+        if !root.resize-enabled && root.dragging {
+            root.dragging = false;
+            root.drag-finished(true);
+        }
+    }
+
+    divider-line := Rectangle {
+        private property <bool> emphasized: root.hovered || root.dragging;
+        private property <length> thickness: self.emphasized ? 2px : 1px;
+        private property <length> inset: max(0px, min(root.line-inset,
+            (root.horizontal ? parent.width : parent.height) / 2));
+        x: root.horizontal ? self.inset
+            : root.leading-edge ? 0px : (parent.width - self.width) / 2;
+        y: !root.horizontal ? self.inset
+            : root.leading-edge ? 0px : (parent.height - self.height) / 2;
+        width: root.horizontal ? parent.width - self.inset * 2 : self.thickness;
+        height: root.horizontal ? self.thickness : parent.height - self.inset * 2;
+        background: self.emphasized ? GitHubTheme.fg-muted : GitHubTheme.border-default;
+        opacity: self.emphasized ? 0.8 : 1;
+        animate background { duration: 100ms; easing: ease-out; }
+    }
+
+    // Keep the complete hit band above the painted line. It remains mounted
+    // across hover/drag states, including when a consumer follows the pointer.
+    resize-touch := TouchArea {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        enabled: root.resize-enabled;
+        mouse-cursor: root.horizontal ? ns-resize : ew-resize;
+        moved => {
+            if root.dragging {
+                root.drag-delta(root.horizontal
+                    ? self.mouse-y - self.pressed-y
+                    : self.mouse-x - self.pressed-x);
+            }
+        }
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down
+                    && event.button == PointerEventButton.left {
+                root.dragging = true;
+                root.drag-started();
+            } else if root.dragging
+                    && event.kind == PointerEventKind.up
+                    && event.button == PointerEventButton.left {
+                root.dragging = false;
+                root.drag-finished(false);
+            } else if root.dragging && event.kind == PointerEventKind.cancel {
+                root.dragging = false;
+                root.drag-finished(true);
+            }
+        }
+    }
+}

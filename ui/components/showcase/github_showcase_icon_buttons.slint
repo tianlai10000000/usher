@@ -1,0 +1,75 @@
+import { GitHubIconButton } from "../button/github_icon_button.slint";
+import { GitHubCopyButton } from "../button/github_copy_button.slint";
+import { FactoryTooltipState } from "../../state/factory_tooltip_state.slint";
+import { I18n } from "@i18n";
+import { ShowcaseInvisibleTooltipAnchor, ShowcaseBorderedTooltipAnchor, ShowcaseDangerTooltipAnchor, ShowcaseLoadingTooltipAnchor, ShowcaseDisabledTooltipAnchor, ShowcaseReviewTooltipAnchor, ShowcaseCloseReviewTooltipAnchor, ShowcaseReviewRunningTooltipAnchor, ShowcaseCopyTooltipAnchor, ShowcaseCopiedTooltipAnchor } from "github_showcase_tooltip_anchors.slint";
+
+export component ShowcaseInvisibleIconButton inherits GitHubIconButton {
+    icon: @image-url("../../assets/icons/octicon-plus-16.svg");
+    tooltip-text: I18n.ui-components-demo-invisible-icon-button;
+    show-tooltip: !FactoryTooltipState.enabled;
+    invisible: true;
+    ShowcaseInvisibleTooltipAnchor { active: FactoryTooltipState.enabled && root.tooltip-active; }
+}
+
+export component ShowcaseBorderedIconButton inherits GitHubIconButton {
+    icon: @image-url("../../assets/icons/octicon-sync-16.svg");
+    tooltip-text: I18n.ui-components-demo-bordered-icon-button;
+    show-tooltip: !FactoryTooltipState.enabled;
+    invisible: false;
+    ShowcaseBorderedTooltipAnchor { active: FactoryTooltipState.enabled && root.tooltip-active; }
+}
+
+export component ShowcaseDangerIconButton inherits GitHubIconButton {
+    icon: @image-url("../../assets/icons/octicon-trash-16.svg");
+    tooltip-text: I18n.ui-components-demo-danger-icon-button;
+    show-tooltip: !FactoryTooltipState.enabled;
+    invisible: false; danger: true;
+    ShowcaseDangerTooltipAnchor { active: FactoryTooltipState.enabled && root.tooltip-active; }
+}
+
+export component ShowcaseLoadingIconButton inherits GitHubIconButton {
+    icon: @image-url("../../assets/icons/octicon-sync-16.svg");
+    tooltip-text: I18n.common-loading;
+    show-tooltip: !FactoryTooltipState.enabled;
+    invisible: false; loading: true;
+    ShowcaseLoadingTooltipAnchor { active: FactoryTooltipState.enabled && root.tooltip-active; }
+}
+
+export component ShowcaseDisabledIconButton inherits GitHubIconButton {
+    icon: @image-url("../../assets/icons/octicon-plus-16.svg");
+    tooltip-text: I18n.ui-components-demo-disabled;
+    show-tooltip: !FactoryTooltipState.enabled;
+    invisible: false; button-enabled: false;
+    ShowcaseDisabledTooltipAnchor { active: FactoryTooltipState.enabled && root.tooltip-active; }
+}
+
+export component ShowcaseReviewIconButton inherits GitHubIconButton {
+    icon: @image-url("../../assets/icons/octicon-copilot-16.svg");
+    tooltip-text: I18n.ui-components-demo-review-this-pull-request-with-ai;
+    show-tooltip: !FactoryTooltipState.enabled;
+    invisible: true;
+    ShowcaseReviewTooltipAnchor { active: FactoryTooltipState.enabled && root.tooltip-active; }
+}
+
+export component ShowcaseCloseReviewIconButton inherits GitHubIconButton {
+    icon: @image-url("../../assets/icons/octicon-copilot-16.svg");
+    tooltip-text: I18n.ui-components-demo-close-ai-code-review;
+    show-tooltip: !FactoryTooltipState.enabled;
+    invisible: true; selected: true;
+    ShowcaseCloseReviewTooltipAnchor { active: FactoryTooltipState.enabled && root.tooltip-active; }
+}
+
+export component ShowcaseReviewRunningIconButton inherits GitHubIconButton {
+    icon: @image-url("../../assets/icons/octicon-copilot-16.svg");
+    tooltip-text: I18n.ui-components-demo-ai-code-review-is-running;
+    show-tooltip: !FactoryTooltipState.enabled;
+    invisible: true; loading: true;
+    ShowcaseReviewRunningTooltipAnchor { active: FactoryTooltipState.enabled && root.tooltip-active; }
+}
+
+export component ShowcaseCopyButton inherits GitHubCopyButton {
+    show-tooltip: !FactoryTooltipState.enabled;
+    ShowcaseCopyTooltipAnchor { active: FactoryTooltipState.enabled && root.tooltip-active && !root.copied; }
+    ShowcaseCopiedTooltipAnchor { active: FactoryTooltipState.enabled && root.copied; }
+}

@@ -46,6 +46,7 @@ mod i18n;
 mod settings;
 use settings::setup_settings;
 mod settings_page;
+mod ui_components;
 use settings_page::SettingsPageBridge;
 mod message_center;
 use message_center::MessagePageBridge;
@@ -66,6 +67,7 @@ mod ai_review;
 mod app_lifecycle;
 mod app_paths;
 mod app_runtime;
+mod focus_navigation;
 #[cfg(feature = "test-fixtures")]
 mod memory_benchmark;
 mod memory_diagnostics;
@@ -85,6 +87,9 @@ use platform::{
 };
 #[doc(hidden)]
 pub use transient_input::install_for_window as install_transient_input_bridge;
+#[cfg(all(feature = "ui-components", not(feature = "live-preview")))]
+#[doc(hidden)]
+pub use ui_components::install as install_ui_components_fixture;
 
 mod terminal;
 
@@ -285,6 +290,7 @@ fn ui(
                 message_page_for_language.sync_language(canonical);
                 workflow::sync_language(&app);
                 shortcuts::sync_language(&app);
+                platform::update_titlebar_navigation_controls(&app);
                 update::updater::sync_language(&app);
                 artifact_preview::sync_language(&app);
                 terminal::sync_language(&app);
@@ -422,68 +428,6 @@ fn ui(
             );
         },
     );
-
-    // ========= AI Agent Settings ========= //
-    ai::settings_ui::bind(&app, &settings_page, ai_agent_settings.clone());
-
-    let app_weak_ai_agent_test = app.as_weak();
-    let settings_page_for_ai_test = settings_page.clone();
-    AppState::get(&app).on_test_ai_agent_connection(move |base_url, api_key, model| {
-        let settings = settings::AiAgentSettings {
-            provider: "custom".to_string(),
-            base_url: base_url.to_string(),
-            api_key: api_key.to_string(),
-            model: model.to_string(),
-            reply_language: usher_i18n::AUTO_LANGUAGE.to_string(),
-        };
-        let ui_weak = app_weak_ai_agent_test.clone();
-        let settings_page = settings_page_for_ai_test.clone();
-        // Operation dual-write begin: host + isolated Settings page.
-        if let Some(ui) = ui_weak.upgrade() {
-            settings_page::mirror_ai_agent_testing(&ui, &settings_page, true);
-        }
-        app_runtime::shared_runtime().spawn(async move {
-            let result = ai::agent::test_connection(&settings).await;
-            let _ = slint::invoke_from_event_loop(move || {
-                let Some(ui) = ui_weak.upgrade() else {
-                    settings_page.set_ai_agent_testing(false);
-                    return;
-                };
-                settings_page::mirror_ai_agent_testing(&ui, &settings_page, false);
-                match result {
-                    Ok(result) => {
-                        let message = if result.model_listed {
-                            i18n::tr("settings.feedback.ai_agent_connected")
-                        } else {
-                            i18n::tr("settings.feedback.ai_agent_connected_model_unlisted")
-                        };
-                        ToastManager::get(&ui).invoke_success(ToastOptions {
-                            message: message.as_ref().into(),
-                            duration: 3_500,
-                            position: "bottom".into(),
-                            icon: "".into(),
-                            overlay: false,
-                            close_on_click: true,
-                            loading_type: "".into(),
-                            width: "auto".into(),
-                        });
-                    }
-                    Err(error) => {
-                        ToastManager::get(&ui).invoke_error(ToastOptions {
-                            message: error.localized_user_message().into(),
-                            duration: 3_500,
-                            position: "bottom".into(),
-                            icon: "".into(),
-                            overlay: false,
-                            close_on_click: true,
-                            loading_type: "".into(),
-                            width: "auto".into(),
-                        });
-                    }
-                }
-            });
-        });
-    });
 
     // ========= Router ========= //
     let lifecycle_hooks = app_lifecycle::hooks(app.get_current_route());
@@ -882,6 +826,8 @@ fn ui(
     );
     settings_page.install(&app);
     message_page.install(&app);
+    #[cfg(all(feature = "ui-components", not(feature = "live-preview")))]
+    ui_components::install(&app);
     persistence_benchmark::setup(&app, &message_center);
     memory_diagnostics::log_checkpoint("startup.ui_bindings_complete");
     startup_timeline.checkpoint("ui_bindings_complete");
@@ -978,9 +924,8 @@ pub fn main() {
         }
     };
     // The production backend creates its real window adapter during show().
-    // macOS uses its existing application-local event monitor because native
-    // StyledText consumes the Slint event; other backends use the generic hook.
-    #[cfg(not(target_os = "macos"))]
+    // Native AppKit monitors precede Slint focus assignment. Classify input
+    // presses in the shared post-dispatch hook on every backend.
     if let Err(error) = transient_input::install(&ui) {
         startup::exit_failure("The native input bridge could not be installed", &error);
     }

@@ -20,6 +20,8 @@ export global GitHubSelectState {
     in-out property <length> anchor-height;
     in-out property <GitHubSelectGeometry> surface;
     in-out property <bool> restore-focus: true;
+    // Opt in only when a mounted-host Tab owner flushes queued close handlers.
+    in-out property <bool> restore-before-tab: false;
 
     public function close(restore: bool) {
         root.restore-focus = restore;
@@ -116,9 +118,13 @@ export component GitHubSelectPopup inherits FocusScope {
         if !root.open {
             return reject;
         }
-        if event.text == Key.Escape || event.text == Key.Tab {
-            GitHubSelectState.close(event.text == Key.Escape);
-            return event.text == Key.Escape ? accept : reject;
+        if event.text == Key.Escape {
+            GitHubSelectState.close(true);
+            return accept;
+        }
+        if event.text == Key.Tab || event.text == Key.Backtab {
+            GitHubSelectState.close(GitHubSelectState.restore-before-tab);
+            return reject;
         }
         if event.text == Key.DownArrow || event.text == Key.UpArrow {
             GitHubSelectState.keyboard-navigation = true;
@@ -150,7 +156,9 @@ export component GitHubSelectPopup inherits FocusScope {
         anchor-height: GitHubSelectState.anchor-height;
         floating-width: root.popup-width;
         floating-height: root.popup-height;
-        preferred-placement: root.space-below < root.popup-height && root.space-above > root.space-below
+        // Prefer the side with more visible space, even when a short menu
+        // would fit on both sides. A tie opens below the trigger.
+        preferred-placement: root.space-above > root.space-below
             ? GitHubTooltipPlacement.Top : GitHubTooltipPlacement.Bottom;
         alignment: GitHubTooltipAlignment.Start;
 

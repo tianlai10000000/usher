@@ -1,0 +1,135 @@
+import { I18n } from "@i18n";
+import { GitHubIconButton } from "../button/github_icon_button.slint";
+import { GitHubCompactElevation } from "../github_elevation.slint";
+import { TooltipOverlayState } from "../../state/tooltip_overlay_state.slint";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+
+// Keep the application controls in the content tree while AppKit temporarily
+// reveals its system title bar above them in macOS full screen.
+component GitHubWindowNavigationButton inherits GitHubIconButton {
+    control-size: GitHubMetrics.size-28;
+    glyph-size: GitHubMetrics.icon-medium;
+    tooltip-above: false;
+    foreground: GitHubTheme.fg-subtle;
+    hover-foreground: GitHubTheme.titlebar-control-hover-fg;
+    hover-background: GitHubTheme.titlebar-control-hover-bg;
+}
+
+export component GitHubWindowNavigation inherits Rectangle {
+    in property <bool> controls-enabled: true;
+    in property <bool> can-go-back: false;
+    in property <bool> can-go-forward: false;
+    in property <bool> sidebar-expanded: true;
+    in property <image> sidebar-icon;
+    in property <string> back-shortcut-label;
+    in property <string> forward-shortcut-label;
+    in property <string> sidebar-shortcut-label;
+    callback back();
+    callback forward();
+    callback toggle-sidebar();
+
+    width: GitHubMetrics.size-28 * 3 + GitHubMetrics.size-4 * 2;
+    height: 46px;
+    background: transparent;
+
+    changed controls-enabled => {
+        if !root.controls-enabled { TooltipOverlayState.dismiss-all(); }
+    }
+
+    back-button := GitHubWindowNavigationButton {
+        x: 0px;
+        y: (root.height - self.height) / 2;
+        icon: @image-url("../../assets/icons/octicon-arrow-left-16.svg");
+        tooltip-text: I18n.common-back + (root.back-shortcut-label == ""
+            ? "" : " (" + root.back-shortcut-label + ")");
+        show-tooltip: root.controls-enabled;
+        button-enabled: root.can-go-back;
+        activation-enabled: root.controls-enabled && root.can-go-back;
+        clicked => { root.back(); }
+    }
+
+    forward-button := GitHubWindowNavigationButton {
+        x: GitHubMetrics.size-28 + GitHubMetrics.size-4;
+        y: (root.height - self.height) / 2;
+        icon: @image-url("../../assets/icons/octicon-arrow-right-16.svg");
+        tooltip-text: I18n.tooltip-forward + (root.forward-shortcut-label == ""
+            ? "" : " (" + root.forward-shortcut-label + ")");
+        show-tooltip: root.controls-enabled;
+        button-enabled: root.can-go-forward;
+        activation-enabled: root.controls-enabled && root.can-go-forward;
+        clicked => { root.forward(); }
+    }
+
+    sidebar-button := GitHubWindowNavigationButton {
+        x: (GitHubMetrics.size-28 + GitHubMetrics.size-4) * 2;
+        y: (root.height - self.height) / 2;
+        icon: root.sidebar-icon;
+        glyph-size: GitHubMetrics.size-28;
+        tooltip-text: (root.sidebar-expanded ? I18n.tooltip-hide-sidebar : I18n.tooltip-show-sidebar)
+            + (root.sidebar-shortcut-label == ""
+                ? "" : " (" + root.sidebar-shortcut-label + ")");
+        show-tooltip: root.controls-enabled;
+        activation-enabled: root.controls-enabled;
+        clicked => { root.toggle-sidebar(); }
+    }
+}
+
+// Windows/Linux keep the established compact floating strip when the sidebar
+// is collapsed. Its visual surface and action order belong to this owner too.
+export component GitHubCollapsedWindowNavigation inherits Rectangle {
+    in property <bool> can-go-back: false;
+    in property <bool> can-go-forward: false;
+    in property <string> back-shortcut-label;
+    in property <string> forward-shortcut-label;
+    in property <string> sidebar-shortcut-label;
+    callback back();
+    callback forward();
+    callback toggle-sidebar();
+
+    width: 112px;
+    height: GitHubMetrics.size-40;
+    background: transparent;
+
+    GitHubCompactElevation {
+        target-width: parent.width;
+        target-height: parent.height;
+        shadow-color: GitHubTheme.shadow-floating-small;
+    }
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: GitHubMetrics.radius-large;
+        background: GitHubTheme.canvas-overlay;
+    }
+
+    HorizontalLayout {
+        width: parent.width;
+        height: parent.height;
+        padding-left: GitHubMetrics.size-4;
+        padding-right: GitHubMetrics.size-4;
+        spacing: GitHubMetrics.size-4;
+        alignment: center;
+
+        GitHubIconButton {
+            icon: @image-url("../../assets/icons/octicon-sidebar-expand-16.svg");
+            tooltip-text: I18n.tooltip-show-sidebar + " (" + root.sidebar-shortcut-label + ")";
+            tooltip-above: false;
+            clicked => { root.toggle-sidebar(); }
+        }
+        GitHubIconButton {
+            icon: @image-url("../../assets/icons/octicon-arrow-left-16.svg");
+            tooltip-text: I18n.common-back + " (" + root.back-shortcut-label + ")";
+            tooltip-above: false;
+            button-enabled: root.can-go-back;
+            clicked => { root.back(); }
+        }
+        GitHubIconButton {
+            icon: @image-url("../../assets/icons/octicon-chevron-right-16.svg");
+            tooltip-text: I18n.tooltip-forward + " (" + root.forward-shortcut-label + ")";
+            tooltip-above: false;
+            button-enabled: root.can-go-forward;
+            clicked => { root.forward(); }
+        }
+    }
+}

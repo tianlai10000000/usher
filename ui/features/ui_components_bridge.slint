@@ -1,0 +1,62 @@
+import { AppState } from "../state/app_state.slint";
+import { FloatingOverlayRect } from "../state/floating_overlay_bridge.slint";
+import { TransientOverlayState } from "../state/transient_overlay_state.slint";
+
+// Feature-owned API: Rust binds this directly, with no root proxy callbacks.
+export global UiComponentsBridge {
+    in property <component-factory> factory;
+    in-out property <FloatingOverlayRect> window-bounds;
+    in-out property <FloatingOverlayRect> viewport;
+    in-out property <length> top-padding;
+    in-out property <bool> active: false;
+    callback sync();
+    callback dismiss(bool);
+    callback pointer-released(length, length);
+    callback key-pressed(string, bool, bool, bool, bool) -> bool;
+    callback claim-host-exclusive();
+    private property <int> own-host-generation: -1;
+    private property <int> observed-host-generation: TransientOverlayState.exclusive-generation;
+    claim-host-exclusive => {
+        if root.active {
+            // Stamp before claiming: synchronous observers must recognize us.
+            root.own-host-generation = TransientOverlayState.exclusive-generation + 1;
+            TransientOverlayState.claim-exclusive();
+        }
+    }
+    changed observed-host-generation => {
+        if root.active && root.observed-host-generation != root.own-host-generation {
+            root.dismiss(false);
+        }
+    }
+}
+
+export component UiComponentsHost inherits Rectangle {
+    in property <bool> active: false;
+    in property <FloatingOverlayRect> viewport;
+    in property <length> top-padding;
+    private property <int> theme-mode: AppState.theme-mode;
+    private property <bool> dark-mode: AppState.effective-dark-mode;
+    private property <bool> ever-opened: false;
+    x: 0px; y: 0px; width: 100%; height: 100%;
+    background: transparent;
+    visible: root.active;
+    init => { root.publish(); }
+    changed active => { if root.active { root.ever-opened = true; } root.publish(); }
+    changed width => { root.publish(); }
+    changed height => { root.publish(); }
+    changed viewport => { root.publish(); }
+    changed top-padding => { root.publish(); }
+    changed theme-mode => { root.publish(); }
+    changed dark-mode => { root.publish(); }
+    function publish() {
+        UiComponentsBridge.window-bounds = { x: 0px, y: 0px, width: root.width, height: root.height };
+        UiComponentsBridge.viewport = root.viewport;
+        UiComponentsBridge.top-padding = root.top-padding;
+        UiComponentsBridge.active = root.active;
+        UiComponentsBridge.sync();
+    }
+    if root.ever-opened: ComponentContainer {
+        width: parent.width; height: parent.height;
+        component-factory: UiComponentsBridge.factory;
+    }
+}

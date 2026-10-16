@@ -1,3 +1,4 @@
+import { ShowcaseInvisibleIconButton, ShowcaseBorderedIconButton, ShowcaseDangerIconButton, ShowcaseLoadingIconButton, ShowcaseDisabledIconButton, ShowcaseReviewIconButton, ShowcaseCloseReviewIconButton, ShowcaseReviewRunningIconButton, ShowcaseCopyButton } from "github_showcase_icon_buttons.slint";
 import { I18n } from "@i18n";
 import { Route } from "../../route/routeMap.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
@@ -7,8 +8,6 @@ import { GitHubSelectState, GitHubSelectPopup, GitHubSelectOption, GitHubSelectG
 import { GitHubCompactTextField } from "../input/compact_text_field.slint";
 import { GitHubCheckbox } from "../input/github_checkbox.slint";
 import { GitHubRadio } from "../input/github_radio.slint";
-import { GitHubIconButton } from "../button/github_icon_button.slint";
-import { GitHubCopyButton } from "../button/github_copy_button.slint";
 import { GitHubLink } from "../github_link.slint";
 import { GitHubMetadataLabel, GitHubMetadataLabelVariant } from "../github_metadata_label.slint";
 import { GitHubCounterLabel, GitHubCounterScheme } from "../label/github_counter_label.slint";
@@ -29,6 +28,7 @@ import { GitHubPagination } from "../navigation/github_pagination.slint";
 import { GitHubAiReviewFindingRow, GitHubAiReviewSeverityLabel } from "../ai_review/github_ai_review_components.slint";
 import { GitHubAgentResponseShowcase } from "github_agent_response_showcase.slint";
 import { GitHubPrMenuShowcase } from "github_pr_menu_showcase.slint";
+import { GitHubResizeHandleShowcase } from "github_resize_handle_showcase.slint";
 
 component GitHubShowcaseGroup inherits Rectangle {
     in property <string> title;
@@ -182,7 +182,7 @@ global GitHubSelectDemoState {
 }
 
 
-global GitHubFilterDemoState {
+export global GitHubFilterDemoState {
     in-out property <string> menu: "";
     in-out property <string> status: "all";
     in-out property <string> owner: "any";
@@ -220,7 +220,7 @@ component GitHubFilterDemoButton inherits GitHubFilterMenuButton {
     }
 }
 
-global GitHubNotificationDemoState {
+export global GitHubNotificationDemoState {
     in-out property <bool> open: false;
     in-out property <length> anchor-x;
     in-out property <length> anchor-y;
@@ -440,6 +440,7 @@ export component GitHubUiComponentsGallery inherits Rectangle {
     private property <int> selected-segment: 0;
     private property <int> selected-icon-segment: 1;
     private property <int> selected-tab: 0;
+    private property <int> selected-flush-tab: 0;
     private property <int> selected-action: 0;
     private property <string> field-text: "";
     private property <string> compact-field-text: "";
@@ -619,19 +620,20 @@ export component GitHubUiComponentsGallery inherits Rectangle {
         directory := FocusScope {
             width: parent.width;
             private property <int> columns: self.width < 640px ? 2 : 4;
-            height: self.columns == 2 ? 120px : 64px;
-            // Keep the eight links mounted across locale and layout changes.
-            for index in 8: GitHubLink {
+            height: Math.ceil(9 / self.columns) * 28px + 8px;
+            // Keep the nine links mounted across locale and layout changes.
+            for index in 9: GitHubLink {
                 x: mod(index, directory.columns) * directory.width / directory.columns;
                 y: 4px + floor(index / directory.columns) * 28px;
                 height: 28px;
                 text: [I18n.ui-components-foundations, I18n.ui-components-actions,
+                    I18n.ui-components-layout,
                     I18n.ui-components-containment, I18n.ui-components-communication,
                     I18n.ui-components-navigation, I18n.ui-components-selection,
                     I18n.ui-components-text-input, I18n.ui-components-scenarios][index];
                 text-max-width: directory.width / directory.columns - 16px;
                 clicked => {
-                    root.jump-to([foundations-group.y, actions-group.y,
+                    root.jump-to([foundations-group.y, actions-group.y, layout-group.y,
                         containment-group.y, communication-group.y, navigation-group.y,
                         selection-group.y, text-input-group.y, scenarios-group.y][index]);
                 }
@@ -794,25 +796,15 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 spacing: GitHubMetrics.size-12;
                 alignment: start;
 
-                for button-state in [
-                    { icon: @image-url("../../assets/icons/octicon-plus-16.svg"), label: I18n.ui-components-demo-invisible-icon-button, invisible: true, danger: false, loading: false, enabled: true, selected: false },
-                    { icon: @image-url("../../assets/icons/octicon-sync-16.svg"), label: I18n.ui-components-demo-bordered-icon-button, invisible: false, danger: false, loading: false, enabled: true, selected: false },
-                    { icon: @image-url("../../assets/icons/octicon-trash-16.svg"), label: I18n.ui-components-demo-danger-icon-button, invisible: false, danger: true, loading: false, enabled: true, selected: false },
-                    { icon: @image-url("../../assets/icons/octicon-sync-16.svg"), label: I18n.common-loading, invisible: false, danger: false, loading: true, enabled: true, selected: false },
-                    { icon: @image-url("../../assets/icons/octicon-plus-16.svg"), label: I18n.ui-components-demo-disabled, invisible: false, danger: false, loading: false, enabled: false, selected: false },
-                    { icon: @image-url("../../assets/icons/octicon-copilot-16.svg"), label: I18n.ui-components-demo-review-this-pull-request-with-ai, invisible: true, danger: false, loading: false, enabled: true, selected: false },
-                    { icon: @image-url("../../assets/icons/octicon-copilot-16.svg"), label: I18n.ui-components-demo-close-ai-code-review, invisible: true, danger: false, loading: false, enabled: true, selected: true },
-                    { icon: @image-url("../../assets/icons/octicon-copilot-16.svg"), label: I18n.ui-components-demo-ai-code-review-is-running, invisible: true, danger: false, loading: true, enabled: true, selected: false }
-                ]: GitHubIconButton {
-                    icon: button-state.icon;
-                    tooltip-text: button-state.label;
-                    invisible: button-state.invisible;
-                    danger: button-state.danger;
-                    loading: button-state.loading;
-                    button-enabled: button-state.enabled;
-                    selected: button-state.selected;
-                }
-                GitHubCopyButton {
+                ShowcaseInvisibleIconButton { }
+                ShowcaseBorderedIconButton { }
+                ShowcaseDangerIconButton { }
+                ShowcaseLoadingIconButton { }
+                ShowcaseDisabledIconButton { }
+                ShowcaseReviewIconButton { }
+                ShowcaseCloseReviewIconButton { }
+                ShowcaseReviewRunningIconButton { }
+                ShowcaseCopyButton {
                     tooltip-above: false;
                     copy-requested => { true }
                 }
@@ -947,6 +939,21 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 }
             }
 
+        }
+
+        layout-group := GitHubShowcaseGroup {
+            title: I18n.ui-components-layout;
+            back-to-top => { root.jump-to(0px); }
+        }
+
+        GitHubShowcaseSection {
+            title: I18n.ui-components-resize-title;
+            description: I18n.ui-components-resize-description;
+            content-height: resize-showcase.height + GitHubMetrics.size-8;
+
+            resize-showcase := GitHubResizeHandleShowcase {
+                width: parent.width;
+            }
         }
 
         containment-group := GitHubShowcaseGroup {
@@ -1332,14 +1339,15 @@ export component GitHubUiComponentsGallery inherits Rectangle {
         GitHubShowcaseSection {
             title: I18n.ui-components-navigation;
             description: "";
-            content-height: 132px;
+            content-height: 220px;
 
-            GitHubShowcaseLabel { x: 0px; y: 0px; width: 160px; height: 20px; label: "UnderlineNav"; }
-            GitHubUnderlineNav {
+            GitHubShowcaseLabel { x: 0px; y: 0px; width: parent.width; height: 20px; label: I18n.ui-components-demo-tabs-inset; }
+            tabs-inset := GitHubUnderlineNav {
                 x: 0px;
                 y: 28px;
                 width: parent.width;
                 height: 48px;
+                variant: inset;
                 group-label: I18n.ui-components-demo-underline-navigation-examples;
                 owner: "showcase-tabs";
                 selected-index: root.selected-tab;
@@ -1353,9 +1361,29 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 selected(index) => { root.selected-tab = index; }
             }
 
+            tabs-flush-label := GitHubShowcaseLabel {
+                x: 0px;
+                y: tabs-inset.y + tabs-inset.height + GitHubMetrics.size-12;
+                width: parent.width;
+                height: GitHubMetrics.size-20;
+                label: I18n.ui-components-demo-tabs-flush;
+            }
+            tabs-flush := GitHubUnderlineNav {
+                x: 0px;
+                y: tabs-flush-label.y + tabs-flush-label.height + GitHubMetrics.size-8;
+                width: parent.width;
+                height: GitHubMetrics.size-48;
+                variant: flush;
+                group-label: I18n.ui-components-demo-underline-navigation-examples;
+                owner: "showcase-tabs-flush";
+                selected-index: root.selected-flush-tab;
+                items: tabs-inset.items;
+                selected(index) => { root.selected-flush-tab = index; }
+            }
+
             GitHubSettingsNavItem {
                 x: 0px;
-                y: 88px;
+                y: tabs-flush.y + tabs-flush.height + GitHubMetrics.size-12;
                 width: min(256px, parent.width);
                 text: I18n.ui-components-demo-selected-navigation;
                 selected: true;

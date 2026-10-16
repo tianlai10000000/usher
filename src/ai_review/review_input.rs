@@ -17,7 +17,7 @@ use crate::settings::AiAgentSettings;
 
 const MAX_CHAT_DIFF_BYTES: usize = 48 * 1024;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(super) struct PendingReviewRequest {
     pub(super) project_alias: String,
     pub(super) project_key: ProjectReviewKey,
@@ -32,7 +32,7 @@ pub(super) struct PendingReviewRequest {
     pub(super) source_branch: String,
     pub(super) target_branch: String,
     pub(super) updated_at: String,
-    pub(super) model_name: String,
+    pub(super) profile: crate::settings::AiAgentProfile,
     pub(super) extra_requirements: String,
 }
 
@@ -214,7 +214,11 @@ pub(super) fn validate_model_settings(settings: &AiAgentSettings) -> Result<(), 
     if settings.base_url.trim().is_empty() {
         return Err("ai_review.failure.configure_base_url".to_string());
     }
-    if settings.api_key.trim().is_empty() {
+    if settings.api_key.trim().is_empty()
+        && !settings.headers.iter().any(|header| {
+            header.enabled && !header.name.trim().is_empty() && !header.value.is_empty()
+        })
+    {
         return Err("ai_review.failure.configure_api_key".to_string());
     }
     if settings.model.trim().is_empty() {
@@ -248,7 +252,10 @@ mod tests {
             source_branch: "topic".into(),
             target_branch: "main".into(),
             updated_at: "synthetic-time".into(),
-            model_name: "selected-model".into(),
+            profile: crate::settings::AiAgentProfile::from(AiAgentSettings {
+                model: "selected-model".into(),
+                ..Default::default()
+            }),
             extra_requirements: "Review-only requirements".into(),
         };
         let target = ReviewTarget {

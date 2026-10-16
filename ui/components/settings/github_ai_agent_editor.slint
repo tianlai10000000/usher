@@ -1,0 +1,214 @@
+import { AppState, AiAgentHeaderItem } from "../../state/app_state.slint";
+import { I18n } from "@i18n";
+import { GitHubTheme } from "../../theme/github_theme.slint";
+import { GitHubDialog } from "../dialog/github_dialog.slint";
+import { GitHubScrollView } from "../github_scroll_view.slint";
+import { GitHubButton, GitHubTextField, GitHubToggle, GitHubSettingsSectionMenuButton } from "./github_settings_controls.slint";
+import { GitHubAiAgentHeaders } from "./github_ai_agent_headers.slint";
+import { AgentHeaderTooltipState, GitHubAiAgentHeaderTooltipOverlay } from "./github_ai_agent_header_tooltip.slint";
+import { GitHubToast } from "../toast/toast.slint";
+import { GitHubSpinner } from "../github_spinner.slint";
+import { GitHubSelectState, GitHubSelectPopup, GitHubSelectOption } from "../input/github_select.slint";
+import { ManifestReplyLanguagePicker } from "@language-picker";
+
+component GitHubAiAgentEditorProviderPicker inherits Rectangle {
+    private property <bool> menu-open: GitHubSelectState.open
+        && GitHubSelectState.owner == "settings-ai-agent-editor-provider";
+    width: 100%; height: 40px;
+    function choose(provider: string, index: int) {
+        GitHubSelectState.toggle("settings-ai-agent-editor-provider", provider, index,
+            root.absolute-position.x, root.absolute-position.y, root.width, root.height);
+    }
+    GitHubSettingsSectionMenuButton {
+        x: 0px; y: 0px; width: parent.width;
+        visible: AppState.ai-agent-editor-provider == "custom";
+        text: I18n.common-custom; open: root.menu-open;
+        enabled: !AppState.ai-agent-editor-busy;
+        restore-focus-on-close: GitHubSelectState.restore-focus;
+        clicked => { root.choose("custom", 0); }
+    }
+    GitHubSettingsSectionMenuButton {
+        x: 0px; y: 0px; width: parent.width;
+        visible: AppState.ai-agent-editor-provider == "deepseek";
+        text: "DeepSeek"; open: root.menu-open;
+        enabled: !AppState.ai-agent-editor-busy;
+        restore-focus-on-close: GitHubSelectState.restore-focus;
+        clicked => { root.choose("deepseek", 1); }
+    }
+    GitHubSettingsSectionMenuButton {
+        x: 0px; y: 0px; width: parent.width;
+        visible: AppState.ai-agent-editor-provider == "openai";
+        text: "OpenAI"; open: root.menu-open;
+        enabled: !AppState.ai-agent-editor-busy;
+        restore-focus-on-close: GitHubSelectState.restore-focus;
+        clicked => { root.choose("openai", 2); }
+    }
+}
+
+export component GitHubAiAgentEditorProviderOverlay inherits GitHubSelectPopup {
+    owner: "settings-ai-agent-editor-provider";
+    option-count: 3;
+    private property <bool> menu-open: GitHubSelectState.open && GitHubSelectState.owner == root.owner;
+    selected(index) => {
+        if index >= 0 && index < 3 {
+            AppState.select-ai-agent-provider(index == 0 ? "custom" : index == 1 ? "deepseek" : "openai");
+            AppState.ai-agent-editor-test-result = ""; AppState.ai-agent-editor-test-result-key = "";
+            AppState.ai-agent-editor-error = ""; AppState.ai-agent-editor-error-key = "";
+            AppState.ai-agent-editor-feedback-open = false;
+        }
+        GitHubSelectState.close(true);
+    }
+    GitHubSelectOption {
+        x: 0px; y: 0px; width: root.option-width; text: I18n.common-custom;
+        selected: AppState.ai-agent-editor-provider == "custom";
+        active: root.menu-open && GitHubSelectState.active-index == 0;
+        activated => { root.selected(0); }
+    }
+    GitHubSelectOption {
+        x: 0px; y: 32px; width: root.option-width; text: "DeepSeek";
+        selected: AppState.ai-agent-editor-provider == "deepseek";
+        active: root.menu-open && GitHubSelectState.active-index == 1;
+        activated => { root.selected(1); }
+    }
+    GitHubSelectOption {
+        x: 0px; y: 64px; width: root.option-width; text: "OpenAI";
+        selected: AppState.ai-agent-editor-provider == "openai";
+        active: root.menu-open && GitHubSelectState.active-index == 2;
+        activated => { root.selected(2); }
+    }
+}
+
+export component GitHubAiAgentEditorDialog inherits Rectangle {
+    in property <bool> route-active: true;
+    private property <bool> dialog-open: root.route-active && AppState.ai-agent-editor-open;
+    private property <bool> reveal-key: false;
+    private property <int> editor-revision: AppState.ai-agent-editor-revision;
+    private property <[AiAgentHeaderItem]> header-rows: AppState.ai-agent-editor-headers;
+    private property <bool> header-object-mode: AppState.ai-agent-editor-headers-object-mode;
+    private property <int> header-input-revision: AppState.ai-agent-editor-headers-input-revision;
+    changed header-rows => { AgentHeaderTooltipState.dismiss(); }
+    changed header-object-mode => { AgentHeaderTooltipState.dismiss(); }
+    changed header-input-revision => { AgentHeaderTooltipState.dismiss(); }
+    changed dialog-open => { AgentHeaderTooltipState.dismiss(); root.reveal-key = false; editor-scroll.viewport_y = 0px; GitHubSelectState.close(false); }
+    changed editor-revision => { AgentHeaderTooltipState.dismiss(); AppState.cancel-ai-agent-test(); root.reveal-key = false; editor-scroll.viewport_y = 0px; GitHubSelectState.close(false); }
+    changed route-active => { if !root.route-active { AppState.cancel-ai-agent-test(); } }
+    function edited() {
+        AppState.ai-agent-editor-test-result = ""; AppState.ai-agent-editor-test-result-key = "";
+        AppState.ai-agent-editor-error = ""; AppState.ai-agent-editor-error-key = "";
+        AppState.ai-agent-editor-feedback-open = false;
+    }
+    frame := GitHubDialog {
+        dialog-visible: root.dialog-open;
+        title: AppState.ai-agent-editor-new ? I18n.settings-ai-agent-add : I18n.settings-ai-agent-edit-title;
+        dialog-width: 620px;
+        dialog-height: min(560px, max(320px, root.height - 140px));
+        fullscreen-on-narrow: false;
+        close-enabled: !AppState.ai-agent-editor-busy;
+        primary-label: I18n.common-save; primary-success: true;
+        primary-enabled: !AppState.ai-agent-editor-busy && !AppState.ai-agent-editor-testing;
+        primary-busy: AppState.ai-agent-editor-busy;
+        submit-on-primary-enter: true;
+        close-requested => { AppState.cancel-ai-agent-editor(); }
+        cancel-clicked => { AppState.cancel-ai-agent-editor(); }
+        primary-clicked => { AppState.save-ai-agent-editor(); }
+        editor-scroll := GitHubScrollView {
+            // Vertical safe-area space scrolls with the form, so the viewport
+            // reaches the header/footer dividers without clipping row content.
+            x: frame.content-x; y: frame.body-y;
+            width: frame.content-width; height: frame.body-height;
+            changed viewport_y => { AgentHeaderTooltipState.dismiss(); GitHubSelectState.close(false); }
+            form-host := Rectangle {
+                // Keep the layout host full width so its child cannot be
+                // centered by the ScrollView's column. Reserve an 8px track
+                // plus an 8px gap outside the form's right edge.
+                width: editor-scroll.visible_width; height: form.preferred-height;
+                form := VerticalLayout {
+                    x: 0px; y: 0px; width: max(0px, parent.width - 16px);
+                    padding-top: frame.body-padding; padding-bottom: frame.body-padding;
+                    spacing: 12px; alignment: start;
+                    name-field := GitHubTextField {
+                        label: I18n.settings-ai-agent-name; text <=> AppState.ai-agent-editor-name;
+                        placeholder: I18n.settings-ai-agent-name-placeholder;
+                        enabled: !AppState.ai-agent-editor-busy; edited(_) => { root.edited(); }
+                    }
+                    Text { text: I18n.settings-ai-agent-provider; font-size: 14px; font-weight: 600; color: GitHubTheme.fg-default; }
+                    GitHubAiAgentEditorProviderPicker { }
+                    GitHubTextField {
+                        label: I18n.settings-ai-agent-base-url; text <=> AppState.ai-agent-editor-base-url;
+                        placeholder: "https://api.example.com/v1";
+                        enabled: !AppState.ai-agent-editor-busy; edited(_) => { root.edited(); }
+                    }
+                    GitHubTextField {
+                        label: I18n.settings-ai-agent-api-key; text <=> AppState.ai-agent-editor-api-key;
+                        secret: true; reveal: root.reveal-key; placeholder: "sk-...";
+                        enabled: !AppState.ai-agent-editor-busy; edited(_) => { root.edited(); }
+                    }
+                    Text {
+                        width: parent.width; text: I18n.settings-ai-agent-api-key-caption;
+                        font-size: 12px; color: GitHubTheme.fg-muted; wrap: word-wrap; line-height-factor: 1.2;
+                    }
+                    reveal-row := Rectangle {
+                        width: parent.width; height: 32px;
+                        reveal-toggle := GitHubToggle {
+                            x: 0px; y: (parent.height - self.height) / 2;
+                            checked: root.reveal-key; toggled(value) => { root.reveal-key = value; }
+                        }
+                        reveal-label := Text {
+                            x: reveal-toggle.width + 8px; y: 0px;
+                            width: max(0px, parent.width - self.x); height: parent.height;
+                            text: I18n.common-show-api-key; font-size: 13px;
+                            color: GitHubTheme.fg-muted; vertical-alignment: center;
+                        }
+                    }
+                    GitHubTextField {
+                        label: I18n.settings-ai-agent-model; text <=> AppState.ai-agent-editor-model;
+                        placeholder: I18n.settings-ai-agent-model-placeholder;
+                        enabled: !AppState.ai-agent-editor-busy; edited(_) => { root.edited(); }
+                    }
+                    Text { text: I18n.settings-ai-agent-reply-language; font-size: 14px; font-weight: 600; color: GitHubTheme.fg-default; }
+                    ManifestReplyLanguagePicker { changed => { root.edited(); } }
+                    GitHubAiAgentHeaders { }
+                }
+            }
+        }
+        test-button := GitHubButton {
+            x: frame.content-x; y: frame.content-y + frame.content-height + 32px;
+            text: AppState.ai-agent-editor-testing ? I18n.common-testing : I18n.common-test-connection;
+            disabled: AppState.ai-agent-editor-busy || AppState.ai-agent-editor-testing;
+            clicked => { AppState.test-ai-agent-editor(); }
+        }
+        test-spinner := GitHubSpinner {
+            x: test-button.x + test-button.width + 8px;
+            y: test-button.y + (test-button.height - self.height) / 2;
+            visible: root.dialog-open && AppState.ai-agent-editor-testing;
+            spinning: self.visible; spinner-size: 16px;
+        }
+        test-status := Image {
+            x: test-button.x + test-button.width + 8px;
+            y: test-button.y + (test-button.height - self.height) / 2;
+            width: 16px; height: 16px;
+            visible: root.dialog-open && !AppState.ai-agent-editor-testing
+                && AppState.ai-agent-editor-test-result-key != "";
+            source: AppState.ai-agent-editor-test-success
+                ? @image-url("../../assets/icons/octicon-check-circle-fill-16.svg")
+                : @image-url("../../assets/icons/octicon-x-circle-fill-16.svg");
+            colorize: AppState.ai-agent-editor-test-success ? GitHubTheme.success-fg : GitHubTheme.danger-fg;
+            accessible-role: image; accessible-label: AppState.ai-agent-editor-test-result;
+        }
+        feedback-toast := GitHubToast {
+            x: frame.content-x; y: frame.content-y;
+            width: frame.content-width; height: frame.content-height;
+            message: AppState.ai-agent-editor-error != ""
+                ? AppState.ai-agent-editor-error : AppState.ai-agent-editor-test-result;
+            type: AppState.ai-agent-editor-error != "" || !AppState.ai-agent-editor-test-success ? "error" : "success";
+            position: "bottom"; overlay: false;
+            toast-visible: root.dialog-open && AppState.ai-agent-editor-feedback-open && self.message != "";
+            dismiss => { AppState.ai-agent-editor-feedback-open = false; }
+        }
+    }
+    header-tooltip := GitHubAiAgentHeaderTooltipOverlay {
+        x: editor-scroll.x; y: editor-scroll.y;
+        width: editor-scroll.width; height: editor-scroll.height; z: 10001;
+        tooltip-enabled: root.dialog-open && !AppState.ai-agent-editor-busy && !root.header-object-mode;
+    }
+}

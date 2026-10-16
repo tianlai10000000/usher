@@ -1,203 +1,211 @@
-//! AI Settings Save admission and guarded event-loop completion projection.
+//! Ordered Agent CRUD/activation admission and isolated dialog completion.
 
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicU64, Ordering},
-};
+use slint::{ComponentHandle, Global};
+use std::sync::{Arc, atomic::Ordering};
+use usher_ui_settings::{AppState as PageState, GitHubSettingsPage};
 
-use slint::{ComponentHandle, Global, Timer};
+mod admission;
+mod connection_probe;
+mod connection_test;
+mod delete_confirmation;
+mod feedback;
+mod list_connection_test;
 
+pub(crate) fn sync_language(page: &GitHubSettingsPage) {
+    feedback::refresh(page);
+}
 use super::settings_state::{AiAgentSaveOutcome, AiAgentSettingsFacade};
 use crate::settings_feedback::settings_toast;
-use crate::settings_page::AiAgentSaveContext;
-use crate::{AppState, MainWindow, SettingsPageBridge, ToastManager, app_runtime, i18n};
+#[cfg(test)]
+use crate::settings_page::ai_agent_projection::ai_agent_profile_from_page;
+use crate::settings_page::ai_agent_projection::{
+    apply_ai_agent_choices_to_page, validated_ai_agent_profile_from_page,
+};
+use crate::{MainWindow, ToastManager, app_runtime, i18n};
+use admission::{SaveUiPermit, SaveUiState, UiAction};
 
-const UI_SAVE_CAPACITY: usize = 8;
-
-#[derive(Default)]
-struct SaveUiState {
-    latest_attempt: AtomicU64,
-    projected_request: AtomicU64,
-    latest_ticket: AtomicU64,
-    pending: Mutex<Vec<(u64, crate::settings::AiAgentSettings)>>,
-}
-
-struct SaveUiPermit {
-    state: Arc<SaveUiState>,
-    ticket: u64,
-}
-
-impl SaveUiState {
-    fn reserve(
-        self: &Arc<Self>,
-        draft: &crate::settings::AiAgentSettings,
-    ) -> Result<Option<SaveUiPermit>, String> {
-        let mut pending = self
-            .pending
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        if pending.last().is_some_and(|(ticket, value)| {
-            *ticket == self.latest_ticket.load(Ordering::Acquire) && value == draft
-        }) {
-            return Ok(None);
-        }
-        if pending.len() >= UI_SAVE_CAPACITY {
-            return Err("AI Agent settings UI completion queue is full".into());
-        }
-        let ticket = self.latest_ticket.fetch_add(1, Ordering::AcqRel) + 1;
-        pending.push((ticket, draft.clone()));
-        Ok(Some(SaveUiPermit {
-            state: self.clone(),
-            ticket,
-        }))
-    }
-}
-
-impl Drop for SaveUiPermit {
-    fn drop(&mut self) {
-        self.state
-            .pending
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .retain(|(ticket, _)| *ticket != self.ticket);
-    }
-}
-
-struct SaveUiRequest {
-    _permit: Option<SaveUiPermit>,
+struct UiRequest {
+    _permit: SaveUiPermit,
     attempt: u64,
     request: u64,
-    context: Option<AiAgentSaveContext>,
-    draft: crate::settings::AiAgentSettings,
+    target_id: String,
+    editor_revision: i32,
+    header_input_revision: i32,
+    action: UiAction,
 }
 
-pub(crate) fn bind(window: &MainWindow, page: &SettingsPageBridge, facade: AiAgentSettingsFacade) {
-    let weak = window.as_weak();
-    let page = page.clone();
-    let state = Arc::new(SaveUiState::default());
-    AppState::get(window).on_save_ai_agent_settings(
-        move |provider, base_url, api_key, model, reply_language| {
-            let draft = crate::settings::AiAgentSettings {
-                provider: provider.to_string(),
-                base_url: base_url.to_string(),
-                api_key: api_key.to_string(),
-                model: model.to_string(),
-                reply_language: reply_language.to_string(),
-            };
-            let admission = state.reserve(&draft).and_then(|permit| {
-                let Some(permit) = permit else {
-                    return Ok(None);
-                };
-                facade
-                    .save_draft(draft.clone())
-                    .map(|receipt| receipt.map(|receipt| (receipt, permit)))
-            });
-            let (receipt, permit) = match admission {
-                Ok(Some(accepted)) => accepted,
-                Ok(None) => return,
-                Err(error) => {
-                    state.latest_attempt.fetch_add(1, Ordering::AcqRel);
-                    if let Some(window) = weak.upgrade() {
-                        window.set_settings_ai_agent_saved(false);
-                        page.set_ai_agent_saved(false);
-                        ToastManager::get(&window).invoke_error(settings_toast(
-                            i18n::tr("settings.feedback.ai_agent_save_failed").as_ref(),
-                        ));
-                    }
-                    log::error!("[AI Agent][Settings] Save admission failed: {error}");
-                    return;
-                }
-            };
-            let request = SaveUiRequest {
-                _permit: Some(permit),
-                attempt: state.latest_attempt.fetch_add(1, Ordering::AcqRel) + 1,
-                request: receipt.id,
-                context: page.capture_ai_agent_save(),
-                draft,
-            };
-            if let Some(window) = weak.upgrade() {
-                window.set_settings_ai_agent_saved(false);
-                page.set_ai_agent_saved(false);
-            }
-            let weak = weak.clone();
-            let page = page.clone();
-            let state = state.clone();
-            app_runtime::shared_runtime().spawn(async move {
-                let result = tokio::task::spawn_blocking(move || receipt.wait())
-                    .await
-                    .unwrap_or_else(|error| {
-                        Err(format!("AI Agent settings feedback worker failed: {error}"))
-                    });
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(window) = weak.upgrade() {
-                        complete_save(&window, page, state, request, result);
-                    }
-                });
-            });
-        },
-    );
-}
-
-/// Event-loop only. Committed host state and the editable factory draft have
-/// different guards: request order protects the former, visit + exact fields
-/// protect the latter, and the latest attempt owns transient Save feedback.
-fn complete_save(
-    window: &MainWindow,
-    page: SettingsPageBridge,
+#[derive(Clone)]
+struct Binding {
+    window: slint::Weak<MainWindow>,
+    page: slint::Weak<GitHubSettingsPage>,
     state: Arc<SaveUiState>,
-    request: SaveUiRequest,
-    result: Result<AiAgentSaveOutcome, String>,
+    facade: AiAgentSettingsFacade,
+}
+
+pub(crate) fn bind_page(
+    window: &MainWindow,
+    page: &GitHubSettingsPage,
+    facade: AiAgentSettingsFacade,
 ) {
-    let mut draft_matches = false;
-    let persisted = match result {
-        Ok(outcome) => {
-            if request.request > state.projected_request.load(Ordering::Acquire) {
-                state
-                    .projected_request
-                    .store(request.request, Ordering::Release);
-                crate::settings_page::apply_ai_agent_snapshot_to_window(
-                    window,
-                    outcome.snapshot.state(),
-                );
-            }
-            if state.latest_attempt.load(Ordering::Acquire) == request.attempt {
-                draft_matches = page.complete_ai_agent_save(
-                    &request.context,
-                    &request.draft,
-                    outcome.snapshot.state(),
-                );
-            }
-            outcome.persisted
-        }
-        Err(error) => Err(error),
+    let binding = Binding {
+        window: window.as_weak(),
+        page: page.as_weak(),
+        state: Arc::default(),
+        facade,
     };
-    if state.latest_attempt.load(Ordering::Acquire) != request.attempt {
-        return;
-    }
-    let saved = persisted.is_ok() && draft_matches;
-    window.set_settings_ai_agent_saved(saved);
-    page.set_ai_agent_saved(saved);
-    match persisted {
-        Ok(()) => {
-            ToastManager::get(window).invoke_success(settings_toast(
-                i18n::tr("settings.feedback.ai_agent_saved").as_ref(),
-            ));
-            let weak = window.as_weak();
-            Timer::single_shot(std::time::Duration::from_secs(2), move || {
-                if state.latest_attempt.load(Ordering::Acquire) != request.attempt {
-                    return;
-                }
-                if let Some(window) = weak.upgrade() {
-                    window.set_settings_ai_agent_saved(false);
-                    page.set_ai_agent_saved(false);
-                }
-            });
+    let save = binding.clone();
+    PageState::get(page).on_save_ai_agent_editor(move || {
+        let Some(page) = save.page.upgrade() else {
+            return;
+        };
+        let state = PageState::get(&page);
+        if state.get_ai_agent_editor_busy() {
+            return;
         }
-        Err(error) => {
-            ToastManager::get(window).invoke_error(settings_toast(
-                i18n::tr("settings.feedback.ai_agent_save_failed").as_ref(),
-            ));
-            log::error!("[AI Agent][Settings] Save failed: {error}");
+        let Some(draft) = feedback::validated_draft(&page) else {
+            return;
+        };
+        if draft.name.trim().is_empty()
+            || draft.connection.base_url.trim().is_empty()
+            || draft.connection.model.trim().is_empty()
+        {
+            feedback::error(&page, "settings.feedback.ai_agent_invalid_editor");
+            return;
+        }
+        save.submit(if state.get_ai_agent_editor_new() {
+            UiAction::Create(draft)
+        } else {
+            UiAction::Update(draft)
+        });
+    });
+    let activate = binding.clone();
+    PageState::get(page).on_activate_ai_agent(move |id| {
+        activate.submit(UiAction::Activate(id.to_string()));
+    });
+    list_connection_test::bind(page, binding.facade.clone());
+    delete_confirmation::bind(page, binding);
+    connection_test::bind(page);
+}
+
+impl Binding {
+    fn submit(&self, action: UiAction) {
+        let Some(page) = self.page.upgrade() else {
+            return;
+        };
+        let admission = self.state.reserve(&action).and_then(|permit| {
+            let Some(permit) = permit else {
+                return Ok(None);
+            };
+            let receipt = match &action {
+                UiAction::Create(draft) => self.facade.create_profile(draft.clone()),
+                UiAction::Update(draft) => self.facade.update_profile(draft.clone()),
+                UiAction::Delete(id) => self.facade.delete_profile(id),
+                UiAction::Activate(id) => self.facade.activate_profile(id),
+            }?;
+            Ok(receipt.map(|receipt| (receipt, permit)))
+        });
+        let (receipt, permit) = match admission {
+            Ok(Some(value)) => value,
+            Ok(None) => return,
+            Err(_) => {
+                self.state.latest_attempt.fetch_add(1, Ordering::AcqRel);
+                if matches!(action, UiAction::Create(_) | UiAction::Update(_)) {
+                    feedback::error(&page, action.feedback(false));
+                } else if let Some(window) = self.window.upgrade() {
+                    ToastManager::get(&window)
+                        .invoke_error(settings_toast(i18n::tr(action.feedback(false)).as_ref()));
+                }
+                return;
+            }
+        };
+        let request = UiRequest {
+            _permit: permit,
+            request: receipt.id,
+            target_id: receipt.profile_id.clone(),
+            attempt: self.state.latest_attempt.fetch_add(1, Ordering::AcqRel) + 1,
+            editor_revision: PageState::get(&page).get_ai_agent_editor_revision(),
+            header_input_revision: PageState::get(&page)
+                .get_ai_agent_editor_headers_input_revision(),
+            action,
+        };
+        if matches!(request.action, UiAction::Create(_) | UiAction::Update(_)) {
+            let state = PageState::get(&page);
+            state.set_ai_agent_editor_busy(true);
+            state.set_ai_agent_editor_error_key("".into());
+            state.set_ai_agent_editor_error("".into());
+        }
+        let binding = self.clone();
+        app_runtime::shared_runtime().spawn(async move {
+            let result = tokio::task::spawn_blocking(move || receipt.wait())
+                .await
+                .unwrap_or_else(|_| Err("AI Agent command feedback worker stopped".into()));
+            let _ = slint::invoke_from_event_loop(move || {
+                binding.complete(request, result);
+            });
+        });
+    }
+
+    fn complete(&self, request: UiRequest, result: Result<AiAgentSaveOutcome, String>) {
+        let Some(window) = self.window.upgrade() else {
+            return;
+        };
+        // Receipts can arrive out of order. Project the current Store snapshot,
+        // retaining the command result only for its own draft/feedback ownership.
+        if let Ok(outcome) = &result {
+            log::debug!(
+                "[AI Agent][Settings] Command {} completed at revision {}",
+                request.request,
+                outcome.snapshot.revision()
+            );
+        }
+        let latest = self.facade.snapshot();
+        crate::settings_page::apply_ai_agent_configuration_to_window(&window, latest.state());
+        crate::chat::sync_agent_identity(&window);
+        let Some(page) = self.page.upgrade() else {
+            return;
+        };
+        apply_ai_agent_choices_to_page(&page, latest.state());
+        let state = PageState::get(&page);
+        let own_editor = state.get_ai_agent_editor_revision() == request.editor_revision
+            && state.get_ai_agent_editor_id().as_str() == request.target_id;
+        let saving = matches!(request.action, UiAction::Create(_) | UiAction::Update(_));
+        let success = result
+            .as_ref()
+            .is_ok_and(|outcome| outcome.persisted.is_ok() && outcome.applied.is_ok());
+        if saving && own_editor {
+            state.set_ai_agent_editor_busy(false);
+            if matches!(request.action, UiAction::Create(_))
+                && result.as_ref().is_ok_and(|outcome| outcome.applied.is_ok())
+            {
+                state.set_ai_agent_editor_new(false);
+            }
+            let draft_matches = match &request.action {
+                UiAction::Create(draft) | UiAction::Update(draft) => {
+                    state.get_ai_agent_editor_headers_input_revision()
+                        == request.header_input_revision
+                        && validated_ai_agent_profile_from_page(&page)
+                            .is_ok_and(|current| current == *draft)
+                }
+                _ => false,
+            };
+            if success && draft_matches {
+                if matches!(request.action, UiAction::Create(_)) {
+                    state.set_ai_agent_query("".into());
+                    state.set_ai_agent_page(1);
+                    apply_ai_agent_choices_to_page(&page, latest.state());
+                }
+                crate::settings_page::ai_agent_drafts::close(&page);
+            } else if !success {
+                feedback::error(&page, request.action.feedback(false));
+            }
+        }
+        if self.state.latest_attempt.load(Ordering::Acquire) == request.attempt {
+            let text = settings_toast(i18n::tr(request.action.feedback(success)).as_ref());
+            if success {
+                ToastManager::get(&window).invoke_success(text);
+            } else {
+                ToastManager::get(&window).invoke_error(text);
+            }
         }
     }
 }

@@ -86,8 +86,10 @@ build. For a constrained build without its core package or UI/settings bridge:
 cargo check --no-default-features --features renderer-femtovg --locked
 ```
 
-Everyday `dev` builds optimize third-party dependencies and generated Slint UI
-crates at level 1 while keeping application-owned Rust at opt0. `dev` and
+Everyday `dev` builds use opt-level 1 for third-party dependencies and the generated
+MainWindow, playground and Messages UI crates. Independently generated Settings
+uses opt0 to reduce LLVM optimization work during rebuilds; application-owned
+Rust also remains opt0. `dev` and
 `test` retain source line tables and incremental compilation, but avoid macOS's
 default unpacked debug objects. This keeps application panic backtraces and
 source breakpoints useful while reducing ordinary `cargo run` code residency.
@@ -124,24 +126,24 @@ existing `target/` still contains historical unpacked objects. See
 [build performance and artifact policy](docs/build-performance.md) for the
 measured trade-offs and cleanup guidance.
 
-For UI/Rust iteration that does not touch the PR Review detail page, use the
-explicit development shell. It keeps a separate target directory and replaces
-the complete PR Review feature package with a protocol-compatible empty
-implementation:
+Rust-only translation copy is isolated in `i18n/rust-messages.toml` and
+`usher-rust.po`; editing it keeps the static UI crates cached. Slint-visible
+catalogs and shared locale metadata still trigger UI rebuilds. See the
+[i18n contract](docs/specs/i18n.md) before adding or moving copy.
+
+For repeated `.slint` edits to the main shell or UI Components playground, start
+live preview once, keep the application running, and save files to refresh it:
 
 ```sh
-./scripts/dev-shell-check.sh
-./scripts/dev-shell-run.sh
+./scripts/ui-live-preview.sh
 ```
 
-PowerShell equivalents are `scripts/dev-shell-check.ps1` and
-`scripts/dev-shell-run.ps1`. The mode intentionally redirects attempts to open
-PR Review back to Workflow. Default builds and every existing release command
-still compile the complete page; use normal `cargo check --locked` and
-`cargo run --locked` before delivering PR Review or final application changes.
-
-In-process Slint live preview is development-only and excluded from normal and
-release builds.
+PowerShell uses `scripts/ui-live-preview.ps1`. The first launch still compiles
+the application and preview dependencies. Subsequent supported UI edits reload
+inside that process; restarting `cargo run --features ui-components` after each
+save repeats static Slint generation, Rust compilation, and linking. Rust changes
+still require a rebuild. Settings and Messages are independently compiled,
+static factory products, so changes to those pages also require a rebuild.
 
 The fast UI check requires the matching stable viewer:
 
@@ -149,20 +151,23 @@ The fast UI check requires the matching stable viewer:
 cargo install slint-viewer --version 1.18.1 --locked
 ```
 
-Use the project scripts for fast UI validation and visual iteration:
+Validate the complete root UI without starting the application:
 
 ```sh
 ./scripts/ui-check.sh
-./scripts/ui-live-preview.sh
 ```
 
-PowerShell equivalents are `scripts/ui-check.ps1` and
-`scripts/ui-live-preview.ps1`. The check validates the complete root UI without
-starting the application. Live preview keeps application callbacks and state,
-but UI edits are interpreted at runtime; use a normal `cargo run --locked` for
-the final static-build and route/layout check. Repeated reloads can retain
-substantial diagnostic state, so restart the preview process during long UI
-sessions. On macOS the opt-in preview path
+PowerShell uses `scripts/ui-check.ps1`. Live preview keeps application callbacks
+and state, but UI edits are interpreted at runtime. For the final complete static
+playground and route/layout comparison, run:
+
+```sh
+cargo run --locked --features ui-components
+```
+
+Also validate the affected product routes with normal `cargo run --locked`.
+Repeated reloads can retain substantial diagnostic state, so restart the preview
+process periodically during long sessions. On macOS the opt-in preview path
 uses the documented local Slint watcher patch under
 `vendor/i-slint-live-preview`; default and release builds do not select it.
 
@@ -171,8 +176,33 @@ all existing release scripts omit its menu entry and compile graph. The live
 preview script enables it automatically; the equivalent direct command is:
 
 ```sh
-SLINT_LIVE_PREVIEW=1 cargo run --features live-preview,ui-components
+SLINT_LIVE_PREVIEW=1 cargo run --locked --features live-preview,ui-components
 ```
+
+Ordinary static `ui-components` builds compile the playground in its own UI
+package. Showcase-only edits preserve MainWindow's generated UI library; shared
+widget edits still rebuild their consumers, and application linking may still
+run. Its static factory shares the application window's renderer; the
+`live-preview,ui-components` combination retains integrated gallery hot reload.
+See the
+[playground contract](docs/specs/ui-components.md).
+
+When the work does not involve PR Review, the existing development shell can
+also include the playground:
+
+```sh
+./scripts/dev-shell-check.sh
+./scripts/dev-shell-run.sh --features ui-components
+```
+
+PowerShell equivalents are `scripts/dev-shell-check.ps1` and
+`scripts/dev-shell-run.ps1 --features ui-components`. These scripts keep artifacts
+under `target/dev-shell`, so the first cold build of that target still compiles
+its dependencies. This mode replaces the complete PR Review feature package
+with a compatible empty implementation and redirects PR Review navigation to
+Workflow. It cannot validate PR Review; final delivery still requires the normal
+complete application checks above. It is a static build and does not enable live
+preview by itself.
 
 The playground's **Artifact preview fixtures** section opens Markdown, PNG,
 plain-text, JSON, and unsupported-binary samples through the production Preview
@@ -267,7 +297,7 @@ Usher uses `directories::ProjectDirs::from("com", "usher", "app")` to select pla
 | Logs | local data directory: `logs/<date>/usher.log` and `logs/<date>/usher_tracing.log` |
 | Cached remote project logos | temporary directory: `usher-logo-cache/` |
 
-GitHub, GitLab, and Gitee tokens can be managed from Settings. Gitee public and enterprise credentials are separate; the repository remote host selects public v5 or the configured enterprise v8 API without sharing tokens. The **Code Hosting API Configuration** section stores a per-provider enterprise API URL and enterprise name under `[git.platform.<provider>]`; enter either the service host or the complete REST API root (for example, `https://git.example.com` or `https://git.example.com/api/v4`). The provider version path is added when omitted. These values are local-only and used only when the configured API host matches a repository remote. The **AI Agent** section accepts an OpenAI-compatible Base URL, API Key, Model Name, and reply language; that language applies to AI Chat, AI Code Review, and Review Ask, while `auto` follows the active interface language and RAG remains unchanged. **AI Review** configures reusable local Markdown rules, the default rule, and the concurrent task limit. Settings are saved under `[ai.agent]` and `ai-review.json`. All built-in Agent instructions live in the source-controlled `src/ai/prompts.toml` catalog. Do not commit generated settings, logs, histories, review sessions, or credentials. See [AI Agent configuration](docs/specs/ai-agent.md) and [AI Code Review](docs/specs/ai-code-review.md).
+GitHub, GitLab, and Gitee tokens can be managed from Settings. Gitee public and enterprise credentials are separate; the repository remote host selects public v5 or the configured enterprise v8 API without sharing tokens. The **Code Hosting API Configuration** section stores a per-provider enterprise API URL and enterprise name under `[git.platform.<provider>]`; enter either the service host or the complete REST API root (for example, `https://git.example.com` or `https://git.example.com/api/v4`). The provider version path is added when omitted. These values are local-only and used only when the configured API host matches a repository remote. The **AI Agent** section manages named OpenAI-compatible Agents in a searchable list of ten per page. Add/Edit dialogs configure Base URL, API Key, model, reply language, and enabled custom Headers; activation is independent from editing, and the current Agent cannot be deleted. Agent name and model identify AI Chat, AI Code Review, and Review Ask requests. Reply language applies to those three features; `auto` follows the active interface language and RAG remains unchanged. **AI Review** configures reusable local Markdown rules, the default rule, and the concurrent task limit. Settings are saved under `[ai.agent]` and `ai-review.json`. All built-in Agent instructions live in the source-controlled `src/ai/prompts.toml` catalog. Do not commit generated settings, logs, histories, review sessions, or credentials. See [AI Agent configuration](docs/specs/ai-agent.md) and [AI Code Review](docs/specs/ai-code-review.md).
 
 ## Architecture at a glance
 
@@ -275,10 +305,12 @@ GitHub, GitLab, and Gitee tokens can be managed from Settings. Gitee public and 
 src/main.rs
   -> src/lib.rs                application composition and callback bindings
      -> crates/usher-ui/       generated Slint API boundary
-     -> crates/usher-i18n/     locale registry and shared Rust/Slint catalogs
         -> ui/main.slint       root window and exported UI contract
            -> ui/views/        page-level views
            -> ui/components/   reusable application components
+     -> crates/usher-ui-build/ build-time Slint inputs and generated-output boundary
+     -> crates/usher-i18n/     locale registry and merged runtime catalogs
+     -> crates/usher-i18n-build/ catalog-free build validation and Slint bundles
      -> src/app_runtime.rs     shared Tokio runtime
      -> src/http/mod.rs        shared HTTP clients and interceptors
      -> src/platform/          native appearance, title bar, window interaction, fonts
@@ -332,6 +364,22 @@ The GitHub release workflow produces macOS archives/DMGs and Windows ZIP bundles
 A pushed `v*` tag is the only automatic build trigger and starts the Release
 workflow. Direct `main` pushes and pull requests do not start a second build;
 CI remains available through manual `workflow_dispatch` when needed.
+
+Release builds use `cargo build --release --locked` and cache Cargo downloads
+and unsigned compiler artifacts without changing production optimization settings.
+Diagnostic setup, cache/timing exports and `Release timing report` are best-effort;
+build, packaging, enabled signing, product upload and publication failures still
+block release.
+
+Different tags cannot share tag-scoped caches. To prewarm reusable caches, select
+the default branch in **Release → Run workflow** and set `cache_only` to `true`
+(default: `false`). A case-sensitive branch check runs before checkout. This mode
+builds the same three targets and saves caches, while skipping packaging-tool
+installation, packaging, signing, product uploads and publication. Layered cache
+restoration still runs Cargo to validate tracked inputs. Local policy checks have
+passed; hosted cold/warm timings remain unmeasured. See the
+[Release CI contract](docs/specs/release-ci.md) and
+[build guide](docs/build-performance.md#production-ci-cache-and-timings--生产-ci-缓存与计时).
 
 ## Documentation
 

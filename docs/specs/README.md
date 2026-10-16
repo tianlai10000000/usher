@@ -27,6 +27,7 @@ API declarations before UI behavior changes.
 | 跨页面/后台共享状态与持久化 / Shared state and persistence | [State store](state-store.md); 同时核对 feature facade / trace the feature facade |
 | HTTP、凭据、重定向、诊断、更新文件、进程启动 / HTTP, credentials, diagnostics, update files or launching | [HTTP](http.md), [security boundaries](security-boundaries.md); 日志行为另读 / logging also reads [diagnostics](diagnostics.md) |
 | Job/Hook 执行或输出 / Job or Hook execution/output | [Jobs](jobs.md), [Hooks](hooks.md), [state store](state-store.md); 日志布局另读 / log layout also reads [text layout](text-layout.md) and [virtual scrolling](virtual-scrolling.md) |
+| 生产构建、发布诊断与缓存 / Production builds, release diagnostics and caches | [Release CI](release-ci.md), [build policy](../build-performance.md); distinguish blocking production work from best-effort diagnostics and local policy fixtures from hosted performance / 区分生产阻断与尽力执行诊断、本地策略夹具与云端性能 |
 | 优化或资源生命周期 / Optimization or resource lifetime | 功能验收矩阵 / feature acceptance, [P6 protocol](../p6-regression.md), [memory backlog](../memory_optimization_backlog.zh.md) |
 
 ## 共享基础设施 / Shared infrastructure
@@ -42,7 +43,7 @@ and verification limits belong in the linked spec and current implementation.
 | [HTTP pipeline / HTTP 管线](http.md) | `src/http/mod.rs`, `src/settings/request_preferences.rs`, feature request callers |
 | [State store / 跨页面状态](state-store.md) | `crates/usher-state-store/`, feature-owned facades and persistence workers |
 | [Shared search / 搜索与定位](search.md) | `crates/usher-search/`, feature Find adapters; PR `find_bridge.rs`, `controller/diff_bindings.rs`, `PrDiffBridge` |
-| [Internationalization / 国际化](i18n.md) | `i18n/`, `crates/usher-i18n/`, `src/i18n.rs`, locale callbacks and feature projections |
+| [Internationalization / 国际化](i18n.md) | `i18n/` Slint/Rust registry and PO scopes, catalog-free `crates/usher-i18n-build/`, `crates/usher-ui-build/` source/output watch boundary, merged runtime `crates/usher-i18n/`, `src/i18n.rs`, locale callbacks and feature projections; Settings/playground `create_page` host-renderer ownership and native repaint acceptance |
 | [Diagnostics / 诊断日志](diagnostics.md) | `src/diagnostics.rs`, `src/diagnostics/archive.rs`, `src/logger/`, `src/memory_diagnostics.rs`, `src/settings.rs`, shutdown and Settings bridges |
 
 ## UI 与布局 / UI and layout
@@ -50,12 +51,20 @@ and verification limits belong in the linked spec and current implementation.
 | Spec | 修改入口 / Code entry points |
 | --- | --- |
 | [GitHub/Primer UI design / 视觉与交互](ui-design.md) | `ui/theme/github_theme.slint`, `ui/components/`, `ui/views/`, `scripts/check-ui-policy.sh` |
+| [macOS full-screen shell / macOS 全屏 Shell](ui-design.md#shell-and-sidebar--shell-与侧栏) | `src/platform/macos.rs`, `ui/main.slint`; persistent Back/Forward/Sidebar controls, native top-edge title-bar reveal and intrinsic title alignment, shared Router state and modal ownership / 常驻导航操作、原生顶部标题栏交互与标题自然高度对齐、共享路由状态与弹窗输入归属 |
+| [Tab inset/flush / 页签缩进与贴齐](ui-design.md#page-headers-and-navigation--页头与导航) | `ui/components/navigation/github_underline_nav.slint`, `github_fixed_tabs.slint`; shared variant, numeric inset override and overflow geometry; Settings enterprise API tabs use flush |
+| [Dialog body geometry / 弹窗正文几何](ui-design.md#dialog--弹窗) | `ui/components/dialog/github_dialog.slint`, `dialog_enhance.slint`, `tests/dialog_body_ui.rs`; raw `body-*`, compatible padded `content-*`, content-owned scrolling padding and static/bounded/edge-list consumer distinctions / 原始正文、安全区兼容、滚动内容留白及静态/有界/贴边列表区别 |
+| [Resizable dividers / 可拖拽分割线](ui-design.md#resizable-dividers--可拖拽分割线) | Shared `ui/components/github_resize_handle.slint`, feature-owned bounds/state, Layout showcase |
+| [UI Components playground / 组件演练场](ui-components.md) | `crates/usher-ui-components/`, `src/ui_components/` (host adapter and shell-root restoration), `ui/features/ui_components_bridge.slint`, `ui/views/ui_components_factory.slint`; static/interpreter build boundary |
+| [Factory keyboard traversal / 工厂键盘遍历](ui-components.md#composition-and-lifecycle--编排与生命周期) | `src/focus_navigation.rs`, page keyboard adapters, static-playground-only Select restoration opt-in; flush queued close/focus changes before choosing the next/previous peer |
+| [Pointer dismissal and menu opening / 指针关闭与菜单打开](ui-design.md#select-and-action-menus--选择与操作菜单) | `src/transient_input.rs` delayed child-press reconciliation, `ui/components/github_action_menu.slint` initial/open claim lifecycle, factory exclusivity bridge |
+| [Select placement and pointer focus / Select 定位与指针焦点](ui-design.md#select-and-action-menus--选择与操作菜单) | `ui/components/input/github_select.slint`, `ui/components/settings/github_settings_controls.slint`, shared Select tests; pure viewport/anchor geometry prefers more space, tie below; pointer activation defers focus to the root menu and preserves clipped-trigger scroll position on first click / 纯视口与锚点几何优先空间较多侧、相等向下，指针激活由根菜单接管焦点，裁切触发框首次点击且正文不滚动 |
 | [Tooltips / Tooltip 工厂与 Portal](tooltips.md) | Shared Tooltip/Float/IconButton, factory-local action state and root portals |
 | [Multiline text layout / 多行文本](text-layout.md) | Native `Text`/`TextInput`, documented `StyledText`/`TextEdit` exceptions, feature measurement adapters |
 | [Exact virtual scrolling / 精确虚拟滚动](virtual-scrolling.md) | `crates/usher-virtual-list/`, `src/app_runtime/latest_compute.rs`, `ui/components/github_scroll_view.slint`, feature layout adapters |
 
 UI design 的共享组件章节按按钮、Shell、Tooltip/标签、状态/消息、菜单、导航、
-滚动/Job、表单、Dialog、反馈、功能编排、演练场和 Escape 分组。专项契约以本表
+滚动/Job、表单、Dialog、反馈、功能编排、分割线、演练场和 Escape 分组。专项契约以本表
 对应 spec 为准，避免把局部迭代摘要复制到索引或架构首部。
 
 The shared component chapter is grouped by responsibility. Follow the specialized
@@ -68,17 +77,18 @@ contracts here rather than duplicating local iteration summaries in navigation.
 | [Project repository / 项目与仓库元数据](project-repository.md) | `src/project/`, `ui/features/project/bridge.slint`, `src/git/`, `src/codereview/api/` |
 | [PR workflow / PR 读取与评审](pr-review.md) | `src/workflow/pr_data.rs`, `pr_list.rs`, `pr_review/`, `src/git/`, `ui/features/pr_review/`, `ui/components/pr_review/` |
 | [PR conflicts / 只读冲突工作区](pr-conflicts.md) | `src/git/conflicts/`, `src/workflow/pr_conflict_status.rs`, `pr_conflict_status_owner.rs`, `src/workflow/pr_review/conflicts/` |
-| [Tag workflow / Tag 流程](tag.md) | `src/workflow/tag.rs`, `src/workflow/tag/`, `src/workflow/state.rs`, `src/workflow/state/`, `ui/components/workflow/` |
+| [Tag workflow / Tag 流程](tag.md) | `src/workflow/tag.rs`, `src/workflow/tag/` (create pulls main before rebase/tag / 创建时先拉取 main 再 rebase/打 Tag), `src/workflow/state.rs`, `src/workflow/state/`, `ui/components/workflow/` |
 | [Reusable jobs / Job 运行页与日志](jobs.md) | `src/jobs/`, `ui/views/job_run.slint`, `ui/components/jobs/`, feature controllers |
-| [Application Hooks / 应用 Hook](hooks.md) | `src/hooks/`, project selection, Settings, PR/AI completion sources and shutdown drains |
+| [Application Hooks / 应用 Hook](hooks.md) | `src/hooks/`, project selection, Settings search/grouped list and dialogs, PR/AI completion sources and shutdown drains / 设置搜索与分组列表 |
+| [Release CI / 生产构建与缓存](release-ci.md) | `.github/workflows/release.yml`, `scripts/ci_release_metrics.py`, `scripts/tests/test_release_workflow*.py`; typed `cache_only`, exact default-branch ref guard, blocking production/best-effort diagnostics and layered cache restore / 类型化预热开关、默认分支精确校验、生产阻断/尽力诊断与分层恢复 |
 
 ## AI、Chat 与预览 / AI, Chat and preview
 
 | Spec | 修改入口 / Code entry points |
 | --- | --- |
-| [AI Agent configuration / Agent 配置](ai-agent.md) | `src/ai/agent.rs`, `src/ai/settings_state.rs`, `src/ai/settings_ui.rs`, `src/settings.rs`, Settings bridge |
-| [AI Code Review / AI 评审与 Ask](ai-code-review.md) | `crates/usher-ai-review/`, `src/ai_review/`, `src/agent_response/`, PR and Settings bridges |
-| [Chat / 对话与历史](chat.md) | `src/chat/interactive.rs`, `viewport_policy.rs`, `message_model.rs`, `renderer.rs`, `ui/views/chat.slint` |
+| [AI Agent configuration / Agent 配置](ai-agent.md) | `src/settings/ai_agents.rs`, `src/ai/settings_state.rs`, `src/ai/settings_ui.rs`, `settings_ui/{connection_probe,list_connection_test}.rs`, `src/settings_page/ai_agent_header_{object,drafts}.rs`, list/editor/Header fixed-Tooltip components and adjacent tests; saved-row Test with content-bottom feedback, seven fixed actions, single-active Toggle, named registry/drafts and shared Select placement / 已保存行 Test 与内容底部反馈、七种固定动作、单活 Toggle、命名注册表/草稿和共享 Select 定位 |
+| [AI Code Review / AI 评审与 Ask](ai-code-review.md) | `crates/usher-ai-review/`, `src/ai_review/request_capture.rs`, `agent_identity.rs`, `src/agent_response/`, PR and Settings bridges |
+| [Chat / 对话与历史](chat.md) | `src/chat/interactive.rs`, `request.rs`, `persistence.rs`, `viewport_policy.rs`, `message_model.rs`, `renderer.rs`, `ui/views/chat.slint` |
 | [Artifact preview / 通用预览](artifact-preview.md) | `crates/usher-preview/`, `src/artifact_preview/`, `ui/components/artifact_preview/`, preview callers and Settings |
 
 ## 桌面 Shell 与消息 / Desktop shell and messages
@@ -111,18 +121,20 @@ unadopted candidates and pending native acceptance are separate from production.
   [i18n](i18n.md)：全路由视觉验收仍待完成。
 - [Chat](chat.md)、[state store](state-store.md)：旧文本兼容与底层 API 边界详见正文；
   不应把兼容机制当作通用语义 Schema 或 checked close。
+- [Release CI](release-ci.md)：诊断隔离、预热和分层恢复已通过本地正反例；未执行
+  托管 runner 构建或冷/暖 A/B，不能从缓存命中或本机 dev 数据推断生产耗时收益。
 
 See those specs for the current production/test/candidate boundaries and gaps.
 The source-audit scope and executed checks are recorded in
-[2026-10-14 spec audit](../validation/spec-audit-20261014/README.md); this is not
+[2026-10-14 spec audit（归档：docs/validation/spec-audit-20261014/README.md）](../local-archives.md#validation-tracked-history-20261016); this is not
 native UI or performance acceptance.
 
 Preview 文件增长预算与 AI Agent/Inbox/Banner 的 UI 同步 reducer 缺口已按
-[2026-10-15 修复记录](../validation/spec-gap-fixes-20261015/README.md)处理；
+[2026-10-15 修复记录（归档：docs/validation/spec-gap-fixes-20261015/README.md）](../local-archives.md#validation-tracked-history-20261016)处理；
 其余审计行及消息最终关闭的修复见
-[后续修复记录](../validation/spec-gap-followups-20261015/README.md)。
+[后续修复记录（归档：docs/validation/spec-gap-followups-20261015/README.md）](../local-archives.md#validation-tracked-history-20261016)。
 UI-120 消息分页的宿主焦点修复及 macOS 原生前后对照见
-[专项回归记录](../validation/ui120-macos-focus-20261015/README.md)；旧侧栏焦点问题已修复，
+[专项回归记录（归档：docs/validation/ui120-macos-focus-20261015/README.md）](../local-archives.md#validation-tracked-history-20261016)；旧侧栏焦点问题已修复，
 中英文鼠标/正向键盘分页、禁用描边清理、放大还原、快捷键和重入已做 macOS 原生回归。
 原生反向遍历受输入工具限制，Windows 和读屏仍待专项检查。应用最小窗口为
 800 × 600px，强制 640px fallback 只用于 compiled 组件边界验证。

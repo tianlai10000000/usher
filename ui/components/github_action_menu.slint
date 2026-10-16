@@ -76,6 +76,7 @@ export component GitHubActionMenu inherits FocusScope {
         TransientOverlayState.popover-dismiss-revision;
     private property <int> exclusive-generation: TransientOverlayState.exclusive-generation;
     private property <int> exclusive-token: 0;
+    private property <bool> initialized-open: false;
 
     changed reveal-offset => {
         if root.open && root.reveal-offset >= 0px {
@@ -87,18 +88,26 @@ export component GitHubActionMenu inherits FocusScope {
 
     accessible-role: list;
 
-    changed open => {
+    // Conditional callers can create an already-open menu, without an open
+    // change notification. Share an idempotent opening path with live toggles.
+    init => { root.sync-open-state(); }
+    changed open => { root.sync-open-state(); }
+    function sync-open-state() {
         if root.open {
-            // Claim after stamping the next generation so the synchronous
-            // exclusive-generation notification cannot dismiss this opener.
-            root.exclusive-token = TransientOverlayState.exclusive-generation + 1;
-            TransientOverlayState.claim-exclusive();
-            root.scroll-offset-y = root.reveal-offset < 0px ? 0px
-                : -max(0px, min(root.content-height - root.height,
-                    root.reveal-offset + root.reveal-height - root.height));
-            root.focus();
-        } else if root.has-focus {
-            root.clear-focus();
+            if !root.initialized-open {
+                root.initialized-open = true;
+                // Stamp before the synchronous claim notification; neither
+                // peers nor a second init/change may dismiss this opener.
+                root.exclusive-token = TransientOverlayState.exclusive-generation + 1;
+                TransientOverlayState.claim-exclusive();
+                root.scroll-offset-y = root.reveal-offset < 0px ? 0px
+                    : -max(0px, min(root.content-height - root.height,
+                        root.reveal-offset + root.reveal-height - root.height));
+                root.focus();
+            }
+        } else {
+            root.initialized-open = false;
+            if root.has-focus { root.clear-focus(); }
         }
     }
 

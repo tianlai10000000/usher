@@ -59,8 +59,47 @@ Checked implementation references:
 - [`Hook actions and portal`](../../ui/components/settings/github_hook_tooltip.slint),
   [`Settings root`](../../ui/views/settings.slint): fixed action types, literal
   surfaces and one transient full-window positioning host inside the independent
-  Settings factory. The five surfaces remain instantiated; `active` is false
+  Settings factory. The six surfaces remain instantiated; `active` is false
   while idle.
+- [`Agent actions and portal`](../../ui/components/settings/github_ai_agent_tooltip.slint)
+  keep seven literal action kinds and mounted I18n surfaces inside one factory-root
+  transient host. Activate/Current reuse the shared Toggle; Current and disabled
+  Delete retain hover-only hit targets and never admit actions. Bounds intersect
+  list and scroll viewport; query/page/rows/scroll/layout/modal/route changes
+  dismiss the claim, and token/lease checks reject stale publishers.
+  TestConnection has its own fixed Plug action, literal kind and mounted
+  `I18n.common-test-connection` measure/paint Surface; it must not borrow Edit's
+  claim or dynamic text. The 168px row group contains Toggle/Test/Edit/Delete.
+  Agent 的 TestConnection 使用独立固定 Plug 叶子、固定 kind 和常驻
+  `I18n.common-test-connection` 测量/绘制 Surface；七种动作共用单个根 Portal，
+  不得复用 Edit 身份或动态文案。168px 行操作组依次为 Toggle/Test/Edit/Delete。
+- [`Agent Header Delete`](../../ui/components/settings/github_ai_agent_header_tooltip.slint)
+  owns a separate single literal action and fixed I18n Delete Surface, with one
+  transient portal sibling to the editor frame. It is bounded to the actual
+  scrolling body, not clipped inside a Header row; no Header text/value crosses
+  the portal. Busy/object mode disables publishing. Header/session revisions,
+  row changes, scroll, mode switch and close dismiss claims; tokens and leases
+  reject stale publishers. The row reuses the shared 32×32 trash IconButton.
+  Header 删除使用独立单动作固定叶子和 I18n Surface，单个 transient Portal 与编辑器
+  frame 同级、以实际滚动正文为边界，不跨 Portal 传 Header 名称/值。busy/对象模式
+  不发布，行/revision、滚动、模式和关闭均撤销 claim；不能复用 Agent 列表的 Delete
+  身份或把提示挂在受裁切的行内。
+- [`Fixed anchor geometry`](../../ui/components/github_fixed_tooltip_anchor.slint)
+  owns only geometry, viewport eligibility and lease mechanics. Its callbacks
+  carry no label or action kind; each semantic leaf publishes its own literal
+  identity. Shared PR leaves belong to
+  [`workflow/github_pr_factory_tooltip_anchors.slint`](../../ui/components/workflow/github_pr_factory_tooltip_anchors.slint),
+  so production PR widgets do not depend on the development showcase tree.
+- [`Playground action portal`](../../ui/components/showcase/github_showcase_tooltip.slint)
+  and [`factory state`](../../ui/state/factory_tooltip_state.slint) own the static
+  playground's literal actions and fixed I18n surfaces. Its full-window factory
+  enables that local path; integrated live preview retains ordinary publishing.
+  See the [playground contract](ui-components.md) for the two compilation roots.
+  Its [`creation adapter`](../../src/ui_components/mod.rs) shares MainWindow's
+  actual `WindowAdapter` and restores the shell root immediately after the
+  shared-window constructor. This ensures destroyed Tooltip/model item trees
+  release resources in the renderer that painted them. It supplements the
+  literal-leaf recipe; it does not replace fixed action/measurement isolation.
 
 ## Factory recipe / 工厂内正确做法
 

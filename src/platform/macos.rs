@@ -11,6 +11,11 @@ use slint::ComponentHandle;
 use crate::{MainWindow, Route};
 
 static TITLEBAR_UI: std::sync::OnceLock<slint::Weak<MainWindow>> = std::sync::OnceLock::new();
+thread_local! {
+    // One image per sidebar state, rebuilt only when the display scale changes.
+    static SIDEBAR_SYMBOL_IMAGES: std::cell::RefCell<[Option<(f32, slint::Image)>; 2]> =
+        const { std::cell::RefCell::new([None, None]) };
+}
 static WINDOW_MOVE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static WINDOW_INTERACTING: AtomicBool = AtomicBool::new(false);
 static MEMORY_WINDOW_CONTROL_INSTALLED: AtomicBool = AtomicBool::new(false);
@@ -22,6 +27,8 @@ static mut TITLEBAR_BACK_BUTTON: *mut Object = std::ptr::null_mut();
 static mut TITLEBAR_FORWARD_BUTTON: *mut Object = std::ptr::null_mut();
 static mut TITLEBAR_ACCESSORY_ANCHOR: *mut Object = std::ptr::null_mut();
 static mut TITLEBAR_CONTROLS_CONTAINER: *mut Object = std::ptr::null_mut();
+static mut TITLEBAR_FULLSCREEN_LABEL: *mut Object = std::ptr::null_mut();
+static mut TITLEBAR_FULLSCREEN_LABEL_CONSTRAINTS: [*mut Object; 2] = [std::ptr::null_mut(); 2];
 static mut TITLEBAR_MODAL_SHIELD: *mut Object = std::ptr::null_mut();
 static mut TITLEBAR_EVENT_MONITOR: *mut Object = std::ptr::null_mut();
 static mut SYSTEM_THEME_OBSERVER: *mut Object = std::ptr::null_mut();
@@ -819,7 +826,12 @@ fn style_mask_is_fullscreen(style_mask: u64) -> bool {
 fn set_native_window_fullscreen(fullscreen: bool) {
     if let Some(ui) = TITLEBAR_UI.get().and_then(slint::Weak::upgrade) {
         // AppKit window notifications run on Slint's owning event loop.
-        ui.set_native_window_fullscreen(fullscreen);
+        if ui.get_native_window_fullscreen() != fullscreen {
+            ui.set_native_window_fullscreen(fullscreen);
+            // The in-content strip owns full-screen navigation and modal
+            // composition. Never carry a native control snapshot across hosts.
+            ui.set_native_titlebar_modal_image(slint::Image::default());
+        }
     }
 }
 
@@ -1195,20 +1207,8 @@ fn install_app_event_monitor(window: *mut Object) -> bool {
         let click_y = (window_frame.size.height - location.y) as f32;
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(ui) = TITLEBAR_UI.get().and_then(slint::Weak::upgrade) {
-                // Classify the press, not its release: text selection may be
-                // dragged outside the field while retaining keyboard focus.
-                if event_type == 1 {
-                    crate::transient_input::clear_text_input_focus_outside(
-                        ui.window(),
-                        slint::LogicalPosition::new(click_x, click_y),
-                    );
-                    if crate::transient_input::focused_text_input_contains_pointer(
-                        ui.window(),
-                        slint::LogicalPosition::new(click_x, click_y),
-                    ) {
-                        ui.invoke_dismiss_transient_popovers();
-                    }
-                }
+                // Native chrome is outside Slint's item tree. Text-input
+                // classification uses the real post-dispatch window hook.
                 if event_type == 2 {
                     ui.invoke_post_dispatch_pointer_released(click_x, click_y);
                 } else if titlebar_clicked {
@@ -1355,11 +1355,11 @@ fn shortcut_tooltip(action: &str, command: crate::shortcuts::CommandId) -> Strin
 
 fn sidebar_toggle_tooltip(expanded: bool) -> String {
     shortcut_tooltip(
-        if expanded {
-            "Hide sidebar"
+        &usher_i18n::translate(if expanded {
+            "tooltip.hide_sidebar"
         } else {
-            "Show sidebar"
-        },
+            "tooltip.show_sidebar"
+        }),
         crate::shortcuts::CommandId::ToggleSidebar,
     )
 }
@@ -1605,6 +1605,65 @@ fn traffic_light_origin(base_x: f64, base_y: f64) -> NSPoint {
     }
 }
 
+unsafe fn clear_fullscreen_title_constraints() {
+    unsafe {
+        for constraint in TITLEBAR_FULLSCREEN_LABEL_CONSTRAINTS {
+            if !constraint.is_null() {
+                let _: () = msg_send![constraint, setActive: false];
+                let _: () = msg_send![constraint, release];
+            }
+        }
+        TITLEBAR_FULLSCREEN_LABEL_CONSTRAINTS = [std::ptr::null_mut(); 2];
+    }
+}
+
+unsafe fn align_fullscreen_title_label(
+    titlebar_view: *mut Object,
+    traffic: *mut Object,
+    trailing_traffic: *mut Object,
+    fullscreen: bool,
+) {
+    unsafe {
+        let label = TITLEBAR_FULLSCREEN_LABEL;
+        if label.is_null() {
+            return;
+        }
+        let _: () = msg_send![label, setHidden: !fullscreen];
+        if !fullscreen {
+            clear_fullscreen_title_constraints();
+            return;
+        }
+        let parent: *mut Object = msg_send![label, superview];
+        if parent == titlebar_view && !TITLEBAR_FULLSCREEN_LABEL_CONSTRAINTS[0].is_null() {
+            return;
+        }
+        // AppKit lays out the traffic lights again when its full-screen title
+        // bar reveals. Follow that layout instead of retaining an entry-time
+        // frame. Intrinsic label height avoids surplus space around the text.
+        clear_fullscreen_title_constraints();
+        if parent != titlebar_view {
+            let _: () = msg_send![titlebar_view, addSubview: label];
+        }
+        let center: *mut Object = msg_send![label, centerYAnchor];
+        let traffic_center: *mut Object = msg_send![traffic, centerYAnchor];
+        let vertical: *mut Object = msg_send![center, constraintEqualToAnchor: traffic_center];
+        let left: *mut Object = msg_send![label, leftAnchor];
+        let traffic_right: *mut Object = msg_send![trailing_traffic, rightAnchor];
+        // NSTextField's alignment rect excludes its horizontal cell inset.
+        // Preserve the existing 12pt frame gap while changing vertical layout.
+        let frame: NSRect = msg_send![label, frame];
+        let alignment: NSRect = msg_send![label, alignmentRectForFrame: frame];
+        let gap = 12.0 + alignment.origin.x - frame.origin.x;
+        let horizontal: *mut Object =
+            msg_send![left, constraintEqualToAnchor: traffic_right constant: gap];
+        for constraint in [vertical, horizontal] {
+            let _: () = msg_send![constraint, retain];
+            let _: () = msg_send![constraint, setActive: true];
+        }
+        TITLEBAR_FULLSCREEN_LABEL_CONSTRAINTS = [vertical, horizontal];
+    }
+}
+
 unsafe fn align_standard_window_buttons(window: *mut Object) {
     if window.is_null() {
         return;
@@ -1665,16 +1724,25 @@ unsafe fn align_standard_window_buttons(window: *mut Object) {
     // accessory anchor at the title-bar origin. Never allow the detached
     // controls container to overlap the system traffic-light cluster.
     let mut traffic_right = traffic_frame.origin.x + traffic_frame.size.width;
+    let mut trailing_traffic = traffic;
     for button_kind in 1u64..=2u64 {
         let button: *mut Object = unsafe { msg_send![window, standardWindowButton: button_kind] };
         if button.is_null() {
             continue;
         }
         let frame: NSRect = unsafe { msg_send![button, frame] };
-        traffic_right = traffic_right.max(frame.origin.x + frame.size.width);
+        if frame.origin.x + frame.size.width > traffic_right {
+            traffic_right = frame.origin.x + frame.size.width;
+            trailing_traffic = button;
+        }
     }
     let style_mask: u64 = unsafe { msg_send![window, styleMask] };
     let fullscreen = style_mask_is_fullscreen(style_mask);
+    let controls_were_hidden: bool = unsafe { msg_send![controls, isHidden] };
+    unsafe {
+        let _: () = msg_send![controls, setHidden: fullscreen];
+        align_fullscreen_title_label(titlebar_view, traffic, trailing_traffic, fullscreen);
+    }
     let titlebar_origin = NSPoint {
         x: titlebar_controls_x(anchor_origin.x, traffic_right),
         y: titlebar_controls_y(
@@ -1704,7 +1772,12 @@ unsafe fn align_standard_window_buttons(window: *mut Object) {
         let _: () = msg_send![controls, setFrameOrigin: origin];
     }
     if let Some(ui) = TITLEBAR_UI.get().and_then(slint::Weak::upgrade) {
-        sync_titlebar_modal_geometry(&ui);
+        if controls_were_hidden != fullscreen {
+            update_titlebar_navigation_controls(&ui);
+        } else {
+            sync_titlebar_modal_geometry(&ui);
+            sync_sidebar_symbol_image(&ui, ui.get_navigation_drawer_expanded());
+        }
     }
 }
 
@@ -1746,6 +1819,7 @@ pub(crate) fn set_startup_presentation_hidden(window: &MainWindow, hidden: bool)
 }
 
 pub(crate) fn install_titlebar_settings_button(window: &MainWindow) {
+    let expanded = window.get_navigation_drawer_expanded();
     let _ = TITLEBAR_UI.set(window.as_weak());
 
     unsafe {
@@ -1828,7 +1902,7 @@ pub(crate) fn install_titlebar_settings_button(window: &MainWindow) {
         create_view(
             "NSButton",
             NSRect {
-                origin: NSPoint { x: 0.0, y: 0.0 },
+                origin: NSPoint { x: 64.0, y: 0.0 },
                 size: NSSize {
                     width: 28.0,
                     height: 28.0,
@@ -1840,7 +1914,7 @@ pub(crate) fn install_titlebar_settings_button(window: &MainWindow) {
         create_view(
             "NSButton",
             NSRect {
-                origin: NSPoint { x: 32.0, y: 0.0 },
+                origin: NSPoint { x: 0.0, y: 0.0 },
                 size: NSSize {
                     width: 28.0,
                     height: 28.0,
@@ -1852,7 +1926,7 @@ pub(crate) fn install_titlebar_settings_button(window: &MainWindow) {
         create_view(
             "NSButton",
             NSRect {
-                origin: NSPoint { x: 64.0, y: 0.0 },
+                origin: NSPoint { x: 32.0, y: 0.0 },
                 size: NSSize {
                     width: 28.0,
                     height: 28.0,
@@ -1891,14 +1965,31 @@ pub(crate) fn install_titlebar_settings_button(window: &MainWindow) {
         return;
     };
 
-    let toggle_tooltip =
-        shortcut_tooltip("Toggle sidebar", crate::shortcuts::CommandId::ToggleSidebar);
-    let back_tooltip = shortcut_tooltip("Back", crate::shortcuts::CommandId::NavigateBack);
-    let forward_tooltip = shortcut_tooltip("Forward", crate::shortcuts::CommandId::NavigateForward);
+    let toggle_tooltip = sidebar_toggle_tooltip(expanded);
+    let back_tooltip = shortcut_tooltip(
+        &usher_i18n::translate("common.back"),
+        crate::shortcuts::CommandId::NavigateBack,
+    );
+    let forward_tooltip = shortcut_tooltip(
+        &usher_i18n::translate("tooltip.forward"),
+        crate::shortcuts::CommandId::NavigateForward,
+    );
     unsafe {
+        // The product name is invariant across locales. Let AppKit own its
+        // reveal along with the traffic lights; the full-screen strip itself
+        // stays in Slint's ordinary content tree.
+        if let Some(title) = nsstring("Usher") {
+            let label: *mut Object = msg_send![class!(NSTextField), labelWithString: title];
+            let font: *mut Object = msg_send![class!(NSFont), boldSystemFontOfSize: 13.0f64];
+            let _: () = msg_send![label, setFont: font];
+            let _: () = msg_send![label, setTranslatesAutoresizingMaskIntoConstraints: false];
+            let _: () = msg_send![label, setHidden: true];
+            let _: () = msg_send![label, retain];
+            TITLEBAR_FULLSCREEN_LABEL = label;
+        }
         configure_icon_button(
             toggle_button,
-            sidebar_toggle_image_names(false),
+            sidebar_toggle_image_names(expanded),
             "◫",
             &toggle_tooltip,
             delegate,
@@ -1920,9 +2011,9 @@ pub(crate) fn install_titlebar_settings_button(window: &MainWindow) {
             delegate,
             sel!(usherNavigateForward:),
         );
-        let _: () = msg_send![controls_container, addSubview: toggle_button];
         let _: () = msg_send![controls_container, addSubview: back_button];
         let _: () = msg_send![controls_container, addSubview: forward_button];
+        let _: () = msg_send![controls_container, addSubview: toggle_button];
         // This transparent native shield sits above application-owned title-bar
         // controls while a modal backdrop is visible. It intercepts hover,
         // Tooltip and click handling without covering AppKit's traffic lights.
@@ -2008,6 +2099,12 @@ fn titlebar_modal_image() -> Option<slint::Image> {
         let _: () = msg_send![
             TITLEBAR_CONTROLS_CONTAINER, cacheDisplayInRect: bounds toBitmapImageRep: bitmap
         ];
+        bitmap_to_rgba_image(bitmap).map(slint_image_from_rgba)
+    }
+}
+
+unsafe fn bitmap_to_rgba_image(bitmap: *mut Object) -> Option<image::RgbaImage> {
+    unsafe {
         let dictionary = Class::get("NSDictionary")?;
         let properties: *mut Object = msg_send![dictionary, dictionary];
         let png: *mut Object =
@@ -2020,20 +2117,89 @@ fn titlebar_modal_image() -> Option<slint::Image> {
         if bytes.is_null() || length == 0 || length > 1024 * 1024 {
             return None;
         }
-        let rgba = image::load_from_memory_with_format(
-            std::slice::from_raw_parts(bytes, length),
-            image::ImageFormat::Png,
+        Some(
+            image::load_from_memory_with_format(
+                std::slice::from_raw_parts(bytes, length),
+                image::ImageFormat::Png,
+            )
+            .ok()?
+            .to_rgba8(),
         )
-        .ok()?
-        .to_rgba8();
-        Some(slint::Image::from_rgba8(slint::SharedPixelBuffer::<
-            slint::Rgba8Pixel,
-        >::clone_from_slice(
+    }
+}
+
+fn slint_image_from_rgba(rgba: image::RgbaImage) -> slint::Image {
+    slint::Image::from_rgba8(
+        slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
             rgba.as_raw(),
             rgba.width(),
             rgba.height(),
-        )))
-    }
+        ),
+    )
+}
+
+fn sync_sidebar_symbol_image(window: &MainWindow, expanded: bool) {
+    let scale = window.window().scale_factor();
+    SIDEBAR_SYMBOL_IMAGES.with_borrow_mut(|images| {
+        let cached = &mut images[usize::from(expanded)];
+        if cached
+            .as_ref()
+            .is_none_or(|(cached_scale, _)| *cached_scale != scale)
+        {
+            // Reuse the exact native symbol choice, including its OS fallback.
+            // Render the image alone so hover, disabled and bezel pixels never
+            // become part of the persistent full-screen button's glyph.
+            let image = unsafe {
+                let source: *mut Object = msg_send![TITLEBAR_TOGGLE_BUTTON, image];
+                if source.is_null() {
+                    return;
+                }
+                let source_size: NSSize = msg_send![source, size];
+                let tiff: *mut Object = msg_send![source, TIFFRepresentation];
+                if tiff.is_null() || source_size.width <= 0.0 {
+                    return;
+                }
+                let reps: *mut Object =
+                    msg_send![class!(NSBitmapImageRep), imageRepsWithData: tiff];
+                let count: usize = msg_send![reps, count];
+                let mut chosen: *mut Object = std::ptr::null_mut();
+                let mut best_distance = f64::INFINITY;
+                for index in 0..count {
+                    let rep: *mut Object = msg_send![reps, objectAtIndex: index];
+                    let width: isize = msg_send![rep, pixelsWide];
+                    let distance = (width as f64 / source_size.width - f64::from(scale)).abs();
+                    if distance < best_distance {
+                        chosen = rep;
+                        best_distance = distance;
+                    }
+                }
+                if chosen.is_null() {
+                    return;
+                }
+                bitmap_to_rgba_image(chosen).map(|rgba| {
+                    // Preserve the original 14pt symbol's optical size. Its TIFF
+                    // includes native 1x/2x/3x reps; changing point size would
+                    // select a different SF Symbols optical design.
+                    let extent =
+                        (28.0 * f64::from(rgba.width()) / source_size.width).round() as u32;
+                    let mut canvas = image::RgbaImage::new(extent, extent);
+                    let x = (i64::from(extent) - i64::from(rgba.width())) / 2;
+                    let y = (i64::from(extent) - i64::from(rgba.height())) / 2;
+                    image::imageops::overlay(&mut canvas, &rgba, x, y);
+                    slint_image_from_rgba(canvas)
+                })
+            };
+            let Some(image) = image else {
+                return;
+            };
+            *cached = Some((scale, image));
+        }
+        if let Some((_, image)) = cached {
+            if window.get_native_sidebar_toggle_image() != *image {
+                window.set_native_sidebar_toggle_image(image.clone());
+            }
+        }
+    });
 }
 
 pub(crate) fn update_titlebar_navigation_controls(window: &MainWindow) {
@@ -2048,7 +2214,24 @@ pub(crate) fn update_titlebar_navigation_controls(window: &MainWindow) {
         let modal_visible = window.get_modal_overlay_visible();
         // Hand off the original appearance before disabling native controls.
         // Slint now composites these pixels underneath the real modal backdrop.
-        if modal_visible && window.get_native_titlebar_modal_image().size().width == 0 {
+        if modal_visible
+            && !window.get_native_window_fullscreen()
+            && window.get_native_titlebar_modal_image().size().width == 0
+        {
+            // A modal can survive a full-screen round trip. Restore the
+            // ordinary source appearance before recapturing, then reapply the
+            // modal's disabled/hidden state below in this same event-loop turn.
+            for (button, enabled) in [
+                (TITLEBAR_TOGGLE_BUTTON, true),
+                (TITLEBAR_BACK_BUTTON, window.get_navigation_can_go_back()),
+                (
+                    TITLEBAR_FORWARD_BUTTON,
+                    window.get_navigation_can_go_forward(),
+                ),
+            ] {
+                let _: () = msg_send![button, setHidden: false];
+                let _: () = msg_send![button, setEnabled: enabled];
+            }
             if let Some(image) = titlebar_modal_image() {
                 window.set_native_titlebar_modal_image(image);
             } else {
@@ -2077,6 +2260,23 @@ pub(crate) fn update_titlebar_navigation_controls(window: &MainWindow) {
             let _: () = msg_send![TITLEBAR_MODAL_SHIELD, setHidden: !modal_visible];
         }
         let expanded = window.get_navigation_drawer_expanded();
+        for (button, key, command) in [
+            (
+                TITLEBAR_BACK_BUTTON,
+                "common.back",
+                crate::shortcuts::CommandId::NavigateBack,
+            ),
+            (
+                TITLEBAR_FORWARD_BUTTON,
+                "tooltip.forward",
+                crate::shortcuts::CommandId::NavigateForward,
+            ),
+        ] {
+            if let Some(label) = nsstring(&shortcut_tooltip(&usher_i18n::translate(key), command)) {
+                let _: () = msg_send![button, setToolTip: label];
+                let _: () = msg_send![button, setAccessibilityLabel: label];
+            }
+        }
         configure_icon_button(
             TITLEBAR_TOGGLE_BUTTON,
             sidebar_toggle_image_names(expanded),
@@ -2085,6 +2285,7 @@ pub(crate) fn update_titlebar_navigation_controls(window: &MainWindow) {
             TITLEBAR_DELEGATE,
             sel!(usherToggleSidebar:),
         );
+        sync_sidebar_symbol_image(window, expanded);
         if !modal_visible {
             window.set_native_titlebar_modal_image(slint::Image::default());
         }
@@ -2199,7 +2400,14 @@ pub(crate) fn install_system_theme_change_observer() {
 }
 
 pub(crate) fn shutdown_native_integrations() {
+    SIDEBAR_SYMBOL_IMAGES.with_borrow_mut(|images| *images = [None, None]);
     unsafe {
+        clear_fullscreen_title_constraints();
+        if !TITLEBAR_FULLSCREEN_LABEL.is_null() {
+            let _: () = msg_send![TITLEBAR_FULLSCREEN_LABEL, removeFromSuperview];
+            let _: () = msg_send![TITLEBAR_FULLSCREEN_LABEL, release];
+            TITLEBAR_FULLSCREEN_LABEL = std::ptr::null_mut();
+        }
         if !TITLEBAR_EVENT_MONITOR.is_null()
             && let Some(event_class) = Class::get("NSEvent")
         {
@@ -2299,8 +2507,22 @@ mod tests {
             sidebar_toggle_image_names(false)[0],
             sidebar_toggle_image_names(true)[0]
         );
-        assert_eq!(sidebar_toggle_tooltip(false), "Show sidebar (⌘B)");
-        assert_eq!(sidebar_toggle_tooltip(true), "Hide sidebar (⌘B)");
+    }
+
+    #[test]
+    fn titlebar_sidebar_tooltip_tracks_runtime_locale_and_expansion() {
+        let _guard = crate::i18n::test_locale_guard();
+        let previous = usher_i18n::active_locale().id;
+        for (locale, shown, hidden) in [
+            ("en", "Show sidebar (⌘B)", "Hide sidebar (⌘B)"),
+            ("zh-CN", "显示侧边栏 (⌘B)", "隐藏侧边栏 (⌘B)"),
+            ("en", "Show sidebar (⌘B)", "Hide sidebar (⌘B)"),
+        ] {
+            usher_i18n::activate_locale(locale).unwrap();
+            assert_eq!(sidebar_toggle_tooltip(false), shown);
+            assert_eq!(sidebar_toggle_tooltip(true), hidden);
+        }
+        usher_i18n::activate_locale(previous).unwrap();
     }
 
     #[test]

@@ -1,6 +1,9 @@
 use super::*;
 use std::time::Duration;
 
+#[path = "search_tests.rs"]
+mod search_tests;
+
 pub(super) fn service() -> (tempfile::TempDir, Arc<HookService>) {
     service_with_selector(Arc::new(|_, _| false))
 }
@@ -207,49 +210,93 @@ fn hook_tooltips_keep_literal_labels_and_fit_after_action_changes() {
         .find(|e| e.accessible_checked().is_some())
         .unwrap()
         .mock_single_click(PointerEventButton::Left);
-    for width in [1200.0, 800.0, 1200.0] {
-        page.set_viewport_width(width);
-        for (label, kind, surface) in [
-            ("Edit Hook: One", HookTooltipKind::Edit, "edit-surface"),
-            ("Delete: One", HookTooltipKind::Delete, "delete-surface"),
-            (
-                "Clear execution history",
-                HookTooltipKind::ClearHistory,
-                "clearhistory-surface",
-            ),
-            ("Edit Hook: One", HookTooltipKind::Edit, "edit-surface"),
-        ] {
-            let button = ElementHandle::find_by_accessible_label(&page, label)
-                .next()
-                .unwrap();
-            let pos = button.absolute_position();
-            page.window().dispatch_event(WindowEvent::PointerMoved {
-                position: slint::LogicalPosition::new(pos.x + 16.0, pos.y + 16.0),
-            });
-            i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
-            assert_eq!(
-                page.global::<HookTooltipState>().get_kind(),
-                kind,
-                "{label}"
-            );
-            let tip = ElementHandle::find_by_element_id(
-                &page,
-                &format!("GitHubHookTooltipOverlay::{surface}"),
-            )
-            .next()
-            .unwrap();
-            assert!(tip.absolute_position().x >= 0.0);
-            assert!(tip.absolute_position().x + tip.size().width <= width);
-            assert!(tip.size().width > 40.0);
-            let expected_center = (pos.x + button.size().width / 2.0).clamp(
-                8.0 + tip.size().width / 2.0,
-                width - 8.0 - tip.size().width / 2.0,
-            );
-            assert!(
-                (tip.absolute_position().x + tip.size().width / 2.0 - expected_center).abs() <= 1.0
-            );
+    for locale in ["en", "zh-CN", "en"] {
+        crate::i18n::apply_preference(locale).unwrap();
+        for width in [550.0, 1200.0, 550.0] {
+            page.set_viewport_width(width);
+            i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(2));
+            for _ in 0..3 {
+                for (key, row_action, kind, surface) in [
+                    ("hooks.new", false, HookTooltipKind::Add, "add-surface"),
+                    ("hooks.edit", true, HookTooltipKind::Edit, "edit-surface"),
+                    (
+                        "common.delete",
+                        true,
+                        HookTooltipKind::Delete,
+                        "delete-surface",
+                    ),
+                    (
+                        "hooks.clear_history",
+                        false,
+                        HookTooltipKind::ClearHistory,
+                        "clearhistory-surface",
+                    ),
+                    ("hooks.new", false, HookTooltipKind::Add, "add-surface"),
+                ] {
+                    let text = crate::i18n::tr(key);
+                    let label = if row_action {
+                        format!("{text}: One")
+                    } else {
+                        text.to_string()
+                    };
+                    let button = ElementHandle::find_by_accessible_label(&page, &label)
+                        .find(|element| {
+                            element.accessible_role()
+                                == Some(i_slint_backend_testing::AccessibleRole::Button)
+                        })
+                        .unwrap();
+                    let pos = button.absolute_position();
+                    page.window().dispatch_event(WindowEvent::PointerMoved {
+                        position: slint::LogicalPosition::new(pos.x + 16.0, pos.y + 16.0),
+                    });
+                    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+                    assert_eq!(
+                        page.global::<HookTooltipState>().get_kind(),
+                        kind,
+                        "{label}"
+                    );
+                    let tip = ElementHandle::find_by_element_id(
+                        &page,
+                        &format!("GitHubHookTooltipOverlay::{surface}"),
+                    )
+                    .next()
+                    .unwrap();
+                    assert!(tip.absolute_position().x >= 0.0);
+                    assert!(tip.absolute_position().x + tip.size().width <= width);
+                    assert!(tip.absolute_position().y >= 0.0);
+                    assert!(tip.absolute_position().y + tip.size().height <= 900.0);
+                    assert!(tip.size().width > 40.0 && tip.size().height >= 24.0);
+                    assert!(
+                        ElementHandle::find_by_accessible_label(&page, text.as_ref())
+                            .any(|element| element.accessible_role()
+                                == Some(i_slint_backend_testing::AccessibleRole::Text)),
+                        "fixed surface paints {key} in {locale}"
+                    );
+                    let expected_center = (pos.x + button.size().width / 2.0).clamp(
+                        8.0 + tip.size().width / 2.0,
+                        width - 8.0 - tip.size().width / 2.0,
+                    );
+                    assert!(
+                        (tip.absolute_position().x + tip.size().width / 2.0 - expected_center)
+                            .abs()
+                            <= 1.0
+                    );
+                }
+            }
         }
     }
+    page.set_route_active(false);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+    assert_eq!(
+        page.global::<HookTooltipState>().get_kind(),
+        HookTooltipKind::None
+    );
+    assert!(
+        ElementHandle::find_by_element_id(&page, "GitHubHookTooltipOverlay::add-surface")
+            .next()
+            .is_none()
+    );
+    crate::i18n::apply_preference(usher_i18n::fallback_locale().id).unwrap();
 }
 
 #[test]

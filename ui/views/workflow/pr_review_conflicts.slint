@@ -1,3 +1,4 @@
+import { GitHubResizeHandle } from "../../components/github_resize_handle.slint";
 import { PrConflictsBridge, PrConflictRow, PrConflictWindow } from "../../features/pr_review/conflicts_bridge.slint";
 import { PrDiffBridge } from "../../features/pr_review/diff_bridge.slint";
 import { GitHubTheme } from "../../theme/github_theme.slint";
@@ -19,7 +20,6 @@ export component PrReviewConflicts inherits FocusScope {
     private property <length> files-min-width: 220px;
     private property <length> files-max-width: max(root.files-min-width, min(520px, root.width * 0.45));
     private property <length> files-width: max(root.files-min-width, min(root.files-max-width, root.files-preferred-width));
-    private property <bool> files-resizing: false;
     private property <length> files-drag-start-width;
     private property <int> revision: PrConflictsBridge.revision;
     private property <int> copy-completed: PrConflictsBridge.copy-completed;
@@ -110,7 +110,6 @@ export component PrReviewConflicts inherits FocusScope {
                         }
                     }
                 }
-                Rectangle {x: parent.width - 1px;y: 0px;width: 1px;height: parent.height;background: GitHubTheme.border-default;}
             }
             Rectangle {
                 horizontal-stretch: 1;
@@ -185,37 +184,27 @@ export component PrReviewConflicts inherits FocusScope {
                 }
             }
         }
-            files-resize-handle := TouchArea {
+            files-resize-handle := GitHubResizeHandle {
                 x: root.files-open ? root.files-width - 4px : -10px;
                 y: 0px;
-                width: root.files-open ? 9px : 0px;
                 height: parent.height;
                 z: 100;
-                mouse-cursor: col-resize;
-                moved => {
-                    if root.files-resizing {
-                        // The divider follows the pointer, so apply its remaining local delta.
-                        root.files-preferred-width = max(root.files-min-width,
-                            min(root.files-max-width, root.files-width + self.mouse-x - self.pressed-x));
-                    }
+                visible: root.files-open;
+                resize-enabled: root.files-open;
+                drag-started => {
+                    root.files-drag-start-width = root.files-width;
                 }
-                pointer-event(event) => {
-                    if event.kind == PointerEventKind.down {
-                        root.files-resizing = true;
-                        root.files-drag-start-width = root.files-width;
-                    } else if event.kind == PointerEventKind.up {
-                        root.files-resizing = false;
-                    } else if event.kind == PointerEventKind.cancel {
+                drag-delta(delta) => {
+                    root.files-preferred-width = max(root.files-min-width,
+                        min(root.files-max-width, root.files-width + delta));
+                }
+                drag-finished(cancelled) => {
+                    if cancelled {
                         root.files-preferred-width = root.files-drag-start-width;
-                        root.files-resizing = false;
                     }
                 }
             }
-            Rectangle {
-                x: root.files-width - 1px;y: 0px;width: 3px;height: parent.height;
-                z: 101;background: GitHubTheme.fg-muted;
-                opacity: root.files-open && (root.files-resizing || files-resize-handle.has-hover) ? 0.8 : 0;
-            }
+
         }
     }
 }

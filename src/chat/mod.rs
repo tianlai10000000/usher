@@ -7,6 +7,7 @@ mod message_model;
 pub(crate) mod performance;
 pub mod persistence;
 pub mod renderer;
+mod request;
 pub mod session;
 mod text_selection;
 mod timestamp;
@@ -31,3 +32,5 @@ pub fn setup_chat(ui: &MainWindow) {
 pub(crate) fn sync_language(ui: &MainWindow) {
     interactive::sync_language(ui);
 }
+
+pub(crate) use request::sync_agent_identity;

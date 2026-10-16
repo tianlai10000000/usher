@@ -1,0 +1,204 @@
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { I18n } from "@i18n";
+import { GitHubTabItem, GitHubUnderlineNavItem, GitHubTabOverflowState, GitHubUnderlineNavVariant } from "./github_underline_nav.slint";
+import { GitHubSelectState, GitHubSelectPopup, GitHubSelectOption } from "../input/github_select.slint";
+
+// Factory-safe three-tab form of the shared UnderlineNav. Every measured and
+// painted tab is a fixed leaf; no label passes through a repeater delegate.
+export component GitHubFixedThreeTabs inherits Rectangle {
+    in property <string> owner;
+    in property <GitHubTabItem> first-item;
+    in property <GitHubTabItem> second-item;
+    in property <GitHubTabItem> third-item;
+    in property <int> selected-index: 0;
+    in property <int> count-limit: 99;
+    in property <string> group-label;
+    in property <bool> show-bottom-border: true;
+    in property <GitHubUnderlineNavVariant> variant: inset;
+    in property <length> content-inset:
+        root.variant == GitHubUnderlineNavVariant.flush ? 0px : GitHubMetrics.size-16;
+    in property <length> item-spacing: GitHubMetrics.size-4;
+    callback selected(int);
+    out property <length> natural-width: root.third-end + 2 * root.content-inset;
+    out property <bool> overflowing: root.third-end > root.available-width;
+    out property <int> visible-count: !root.overflowing ? 3
+        : root.third-end <= root.visible-width ? 3
+        : root.second-end <= root.visible-width ? 2
+        : first.natural-width <= root.visible-width ? 1 : 0;
+    private property <length> second-start: first.natural-width + root.item-spacing;
+    private property <length> second-end: root.second-start + second.natural-width;
+    private property <length> third-start: root.second-end + root.item-spacing;
+    private property <length> third-end: root.third-start + third.natural-width;
+    private property <length> available-width: max(0px, root.width - 2 * root.content-inset);
+    private property <length> visible-width: max(0px, root.available-width
+        - (root.overflowing ? more.natural-width + root.item-spacing : 0px));
+    private property <int> focus-index: -1;
+    private property <int> menu-revision: GitHubTabOverflowState.revision;
+    private property <bool> menu-open: GitHubSelectState.open
+        && GitHubSelectState.owner == root.owner + "-overflow"
+        && GitHubTabOverflowState.owner == root.owner;
+    changed menu-revision => {
+        if GitHubTabOverflowState.owner == root.owner {
+            root.selected(GitHubTabOverflowState.activated);
+        }
+    }
+    changed width => { root.dismiss-menu(); }
+    changed content-inset => { root.dismiss-menu(); }
+    changed first-item => { root.dismiss-menu(); }
+    changed second-item => { root.dismiss-menu(); }
+    changed third-item => { root.dismiss-menu(); }
+    changed menu-open => {
+        if !root.menu-open && GitHubTabOverflowState.owner == root.owner
+            && GitHubSelectState.restore-focus { more.focus(); }
+    }
+    function dismiss-menu() {
+        if root.menu-open { GitHubSelectState.close(false); }
+    }
+    function navigate(index: int, direction: int) {
+        root.focus-index = direction == -2 ? 0 : direction == 2 ? root.visible-count - 1
+            : max(0, min(root.visible-count, index + direction));
+        if root.focus-index == root.visible-count { more.focus(); }
+    }
+    function show-more() {
+        if root.menu-open { GitHubSelectState.close(true); return; }
+        GitHubTabOverflowState.owner = root.owner;
+        // The model is used only for activation bounds/disabled checks. Fixed
+        // popup leaves receive their own literal/I18n items at the page root.
+        GitHubTabOverflowState.items = [root.first-item, root.second-item, root.third-item];
+        GitHubTabOverflowState.first = root.visible-count;
+        GitHubTabOverflowState.selected = root.selected-index;
+        GitHubTabOverflowState.count-limit = root.count-limit;
+        GitHubSelectState.show(root.owner + "-overflow", "",
+            max(0, root.selected-index - root.visible-count),
+            more.absolute-position.x, more.absolute-position.y, more.width, more.height);
+    }
+
+    width: 100%;
+    height: GitHubMetrics.size-48;
+    background: transparent;
+    accessible-role: tab-list;
+    accessible-label: root.group-label;
+    if root.show-bottom-border: Rectangle {
+        y: parent.height - GitHubMetrics.border-thin;
+        width: parent.width;
+        height: GitHubMetrics.border-thin;
+        background: GitHubTheme.border-muted;
+    }
+    Rectangle {
+        x: root.content-inset;
+        width: root.visible-width;
+        height: root.height;
+        clip: true;
+        first := GitHubUnderlineNavItem {
+            x: 0px;
+            visible: root.visible-count > 0;
+            item-enabled: !root.first-item.disabled && self.visible;
+            label: root.first-item.label;
+            icon: root.first-item.icon;
+            icon-color: root.first-item.danger ? GitHubTheme.danger-fg : GitHubTheme.fg-default;
+            count: root.first-item.count; show-count: root.first-item.show-count;
+            count-limit: root.count-limit;
+            selected: root.selected-index == 0;
+            private property <bool> focus-requested: root.focus-index == 0;
+            changed focus-requested => { if self.focus-requested { self.focus(); } }
+            clicked => { root.focus-index = -1; root.selected(0); }
+            navigate(direction) => { root.navigate(0, direction); }
+        }
+        second := GitHubUnderlineNavItem {
+            x: root.second-start;
+            visible: root.visible-count > 1;
+            item-enabled: !root.second-item.disabled && self.visible;
+            label: root.second-item.label;
+            icon: root.second-item.icon;
+            icon-color: root.second-item.danger ? GitHubTheme.danger-fg : GitHubTheme.fg-default;
+            count: root.second-item.count; show-count: root.second-item.show-count;
+            count-limit: root.count-limit;
+            selected: root.selected-index == 1;
+            private property <bool> focus-requested: root.focus-index == 1;
+            changed focus-requested => { if self.focus-requested { self.focus(); } }
+            clicked => { root.focus-index = -1; root.selected(1); }
+            navigate(direction) => { root.navigate(1, direction); }
+        }
+        third := GitHubUnderlineNavItem {
+            x: root.third-start;
+            visible: root.visible-count > 2;
+            item-enabled: !root.third-item.disabled && self.visible;
+            label: root.third-item.label;
+            icon: root.third-item.icon;
+            icon-color: root.third-item.danger ? GitHubTheme.danger-fg : GitHubTheme.fg-default;
+            count: root.third-item.count; show-count: root.third-item.show-count;
+            count-limit: root.count-limit;
+            selected: root.selected-index == 2;
+            private property <bool> focus-requested: root.focus-index == 2;
+            changed focus-requested => { if self.focus-requested { self.focus(); } }
+            clicked => { root.focus-index = -1; root.selected(2); }
+            navigate(direction) => { root.navigate(2, direction); }
+        }
+    }
+    more := GitHubUnderlineNavItem {
+        x: root.width - root.content-inset - self.width;
+        visible: root.overflowing;
+        item-enabled: self.visible;
+        label: I18n.navigation-more-tabs;
+        icon: @image-url("../../assets/icons/octicon-chevron-down-16.svg");
+        trailing-icon: true;
+        selected: root.selected-index >= root.visible-count;
+        clicked => { root.focus-index = -1; root.show-more(); }
+        navigate(direction) => { root.focus-index = direction == -2 ? 0 : root.visible-count - 1; }
+    }
+}
+
+component FixedTabOverflowOption inherits GitHubSelectOption {
+    in property <GitHubTabItem> item;
+    in property <int> index;
+    in property <string> navigation-owner;
+    in property <bool> menu-open;
+    visible: root.index >= GitHubTabOverflowState.first;
+    y: (root.index - GitHubTabOverflowState.first) * GitHubMetrics.size-32;
+    text: root.item.label;
+    icon: root.item.icon;
+    selected: root.index == GitHubTabOverflowState.selected;
+    item-enabled: !root.item.disabled && self.visible;
+    active: root.menu-open
+        && GitHubSelectState.active-index == root.index - GitHubTabOverflowState.first;
+    trailing-text: root.item.show-count
+        ? (root.item.count > GitHubTabOverflowState.count-limit && GitHubTabOverflowState.count-limit > 0
+            ? GitHubTabOverflowState.count-limit + "+" : "" + max(0, root.item.count)) : "";
+    accessible-label: root.item.show-count ? root.item.label + ", " + root.item.count : root.item.label;
+    activated => {
+        if root.menu-open && GitHubTabOverflowState.owner == root.navigation-owner {
+            GitHubTabOverflowState.activate(root.index);
+        }
+    }
+}
+
+// Mount one at the factory root per navigation owner. Its three item inputs
+// must be fixed literal/I18n bindings, never a shared model switched by owner.
+export component GitHubFixedThreeTabsOverflowPopup inherits GitHubSelectPopup {
+    in property <string> navigation-owner;
+    in property <GitHubTabItem> first-item;
+    in property <GitHubTabItem> second-item;
+    in property <GitHubTabItem> third-item;
+    owner: root.navigation-owner + "-overflow";
+    private property <bool> menu-open: GitHubSelectState.open
+        && GitHubSelectState.owner == root.owner;
+    menu-width: 320px;
+    option-count: 3 - GitHubTabOverflowState.first;
+    selected(index) => {
+        if GitHubTabOverflowState.owner == root.navigation-owner {
+            GitHubTabOverflowState.activate(index + GitHubTabOverflowState.first);
+        }
+    }
+    FixedTabOverflowOption {
+        x: 0px; width: root.option-width; index: 0; item: root.first-item;
+        navigation-owner: root.navigation-owner; menu-open: root.menu-open;
+    }
+    FixedTabOverflowOption {
+        x: 0px; width: root.option-width; index: 1; item: root.second-item;
+        navigation-owner: root.navigation-owner; menu-open: root.menu-open;
+    }
+    FixedTabOverflowOption {
+        x: 0px; width: root.option-width; index: 2; item: root.third-item;
+        navigation-owner: root.navigation-owner; menu-open: root.menu-open;
+    }
+}

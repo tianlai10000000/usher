@@ -372,12 +372,22 @@ impl FindingSeverity {
     }
 }
 
+/// Non-secret request attribution, kept raw so presentation can change locale.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentIdentity {
+    pub name: String,
+    pub provider: String,
+    pub model: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReviewTaskSummary {
     pub id: ReviewTaskId,
     pub target: ReviewTarget,
     pub rule_name: String,
     pub model_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<AgentIdentity>,
     pub status: ReviewTaskStatus,
     pub progress_percent: u8,
     #[serde(default)]
@@ -674,6 +684,8 @@ impl ReviewConversationRole {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReviewConversationMessage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<AgentIdentity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message_id: Option<String>,
     pub role: ReviewConversationRole,
@@ -1142,6 +1154,7 @@ mod tests {
         assert_eq!(message.message_id, None);
         assert_eq!(message.elapsed_ms, None);
         assert_eq!(message.prompt, None);
+        assert_eq!(message.agent, None);
     }
 
     #[test]
@@ -1161,6 +1174,7 @@ mod tests {
     #[test]
     fn conversation_identity_roundtrip_preserves_distinct_submissions() {
         let first = ReviewConversationMessage {
+            agent: None,
             message_id: Some("operation-1:user".to_owned()),
             role: ReviewConversationRole::User,
             content: "same question".to_owned(),
@@ -1169,6 +1183,7 @@ mod tests {
             prompt: None,
         };
         let second = ReviewConversationMessage {
+            agent: None,
             message_id: Some("operation-2:user".to_owned()),
             ..first.clone()
         };
@@ -1234,6 +1249,7 @@ mod tests {
         .expect("legacy review session");
 
         assert_eq!(session.prompt, PromptProvenance::default());
+        assert_eq!(session.task.agent, None);
         assert_eq!(session.task.target.author_name, None);
         assert_eq!(session.task.target.author_email, None);
         assert_eq!(session.input.target.author_name, None);
@@ -1269,6 +1285,7 @@ mod tests {
 
     fn task(id: &str, number: &str) -> ReviewTaskSummary {
         ReviewTaskSummary {
+            agent: None,
             id: ReviewTaskId(id.into()),
             target: target(number),
             rule_name: "Default".into(),

@@ -228,7 +228,7 @@ pub(crate) struct ConnectionTestResult {
     pub model_listed: bool,
 }
 
-fn configuration_error(message: impl Into<String>) -> HttpError {
+pub(super) fn configuration_error(message: impl Into<String>) -> HttpError {
     HttpError {
         kind: HttpErrorKind::Request,
         operation: "AI Agent configuration".to_string(),
@@ -245,9 +245,6 @@ fn configuration_error(message: impl Into<String>) -> HttpError {
 fn validate_settings(settings: &AiAgentSettings) -> Result<(), HttpError> {
     if settings.base_url.trim().is_empty() {
         return Err(configuration_error("OpenAI Base URL is required"));
-    }
-    if settings.api_key.trim().is_empty() {
-        return Err(configuration_error("OpenAI API Key is required"));
     }
     if settings.model.trim().is_empty() {
         return Err(configuration_error("Model name is required"));
@@ -278,10 +275,11 @@ pub(crate) async fn test_connection(
     settings: &AiAgentSettings,
 ) -> Result<ConnectionTestResult, HttpError> {
     validate_settings(settings)?;
+    let headers = super::request_headers::build(settings)?;
     let url = endpoint_url(&settings.base_url, "models")?;
     let response = http::send_json::<ModelsResponse>(
-        http::get(url).bearer_auth(settings.api_key.trim()),
-        // The Settings action owns one bottom Toast for every terminal result.
+        http::get(url).headers(headers),
+        // The Settings editor owns localized feedback for every terminal result.
         RequestOptions::new("Test AI Agent connection")
             .response_byte_limit(MAX_BUFFERED_AGENT_JSON_BYTES),
     )
@@ -332,6 +330,7 @@ async fn complete_with_options(
     stream: bool,
 ) -> Result<String, HttpError> {
     validate_settings(settings)?;
+    let headers = super::request_headers::build(settings)?;
     if messages.is_empty() {
         return Err(configuration_error(
             "At least one completion message is required",
@@ -382,13 +381,7 @@ async fn complete_with_options(
             stream
         );
     }
-    let response = http::send(
-        http::post(url)
-            .bearer_auth(settings.api_key.trim())
-            .json(&request),
-        options,
-    )
-    .await?;
+    let response = http::send(http::post(url).json(&request).headers(headers), options).await?;
     #[cfg(feature = "ai-code-review")]
     if stream {
         let is_event_stream = response

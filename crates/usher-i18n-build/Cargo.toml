@@ -1,0 +1,11 @@
+[package]
+name = "usher-i18n-build"
+version = "0.0.9-alpha.1"
+edition = "2024"
+license = "LicenseRef-Proprietary"
+publish = false
+
+[dependencies]
+rspolib = "0.1.2"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.6"

@@ -113,7 +113,7 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
 | Domain, durability, close / 领域、持久化、关闭 | `crates/usher-messages/src/{center,storage,center_tests}.rs`, `crates/usher-state-store/src/latest.rs` |
 | Native delivery / 原生投递 | `crates/usher-messages/src/{model,desktop,native_worker}.rs`, application adapter in `src/message_center.rs` |
 | Page/filter/locale projection / 页面、筛选与语言投影 | `src/message_center.rs`, `src/message_center/paging_tests.rs`, `ui/views/messages.slint` |
-| Factory keyboard ownership / Factory 键盘所有权 | `src/message_center/focus.rs`, `src/message_center/focus/navigation.rs`, shared pagination and the page capture scope |
+| Factory keyboard ownership / Factory 键盘所有权 | `src/message_center/focus.rs`, shared `src/focus_navigation.rs` (also used by the playground), shared pagination and the page capture scope |
 | UI mutation admission / UI 变更准入 | `src/message_center/commands.rs`, `src/message_center/commands_tests.rs` |
 | Row actions and Tooltip portal / 行动作与 Tooltip Portal | `ui/components/messages/github_message_{components,actions,tooltip}.slint`, `ui/state/message_tooltip_overlay_state.slint` |
 | Banner mirroring/queue / Banner 镜像与队列 | `src/notification.rs`, `src/notification/ingress.rs`, `src/notification/ingress_tests.rs`, `ui/components/notify/`, root hosts in `ui/main.slint` |
@@ -122,7 +122,7 @@ Focused commands: `cargo test -p usher-messages --locked`,
 `cargo test --lib --locked message_center::` and
 `cargo test --lib --locked notification::`. Root tests include compiled Inbox
 paging, host-focus and route-reentry cases. Their simulated input is separate
-from the scoped [macOS native regression](../validation/ui120-macos-focus-20261015/README.md)
+from the scoped [macOS native regression（归档：docs/validation/ui120-macos-focus-20261015/README.md）](../local-archives.md#validation-tracked-history-20261016)
 below; neither establishes renderer memory behavior or acceptance on other platforms.
 
 专项命令覆盖领域、真实编译 Inbox 分页、宿主焦点与重入；模拟输入与下文单独记录的
@@ -513,7 +513,7 @@ within the new content bounds. A numbered slot's label can change when the
 neighboring-page window is reprojected; focus does not promise to follow the same
 semantic page number. Previous/Next retain their directional identity. Shared
 links do not run generated `.focus()` again during
-keyboard activation. `focus/navigation.rs` traverses the mounted host's eligible
+keyboard activation. Shared `src/focus_navigation.rs` traverses the mounted host's eligible
 controls for Tab/Shift+Tab across the factory boundary. A standalone `Key.Backtab`
 also requests reverse traversal without requiring the Shift modifier; unrelated
 Control/Alt/Meta combinations remain outside this Tab handler. Disabled/hidden controls,
@@ -522,8 +522,8 @@ target retains its actual mounted rectangle and enclosing Flickable viewport.
 Before assigning Tab focus, the owner applies the minimum vertical movement to
 reveal that target, clamped to the viewport's actual content bounds. This avoids
 an offscreen row's own Clip rejecting reverse focus and triggering Slint's fixed
-forward fallback. The [before trace](../validation/ui120-macos-focus-20261015/backtab-trace-before.log)
-records that local loop; the [compiled regression](../validation/ui120-macos-focus-20261015/focused-reveal-after.log)
+forward fallback. The [before trace（归档：docs/validation/ui120-macos-focus-20261015/backtab-trace-before.log）](../local-archives.md#validation-tracked-history-20261016)
+records that local loop; the [compiled regression（归档：docs/validation/ui120-macos-focus-20261015/focused-reveal-after.log）](../local-archives.md#validation-tracked-history-20261016)
 passes complete reverse traversal and exit. This uses live geometry without
 estimated row heights, extent changes or rebuilding the 20-slot message model.
 
@@ -533,7 +533,7 @@ pinned Slint FocusScope can ignore FocusOut after disabling, so clearing only in
 `focus-lost` is insufficient. A subsequent Tab must move to an eligible control
 without leaving a second focus ring on the disabled direction. The compiled
 regression inspects the actual border width, expecting zero after disabling;
-the [recorded before case](../validation/ui120-macos-focus-20261015/disabled-outline-before.log)
+the [recorded before case（归档：docs/validation/ui120-macos-focus-20261015/disabled-outline-before.log）](../local-archives.md#validation-tracked-history-20261016)
 fails with 2px rather than zero. The final native build also passes the page
 49 → Space on Next → page 50 → Tab to host sequence with only the host focus ring.
 
@@ -553,13 +553,13 @@ focus acceptance before removing the adapter.
 键盘翻页保留已挂载链接槽位的焦点，并按新内容边界显示分页栏。相邻页窗口重投影时，
 数字槽位的标签可变化，不保证焦点一直跟随同一个语义页码；Previous/Next 的方向语义
 保持不变。共享链接在键盘激活时不再次调用
-生成的 `.focus()`。`focus/navigation.rs` 按已挂载宿主顺序处理 Tab/Shift+Tab，
+生成的 `.focus()`。共享 `src/focus_navigation.rs` 按已挂载宿主顺序处理 Tab/Shift+Tab，
 独立 `Key.Backtab` 也按反向处理，不要求同时带 Shift；带 Control/Alt/Meta 的其它
 组合不进入该 Tab 处理。跨越 factory 边界时排除禁用/隐藏控件、省略号、透明或屏外
 侧栏副本。选中目标保留真实挂载矩形及所属 Flickable 视口；赋予 Tab 焦点前按最小
 垂直位移精确显示该目标，并夹紧到真实内容边界，避免离屏行自身 Clip 拒绝反向焦点后
-触发 Slint 固定向前 fallback。[修复前 trace](../validation/ui120-macos-focus-20261015/backtab-trace-before.log)
-保留了该局部循环；[compiled 回归](../validation/ui120-macos-focus-20261015/focused-reveal-after.log)
+触发 Slint 固定向前 fallback。[修复前 trace（归档：docs/validation/ui120-macos-focus-20261015/backtab-trace-before.log）](../local-archives.md#validation-tracked-history-20261016)
+保留了该局部循环；[compiled 回归（归档：docs/validation/ui120-macos-focus-20261015/focused-reveal-after.log）](../local-archives.md#validation-tracked-history-20261016)
 已通过完整反向遍历并离开 factory。该过程使用实时几何，不估算行高、不改变 extent，
 也不重建 20 个消息槽位。
 
@@ -577,7 +577,7 @@ compiled 与原生验收，再判断是否移除。
 
 ### Native regression scope / 原生回归范围
 
-The [2026-10-15 macOS record](../validation/ui120-macos-focus-20261015/README.md)
+The [2026-10-15 macOS record（归档：docs/validation/ui120-macos-focus-20261015/README.md）](../local-archives.md#validation-tracked-history-20261016)
 uses the complete application on macOS 27.0.1 arm64, Slint 1.18.1 and
 Winit/FemtoVG, with an isolated store of 1,000 synthetic messages. CUA supplies
 native input; the acceptance steps do not dispatch `WindowEvent` or invoke UI
@@ -609,7 +609,7 @@ inspected. The application minimum is 800 × 600px; forced 640px direction-only
 coverage belongs to the compiled component fixture, not an available native
 window mode. The linked record owns final build identities and executed checks.
 
-[2026-10-15 macOS 记录](../validation/ui120-macos-focus-20261015/README.md)使用完整
+[2026-10-15 macOS 记录（归档：docs/validation/ui120-macos-focus-20261015/README.md）](../local-archives.md#validation-tracked-history-20261016)使用完整
 应用、macOS 27.0.1 arm64、Slint 1.18.1 和 Winit/FemtoVG，消息与设置均在隔离目录，
 包含 1,000 条合成消息。实际输入由 CUA 提供，不通过 `WindowEvent` 或 UI callback
 代替。修复前先建立侧栏 Home 的蓝色焦点环，再点第 4 页、按 Return，重现跳 Home；

@@ -91,8 +91,23 @@ language switch, including an already-open editor and picker. / 事件/分类标
   row list per group. The editor's event Select uses the same category order and
   headings; headings are not keyboard options, and entering a group exposes its
   label to assistive technology. Unknown legacy events remain visible under Other.
-- The tab lists saved definitions with Edit/Delete icon actions. New and Edit
-  use the shared `GitHubDialog`, matching Project dialogs with a fixed footer
+- The tab lists saved definitions with Edit/Delete icon actions. A primary plus
+  button beside the search field opens a new draft; clicking a row or its Edit
+  action opens that definition. Search is trimmed and case-insensitive
+  across saved names, event IDs/localized captions, localized categories and
+  runtimes. It filters before grouping, omits empty groups, and recomputes group
+  counts/positions while retaining stable definition IDs for every action.
+  The query is local to the Settings factory, survives configuration/locale
+  refresh, and is never persisted. A locale switch reapplies the query using the
+  current captions. Unmatched searches show a localized empty state. Successful
+  creation clears the query to reveal the new definition.
+  列表工具栏采用搜索框和绿色加号；点击行主体或编辑按钮打开对应定义。
+  查询忽略首尾空白与大小写，匹配名称、事件 ID/本地化标题、分类及运行方式；
+  先筛选再分组，移除空组并重算数量与位置，所有操作仍使用定义的稳定 ID。
+  查询由 Settings factory 临时持有，不持久化；配置或语言刷新保留查询，
+  切语言后按当前文案重新筛选；无匹配时显示本地化空状态。创建成功后清空查询，
+  显示新定义。
+  New and Edit use the shared `GitHubDialog`, matching Project dialogs with a fixed footer
   and scrollable form. Cancel/Close discard unsaved drafts; Save closes only
   after successful persistence. Validation and test errors remain in the dialog.
   Busy operations disable closing; a running test can be stopped. Delete requires

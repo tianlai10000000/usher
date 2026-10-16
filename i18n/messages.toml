@@ -1,5 +1,5 @@
-# Stable semantic keys and source-language text. UI and Rust code consume the
-# keys; translators only edit locale PO files under i18n/locales/.
+# Slint-visible semantic keys and source copy, also available to Rust.
+# Rust-only messages belong in rust-messages.toml with slint = false.
 
 [[messages]]
 key = "pr_review.wants_to_merge_into"
@@ -97,123 +97,6 @@ text = "The branches changed during analysis. Refresh to load the current confli
 key = "conflicts.empty"
 text = "There are no conflicting files in this snapshot."
 
-
-[[messages]]
-key = "hooks.conclusion.success"
-text = "Succeeded"
-slint = false
-[[messages]]
-key = "hooks.conclusion.failure"
-text = "Failed"
-slint = false
-[[messages]]
-key = "hooks.conclusion.timed_out"
-text = "Timed out"
-slint = false
-[[messages]]
-key = "hooks.conclusion.start_failed"
-text = "Could not start"
-slint = false
-[[messages]]
-key = "hooks.conclusion.interrupted"
-text = "Interrupted"
-slint = false
-[[messages]]
-key = "hooks.conclusion.skipped"
-text = "Skipped"
-slint = false
-[[messages]]
-key = "hooks.error.journal"
-text = "Could not save the execution log. Check available storage and permissions."
-slint = false
-[[messages]]
-key = "hooks.error.preparation"
-text = "Could not prepare the Hook working files. Check storage and permissions."
-slint = false
-[[messages]]
-key = "hooks.error.working_directory"
-text = "The working directory is unavailable. Check that it exists and is accessible."
-slint = false
-[[messages]]
-key = "hooks.error.interpreter_start"
-text = "Could not start the interpreter. Check its executable path and permissions."
-slint = false
-[[messages]]
-key = "hooks.error.process_tree"
-text = "Could not establish process cancellation. Execution was stopped."
-slint = false
-[[messages]]
-key = "hooks.error.wait"
-text = "Could not read the interpreter exit status. See the execution log."
-slint = false
-[[messages]]
-key = "hooks.error.output_drain"
-text = "Output collection timed out. A child process may still hold an output pipe."
-slint = false
-[[messages]]
-key = "hooks.error.invalid_definition"
-text = "The Hook configuration is invalid. Review its fields before retrying."
-slint = false
-[[messages]]
-key = "hooks.error.execution"
-text = "Hook execution failed. See the execution log."
-slint = false
-[[messages]]
-key = "hooks.error.exit_code"
-text = "Interpreter exited with code {code}. See the execution log."
-slint = false
-[[messages]]
-key = "hooks.error.signal"
-text = "Interpreter stopped by signal {signal}. See the execution log."
-slint = false
-[[messages]]
-key = "hooks.error.configuration"
-text = "Could not load Hook configuration. The saved file has been preserved."
-slint = false
-[[messages]]
-key = "hooks.error.command"
-text = "The Hook operation could not be completed. See diagnostics for details."
-slint = false
-[[messages]]
-key = "hooks.error.expired"
-text = "Hook run was not found or has expired."
-slint = false
-[[messages]]
-key = "hooks.validation.invalid_id"
-text = "Invalid Hook ID."
-slint = false
-[[messages]]
-key = "hooks.validation.name_required"
-text = "Hook name is required."
-slint = false
-[[messages]]
-key = "hooks.validation.script_empty"
-text = "Hook script is empty."
-slint = false
-[[messages]]
-key = "hooks.validation.script_too_large"
-text = "Hook script exceeds 64 KiB."
-slint = false
-[[messages]]
-key = "hooks.validation.timeout_range"
-text = "Timeout must be between 1 and 3600 seconds."
-slint = false
-[[messages]]
-key = "hooks.validation.field_too_long"
-text = "Hook configuration field is too long."
-slint = false
-[[messages]]
-key = "hooks.validation.interpreter_path"
-text = "Interpreter must be one executable path."
-slint = false
-[[messages]]
-key = "hooks.validation.timeout_integer"
-text = "Timeout must be a whole number of seconds."
-slint = false
-[[messages]]
-key = "hooks.notification_body"
-text = "{event} · {status}"
-slint = false
 
 [[messages]]
 key = "hooks.runtime"
@@ -314,6 +197,14 @@ text = "Stop"
 [[messages]]
 key = "hooks.new"
 text = "New Hook"
+
+[[messages]]
+key = "hooks.search"
+text = "Search Hooks"
+
+[[messages]]
+key = "hooks.search_empty"
+text = "No matching Hooks"
 
 [[messages]]
 key = "hooks.edit"
@@ -529,6 +420,10 @@ key = "language.title"
 text = "Language"
 
 [[messages]]
+key = "settings.ai_agent.active"
+text = "Currently used AI Agent"
+
+[[messages]]
 key = "settings.ai_agent.api_key"
 text = "API key"
 
@@ -542,7 +437,7 @@ text = "Base URL"
 
 [[messages]]
 key = "settings.ai_agent.description"
-text = "Connect an OpenAI-compatible provider for workflow assistance."
+text = "Manage AI Agents, choose the active Agent, and configure request headers."
 
 [[messages]]
 key = "settings.ai_agent.model"
@@ -555,6 +450,14 @@ text = "For example: deepseek-v4-flash or gpt-4o-mini."
 [[messages]]
 key = "settings.ai_agent.model_placeholder"
 text = "Model name"
+
+[[messages]]
+key = "settings.ai_agent.name"
+text = "Agent name"
+
+[[messages]]
+key = "settings.ai_agent.name_placeholder"
+text = "Name this AI Agent"
 
 [[messages]]
 key = "settings.ai_agent.provider"
@@ -975,26 +878,6 @@ text = "Code hosting tokens could not be saved."
 [[messages]]
 key = "settings.feedback.tokens_saved"
 text = "Code hosting tokens saved."
-
-[[messages]]
-key = "settings.feedback.http_request_timeout_saved"
-text = "Request timeout saved."
-slint = false
-
-[[messages]]
-key = "settings.feedback.http_request_timeout_save_failed"
-text = "Request timeout could not be saved."
-slint = false
-
-[[messages]]
-key = "settings.feedback.default_pr_merge_method_saved"
-text = "Default PR merge method saved."
-slint = false
-
-[[messages]]
-key = "settings.feedback.default_pr_merge_method_save_failed"
-text = "Default PR merge method could not be saved."
-slint = false
 
 [[messages]]
 key = "settings.release.alpha"
@@ -1709,6 +1592,14 @@ text = "Disabled link"
 [[messages]]
 key = "ui_components.demo.underline_navigation_examples"
 text = "Underline navigation examples"
+
+[[messages]]
+key = "ui_components.demo.tabs_inset"
+text = "UnderlineNav · inset"
+
+[[messages]]
+key = "ui_components.demo.tabs_flush"
+text = "UnderlineNav · flush"
 
 [[messages]]
 key = "ui_components.demo.overview"
@@ -2547,16 +2438,6 @@ text = "Local"
 [[messages]]
 key = "workflow.show_in_file_manager"
 text = "Show in file manager"
-
-[[messages]]
-key = "workflow.show_in_finder"
-text = "Show in Finder"
-slint = false
-
-[[messages]]
-key = "workflow.show_in_explorer"
-text = "Show in Explorer"
-slint = false
 
 [[messages]]
 key = "workflow.copy_remote_url"
@@ -5518,25 +5399,137 @@ key = "tag.loading_remove_default"
 text = "Loading the latest remote Tag for the default project."
 
 [[messages]]
-key = "conflicts.copy_failed"
-text = "Failed to copy file contents. Try again."
-slint = false
-
-[[messages]]
 key = "navigation.more_tabs"
 text = "More"
 
 [[messages]]
-key = "tray.quit"
-text = "Quit"
-slint = false
+key = "ui_components.layout"
+text = "Layout"
 
 [[messages]]
-key = "tag.initialization_timeout"
-text = "Tag initialization timed out. Try again."
-slint = false
+key = "ui_components.resize.title"
+text = "Resizable panes"
 
 [[messages]]
-key = "workflow.command_rejected"
-text = "Workflow is busy or closing. Try again."
-slint = false
+key = "ui_components.resize.description"
+text = "Hover over a divider, then drag to resize the panes."
+
+[[messages]]
+key = "ui_components.resize.width"
+text = "Adjust width"
+
+[[messages]]
+key = "ui_components.resize.height"
+text = "Adjust height"
+
+[[messages]]
+key = "ui_components.resize.left_pane"
+text = "Left pane"
+
+[[messages]]
+key = "ui_components.resize.right_pane"
+text = "Right pane"
+
+[[messages]]
+key = "ui_components.resize.top_pane"
+text = "Top pane"
+
+[[messages]]
+key = "ui_components.resize.bottom_pane"
+text = "Bottom pane"
+
+[[messages]]
+key = "ui_components.resize.enabled"
+text = "Allow resizing"
+
+[[messages]]
+key = "ui_components.resize.reset"
+text = "Reset panes"
+
+[[messages]]
+key = "settings.ai_agent.add"
+text = "Add AI Agent"
+
+[[messages]]
+key = "settings.ai_agent.edit"
+text = "Edit"
+
+[[messages]]
+key = "settings.ai_agent.edit_title"
+text = "Edit AI Agent"
+
+[[messages]]
+key = "settings.ai_agent.delete_title"
+text = "Delete AI Agent"
+
+[[messages]]
+key = "settings.ai_agent.search"
+text = "Search AI Agents"
+
+[[messages]]
+key = "settings.ai_agent.empty"
+text = "No AI Agents found."
+
+[[messages]]
+key = "settings.ai_agent.active_badge"
+text = "Active"
+
+[[messages]]
+key = "settings.ai_agent.activate"
+text = "Use"
+
+[[messages]]
+key = "settings.ai_agent.total"
+text = "Total:"
+
+[[messages]]
+key = "settings.ai_agent.page_size"
+text = "10 per page"
+
+[[messages]]
+key = "settings.ai_agent.headers"
+text = "Headers"
+
+[[messages]]
+key = "settings.ai_agent.add_header"
+text = "Add Header"
+
+[[messages]]
+key = "settings.ai_agent.header_enabled"
+text = "Enable Header"
+
+[[messages]]
+key = "settings.ai_agent.header_name"
+text = "Header name"
+
+[[messages]]
+key = "settings.ai_agent.header_value"
+text = "Header value"
+
+[[messages]]
+key = "settings.ai_agent.headers_caption"
+text = "Only enabled Headers are sent. You can add up to 32 rows."
+
+[[messages]]
+key = "settings.ai_agent.api_key_caption"
+text = "Optional when custom Headers provide authentication. Otherwise used as a Bearer token."
+
+[[messages]]
+key = "settings.ai_agent.header_rows_mode"
+text = "Key/value"
+
+[[messages]]
+key = "settings.ai_agent.header_object_mode"
+text = "JS object"
+
+[[messages]]
+key = "settings.ai_agent.header_object_caption"
+text = "Enter a flat object with string values, or string arrays for repeated Headers. Disabled rows are retained when switching modes."
+
+[[messages]]
+key = "settings.ai_agent.header_object_input"
+text = "Header object"
+
+[[messages]]
+key = "settings.ai_agent.delete_active_disabled"
+text = "The current AI Agent cannot be deleted."

@@ -1,5 +1,8 @@
 #![cfg(feature = "ui-components")]
 
+#[path = "support/ui_components.rs"]
+mod playground;
+
 use std::time::Duration;
 
 use i_slint_backend_testing::ElementHandle;
@@ -11,44 +14,45 @@ fn settle() {
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
 }
 
+#[track_caller]
 fn find(window: &MainWindow, id: &str) -> ElementHandle {
-    ElementHandle::find_by_element_id(window, id)
-        .next()
-        .unwrap_or_else(|| panic!("missing {id}"))
+    match ElementHandle::find_by_element_id(window, id).next() {
+        Some(element) => element,
+        None => panic!("missing {id}"),
+    }
 }
 
 #[test]
 fn notification_menu_escapes_showcase_sections_and_tracks_viewport() {
     i_slint_backend_testing::init_no_event_loop();
     let window = MainWindow::new().unwrap();
+    playground::install(&window);
     usher_lib::install_floating_overlay_positioning(&window);
     window.set_show_navigation_drawer(false);
     window.set_platform_is_macos(false);
     window.set_current_route(Route::UiComponents);
-    window.window().dispatch_event(WindowEvent::Resized {
-        size: LogicalSize::new(1000.0, 800.0),
-    });
+    window.window().set_size(LogicalSize::new(1000.0, 800.0));
     slint::select_bundled_translation("en").unwrap();
     settle();
     ElementHandle::find_by_element_type_name(&window, "GitHubLink")
         .find(|link| link.accessible_label().as_deref() == Some("Communication"))
         .unwrap()
         .mock_single_click(PointerEventButton::Left);
-    let scroll = find(&window, "MainWindow::page-scroll-view");
-    for _ in 0..20 {
-        if ElementHandle::find_by_element_id(&window, "GitHubNotificationBanner::queue-menu-button")
-            .next()
-            .is_some()
-        {
-            break;
-        }
-        scroll.scroll(0.0, -200.0);
-        settle();
-    }
+    let scroll = playground::document(&window);
+    playground::reveal(
+        &window,
+        &scroll,
+        "GitHubNotificationBanner::queue-menu-button",
+    );
 
     for (locale, dismiss_label) in [("en", "Dismiss all"), ("zh-CN", "关闭全部通知")] {
         slint::select_bundled_translation(locale).unwrap();
-        let trigger = find(&window, "GitHubNotificationBanner::queue-menu-button");
+        settle();
+        let trigger = playground::reveal(
+            &window,
+            &scroll,
+            "GitHubNotificationBanner::queue-menu-button",
+        );
         scroll.scroll(0.0, 400.0 - trigger.absolute_position().y);
         settle();
         let trigger = find(&window, "GitHubNotificationBanner::queue-menu-button");
@@ -163,9 +167,22 @@ fn notification_menu_escapes_showcase_sections_and_tracks_viewport() {
     let menu = find(&window, "GitHubUiComponentsOverlay::notification-menu");
     assert_eq!(menu.size().height, 80.0);
     assert!(menu.absolute_position().y + menu.size().height <= 800.0);
-    window.window().dispatch_event(WindowEvent::Resized {
-        size: LogicalSize::new(760.0, 760.0),
-    });
+    window.window().set_size(LogicalSize::new(760.0, 760.0));
+    settle();
+    assert!(
+        ElementHandle::find_by_element_id(&window, "GitHubUiComponentsOverlay::notification-menu")
+            .next()
+            .is_none(),
+        "responsive reflow moved the old notification anchor outside the viewport"
+    );
+    let trigger = playground::reveal(
+        &window,
+        &scroll,
+        "GitHubNotificationBanner::queue-menu-button",
+    );
+    scroll.scroll(0.0, 660.0 - trigger.absolute_position().y);
+    settle();
+    trigger.mock_single_click(PointerEventButton::Left);
     settle();
     let menu = find(&window, "GitHubUiComponentsOverlay::notification-menu");
     assert!(menu.absolute_position().x >= 0.0);

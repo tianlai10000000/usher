@@ -62,11 +62,18 @@ export component GitHubDialog inherits FocusScope {
     private property <length> footer-height: root.show-footer ? 64px : 0px;
     private property <bool> narrow-fullscreen:
         root.fullscreen-on-narrow && root.viewport-width < GitHubMetrics.breakpoint-small;
-    out property <length> content-x: dialog-surface.x + root.body-padding;
-    out property <length> content-y: dialog-surface.y + root.header-height + root.body-padding;
-    out property <length> content-width: dialog-surface.width - root.body-padding * 2;
-    out property <length> content-height: dialog-surface.height
-        - root.header-height - root.footer-height - root.body-padding * 2;
+    // Scroll viewports use the entire body between the chrome dividers.
+    // Apply body-padding inside their scrolling content; an inset viewport
+    // would leave fixed blank strips that hide content during scrolling.
+    out property <length> body-x: dialog-surface.x;
+    out property <length> body-y: dialog-surface.y + root.header-height;
+    out property <length> body-width: dialog-surface.width;
+    out property <length> body-height: dialog-surface.height - root.header-height - root.footer-height;
+    // Static bodies retain the padded safe-area geometry.
+    out property <length> content-x: root.body-x + root.body-padding;
+    out property <length> content-y: root.body-y + root.body-padding;
+    out property <length> content-width: root.body-width - root.body-padding * 2;
+    out property <length> content-height: root.body-height - root.body-padding * 2;
 
     // Primer Dialog dismisses on Esc unless the caller opts into a hard-modal
     // session (unsaved forms, blocking progress, or DialogManager.modal).

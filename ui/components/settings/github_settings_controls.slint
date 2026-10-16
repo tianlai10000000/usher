@@ -80,7 +80,8 @@ export component GitHubSettingsSectionMenuButton inherits Rectangle {
         mouse-cursor: pointer;
         clicked => {
             root.keyboard-focus-visible = false;
-            menu-focus.focus();
+            // The popup takes focus when it opens. Pre-focusing a clipped
+            // trigger would reveal it and move its scrolling document.
             root.clicked();
         }
     }
@@ -344,6 +345,8 @@ export component GitHubButton inherits Rectangle {
 }
 
 export component GitHubToggle inherits Rectangle {
+    out property <bool> has-hover: toggle-touch.has-hover;
+    out property <bool> tooltip-focus: toggle-focus.has-focus && root.keyboard-focus-visible;
     // Host state is authoritative so external actions such as "Disable all"
     // cannot leave the switch's visual state behind.
     in property <bool> checked: false;
@@ -434,7 +437,7 @@ export component GitHubToggle inherits Rectangle {
             : GitHubTheme.fg-muted;
     }
 
-    TouchArea {
+    toggle-touch := TouchArea {
         width: 100%;
         height: 100%;
         enabled: root.interactive;

@@ -1,7 +1,8 @@
 import { AppState, LanguageOption } from "../state/app_state.slint";
-export { AppState, LanguageOption } from "../state/app_state.slint";
+export { AppState, LanguageOption, AiAgentListItem, AiAgentHeaderItem } from "../state/app_state.slint";
 import { I18n } from "@i18n";
 import { GitHubScrollView } from "../components/github_scroll_view.slint";
+import { GitHubToast } from "../components/toast/toast.slint";
 import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
 import { GitHubTooltipOverlayHost } from "../components/github_tooltip_overlay.slint";
 import { TooltipOverlayState } from "../state/tooltip_overlay_state.slint";
@@ -13,6 +14,12 @@ import {
     GitHubSettingsSectionMenuButton
 } from "../components/settings/github_settings_controls.slint";
 import { GitHubSettingsPane } from "../components/settings/github_settings_layout.slint";
+import { GitHubFixedThreeTabsOverflowPopup } from "../components/navigation/github_fixed_tabs.slint";
+import { GitHubAiAgentEditorDialog, GitHubAiAgentEditorProviderOverlay } from "../components/settings/github_ai_agent_editor.slint";
+import { GitHubAiAgentDeleteDialog } from "../components/settings/github_ai_agent_delete.slint";
+import { GitHubAiAgentTooltipOverlay, AgentTooltipState } from "../components/settings/github_ai_agent_tooltip.slint";
+export { AgentTooltipState, AgentTooltipKind } from "../components/settings/github_ai_agent_tooltip.slint";
+export { AgentHeaderTooltipState } from "../components/settings/github_ai_agent_header_tooltip.slint";
 import { GitHubDefaultPrMergeSettingsOverlay } from "../components/settings/github_request_settings.slint";
 import { ManifestInterfaceLanguagePickerOverlay, ManifestReplyLanguagePickerOverlay } from "@language-picker";
 import { GitHubSelectState, GitHubSelectPopup, GitHubSelectOption } from "../components/input/github_select.slint";
@@ -40,6 +47,7 @@ export component GitHubSettingsPage inherits Window {
     in property <bool> route-active: true;
     changed route-active => {
         if !root.route-active {
+            AgentTooltipState.dismiss();
             HookTooltipState.dismiss();
             TooltipOverlayState.dismiss-all();
             GitHubSelectState.close(false);
@@ -64,15 +72,21 @@ export component GitHubSettingsPage inherits Window {
         HookSettingsState.dialog-mode = "";
     }
     private property <bool> hook-dialog-open:
-        root.route-active && HookSettingsState.dialog-mode != "";
-    changed hook-dialog-open => { HookTooltipState.dismiss(); root.hook-dialog-visibility-changed(root.hook-dialog-open); }
+        root.route-active && (HookSettingsState.dialog-mode != ""
+            || AppState.ai-agent-editor-open || AppState.ai-agent-delete-confirm-open);
+    out property <bool> ai-agent-list-active:
+        root.route-active && root.selected-section == 2 && !root.hook-dialog-open;
+    changed ai-agent-list-active => {
+        if !root.ai-agent-list-active { AppState.cancel-ai-agent-list-test(); }
+    }
+    changed hook-dialog-open => { AgentTooltipState.dismiss(); HookTooltipState.dismiss(); root.hook-dialog-visibility-changed(root.hook-dialog-open); }
     callback check-update();
     callback simulate-crash();
     callback open-log-directory();
     callback export-diagnostics();
     callback dismiss-select();
     callback select-pointer-released(length, length);
-    dismiss-select => { GitHubSelectState.close(false); }
+    dismiss-select => { AgentTooltipState.dismiss(); GitHubSelectState.close(false); }
     select-pointer-released(x, y) => {
         GitHubSelectState.pointer-released(
             x + root.absolute-position.x, y + root.absolute-position.y);
@@ -123,8 +137,12 @@ export component GitHubSettingsPage inherits Window {
     private property <bool> initial-tab-sync-pending: true;
     private property <bool> compact-navigation-open:
         GitHubSelectState.open && GitHubSelectState.owner == "settings-section";
-    private property <length> page-gutter: root.viewport-width >= 1000px ? 48px : 16px;
-    private property <length> available-width: max(0px, root.viewport-width - root.page-gutter * 2);
+    // The shell may retain its wider page geometry while the sidebar moves.
+    // The factory must still fit inside the window at its live host origin.
+    private property <length> content-viewport-width:
+        min(root.viewport-width, max(0px, root.window-width - root.content-origin-x));
+    private property <length> page-gutter: root.content-viewport-width >= 1000px ? 48px : 16px;
+    private property <length> available-width: max(0px, root.content-viewport-width - root.page-gutter * 2);
     private property <length> page-width: min(1120px, root.available-width);
     private property <bool> compact-layout: root.page-width < 768px;
     private property <length> nav-width: 180px;
@@ -132,15 +150,18 @@ export component GitHubSettingsPage inherits Window {
     private property <length> section-scroll-offset: settings-title.preferred-height + page-column.spacing;
 
     changed selected-section => {
+        AgentTooltipState.dismiss(); HookTooltipState.dismiss();
         GitHubSelectState.open = false;
         if !root.compact-layout {
             settings-scroll.viewport_y = -root.section-scroll-offset;
         }
     }
-    changed viewport-width => { GitHubSelectState.open = false; }
-    changed viewport-height => { GitHubSelectState.open = false; }
-    changed window-width => { GitHubSelectState.close(false); }
-    changed window-height => { GitHubSelectState.close(false); }
+    changed viewport-width => { AgentTooltipState.dismiss(); GitHubSelectState.open = false; }
+    changed viewport-height => { AgentTooltipState.dismiss(); GitHubSelectState.open = false; }
+    changed window-width => { AgentTooltipState.dismiss(); GitHubSelectState.close(false); }
+    changed window-height => { AgentTooltipState.dismiss(); GitHubSelectState.close(false); }
+    changed content-origin-x => { AgentTooltipState.dismiss(); }
+    changed content-origin-y => { AgentTooltipState.dismiss(); }
 
     changed route-entry-revision => {
         draft-reset-focus.focus();
@@ -175,10 +196,10 @@ export component GitHubSettingsPage inherits Window {
     settings-scroll := GitHubScrollView {
         x: root.content-origin-x;
         y: root.content-origin-y;
-        width: root.viewport-width;
+        width: root.content-viewport-width;
         height: root.viewport-height;
         viewport_x: 0px;
-        changed viewport_y => { GitHubSelectState.open = false; }
+        changed viewport_y => { AgentTooltipState.dismiss(); GitHubSelectState.open = false; }
 
         content-host := Rectangle {
             width: settings-scroll.visible_width;
@@ -438,7 +459,7 @@ export component GitHubSettingsPage inherits Window {
         option-count: 6;
         viewport-x: root.content-origin-x;
         viewport-y: root.content-origin-y;
-        viewport-width: root.viewport-width;
+        viewport-width: root.content-viewport-width;
         viewport-height: root.viewport-height;
         selected(index) => {
             root.selected-section = index;
@@ -488,6 +509,19 @@ export component GitHubSettingsPage inherits Window {
         }
     }
 
+    // Each provider group owns fixed overflow leaves, outside scrolling and
+    // without sharing label-bearing delegates with the other group.
+    GitHubFixedThreeTabsOverflowPopup {
+        z: 7900;
+        navigation-owner: "settings-hosting-provider";
+        first-item: { label: "Gitee" };
+        second-item: { label: "GitHub" };
+        third-item: { label: "GitLab" };
+        viewport-x: root.content-origin-x;
+        viewport-y: root.content-origin-y;
+        viewport-width: root.content-viewport-width;
+        viewport-height: root.viewport-height;
+    }
     GitHubHookDialog {
         x: 0px; y: 0px; width: root.width; height: root.height; z: 8000;
         route-active: root.route-active;
@@ -496,22 +530,33 @@ export component GitHubSettingsPage inherits Window {
         z: 9000;
         viewport-x: root.content-origin-x;
         viewport-y: root.content-origin-y;
-        viewport-width: root.viewport-width;
+        viewport-width: root.content-viewport-width;
         viewport-height: root.viewport-height;
+    }
+    GitHubAiAgentEditorDialog {
+        x: 0px; y: 0px; width: root.width; height: root.height; z: 8000;
+        route-active: root.route-active;
+    }
+    GitHubAiAgentDeleteDialog {
+        x: 0px; y: 0px; width: root.width; height: root.height; z: 8000;
+        route-active: root.route-active;
+    }
+    GitHubAiAgentEditorProviderOverlay {
+        z: 9000;
+        viewport-width: root.width;
+        viewport-height: root.height;
     }
     ManifestInterfaceLanguagePickerOverlay {
         z: 9000;
         viewport-x: root.content-origin-x;
         viewport-y: root.content-origin-y;
-        viewport-width: root.viewport-width;
+        viewport-width: root.content-viewport-width;
         viewport-height: root.viewport-height;
     }
     ManifestReplyLanguagePickerOverlay {
         z: 9000;
-        viewport-x: root.content-origin-x;
-        viewport-y: root.content-origin-y;
-        viewport-width: root.viewport-width;
-        viewport-height: root.viewport-height;
+        viewport-width: root.width;
+        viewport-height: root.height;
     }
     GitHubHookSettingsOverlay {
         width: parent.width;
@@ -519,8 +564,24 @@ export component GitHubSettingsPage inherits Window {
         z: 9000;
         page-viewport-x: root.content-origin-x;
         page-viewport-y: root.content-origin-y;
-        page-viewport-width: root.viewport-width;
+        page-viewport-width: root.content-viewport-width;
         page-viewport-height: root.viewport-height;
+    }
+
+    agent-list-toast := GitHubToast {
+        x: root.content-origin-x; y: root.content-origin-y;
+        width: root.content-viewport-width; height: root.viewport-height; z: 9500;
+        message: AppState.ai-agent-list-feedback;
+        type: AppState.ai-agent-list-feedback-success ? "success" : "error";
+        position: "bottom"; overlay: false;
+        toast-visible: root.ai-agent-list-active && AppState.ai-agent-list-feedback-open
+            && AppState.ai-agent-list-feedback != "";
+        dismiss => { AppState.ai-agent-list-feedback-open = false; }
+    }
+    Timer {
+        interval: 3000ms;
+        running: AppState.ai-agent-list-feedback-open && root.ai-agent-list-active;
+        triggered => { AppState.ai-agent-list-feedback-open = false; }
     }
 
     // Settings is also an independent ComponentFactory/global graph. Mount a
@@ -532,4 +593,10 @@ export component GitHubSettingsPage inherits Window {
         z: 10000;
     }
     GitHubHookTooltipOverlay { x: 0px; y: 0px; width: root.width; height: root.height; z: 10001; }
+    agent-tooltip := GitHubAiAgentTooltipOverlay {
+        x: 0px; y: 0px; width: root.width; height: root.height; z: 10002;
+        tooltip-enabled: root.ai-agent-list-active;
+        anchor-viewport: { x: root.content-origin-x, y: root.content-origin-y,
+            width: root.content-viewport-width, height: root.viewport-height };
+    }
 }

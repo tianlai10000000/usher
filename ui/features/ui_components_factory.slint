@@ -1,0 +1,24 @@
+import { Route } from "../route/routeMap.slint";
+
+export global UiComponentsFeature {
+    out property <bool> enabled: true;
+    out property <bool> independent: true;
+}
+
+// Keep the root UI contract stable while excluding the real showcase import
+// graph. The feature-owned factory supplies the active route's actual content.
+export component UiComponentsPage inherits Rectangle {
+    in property <length> viewport-height;
+    in property <length> viewport-global-x;
+    in property <length> viewport-global-y;
+    in property <length> viewport-width;
+    callback navigate(Route);
+    callback open-artifact-preview-fixture(string);
+    callback scroll-to-section(length);
+}
+export component UiComponentsOverlay inherits Rectangle {
+    in property <length> viewport-x;
+    in property <length> viewport-y;
+    in property <length> viewport-width;
+    in property <length> viewport-height;
+}

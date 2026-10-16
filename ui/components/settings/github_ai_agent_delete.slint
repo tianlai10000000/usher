@@ -1,0 +1,26 @@
+import { AppState } from "../../state/app_state.slint";
+import { I18n } from "@i18n";
+import { GitHubTheme } from "../../theme/github_theme.slint";
+import { GitHubDialog } from "../dialog/github_dialog.slint";
+
+export component GitHubAiAgentDeleteDialog inherits Rectangle {
+    in property <bool> route-active: true;
+    frame := GitHubDialog {
+        dialog-visible: root.route-active && AppState.ai-agent-delete-confirm-open;
+        title: I18n.settings-ai-agent-delete-title;
+        dialog-width: 480px; dialog-height: 260px;
+        primary-label: I18n.common-delete; primary-danger: true;
+        close-enabled: !AppState.ai-agent-editor-busy;
+        primary-enabled: !AppState.ai-agent-editor-busy;
+        primary-busy: AppState.ai-agent-editor-busy;
+        close-requested => { AppState.cancel-delete-ai-agent(); }
+        cancel-clicked => { AppState.cancel-delete-ai-agent(); }
+        primary-clicked => { AppState.confirm-delete-ai-agent(); }
+        Text {
+            x: frame.content-x; y: frame.content-y; width: frame.content-width;
+            text: AppState.ai-agent-delete-message;
+            font-size: 14px; color: GitHubTheme.fg-default;
+            wrap: word-wrap; line-height-factor: 1.2;
+        }
+    }
+}

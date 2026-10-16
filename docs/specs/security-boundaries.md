@@ -27,6 +27,7 @@ User-authored Hook scripts retain their explicit opt-in contract in [Hooks](hook
 | Redirects and diagnostics / 重定向与诊断 | `request_has_credentials`, `HttpClient::client_for_request`, `redacted_url` and `HttpError` formatting in `src/http/mod.rs`; `redirect_policy_tests.rs` and `privacy_tests.rs` beside it |
 | Download handles / 下载句柄 | `DownloadArchive::create_in` / `reader`; tests in `src/update/download_archive.rs` cover cleanup and substituted Unix pathnames |
 | Process/path arguments / 进程与路径参数 | `executable_restart_command` in `src/update/updater.rs`, `windows_file_open_command` in `src/platform/mod.rs`; argument-construction controls and a real Unix restart-argument fixture |
+| AI Agent custom Headers / 自定义 Header | `src/ai/request_headers.rs`, `src/settings/ai_agents.rs`; `request_headers_tests.rs` covers disabled/invalid rows, Header-only authentication, redacted diagnostics and same-origin redirects / 覆盖禁用/无效行、Header-only 鉴权、诊断脱敏与同 origin 重定向 |
 | HTTP ownership / HTTP 职责 | `scripts/check-architecture-structure.sh`, positive/negative fixtures in `scripts/tests/test_architecture_checks.py` |
 | Preview file growth / Preview 文件增长 | `crates/usher-preview/src/file_source/tests.rs`: growth after metadata, one overflow byte, exact-limit and ordinary controls, path replacement and Unix FIFO |
 
@@ -56,6 +57,19 @@ below explicit; no clean gate certifies all credential mechanisms or processes.
   port changes. Anonymous requests retain normal redirects for CDN downloads.
 - New credential mechanisms must extend this classification or mark custom header
   values sensitive. The query-key list is not a universal secret detector.
+- AI Agent custom Header values are always sensitive, regardless of their names.
+  Enabled rows are validated before requests; disabled rows are not transmitted.
+  Explicit Authorization overrides default Bearer authentication, and Header-only
+  authentication is allowed with at least one enabled nonempty value. Transport-owned
+  names and CR/LF injection are rejected. Never expose raw header values through
+  Debug, transport/decode diagnostics, editor feedback, or cross-origin redirects.
+  Header object mode is a bounded data-only parser, never JavaScript evaluation.
+  Invalid active Object input cannot admit Save or Test. Switching to Key/Value
+  may park that raw source only in the editor while preserving the row draft;
+  valid active rows remain usable, and inactive raw text is never persisted or
+  transmitted. Object re-entry revalidates it; real row edits supersede it and
+  closing/resetting the editor clears it. Parse/validation errors expose semantic
+  feedback without raw values.
 
 - Provider 识别不等于允许发送凭据。GitLab 全局 Token 只能发往
   `https://gitlab.com`（有效端口 443）或 GitLab 设置中显式配置的精确 origin；
@@ -68,6 +82,14 @@ below explicit; no clean gate certifies all credential mechanisms or processes.
   时先失败再发送，不接触目标，协议降级和端口变化同样拒绝；匿名 CDN 下载仍可跳转。
 - 新增凭据机制时必须同步识别规则或把自定义 Header value 标为敏感。query key
   列表不保证识别所有任意命名的秘密。
+- AI Agent 自定义 Header 值不论名称都标记为敏感。请求前验证启用行，禁用行不发送；
+  显式 Authorization 覆盖默认 Bearer，至少一条启用非空值可使用 Header-only 鉴权。
+  Transport 专有名称与 CR/LF 注入在本地拒绝。Debug、底层传输/解码诊断、编辑器反馈
+  及跨 origin 重定向均不得泄漏原始 Header 值。
+  Header 对象模式只解析有界数据，不执行 JavaScript；当前 Object 无效时不能准入
+  Save/Test。切回 Key/Value 可在编辑器暂存原文并保留表格草稿，有效的当前表格仍可
+  使用，非当前原文不落盘或发送。重进对象时重验，真实行编辑覆盖暂存原文，关闭/
+  重置编辑器清空原文。解析/校验错误只显示语义反馈，不回显原始值。
 
 ## Diagnostic exits / 诊断出口
 

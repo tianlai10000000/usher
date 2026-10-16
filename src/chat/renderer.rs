@@ -138,6 +138,7 @@ impl ChatMessageRenderer {
 
         match source.role {
             StoredMessageRole::User => ChatMessage {
+                agent_label: "".into(),
                 id,
                 role: MessageRole::User,
                 status: MessageStatus::Normal,
@@ -152,6 +153,12 @@ impl ChatMessageRenderer {
                 let (stored_status, display_content) = assistant_display(source);
                 let rendered = self.assistant_projection(source);
                 ChatMessage {
+                    agent_label: source
+                        .agent
+                        .as_ref()
+                        .map(|identity| identity.label())
+                        .unwrap_or_default()
+                        .into(),
                     id,
                     role: MessageRole::Assistant,
                     status: message_status_for_ui(stored_status),
@@ -172,6 +179,7 @@ impl ChatMessageRenderer {
 
     fn loading_placeholder() -> ChatMessage {
         ChatMessage {
+            agent_label: "".into(),
             id: LOADING_PLACEHOLDER_ID,
             role: MessageRole::Assistant,
             status: MessageStatus::Normal,
@@ -355,6 +363,7 @@ mod tests {
 
     fn message(content: impl Into<String>) -> StoredChatMessage {
         StoredChatMessage {
+            agent: None,
             id: 1,
             role: StoredMessageRole::Assistant,
             status: StoredMessageStatus::Normal,
@@ -370,6 +379,21 @@ mod tests {
         let (status, content) = assistant_display(&message);
         assert_eq!(status, StoredMessageStatus::Error);
         assert_eq!(content, "connection failed");
+    }
+
+    #[test]
+    fn assistant_history_retains_captured_agent_and_model_names() {
+        let mut source = message("answer");
+        source.agent = Some(crate::ai::identity::AgentIdentity {
+            name: "My Reviewer".into(),
+            provider: "deepseek".into(),
+            model: "captured-model".into(),
+        });
+        let restored: StoredChatMessage =
+            serde_json::from_str(&serde_json::to_string(&source).unwrap()).unwrap();
+        let row = ChatMessageRenderer::new().render_single(&restored);
+        assert_eq!(row.agent_label, "My Reviewer · captured-model");
+        assert_eq!(row.content, "answer");
     }
 
     #[test]

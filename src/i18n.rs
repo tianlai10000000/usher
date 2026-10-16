@@ -215,6 +215,8 @@ pub(crate) fn tr_args(key: &str, arguments: &[(&str, &str)]) -> String {
 mod tests {
     use super::*;
     use i_slint_backend_testing::ElementHandle;
+    #[cfg(all(feature = "ui-components", not(feature = "live-preview")))]
+    use slint::ComponentHandle;
     use usher_messages::AppState as MessagesAppState;
     use usher_ui_settings::{AppState as SettingsAppState, GitHubSettingsPage};
 
@@ -261,8 +263,17 @@ mod tests {
         let window = MainWindow::new().expect("main window");
         let settings = GitHubSettingsPage::new().expect("settings page");
         let messages = usher_messages::GitHubMessagesPage::new().expect("messages page");
+        #[cfg(all(feature = "ui-components", not(feature = "live-preview")))]
+        let gallery = usher_ui_components::GitHubUiComponentsWindow::new().expect("gallery page");
 
         apply_preference(usher_i18n::source_locale().id).expect("select source language");
+        #[cfg(all(feature = "ui-components", not(feature = "live-preview")))]
+        assert_eq!(
+            gallery
+                .global::<usher_ui_components::AppState>()
+                .get_i18n_catalog_sentinel(),
+            usher_i18n::translate_for(usher_i18n::source_locale().id, "language.title")
+        );
         sync_main_window(&window, usher_i18n::source_locale().id);
         assert_eq!(
             window.get_workflow_pr_list_compact_text_offset_y(),
@@ -300,6 +311,14 @@ mod tests {
                 expected
             );
 
+            #[cfg(all(feature = "ui-components", not(feature = "live-preview")))]
+            assert_eq!(
+                gallery
+                    .global::<usher_ui_components::AppState>()
+                    .get_i18n_catalog_sentinel(),
+                expected,
+                "gallery factory must share the complete UI catalog ordering"
+            );
             let settings_title = usher_i18n::translate_for(locale.id, "settings.title");
             assert!(
                 ElementHandle::find_by_accessible_label(&settings, settings_title.as_ref())

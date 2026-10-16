@@ -124,7 +124,10 @@ fn request(number: &str) -> PendingReviewRequest {
         source_branch: "feature".into(),
         target_branch: "main".into(),
         updated_at: "2026-10-15T00:00:00Z".into(),
-        model_name: "Fixture".into(),
+        profile: crate::settings::AiAgentProfile::from(crate::settings::AiAgentSettings {
+            model: "Fixture".into(),
+            ..Default::default()
+        }),
         extra_requirements: String::new(),
     }
 }

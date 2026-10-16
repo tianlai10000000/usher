@@ -4,7 +4,7 @@
 
 后续第 6 批结构治理见 [结构清理记录](structure-cleanup-20261014.md)，本文保留批次 1–5 当时的验证结果。
 
-本文是历史记录；当前约束见 [安全边界](../../specs/security-boundaries.md)、[HTTP 管线](../../specs/http.md) 和 [AGENTS.md](../../../AGENTS.md)。小型原始证据统一保存于 [raw-evidence.txt](../../validation/security-maintenance-20261014/raw-evidence.txt)，每段保留来源文件名，excerpt 是原文摘录。没有保存真实配置、凭据或完整库测试日志。
+本文是历史记录；当前约束见 [安全边界](../../specs/security-boundaries.md)、[HTTP 管线](../../specs/http.md) 和 [AGENTS.md](../../../AGENTS.md)。小型原始证据统一保存于 [raw-evidence.txt（归档：docs/validation/security-maintenance-20261014/raw-evidence.txt）](../../local-archives.md#validation-tracked-history-20261016)，每段保留来源文件名，excerpt 是原文摘录。没有保存真实配置、凭据或完整库测试日志。
 
 ## 批次 1：凭据目标与重定向
 

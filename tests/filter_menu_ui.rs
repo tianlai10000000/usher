@@ -1,5 +1,8 @@
 #![cfg(feature = "ui-components")]
 
+#[path = "support/ui_components.rs"]
+mod playground;
+
 use i_slint_backend_testing::ElementHandle;
 use slint::platform::{Key, PointerEventButton, WindowEvent};
 use slint::{ComponentHandle, LogicalSize};
@@ -22,33 +25,24 @@ fn find(window: &MainWindow, id: &str) -> ElementHandle {
 fn bordered_select_menu_floats_tracks_and_avoids_edges() {
     i_slint_backend_testing::init_no_event_loop();
     let window = MainWindow::new().unwrap();
+    playground::install(&window);
     usher_lib::install_floating_overlay_positioning(&window);
     window.set_show_navigation_drawer(false);
     window.set_platform_is_macos(false);
     window.set_current_route(Route::UiComponents);
-    window.window().dispatch_event(WindowEvent::Resized {
-        size: LogicalSize::new(1000.0, 800.0),
-    });
+    window.window().set_size(LogicalSize::new(1000.0, 800.0));
     slint::select_bundled_translation("en").unwrap();
     settle();
     ElementHandle::find_by_element_type_name(&window, "GitHubLink")
         .find(|link| link.accessible_label().as_deref() == Some("Selection"))
         .unwrap()
         .mock_single_click(PointerEventButton::Left);
-    let scroll = find(&window, "MainWindow::page-scroll-view");
-    for _ in 0..20 {
-        if ElementHandle::find_by_element_id(
-            &window,
-            "GitHubUiComponentsGallery::status-filter-button",
-        )
-        .next()
-        .is_some()
-        {
-            break;
-        }
-        scroll.scroll(0.0, -200.0);
-        settle();
-    }
+    let scroll = playground::document(&window);
+    playground::reveal(
+        &window,
+        &scroll,
+        "GitHubUiComponentsGallery::status-filter-button",
+    );
     let trigger = find(&window, "GitHubUiComponentsGallery::status-filter-button");
     scroll.scroll(0.0, 300.0 - trigger.absolute_position().y);
     settle();
@@ -81,7 +75,19 @@ fn bordered_select_menu_floats_tracks_and_avoids_edges() {
     );
     assert!(menu.absolute_position().y + menu.size().height > sample_position.y);
     for (locale, label) in [("en", "Archived"), ("zh-CN", "已归档")] {
+        trigger.mock_single_click(PointerEventButton::Left);
+        settle();
         slint::select_bundled_translation(locale).unwrap();
+        settle();
+        playground::reveal(
+            &window,
+            &scroll,
+            "GitHubUiComponentsGallery::status-filter-button",
+        );
+        // Locale changes may rewrap prose. Compare menu opening against the
+        // closed section in that same locale, retaining the no-growth check.
+        let section_size = section.size();
+        trigger.mock_single_click(PointerEventButton::Left);
         settle();
         assert!(
             ElementHandle::find_by_accessible_label(&window, label)
@@ -131,9 +137,22 @@ fn bordered_select_menu_floats_tracks_and_avoids_edges() {
     settle();
     let menu = find(&window, "GitHubUiComponentsOverlay::filter-menu");
     assert!(menu.absolute_position().y + menu.size().height <= trigger.absolute_position().y - 4.0);
-    window.window().dispatch_event(WindowEvent::Resized {
-        size: LogicalSize::new(760.0, 760.0),
-    });
+    window.window().set_size(LogicalSize::new(760.0, 760.0));
+    settle();
+    assert!(
+        ElementHandle::find_by_element_id(&window, "GitHubUiComponentsOverlay::filter-menu")
+            .next()
+            .is_none(),
+        "responsive reflow moved the old anchor outside the viewport"
+    );
+    playground::reveal(
+        &window,
+        &scroll,
+        "GitHubUiComponentsGallery::status-filter-button",
+    );
+    scroll.scroll(0.0, 300.0 - trigger.absolute_position().y);
+    settle();
+    trigger.mock_single_click(PointerEventButton::Left);
     settle();
     let menu = find(&window, "GitHubUiComponentsOverlay::filter-menu");
     assert!(menu.absolute_position().x >= 0.0);
@@ -149,9 +168,7 @@ fn bordered_select_menu_floats_tracks_and_avoids_edges() {
     );
     // Crossing the form's compact breakpoint moves the trigger. Reopen only
     // after bringing that new trigger geometry back into the visible viewport.
-    window.window().dispatch_event(WindowEvent::Resized {
-        size: LogicalSize::new(600.0, 760.0),
-    });
+    window.window().set_size(LogicalSize::new(600.0, 760.0));
     settle();
     scroll.scroll(0.0, 300.0 - trigger.absolute_position().y);
     settle();

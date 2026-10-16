@@ -3,6 +3,9 @@ import { I18n } from "@i18n";
 import { GitHubCounterLabel } from "../label/github_counter_label.slint";
 import { GitHubSelectState, GitHubSelectPopup, GitHubSelectOption } from "../input/github_select.slint";
 
+// Primer's flush variant aligns section tabs with their surrounding content.
+export enum GitHubUnderlineNavVariant { inset, flush }
+
 export struct GitHubTabItem {
     label: string,
     icon: image,
@@ -200,7 +203,8 @@ export component GitHubUnderlineNavItem inherits FocusScope {
 // Shared Primer UnderlineNav/UnderlinePanels tab-list shell. The baseline
 // belongs to the complete list rather than an individual item, so it always
 // spans the available container width. The content inset and explicit gap
-// match GitHub's compact tab rows without pinning edge items to the surface.
+// match GitHub's compact tab rows. Flush rows let the parent own the gutters;
+// individual items retain their internal padding and focus/hit geometry.
 export component GitHubUnderlineNav inherits Rectangle {
     in property <string> owner;
     in property <[GitHubTabItem]> items;
@@ -208,7 +212,9 @@ export component GitHubUnderlineNav inherits Rectangle {
     in property <int> count-limit: 99;
     in property <string> group-label;
     in property <bool> show-bottom-border: true;
-    in property <length> content-inset: GitHubMetrics.size-16;
+    in property <GitHubUnderlineNavVariant> variant: inset;
+    in property <length> content-inset:
+        root.variant == GitHubUnderlineNavVariant.flush ? 0px : GitHubMetrics.size-16;
     in property <length> item-spacing: GitHubMetrics.size-4;
     callback selected(int);
     out property <length> natural-width: tabs.preferred-width + 2 * root.content-inset;
@@ -229,6 +235,7 @@ export component GitHubUnderlineNav inherits Rectangle {
         }
     }
     changed width => { if root.menu-open { GitHubSelectState.close(false); } }
+    changed content-inset => { if root.menu-open { GitHubSelectState.close(false); } }
     changed items => { if root.menu-open { GitHubSelectState.close(false); } }
     changed menu-open => {
         if !root.menu-open && GitHubTabOverflowState.owner == root.owner

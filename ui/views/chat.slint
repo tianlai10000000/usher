@@ -1,3 +1,4 @@
+import { GitHubResizeHandle } from "../components/github_resize_handle.slint";
 import { Route } from "../route/routeMap.slint";
 import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
 import { GitHubIconButton } from "../components/button/github_icon_button.slint";
@@ -72,6 +73,7 @@ export component GitHubChatPage inherits Rectangle {
     callback copy-selection(string, int, int) -> bool;
 
     private property <length> input-area-height: 96px;
+    private property <length> input-drag-start-height;
     private property <int> selection-message-id: -1;
     private property <string> selection-text: "";
     private property <int> selection-anchor: 0;
@@ -360,6 +362,7 @@ export component GitHubChatPage inherits Rectangle {
                             preview-available: message.preview_available;
                             preview-title: message.preview_title;
                             timestamp: message.timestamp;
+                            agent-label: message.agent_label;
                             elapsed: self.is-loading ? root.request-elapsed-label : message.elapsed;
                             is-loading: message.content == ""
                                 && root.is-sending
@@ -448,8 +451,6 @@ export component GitHubChatPage inherits Rectangle {
         composer := Rectangle {
             height: root.input-area-height;
             background: GitHubTheme.canvas-subtle;
-            border-width: GitHubMetrics.border-thin;
-            border-color: GitHubTheme.border-default;
 
             editor-row := Rectangle {
                 x: max(
@@ -528,44 +529,23 @@ export component GitHubChatPage inherits Rectangle {
                 }
             }
 
-            // Keep visual and hit geometry in one explicitly top-anchored strip
-            // so the resize cursor cannot drift into the editor body.
-            resize-strip := Rectangle {
+            resize-handle := GitHubResizeHandle {
                 x: 0px;
                 y: 0px;
-                width: 100%;
-                height: GitHubMetrics.size-16;
+                width: parent.width;
+                horizontal: true;
+                leading-edge: true;
                 z: 102;
-                background: transparent;
-
-                Rectangle {
-                    x: (parent.width - self.width) / 2;
-                    y: GitHubMetrics.size-2;
-                    width: GitHubMetrics.size-40;
-                    height: GitHubMetrics.size-4;
-                    border-radius: GitHubMetrics.size-2;
-                    background: resize-handle.has-hover || resize-handle.pressed
-                        ? GitHubTheme.fg-muted
-                        : GitHubTheme.border-strong;
+                drag-started => { root.input-drag-start-height = root.input-area-height; }
+                drag-delta(delta) => {
+                    root.input-area-height = max(72px,
+                        min(root.height / 2.5, root.input-area-height - delta));
                 }
-
-                resize-handle := TouchArea {
-                    x: (parent.width - GitHubMetrics.size-64) / 2;
-                    y: 0px;
-                    width: GitHubMetrics.size-64;
-                    height: parent.height;
-                    mouse-cursor: n-resize;
-                    moved => {
-                        root.input-area-height = max(
-                            72px,
-                            min(
-                                root.height / 2.5,
-                                root.input-area-height - (self.mouse-y - self.pressed-y)
-                            )
-                        );
-                    }
+                drag-finished(cancelled) => {
+                    if cancelled { root.input-area-height = root.input-drag-start-height; }
                 }
             }
+
         }
     }
 }

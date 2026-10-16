@@ -1,9 +1,12 @@
 #![cfg(feature = "ui-components")]
 
+#[path = "support/ui_components.rs"]
+mod playground;
+
 use std::time::Duration;
 
 use i_slint_backend_testing::ElementHandle;
-use slint::platform::{PointerEventButton, WindowEvent};
+use slint::platform::PointerEventButton;
 use slint::{ComponentHandle, LogicalSize};
 use usher_lib::{MainWindow, Route, install_transient_input_bridge};
 
@@ -11,14 +14,13 @@ use usher_lib::{MainWindow, Route, install_transient_input_bridge};
 fn showcase_action_menu_anchors_floats_and_toggles() {
     i_slint_backend_testing::init_no_event_loop();
     let window = MainWindow::new().unwrap();
+    playground::install(&window);
     install_transient_input_bridge(&window).expect("transient input bridge");
     usher_lib::install_floating_overlay_positioning(&window);
     window.set_show_navigation_drawer(false);
     window.set_platform_is_macos(false);
     window.set_current_route(Route::UiComponents);
-    window.window().dispatch_event(WindowEvent::Resized {
-        size: LogicalSize::new(1000.0, 800.0),
-    });
+    window.window().set_size(LogicalSize::new(1000.0, 800.0));
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
 
     let find = |id| {
@@ -58,9 +60,7 @@ fn showcase_action_menu_anchors_floats_and_toggles() {
             "返回顶部",
         ),
     ] {
-        window.window().dispatch_event(WindowEvent::Resized {
-            size: LogicalSize::new(width, 800.0),
-        });
+        window.window().set_size(LogicalSize::new(width, 800.0));
         slint::select_bundled_translation(locale).unwrap();
         i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
         let directory = ElementHandle::find_by_element_type_name(&window, "GitHubLink")
@@ -107,27 +107,19 @@ fn showcase_action_menu_anchors_floats_and_toggles() {
             assert_eq!(directory.absolute_position(), directory_position);
         }
     }
-    window.window().dispatch_event(WindowEvent::Resized {
-        size: LogicalSize::new(1000.0, 800.0),
-    });
+    window.window().set_size(LogicalSize::new(1000.0, 800.0));
     slint::select_bundled_translation("en").unwrap();
     ElementHandle::find_by_element_type_name(&window, "GitHubLink")
         .find(|element| element.accessible_label().as_deref() == Some("Selection"))
         .unwrap()
         .mock_single_click(PointerEventButton::Left);
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
-    let page_scroll = find("MainWindow::page-scroll-view");
-    for _ in 0..20 {
-        if ElementHandle::find_by_element_id(&window, "GitHubPrMenuShowcase::short-rules-button")
-            .next()
-            .is_some()
-        {
-            break;
-        }
-        page_scroll.scroll(0.0, -200.0);
-        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
-    }
-    let short = find("GitHubPrMenuShowcase::short-rules-button");
+    let page_scroll = playground::document(&window);
+    let short = playground::reveal(
+        &window,
+        &page_scroll,
+        "GitHubPrMenuShowcase::short-rules-button",
+    );
     page_scroll.scroll(0.0, 220.0 - short.absolute_position().y);
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
     let flow = find("GitHubPrMenuShowcase::flow");
@@ -164,21 +156,12 @@ fn showcase_action_menu_anchors_floats_and_toggles() {
         .unwrap()
         .mock_single_click(PointerEventButton::Left);
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
-    let scroll = find("MainWindow::page-scroll-view");
-    for _ in 0..20 {
-        if ElementHandle::find_by_element_id(
-            &window,
-            "GitHubUiComponentsGallery::start-action-button",
-        )
-        .next()
-        .is_some()
-        {
-            break;
-        }
-        scroll.scroll(0.0, -300.0);
-        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
-    }
-    let start = find("GitHubUiComponentsGallery::start-action-button");
+    let scroll = playground::document(&window);
+    let start = playground::reveal(
+        &window,
+        &scroll,
+        "GitHubUiComponentsGallery::start-action-button",
+    );
     scroll.scroll(0.0, 280.0 - start.absolute_position().y);
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
 
@@ -236,9 +219,7 @@ fn showcase_action_menu_anchors_floats_and_toggles() {
             < 0.5
     );
 
-    window.window().dispatch_event(WindowEvent::Resized {
-        size: LogicalSize::new(760.0, 700.0),
-    });
+    window.window().set_size(LogicalSize::new(760.0, 700.0));
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
     let end = find("GitHubUiComponentsGallery::end-action-button");
     let menu = find("GitHubUiComponentsGallery::action-menu");

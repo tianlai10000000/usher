@@ -19,6 +19,42 @@ use usher_ui_settings::{
 
 use crate::{AppState, MainWindow, UpdateLogic};
 
+#[path = "settings_page/ai_agent_drafts.rs"]
+pub(crate) mod ai_agent_drafts;
+mod ai_agent_header_drafts;
+mod ai_agent_header_object;
+#[path = "settings_page/ai_agent_list.rs"]
+mod ai_agent_list;
+#[path = "settings_page/ai_agent_projection.rs"]
+pub(crate) mod ai_agent_projection;
+pub(crate) use ai_agent_projection::apply_ai_agent_configuration_to_window;
+use ai_agent_projection::{apply_ai_agent_choices_to_page, restore_ai_agent_configuration_to_page};
+
+#[cfg(test)]
+#[path = "settings_page/agent_editor_layout_tests.rs"]
+mod agent_editor_layout_tests;
+#[cfg(test)]
+#[path = "settings_page/agent_header_controls_tests.rs"]
+mod agent_header_controls_tests;
+#[cfg(test)]
+#[path = "settings_page/agent_list_probe_ui_tests.rs"]
+mod agent_list_probe_ui_tests;
+#[cfg(test)]
+#[path = "settings_page/agent_select_popup_tests.rs"]
+mod agent_select_popup_tests;
+#[cfg(test)]
+#[path = "settings_page/agent_tooltip_tests.rs"]
+mod agent_tooltip_tests;
+#[cfg(test)]
+#[path = "settings_page/factory_window_tests.rs"]
+mod factory_window_tests;
+#[cfg(test)]
+#[path = "settings_page/header_tooltip_tests.rs"]
+mod header_tooltip_tests;
+#[cfg(test)]
+#[path = "settings_page/provider_tabs_tests.rs"]
+mod provider_tabs_tests;
+
 #[cfg(feature = "ai-code-review")]
 enum AddReviewRuleError {
     Name(&'static str),
@@ -38,19 +74,6 @@ struct AiReviewValidationErrors {
 pub(crate) fn mirror_update_checking(ui: &MainWindow, page: &SettingsPageBridge, checking: bool) {
     ui.global::<UpdateLogic>().set_checking_update(checking);
     page.set_update_checking(checking);
-}
-
-/// Dual-write the AI Agent connection-test busy flag. Event-loop only.
-pub(crate) fn mirror_ai_agent_testing(ui: &MainWindow, page: &SettingsPageBridge, testing: bool) {
-    ui.set_settings_ai_agent_testing(testing);
-    page.set_ai_agent_testing(testing);
-}
-
-/// Captured on the event loop when Save is accepted. A later completion may
-/// normalize this draft only while both its route visit and all fields match.
-pub(crate) struct AiAgentSaveContext {
-    page: slint::Weak<GitHubSettingsPage>,
-    route_entry: i32,
 }
 
 #[derive(Clone, Default)]
@@ -73,6 +96,17 @@ pub(crate) fn register_route_lifecycle(
     }));
 }
 
+fn create_page(window: &MainWindow) -> Result<GitHubSettingsPage, slint::PlatformError> {
+    // Conditional children must release caches in the renderer painting them.
+    // The shared-window constructor temporarily installs its own root; restore
+    // the shell before binding or returning, including constructor errors.
+    let host = i_slint_core::window::WindowInner::from_pub(window.window());
+    let shell = host.component();
+    let page = GitHubSettingsPage::new_with_existing_window(window.window());
+    host.set_component(&shell);
+    page
+}
+
 impl SettingsPageBridge {
     pub(crate) fn sync_request_preferences(
         &self,
@@ -93,6 +127,42 @@ impl SettingsPageBridge {
         window.on_settings_hook_dialog_key_pressed(move |text, primary, alt, shift, secondary| {
             let mut handled = false;
             bridge.with_page(|page| {
+                let state = SettingsAppState::get(page);
+                if (state.get_ai_agent_editor_open() || state.get_ai_agent_delete_confirm_open())
+                    && !alt
+                    && !shift
+                    && !secondary
+                {
+                    if !primary
+                        && text.as_str()
+                            == slint::SharedString::from(slint::platform::Key::Escape).as_str()
+                    {
+                        if page.invoke_dismiss_hook_menu() {
+                            handled = true;
+                            return;
+                        }
+                        if state.get_ai_agent_delete_confirm_open() {
+                            state.invoke_cancel_delete_ai_agent();
+                        } else if !state.get_ai_agent_editor_busy() {
+                            state.invoke_cancel_ai_agent_editor();
+                        }
+                        handled = true;
+                        return;
+                    }
+                    if primary
+                        && text.as_str()
+                            == slint::SharedString::from(slint::platform::Key::Return).as_str()
+                    {
+                        if state.get_ai_agent_editor_open()
+                            && !state.get_ai_agent_editor_busy()
+                            && !state.get_ai_agent_editor_testing()
+                        {
+                            state.invoke_save_ai_agent_editor();
+                        }
+                        handled = true;
+                        return;
+                    }
+                }
                 handled = crate::hooks::handle_dialog_key(
                     page,
                     text.as_str(),
@@ -114,7 +184,7 @@ impl SettingsPageBridge {
 
         window.set_settings_page_factory(ComponentFactory::new(move |_| {
             let window = window_weak.upgrade()?;
-            let page = match GitHubSettingsPage::new() {
+            let page = match create_page(&window) {
                 Ok(page) => page,
                 Err(error) => {
                     log::error!("[Settings] Failed to create isolated page: {error}");
@@ -129,7 +199,7 @@ impl SettingsPageBridge {
                 .expect("AI Agent settings bridge poisoned")
                 .clone();
             if let Some(settings) = &ai_agent_settings {
-                apply_ai_agent_snapshot_to_page(&page, settings.snapshot().state());
+                restore_ai_agent_configuration_to_page(&page, settings.snapshot().state());
             }
             bind_callbacks(&window, &page, ai_agent_settings);
             let weak = window.as_weak();
@@ -198,46 +268,6 @@ impl SettingsPageBridge {
         self.with_page(|page| page.set_git_hosting_config_saved(saved));
     }
 
-    pub(crate) fn capture_ai_agent_save(&self) -> Option<AiAgentSaveContext> {
-        let mut context = None;
-        self.with_page(|page| {
-            context = Some(AiAgentSaveContext {
-                page: page.as_weak(),
-                route_entry: page.get_route_entry_revision(),
-            });
-        });
-        context
-    }
-
-    pub(crate) fn complete_ai_agent_save(
-        &self,
-        context: &Option<AiAgentSaveContext>,
-        accepted: &crate::settings::AiAgentSettings,
-        committed: &crate::settings::AiAgentSettings,
-    ) -> bool {
-        let Some(context) = context else {
-            return false;
-        };
-        let Some(page) = context.page.upgrade() else {
-            return false;
-        };
-        if page.get_route_entry_revision() != context.route_entry
-            || ai_agent_draft_from_page(&page) != *accepted
-        {
-            return false;
-        }
-        apply_ai_agent_snapshot_to_page(&page, committed);
-        true
-    }
-
-    pub(crate) fn set_ai_agent_saved(&self, saved: bool) {
-        self.with_page(|page| page.set_ai_agent_saved(saved));
-    }
-
-    pub(crate) fn set_ai_agent_testing(&self, testing: bool) {
-        self.with_page(|page| page.set_ai_agent_testing(testing));
-    }
-
     pub(crate) fn set_update_checking(&self, checking: bool) {
         self.with_page(|page| page.set_update_checking(checking));
     }
@@ -249,7 +279,13 @@ impl SettingsPageBridge {
         if route == crate::Route::Settings {
             self.reset_drafts_from_committed(window);
         }
-        self.with_page(|page| page.set_route_active(route == crate::Route::Settings));
+        self.with_page(|page| {
+            if route != crate::Route::Settings {
+                ai_agent_drafts::close(page);
+                SettingsAppState::get(page).set_ai_agent_delete_confirm_open(false);
+            }
+            page.set_route_active(route == crate::Route::Settings);
+        });
     }
 
     pub(crate) fn sync_theme(&self, mode: i32, effective_dark_mode: bool) {
@@ -269,6 +305,15 @@ impl SettingsPageBridge {
             sync_language_state(page, preference);
             sync_ai_reply_language_state(page, &reply_language);
             crate::hooks::sync_language(page);
+            crate::ai::settings_ui::sync_language(page);
+            if let Some(facade) = self
+                .ai_agent_settings
+                .lock()
+                .expect("AI Agent settings bridge poisoned")
+                .as_ref()
+            {
+                apply_ai_agent_choices_to_page(page, facade.snapshot().state());
+            }
             #[cfg(feature = "ai-code-review")]
             apply_ai_review_validation_errors(page, &self.ai_review_validation_errors);
         });
@@ -282,7 +327,9 @@ impl SettingsPageBridge {
             .ai_agent_settings
             .lock()
             .expect("AI Agent settings bridge poisoned") = Some(settings.clone());
-        self.with_page(|page| apply_ai_agent_snapshot_to_page(page, settings.snapshot().state()));
+        self.with_page(|page| {
+            restore_ai_agent_configuration_to_page(page, settings.snapshot().state())
+        });
     }
 
     /// Discard page-local drafts and restore the latest committed host/domain
@@ -299,7 +346,7 @@ impl SettingsPageBridge {
             page.set_route_entry_revision(page.get_route_entry_revision().wrapping_add(1));
             sync_state_from_window(window, page);
             if let Some(snapshot) = &ai_agent_snapshot {
-                apply_ai_agent_snapshot_to_page(page, snapshot.state());
+                restore_ai_agent_configuration_to_page(page, snapshot.state());
             }
         });
     }
@@ -581,6 +628,14 @@ fn sync_state_from_window(window: &MainWindow, page: &GitHubSettingsPage) {
     target.set_git_gitlab_enterprise(source.get_git_gitlab_enterprise());
     target.set_git_gitee_api_base_url(source.get_git_gitee_api_base_url());
     target.set_git_gitee_enterprise(source.get_git_gitee_enterprise());
+    target.set_ai_agent_name(source.get_ai_agent_name());
+    target.set_ai_agent_active_provider(source.get_ai_agent_active_provider());
+    target.set_ai_agent_custom_name(source.get_ai_agent_custom_name());
+    target.set_ai_agent_deepseek_name(source.get_ai_agent_deepseek_name());
+    target.set_ai_agent_openai_name(source.get_ai_agent_openai_name());
+    target.set_ai_agent_custom_model(source.get_ai_agent_custom_model());
+    target.set_ai_agent_deepseek_model(source.get_ai_agent_deepseek_model());
+    target.set_ai_agent_openai_model(source.get_ai_agent_openai_model());
     target.set_ai_agent_base_url(source.get_ai_agent_base_url());
     target.set_ai_agent_api_key(source.get_ai_agent_api_key());
     target.set_ai_agent_model(source.get_ai_agent_model());
@@ -636,41 +691,6 @@ fn sync_ai_reply_language_state(page: &GitHubSettingsPage, preference: &str) {
     });
 }
 
-fn apply_ai_agent_snapshot_to_page(
-    page: &GitHubSettingsPage,
-    settings: &crate::settings::AiAgentSettings,
-) {
-    let state = SettingsAppState::get(page);
-    state.set_ai_agent_base_url(settings.base_url.clone().into());
-    state.set_ai_agent_api_key(settings.api_key.clone().into());
-    state.set_ai_agent_model(settings.model.clone().into());
-    state.set_ai_agent_provider(settings.provider.clone().into());
-    sync_ai_reply_language_state(page, &settings.reply_language);
-}
-
-fn ai_agent_draft_from_page(page: &GitHubSettingsPage) -> crate::settings::AiAgentSettings {
-    let state = SettingsAppState::get(page);
-    crate::settings::AiAgentSettings {
-        provider: state.get_ai_agent_provider().to_string(),
-        base_url: state.get_ai_agent_base_url().to_string(),
-        api_key: state.get_ai_agent_api_key().to_string(),
-        model: state.get_ai_agent_model().to_string(),
-        reply_language: state.get_ai_agent_reply_language_selection().id.to_string(),
-    }
-}
-
-pub(crate) fn apply_ai_agent_snapshot_to_window(
-    window: &MainWindow,
-    settings: &crate::settings::AiAgentSettings,
-) {
-    let state = AppState::get(window);
-    state.set_ai_agent_base_url(settings.base_url.clone().into());
-    state.set_ai_agent_api_key(settings.api_key.clone().into());
-    state.set_ai_agent_model(settings.model.clone().into());
-    state.set_ai_agent_provider(settings.provider.clone().into());
-    crate::i18n::sync_ai_reply_language(window, &settings.reply_language);
-}
-
 fn bind_callbacks(
     window: &MainWindow,
     page: &GitHubSettingsPage,
@@ -713,33 +733,16 @@ fn bind_callbacks(
         }
     });
 
-    let page_weak = page.as_weak();
-    state.on_select_ai_agent_provider(move |provider| {
-        if let Some(page) = page_weak.upgrade() {
-            let draft = ai_agent_draft_from_page(&page);
-            let draft = crate::ai::settings_state::apply_provider_preset(&draft, provider.as_str());
-            apply_ai_agent_snapshot_to_page(&page, &draft);
-        }
-    });
-
-    let page_weak = page.as_weak();
-    state.on_set_ai_agent_base_url(move |_| {
-        if let Some(page) = page_weak.upgrade() {
-            SettingsAppState::get(&page).set_ai_agent_provider("custom".into());
-        }
-    });
-
-    let page_weak = page.as_weak();
-    state.on_set_ai_agent_model(move |_| {
-        if let Some(page) = page_weak.upgrade() {
-            SettingsAppState::get(&page).set_ai_agent_provider("custom".into());
-        }
-    });
+    ai_agent_drafts::bind(page, ai_agent_settings.clone());
+    if let Some(facade) = ai_agent_settings {
+        crate::ai::settings_ui::bind_page(window, page, facade);
+    }
 
     let page_weak = page.as_weak();
     state.on_select_ai_agent_reply_language(move |language| {
         if let Some(page) = page_weak.upgrade() {
             sync_ai_reply_language_state(&page, language.as_str());
+            SettingsAppState::get(&page).set_ai_agent_editor_reply_language(language);
         }
     });
 
@@ -925,26 +928,20 @@ fn bind_callbacks(
     );
 
     let window_weak = window.as_weak();
-    let settings = ai_agent_settings;
-    state.on_save_ai_agent_settings(move |provider, base_url, api_key, model, reply_language| {
-        if let Some(window) = window_weak.upgrade() {
-            if settings.is_none() {
-                let state = AppState::get(&window);
-                state.set_ai_agent_provider(provider.clone());
-                state.set_ai_agent_base_url(base_url.clone());
-                state.set_ai_agent_api_key(api_key.clone());
-                state.set_ai_agent_model(model.clone());
-                crate::i18n::sync_ai_reply_language(&window, reply_language.as_str());
+    state.on_save_ai_agent_settings(
+        move |provider, base_url, api_key, model, reply_language, name| {
+            if let Some(window) = window_weak.upgrade() {
+                AppState::get(&window).invoke_save_ai_agent_settings(
+                    provider,
+                    base_url,
+                    api_key,
+                    model,
+                    reply_language,
+                    name,
+                );
             }
-            AppState::get(&window).invoke_save_ai_agent_settings(
-                provider,
-                base_url,
-                api_key,
-                model,
-                reply_language,
-            );
-        }
-    });
+        },
+    );
 
     let window_weak = window.as_weak();
     state.on_test_ai_agent_connection(move |base_url, api_key, model| {
@@ -995,29 +992,6 @@ mod tests {
             .collect()
     }
 
-    fn ai_reply_language_rows(page: &GitHubSettingsPage) -> Vec<(String, bool)> {
-        let mut rows = [
-            "Follow interface language",
-            "跟随界面语言",
-            "English",
-            "简体中文",
-        ]
-        .into_iter()
-        .flat_map(|label| ElementHandle::find_by_accessible_label(page, label))
-        .filter_map(|element| {
-            Some((
-                element.absolute_position().y,
-                element.accessible_label()?.to_string(),
-                element.accessible_checked()?,
-            ))
-        })
-        .collect::<Vec<_>>();
-        rows.sort_by(|left, right| left.0.total_cmp(&right.0));
-        rows.into_iter()
-            .map(|(_, label, checked)| (label, checked))
-            .collect()
-    }
-
     fn open_language_picker(page: &GitHubSettingsPage) {
         let picker =
             ElementHandle::find_by_element_id(page, "GitHubSettingsSectionMenuButton::menu-touch")
@@ -1028,25 +1002,6 @@ mod tests {
                 })
                 .expect("language picker button");
         picker.mock_single_click(PointerEventButton::Left);
-    }
-
-    fn ai_reply_language_trigger_label(page: &GitHubSettingsPage) -> String {
-        [
-            "Follow interface language",
-            "跟随界面语言",
-            "English",
-            "简体中文",
-        ]
-        .into_iter()
-        .flat_map(|label| ElementHandle::find_by_accessible_label(page, label))
-        .filter(|element| element.accessible_checked().is_none())
-        .max_by(|left, right| {
-            left.absolute_position()
-                .y
-                .total_cmp(&right.absolute_position().y)
-        })
-        .and_then(|element| element.accessible_label().map(|label| label.to_string()))
-        .expect("AI reply language trigger label")
     }
 
     fn open_section_picker(page: &GitHubSettingsPage) {
@@ -1196,6 +1151,23 @@ mod tests {
         let bridge = SettingsPageBridge::default();
         crate::i18n::apply_preference("en-US").expect("select English");
         crate::i18n::sync_main_window(&window, "en-US");
+        let profiles = (0..12)
+            .map(|index| crate::settings::AiAgentProfile {
+                id: format!("scroll-fixture-{index}"),
+                name: format!("Scroll Agent {index}"),
+                connection: crate::settings::AiAgentSettings {
+                    model: "fixture-model".into(),
+                    ..Default::default()
+                },
+            })
+            .collect();
+        let agents = crate::ai::settings_state::AiAgentSettingsFacade::memory(
+            crate::settings::AiAgentConfiguration {
+                active_id: "scroll-fixture-0".into(),
+                profiles,
+            },
+        );
+        bridge.configure_ai_agent_settings(agents.clone());
         bridge.install(&window);
         window.set_current_route(Route::Settings);
         i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
@@ -1239,15 +1211,9 @@ mod tests {
                 "page title must stay above the viewport"
             );
         }
+        agents.shutdown();
         crate::i18n::apply_preference(usher_i18n::fallback_locale().id)
             .expect("restore fallback language");
-    }
-
-    fn select_ai_agent_provider(page: &GitHubSettingsPage, label: &str) {
-        ElementHandle::find_by_accessible_label(page, label)
-            .find(|element| element.accessible_checked().is_some())
-            .unwrap_or_else(|| panic!("AI Agent provider {label:?}"))
-            .mock_single_click(PointerEventButton::Left);
     }
 
     fn settings_field_value(page: &GitHubSettingsPage, label: &str) -> String {
@@ -1523,17 +1489,6 @@ mod tests {
             );
         }
         crate::i18n::apply_preference(usher_i18n::fallback_locale().id).unwrap();
-    }
-
-    fn save_ai_agent_draft(page: &GitHubSettingsPage) {
-        let draft = super::ai_agent_draft_from_page(page);
-        SettingsAppState::get(page).invoke_save_ai_agent_settings(
-            draft.provider.into(),
-            draft.base_url.into(),
-            draft.api_key.into(),
-            draft.model.into(),
-            draft.reply_language.into(),
-        );
     }
 
     fn expected_language_rows(system_label: &str, selected_label: &str) -> Vec<(String, bool)> {
@@ -2182,233 +2137,6 @@ mod tests {
     }
 
     #[test]
-    fn ai_reply_language_draft_resets_in_the_stable_factory() {
-        let _locale_guard = crate::i18n::test_locale_guard();
-        i_slint_backend_testing::init_no_event_loop();
-        let window = MainWindow::new().expect("main window");
-        let bridge = SettingsPageBridge::default();
-        let ai_agent_settings = crate::ai::settings_state::AiAgentSettingsFacade::memory(
-            crate::settings::AiAgentSettings::default(),
-        );
-        bridge.configure_ai_agent_settings(ai_agent_settings.clone());
-        crate::ai::settings_ui::bind(&window, &bridge, ai_agent_settings.clone());
-        crate::i18n::apply_preference("zh-CN").expect("select Chinese");
-        crate::i18n::sync_main_window(&window, "zh-CN");
-        crate::i18n::sync_ai_reply_language(&window, usher_i18n::AUTO_LANGUAGE);
-        bridge.install(&window);
-
-        window.set_current_route(Route::Settings);
-        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
-        let page = mounted_page(&bridge);
-        page.set_viewport_width(1200.0);
-        page.set_viewport_height(768.0);
-        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
-        select_settings_section(&page, "AI Agent");
-        assert_eq!(
-            SettingsAppState::get(&page)
-                .get_ai_agent_reply_language_selection()
-                .id,
-            usher_i18n::AUTO_LANGUAGE
-        );
-        open_language_picker(&page);
-        assert_eq!(
-            ai_reply_language_rows(&page),
-            expected_language_rows("跟随界面语言", "跟随界面语言")
-        );
-
-        select_language(&page, "English");
-        assert_eq!(ai_reply_language_trigger_label(&page), "English");
-        assert_eq!(
-            ai_agent_settings.snapshot().state().reply_language,
-            usher_i18n::AUTO_LANGUAGE
-        );
-        open_language_picker(&page);
-        assert_eq!(
-            ai_reply_language_rows(&page),
-            expected_language_rows("跟随界面语言", "English")
-        );
-        let stable_page = page.as_weak();
-        drop(page);
-        window.set_current_route(Route::Home);
-        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
-        assert!(stable_page.upgrade().is_some());
-        window.set_current_route(Route::Settings);
-        bridge.reset_drafts_from_committed(&window);
-        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
-
-        let page = stable_page.upgrade().expect("stable Settings page");
-        page.set_viewport_width(1200.0);
-        page.set_viewport_height(768.0);
-        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
-        select_settings_section(&page, "AI Agent");
-        assert_eq!(
-            SettingsAppState::get(&page)
-                .get_ai_agent_reply_language_selection()
-                .id,
-            usher_i18n::AUTO_LANGUAGE
-        );
-        open_language_picker(&page);
-        assert_eq!(
-            ai_reply_language_rows(&page),
-            expected_language_rows("跟随界面语言", "跟随界面语言")
-        );
-        select_language(&page, "English");
-        save_ai_agent_draft(&page);
-        ai_agent_settings
-            .shutdown_checked()
-            .expect("drain accepted AI Save");
-        drop(page);
-        window.set_current_route(Route::Home);
-        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
-        window.set_current_route(Route::Settings);
-        bridge.reset_drafts_from_committed(&window);
-        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
-
-        let page = mounted_page(&bridge);
-        page.set_viewport_width(1200.0);
-        page.set_viewport_height(768.0);
-        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
-        select_settings_section(&page, "AI Agent");
-        assert_eq!(ai_reply_language_trigger_label(&page), "English");
-        open_language_picker(&page);
-        assert_eq!(
-            ai_reply_language_rows(&page),
-            expected_language_rows("跟随界面语言", "English")
-        );
-
-        ai_agent_settings.shutdown();
-        crate::i18n::apply_preference(usher_i18n::fallback_locale().id)
-            .expect("restore fallback language");
-    }
-
-    #[test]
-    fn ai_agent_draft_is_discarded_until_save_in_the_stable_factory() {
-        let _locale_guard = crate::i18n::test_locale_guard();
-        i_slint_backend_testing::init_no_event_loop();
-        let window = MainWindow::new().expect("main window");
-        crate::i18n::apply_preference("en").expect("select English");
-        crate::i18n::sync_main_window(&window, "en");
-        let bridge = SettingsPageBridge::default();
-        let ai_agent_settings = crate::ai::settings_state::AiAgentSettingsFacade::memory(
-            crate::settings::AiAgentSettings {
-                provider: "deepseek".into(),
-                base_url: "https://api.deepseek.com".into(),
-                api_key: "secret".into(),
-                model: "deepseek-v4-flash".into(),
-                reply_language: "auto".into(),
-            },
-        );
-        bridge.configure_ai_agent_settings(ai_agent_settings.clone());
-        crate::ai::settings_ui::bind(&window, &bridge, ai_agent_settings.clone());
-        bridge.install(&window);
-
-        window.set_current_route(Route::Settings);
-        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
-        let page = mounted_page(&bridge);
-        page.set_viewport_width(1200.0);
-        page.set_viewport_height(768.0);
-        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
-        select_settings_section(&page, "AI Agent");
-        select_ai_agent_provider(&page, "OpenAI");
-
-        let state = SettingsAppState::get(&page);
-        assert_eq!(state.get_ai_agent_provider(), "openai");
-        assert_eq!(
-            settings_field_value(&page, "Base URL"),
-            "https://api.openai.com/v1"
-        );
-        assert_eq!(settings_field_value(&page, "Model"), "gpt-4o-mini");
-        assert!(
-            ElementHandle::find_by_accessible_label(&page, "OpenAI")
-                .any(|element| element.accessible_checked() == Some(true))
-        );
-        assert_eq!(
-            ai_agent_settings.snapshot().state().provider,
-            "deepseek",
-            "editing the page must not commit the Store"
-        );
-        state.set_ai_agent_base_url("https://draft.invalid/v1".into());
-        state.invoke_set_ai_agent_base_url("https://draft.invalid/v1".into());
-        state.set_ai_agent_api_key("draft-secret".into());
-        state.invoke_set_ai_agent_api_key("draft-secret".into());
-        state.set_ai_agent_model("draft-model".into());
-        state.invoke_set_ai_agent_model("draft-model".into());
-        state.invoke_select_ai_agent_reply_language("zh-CN".into());
-        assert_eq!(state.get_ai_agent_provider(), "custom");
-        assert_eq!(
-            ai_agent_settings.snapshot().state().provider,
-            "deepseek",
-            "editing every field must remain a page-local draft"
-        );
-
-        let stable_page = page.as_weak();
-        drop(page);
-        window.set_current_route(Route::Home);
-        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
-        assert!(stable_page.upgrade().is_some());
-        window.set_current_route(Route::Settings);
-        bridge.reset_drafts_from_committed(&window);
-        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
-        let page = stable_page.upgrade().expect("stable Settings page");
-        page.set_viewport_width(1200.0);
-        page.set_viewport_height(768.0);
-        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
-        select_settings_section(&page, "AI Agent");
-
-        assert_eq!(
-            SettingsAppState::get(&page).get_ai_agent_provider(),
-            "deepseek"
-        );
-        assert_eq!(
-            settings_field_value(&page, "Base URL"),
-            "https://api.deepseek.com"
-        );
-        assert_eq!(settings_field_value(&page, "Model"), "deepseek-v4-flash");
-        assert_eq!(
-            SettingsAppState::get(&page).get_ai_agent_api_key(),
-            "secret"
-        );
-        assert_eq!(
-            SettingsAppState::get(&page)
-                .get_ai_agent_reply_language_selection()
-                .id,
-            usher_i18n::AUTO_LANGUAGE
-        );
-
-        select_ai_agent_provider(&page, "OpenAI");
-        save_ai_agent_draft(&page);
-        ai_agent_settings
-            .shutdown_checked()
-            .expect("drain accepted AI Save");
-        assert_eq!(ai_agent_settings.snapshot().state().provider, "openai");
-        drop(page);
-        window.set_current_route(Route::Home);
-        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
-        window.set_current_route(Route::Settings);
-        bridge.reset_drafts_from_committed(&window);
-        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
-        let page = mounted_page(&bridge);
-        page.set_viewport_width(1200.0);
-        page.set_viewport_height(768.0);
-        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
-        select_settings_section(&page, "AI Agent");
-
-        assert_eq!(
-            SettingsAppState::get(&page).get_ai_agent_provider(),
-            "openai"
-        );
-        assert_eq!(
-            settings_field_value(&page, "Base URL"),
-            "https://api.openai.com/v1"
-        );
-        assert_eq!(settings_field_value(&page, "Model"), "gpt-4o-mini");
-
-        ai_agent_settings.shutdown();
-        crate::i18n::apply_preference(usher_i18n::fallback_locale().id)
-            .expect("restore fallback language");
-    }
-
-    #[test]
     fn unsaved_code_hosting_drafts_are_discarded_in_the_stable_factory() {
         let _locale_guard = crate::i18n::test_locale_guard();
         i_slint_backend_testing::init_no_event_loop();
@@ -2561,32 +2289,6 @@ mod tests {
     }
 
     #[test]
-    fn ai_agent_completion_preserves_new_edits_and_a_new_route_visit() {
-        let _locale_guard = crate::i18n::test_locale_guard();
-        i_slint_backend_testing::init_no_event_loop();
-        let window = MainWindow::new().expect("main window");
-        let bridge = SettingsPageBridge::default();
-        bridge.install(&window);
-        window.set_current_route(Route::Settings);
-        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
-        let page = mounted_page(&bridge);
-        let state = SettingsAppState::get(&page);
-        let accepted = super::ai_agent_draft_from_page(&page);
-        let committed = crate::ai::settings_state::apply_provider_preset(&accepted, "openai");
-        let context = bridge.capture_ai_agent_save();
-        state.set_ai_agent_api_key("newer-unsaved-secret".into());
-        assert!(!bridge.complete_ai_agent_save(&context, &accepted, &committed));
-        assert_eq!(state.get_ai_agent_api_key(), "newer-unsaved-secret");
-        super::apply_ai_agent_snapshot_to_page(&page, &accepted);
-        page.set_route_entry_revision(page.get_route_entry_revision() + 1);
-        assert!(!bridge.complete_ai_agent_save(&context, &accepted, &committed));
-        assert_eq!(super::ai_agent_draft_from_page(&page), accepted);
-        let current_context = bridge.capture_ai_agent_save();
-        assert!(bridge.complete_ai_agent_save(&current_context, &accepted, &committed));
-        assert_eq!(super::ai_agent_draft_from_page(&page), committed);
-    }
-
-    #[test]
     fn ai_reply_language_crosses_the_settings_factory_boundary() {
         let _locale_guard = crate::i18n::test_locale_guard();
         i_slint_backend_testing::init_no_event_loop();
@@ -2603,7 +2305,7 @@ mod tests {
         );
         let forwarded = Rc::new(RefCell::new(String::new()));
         let observed = forwarded.clone();
-        AppState::get(&window).on_save_ai_agent_settings(move |_, _, _, _, reply_language| {
+        AppState::get(&window).on_save_ai_agent_settings(move |_, _, _, _, reply_language, _| {
             *observed.borrow_mut() = reply_language.to_string();
         });
         bind_callbacks(&window, &page, None);
@@ -2613,6 +2315,7 @@ mod tests {
             "secret".into(),
             "model".into(),
             "en".into(),
+            "Forwarded name".into(),
         );
 
         assert_eq!(forwarded.borrow().as_str(), "en");
@@ -2620,7 +2323,7 @@ mod tests {
             AppState::get(&window)
                 .get_ai_agent_reply_language_selection()
                 .id,
-            "en"
+            "zh-CN"
         );
         usher_i18n::activate_locale(usher_i18n::fallback_locale().id);
     }

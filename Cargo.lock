@@ -7264,11 +7264,13 @@ dependencies = [
  "usher-ai-review",
  "usher-fs",
  "usher-i18n",
+ "usher-i18n-build",
  "usher-messages",
  "usher-preview",
  "usher-search",
  "usher-state-store",
  "usher-ui",
+ "usher-ui-components",
  "usher-ui-settings",
  "usher-virtual-list",
  "vt100",
@@ -7296,9 +7298,16 @@ dependencies = [
 name = "usher-i18n"
 version = "0.0.9-alpha.1"
 dependencies = [
+ "sys-locale",
+ "usher-i18n-build",
+]
+
+[[package]]
+name = "usher-i18n-build"
+version = "0.0.9-alpha.1"
+dependencies = [
  "rspolib",
  "serde",
- "sys-locale",
  "toml 1.1.6+spec-1.1.0",
 ]
 
@@ -7313,10 +7322,10 @@ dependencies = [
  "serde",
  "serde_json",
  "slint",
- "slint-build",
  "usher-fs",
- "usher-i18n",
+ "usher-i18n-build",
  "usher-state-store",
+ "usher-ui-build",
 ]
 
 [[package]]
@@ -7355,7 +7364,24 @@ dependencies = [
  "floating-ui-utils",
  "slint",
  "slint-build",
- "usher-i18n",
+ "usher-i18n-build",
+ "usher-ui-build",
+]
+
+[[package]]
+name = "usher-ui-build"
+version = "0.0.9-alpha.1"
+dependencies = [
+ "slint-build",
+]
+
+[[package]]
+name = "usher-ui-components"
+version = "0.0.9-alpha.1"
+dependencies = [
+ "slint",
+ "usher-i18n-build",
+ "usher-ui-build",
 ]
 
 [[package]]
@@ -7363,8 +7389,8 @@ name = "usher-ui-settings"
 version = "0.0.9-alpha.1"
 dependencies = [
  "slint",
- "slint-build",
- "usher-i18n",
+ "usher-i18n-build",
+ "usher-ui-build",
 ]
 
 [[package]]

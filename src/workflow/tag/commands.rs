@@ -51,6 +51,11 @@ pub(super) fn create_tag_plan(repo: &str, version: &str, description: &str) -> V
             detail: LocalizedText::message("tag.step.checkout_main_detail"),
         },
         PlannedCommand {
+            name: LocalizedText::message("tag.step.pull_main"),
+            argv: git(repo, &["pull", "origin", "main"]),
+            detail: LocalizedText::message("tag.step.pull_main_detail"),
+        },
+        PlannedCommand {
             name: LocalizedText::message("tag.step.rebase_main"),
             argv: git(repo, &["rebase", "release"]),
             detail: LocalizedText::message("tag.step.rebase_main_detail"),
@@ -155,9 +160,9 @@ mod tests {
     #[test]
     fn create_plan_keeps_repository_and_user_values_as_distinct_arguments() {
         let plan = create_tag_plan("/tmp/repo with spaces", "v1.2.3", "release notes");
-        assert_eq!(plan.len(), 8);
+        assert_eq!(plan.len(), 9);
         assert_eq!(
-            plan[6].argv,
+            plan[7].argv,
             [
                 "git",
                 "-C",
@@ -169,6 +174,65 @@ mod tests {
                 "release notes"
             ]
         );
+    }
+
+    #[test]
+    fn create_plan_pulls_main_after_checkout_before_rebase_and_publication() {
+        let plan = create_tag_plan("/repo", "v1.2.3", "notes");
+        let commands = plan
+            .iter()
+            .map(|command| command.argv[3..].join(" "))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            commands,
+            [
+                "rev-parse --show-toplevel",
+                "checkout release",
+                "pull origin release",
+                "checkout main",
+                "pull origin main",
+                "rebase release",
+                "push origin main",
+                "tag -a v1.2.3 -m notes",
+                "push origin v1.2.3",
+            ]
+        );
+    }
+
+    #[test]
+    fn pull_main_step_reprojects_in_the_current_locale() {
+        use crate::jobs::{JobRunDescriptor, JobSnapshot, apply_job_run};
+        use slint::Model;
+
+        let _locale_guard = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = crate::MainWindow::new().unwrap();
+        let snapshot = JobSnapshot::queued(default_create_tag_steps());
+        let descriptor = JobRunDescriptor {
+            source: "tag-pull-main-locale-test".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            snapshot.steps[4].definition.name,
+            LocalizedText::message("tag.step.pull_main")
+        );
+        let mut rows = None;
+        for (locale, name, detail) in [
+            ("en", "Pull main", "Pull the latest main Branch changes."),
+            ("zh-CN", "拉取 main", "拉取 main Branch 的最新变更。"),
+        ] {
+            crate::i18n::apply_preference(locale).unwrap();
+            apply_job_run(&ui, &descriptor, &snapshot, &LocalizedText::empty(), false);
+            let projected_rows = ui.get_job_run_steps();
+            if let Some(previous) = rows.as_ref() {
+                assert!(previous == &projected_rows);
+            }
+            let projected = projected_rows.row_data(4).unwrap();
+            assert_eq!(projected.name.as_str(), name);
+            assert_eq!(projected.detail.as_str(), detail);
+            rows = Some(projected_rows);
+        }
+        crate::i18n::apply_preference(usher_i18n::fallback_locale().id).unwrap();
     }
 
     #[test]

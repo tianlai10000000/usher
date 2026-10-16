@@ -22,6 +22,7 @@ unexpected_material=$(echo "$material_imports" \
     | rg -v '^ui/main\.slint:[0-9]+:export \{ MaterialWindowAdapter \} from "@material";' \
     | rg -v '^ui/views/workflow/pr_review_workspace\.slint:[0-9]+:import \{ ScrollView \} from "@material";' \
     | rg -v '^ui/components/github_scroll_view\.slint:[0-9]+:import \{ ScrollView as MaterialScrollView \} from "@material";' \
+    | rg -v '^ui/components/settings/github_ai_agent_headers\.slint:[0-9]+:import \{ ScrollView \} from "@material";' \
     || true)
 if [ -n "$unexpected_material" ]; then
     echo "UI policy: unexpected @material usage:" >&2
@@ -394,6 +395,8 @@ dialog_consumer_requirements = {
     pathlib.Path("ui/components/dialog/dialog_enhance.slint"): 1,
     pathlib.Path("ui/components/project/github_project_dialog.slint"): 1,
     pathlib.Path("ui/components/settings/github_hook_settings.slint"): 1,
+    pathlib.Path("ui/components/settings/github_ai_agent_editor.slint"): 1,
+    pathlib.Path("ui/components/settings/github_ai_agent_delete.slint"): 1,
     pathlib.Path("ui/components/update/update.slint"): 1,
     pathlib.Path("ui/views/workflow/pr_review_workspace.slint"): 5,
 }
@@ -437,6 +440,42 @@ if dialog_path.exists():
                 f"{relative}: modal backdrop paint must be owned by "
                 "GitHubDialog or the reviewed root continuation"
             )
+
+# Agent factory actions use fixed semantic leaves and independent mounted text.
+# The connection probe must not reuse Edit's claim or dynamic measured copy.
+agent_tooltip_path = pathlib.Path("ui/components/settings/github_ai_agent_tooltip.slint")
+if agent_tooltip_path in sources:
+    _, tokens = sources[agent_tooltip_path]
+    leaf, count = owner_body(tokens, ["export", "component", "GitHubAiAgentTestConnectionAction"])
+    if count != 1 or leaf is None or any(not sequence_positions(leaf, expected) for expected in [
+        ["tooltip-text", ":", "I18n", ".", "common-test-connection", ";"],
+        ["AgentTooltipState", ".", "show", "(", "AgentTooltipKind", ".", "TestConnection", ","],
+        ["AgentTooltipState", ".", "renew", "(", "root", ".", "claim", ",", "AgentTooltipKind", ".", "TestConnection", ","],
+        ["icon", ":", "@", "image-url", "(", '"../../assets/icons/octicon-plug-16.svg"', ")", ";"],
+    ]):
+        print(f"{agent_tooltip_path}: TestConnection must keep its literal leaf, catalog label and Plug icon")
+    overlay, count = owner_body(tokens, ["export", "component", "GitHubAiAgentTooltipOverlay"])
+    surfaces = {
+        "add": ("Add", "settings-ai-agent-add"),
+        "activate": ("Activate", "settings-ai-agent-activate"),
+        "current": ("Current", "settings-ai-agent-active-badge"),
+        "test-connection": ("TestConnection", "common-test-connection"),
+        "edit": ("Edit", "settings-ai-agent-edit"),
+        "delete": ("Delete", "common-delete"),
+        "deletedisabled": ("DeleteDisabled", "settings-ai-agent-delete-active-disabled"),
+    }
+    valid = count == 1 and overlay is not None
+    if valid:
+        valid = len(sequence_positions(overlay, ["GitHubTooltipSurface", "{"])) == 7
+        valid = valid and len(sequence_positions(overlay, ["GitHubTransientFloatingOverlayHost", "{"])) == 1
+        for suffix, (kind, label) in surfaces.items():
+            body, matches = owner_body(overlay, ["surface-" + suffix, ":=", "GitHubTooltipSurface", "{"])
+            valid = valid and matches == 1 and body is not None and all(sequence_positions(body, expected) for expected in [
+                ["visible", ":", "AgentTooltipState", ".", "kind", "==", "AgentTooltipKind", ".", kind, ";"],
+                ["text", ":", "I18n", ".", label, ";"],
+            ])
+    if not valid:
+        print(f"{agent_tooltip_path}: Agent actions require seven fixed literal surfaces in one transient host")
 
 if elevation_path.exists():
     relative = pathlib.Path("ui/components/github_elevation.slint")
@@ -503,7 +542,7 @@ consumer_requirements = {
     pathlib.Path("ui/components/notify/actions_notify.slint"): ("GitHubCompactElevation", 1, ["export", "component", "GitHubNotificationBanner"]),
     pathlib.Path("ui/components/toast/toast.slint"): ("GitHubCompactElevation", 1, ["export", "component", "GitHubToast"]),
     pathlib.Path("ui/components/pr_review/content.slint"): ("GitHubCompactElevation", 1, ["export", "component", "GitHubCodeRenderingIndicator"]),
-    pathlib.Path("ui/main.slint"): ("GitHubCompactElevation", 1, ["main-content-host", ":=", "Rectangle", "{"]),
+    pathlib.Path("ui/components/navigation/github_window_navigation.slint"): ("GitHubCompactElevation", 1, ["export", "component", "GitHubCollapsedWindowNavigation"]),
 }
 if elevation_path.exists():
     for relative, (component, expected, marker) in consumer_requirements.items():

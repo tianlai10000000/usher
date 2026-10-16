@@ -1,0 +1,51 @@
+import { FloatingOverlayRect } from "floating_overlay_bridge.slint";
+
+export enum FactoryTooltipKind { None, Invisible, Bordered, Danger, Loading, Disabled, Review, CloseReview, ReviewRunning, Copy, Copied, MoreFilters, CancelReview, OpenConversation, ReviewWithAi, QueuedAi, RunningAi, FailedAi, }
+
+// Only literal action identities and geometry cross factory leaves.
+export global FactoryTooltipState {
+    in-out property <bool> enabled: false;
+    in-out property <FloatingOverlayRect> viewport;
+    in-out property <FactoryTooltipKind> kind: FactoryTooltipKind.None;
+    in-out property <length> anchor-x: 0px;
+    in-out property <length> anchor-y: 0px;
+    in-out property <length> anchor-width: 0px;
+    in-out property <length> anchor-height: 0px;
+    in-out property <int> lease: 0;
+
+    callback show(FactoryTooltipKind, length, length, length, length);
+    callback renew(FactoryTooltipKind, length, length, length, length);
+    callback hide(FactoryTooltipKind, length, length);
+    callback dismiss-all();
+
+    show(kind, anchor-x, anchor-y, anchor-width, anchor-height) => {
+        root.kind = kind;
+        root.anchor-x = anchor-x;
+        root.anchor-y = anchor-y;
+        root.anchor-width = anchor-width;
+        root.anchor-height = anchor-height;
+        root.lease += 1;
+    }
+
+    renew(kind, anchor-x, anchor-y, anchor-width, anchor-height) => {
+        if root.kind == kind
+                && root.anchor-x == anchor-x
+                && root.anchor-y == anchor-y {
+            root.anchor-width = anchor-width;
+            root.anchor-height = anchor-height;
+            root.lease += 1;
+        }
+    }
+
+    hide(kind, anchor-x, anchor-y) => {
+        if root.kind == kind
+                && root.anchor-x == anchor-x
+                && root.anchor-y == anchor-y {
+            root.kind = FactoryTooltipKind.None;
+        }
+    }
+
+    dismiss-all() => {
+        root.kind = FactoryTooltipKind.None;
+    }
+}

@@ -1,6 +1,8 @@
+mod agent_identity;
 mod config;
 mod controller;
 mod producers;
+mod request_capture;
 mod response;
 mod review_input;
 mod session_transactions;

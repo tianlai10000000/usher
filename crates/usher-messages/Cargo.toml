@@ -24,5 +24,5 @@ usher-fs = { path = "../usher-fs" }
 usher-state-store = { path = "../usher-state-store" }
 
 [build-dependencies]
-slint-build = { version = "1.18.1", features = ["experimental-module-builds"] }
-usher-i18n = { path = "../usher-i18n" }
+usher-ui-build = { path = "../usher-ui-build" }
+usher-i18n-build = { path = "../usher-i18n-build" }

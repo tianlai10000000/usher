@@ -1,3 +1,4 @@
+import { ShowcaseMoreFiltersTooltipAnchor } from "github_pr_factory_tooltip_anchors.slint";
 import { GitHubTooltip } from "../github_tooltip.slint";
 import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint";
 import { GitHubBlankslate } from "../github_blankslate.slint";
@@ -278,6 +279,9 @@ export component GitHubPullRequestStateButton inherits Rectangle {
 }
 
 export component GitHubPullRequestFilterMoreButton inherits GitHubIconButton {
+    in property <bool> fixed-tooltip: false;
+    show-tooltip: !root.fixed-tooltip;
+    if root.fixed-tooltip: ShowcaseMoreFiltersTooltipAnchor { active: root.fixed-tooltip && root.tooltip-active; }
     icon: @image-url("../../assets/icons/octicon-kebab-horizontal-16.svg");
     tooltip-text: I18n.pr-list-more-filters;
     tooltip-above: false;

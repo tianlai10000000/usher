@@ -1,3 +1,6 @@
+import { UiComponentsHost, UiComponentsBridge } from "./features/ui_components_bridge.slint";
+export { UiComponentsBridge } from "./features/ui_components_bridge.slint";
+import { GitHubResizeHandle } from "./components/github_resize_handle.slint";
 import { GitHubNavigationSidebar, GitHubSidebarRightEdge, NavItem } from "./components/navigation/custom_nav_drawer.slint";
 import { I18n } from "@i18n";
 import { PrDiffBridge } from "./features/pr_review/diff_bridge.slint";
@@ -34,6 +37,7 @@ import { GitHubTooltipOverlayHost } from "./components/github_tooltip_overlay.sl
 import { GitHubSelectState } from "./components/input/github_select.slint";
 import { GitHubTabOverflowPopup } from "./components/navigation/github_underline_nav.slint";
 import { GitHubBreadcrumb } from "./components/navigation/github_breadcrumb.slint";
+import { GitHubWindowNavigation, GitHubCollapsedWindowNavigation } from "./components/navigation/github_window_navigation.slint";
 import { NotificationManager, Notification, NotificationType, NotificationDelivery } from "./components/notify/notification.slint";
 import { NotificationIcons } from "./components/notify/icons.slint";
 import { GitHubNotificationItem } from "./components/notify/notification_item.slint";
@@ -48,10 +52,9 @@ import { GitHubPageScrollActions } from "./components/fab/page_scroll_actions.sl
 import { GitHubTerminalDrawer, TerminalLine } from "./components/drawer/terminal_drawer.slint";
 import { GitHubScrollView } from "./components/github_scroll_view.slint";
 import { GitHubActionMenu } from "./components/github_action_menu.slint";
-import { GitHubCompactElevation } from "./components/github_elevation.slint";
 import { GitHubIconButton } from "./components/button/github_icon_button.slint";
 import { GitHubTheme, GitHubMetrics } from "./theme/github_theme.slint";
-import { ArtifactPreviewKind, ArtifactPreviewBlockKind, ArtifactPreviewInlineKind, ArtifactPreviewInlineSpan, ArtifactPreviewCodeToken, ArtifactPreviewCodeLine, ArtifactPreviewBlock, ArtifactPreviewVirtualRow, ArtifactPreviewVirtualWindow, GitHubArtifactPreviewPanel, GitHubArtifactPreviewResizeHandle, ArtifactPreviewWindow } from "./components/artifact_preview/github_artifact_preview.slint";
+import { ArtifactPreviewKind, ArtifactPreviewBlockKind, ArtifactPreviewInlineKind, ArtifactPreviewInlineSpan, ArtifactPreviewCodeToken, ArtifactPreviewCodeLine, ArtifactPreviewBlock, ArtifactPreviewVirtualRow, ArtifactPreviewVirtualWindow, GitHubArtifactPreviewPanel, ArtifactPreviewWindow } from "./components/artifact_preview/github_artifact_preview.slint";
 
 export { MaterialWindowAdapter } from "@material";
 export { AppState } from "./state/app_state.slint";
@@ -102,11 +105,15 @@ export component MainWindow inherits Window {
     // AppKit owns system full-screen transitions. Platform notifications keep
     // this presentation-only state current on the Slint event loop.
     in-out property <bool> native-window-fullscreen: false;
+    changed native-window-fullscreen => {
+        TooltipOverlayState.dismiss-all();
+    }
     callback message-window-activity-changed(bool);
     changed native-window-active => {
         root.message-window-activity-changed(root.native-window-active);
     }
     in-out property <bool> native-sidebar-vibrancy-ready: false;
+    in property <image> native-sidebar-toggle-image;
     in property <image> native-titlebar-modal-image;
     in property <length> native-titlebar-modal-x;
     in property <length> native-titlebar-modal-y;
@@ -1078,6 +1085,7 @@ export component MainWindow inherits Window {
     dismiss-transient-overlays => {
         GitHubSelectState.close(false);
         root.settings-select-dismiss();
+        UiComponentsBridge.dismiss(true);
         TransientOverlayState.dismiss-all();
     }
 
@@ -1089,6 +1097,7 @@ export component MainWindow inherits Window {
     dismiss-transient-popovers => {
         GitHubSelectState.close(false);
         root.settings-select-dismiss();
+        UiComponentsBridge.dismiss(false);
         TransientOverlayState.dismiss-popovers();
     }
 
@@ -1104,6 +1113,7 @@ export component MainWindow inherits Window {
 
     post-dispatch-pointer-released(x, y) => {
         GitHubSelectState.pointer-released(x, y);
+        if root.current-route == Route.UiComponents { UiComponentsBridge.pointer-released(x, y); }
         if root.current-route == Route.Settings {
             root.settings-select-pointer-released(x, y);
         }
@@ -1144,13 +1154,12 @@ export component MainWindow inherits Window {
         height: root.height;
 
         capture-key-pressed(event) => {
-            if root.app-shortcut-key-pressed(
-                event.text,
-                event.modifiers.control,
-                event.modifiers.alt,
-                event.modifiers.shift,
-                event.modifiers.meta
-            ) {
+            if (UiComponentsFeature.independent && UiComponentsBridge.active
+                    && (event.text == Key.Tab || event.text == Key.Backtab)
+                    && UiComponentsBridge.key-pressed(event.text, event.modifiers.control,
+                        event.modifiers.alt, event.modifiers.shift, event.modifiers.meta))
+                    || root.app-shortcut-key-pressed(event.text, event.modifiers.control,
+                        event.modifiers.alt, event.modifiers.shift, event.modifiers.meta) {
                 return accept;
             }
             return reject;
@@ -1189,56 +1198,18 @@ export component MainWindow inherits Window {
             // macOS hosts these actions in the native title bar. Other desktop
             // platforms keep an equivalent compact control strip in content.
             if !root.platform-is-macos && root.show-navigation-drawer
-                    && !root.navigation-drawer-expanded: Rectangle {
+                    && !root.navigation-drawer-expanded: GitHubCollapsedWindowNavigation {
                 x: GitHubMetrics.size-8;
                 y: GitHubMetrics.size-8;
-                width: 112px;
-                height: GitHubMetrics.size-40;
-                background: transparent;
                 z: 30;
-
-                GitHubCompactElevation {
-                    target-width: parent.width;
-                    target-height: parent.height;
-                    shadow-color: GitHubTheme.shadow-floating-small;
-                }
-
-                Rectangle {
-                    width: parent.width;
-                    height: parent.height;
-                    border-radius: GitHubMetrics.radius-large;
-                    background: GitHubTheme.canvas-overlay;
-                }
-
-                HorizontalLayout {
-                    width: parent.width;
-                    height: parent.height;
-                    padding-left: GitHubMetrics.size-4;
-                    padding-right: GitHubMetrics.size-4;
-                    spacing: GitHubMetrics.size-4;
-                    alignment: center;
-
-                    GitHubIconButton {
-                        icon: @image-url("./assets/icons/octicon-sidebar-expand-16.svg");
-                        tooltip-text: I18n.tooltip-show-sidebar + " (" + root.shortcut-toggle-sidebar-label + ")";
-                        tooltip-above: false;
-                        clicked => { root.toggle-navigation-drawer(); }
-                    }
-                    GitHubIconButton {
-                        icon: @image-url("./assets/icons/octicon-arrow-left-16.svg");
-                        tooltip-text: I18n.common-back + " (" + root.shortcut-navigate-back-label + ")";
-                        tooltip-above: false;
-                        button-enabled: root.navigation-can-go-back;
-                        clicked => { root.navigate-back(); }
-                    }
-                    GitHubIconButton {
-                        icon: @image-url("./assets/icons/octicon-chevron-right-16.svg");
-                        tooltip-text: I18n.tooltip-forward + " (" + root.shortcut-navigate-forward-label + ")";
-                        tooltip-above: false;
-                        button-enabled: root.navigation-can-go-forward;
-                        clicked => { root.navigate-forward(); }
-                    }
-                }
+                can-go-back: root.navigation-can-go-back;
+                can-go-forward: root.navigation-can-go-forward;
+                back-shortcut-label: root.shortcut-navigate-back-label;
+                forward-shortcut-label: root.shortcut-navigate-forward-label;
+                sidebar-shortcut-label: root.shortcut-toggle-sidebar-label;
+                back => { root.navigate-back(); }
+                forward => { root.navigate-forward(); }
+                toggle-sidebar => { root.toggle-navigation-drawer(); }
             }
 
             // On macOS the breadcrumb occupies the title-bar inset instead of
@@ -1246,12 +1217,12 @@ export component MainWindow inherits Window {
             // When the sidebar is hidden, leave room for traffic lights and the
             // native sidebar/history accessory before starting the breadcrumb.
             if root.platform-is-macos
-                    && (root.show-breadcrumb || root.current-route == Route.PrReview): Rectangle {
+                    && (root.show-breadcrumb || root.current-route == Route.PrReview): titlebar-breadcrumb-host := Rectangle {
                 // A normal undocked window leaves room for traffic lights and
-                // native history controls. AppKit removes that leading chrome
-                // in system full screen, so align the crumb with page content.
+                // native history controls. Full screen keeps a smaller content
+                // control strip visible while the system title bar is hidden.
                 x: root.native-window-fullscreen
-                    ? 0px
+                    ? max(0px, 112px - main-content-host.x)
                     : max(0px, 184px - main-content-host.x);
                 y: 0px;
                 width: max(0px, parent.width - self.x);
@@ -1297,6 +1268,7 @@ export component MainWindow inherits Window {
                         visible: root.show-page-scroll-view
                             && root.current-route != Route.Settings
                             && root.current-route != Route.Messages
+                            && !(UiComponentsFeature.independent && root.current-route == Route.UiComponents)
                             && root.current-route != Route.JobRun
                             && !(root.shell-drawer-docked-route
                                 && root.shell-drawer-visible
@@ -1327,7 +1299,7 @@ export component MainWindow inherits Window {
                                 - root.page-content-height-offset;
                             navigate(route) => { root.navigate(route); }
                         }
-                        if root.current-route == Route.UiComponents: UiComponentsPage {
+                        if root.current-route == Route.UiComponents && !UiComponentsFeature.independent: UiComponentsPage {
                             viewport-global-x: page-scroll-view.absolute-position.x;
                             viewport-global-y: page-scroll-view.absolute-position.y;
                             viewport-width: page-scroll-view.visible-width;
@@ -1833,7 +1805,7 @@ export component MainWindow inherits Window {
         }
     }
 
-    GitHubArtifactPreviewResizeHandle {
+    GitHubResizeHandle {
         x: root.width - root.artifact-preview-visible-width - 4px;
         y: 0px;
         height: root.height - LayoutConstants.status-bar-height;
@@ -1939,6 +1911,26 @@ export component MainWindow inherits Window {
             visible: root.sidebar-layout-progress > 0.001;
             z: 1;
         }
+    }
+
+    fullscreen-navigation := GitHubWindowNavigation {
+        x: GitHubMetrics.size-8;
+        y: 0px;
+        height: root.native-titlebar-inset;
+        visible: root.platform-is-macos && root.native-window-fullscreen;
+        controls-enabled: self.visible && !root.modal-overlay-visible;
+        can-go-back: root.navigation-can-go-back;
+        can-go-forward: root.navigation-can-go-forward;
+        sidebar-expanded: root.navigation-drawer-expanded;
+        sidebar-icon: root.native-sidebar-toggle-image;
+        back-shortcut-label: root.shortcut-navigate-back-label;
+        forward-shortcut-label: root.shortcut-navigate-forward-label;
+        sidebar-shortcut-label: root.shortcut-toggle-sidebar-label;
+        // Above the docked sidebar (700), below the modal composition (750).
+        z: 710;
+        back => { root.navigate-back(); }
+        forward => { root.navigate-forward(); }
+        toggle-sidebar => { root.toggle-navigation-drawer(); }
     }
 
     // Native accessories normally paint above the GPU surface. During a modal,
@@ -2159,7 +2151,7 @@ export component MainWindow inherits Window {
         // surface above that host while Settings is an ordinary page; otherwise
         // the host hides every status popup and its outside-click layer. Any
         // modal lowers the bar again so the factory/root dialog keeps ownership.
-        z: root.current-route == Route.Settings && !root.modal-overlay-visible
+        z: (root.current-route == Route.Settings || (UiComponentsFeature.independent && root.current-route == Route.UiComponents)) && !root.modal-overlay-visible
             ? 1210
             : 810;
     }
@@ -2195,6 +2187,13 @@ export component MainWindow inherits Window {
                 page-scroll-view.viewport_y = 0px;
             }
         }
+    }
+
+    if UiComponentsFeature.independent: UiComponentsHost {
+        z: 1200;
+        active: root.current-route == Route.UiComponents && root.show-page-scroll-view;
+        viewport: { x: page-stack.absolute-position.x, y: page-stack.absolute-position.y, width: page-stack.width, height: page-stack.height };
+        top-padding: root.page-content-top-padding;
     }
 
     // A full-window factory host lets Settings-owned Dialogs share their draft
@@ -2528,7 +2527,7 @@ export component MainWindow inherits Window {
         interaction-started => { root.dismiss-transient-overlays(); }
     }
 
-    GitHubArtifactPreviewResizeHandle {
+    GitHubResizeHandle {
         x: root.width - root.pr-review-trailing-surface-width - 4px;
         y: root.native-titlebar-inset;
         height: root.pr-review-content-height;
@@ -2965,7 +2964,7 @@ export component MainWindow inherits Window {
         viewport-height: page-scroll-view.visible-height - root.page-content-height-offset;
     }
 
-    if root.current-route == Route.UiComponents: UiComponentsOverlay {
+    if root.current-route == Route.UiComponents && !UiComponentsFeature.independent: UiComponentsOverlay {
         z: 9000;
         viewport-x: page-scroll-view.absolute-position.x;
         viewport-y: page-scroll-view.absolute-position.y + root.page-content-top-padding;

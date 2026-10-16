@@ -31,6 +31,10 @@ class ArchitectureGateTests(unittest.TestCase):
                        "callback fixture();\nin property <bool> fixture;\n")
         self.write("src/http/mod.rs", "pub fn fixture() {}\n")
         self.write("crates/fixture/src/lib.rs", "pub fn fixture() {}\n")
+        for owner in ("usher-ui", "usher-ui-settings", "usher-messages", "usher-ui-components", "usher-i18n-build", "usher-ui-build"):
+            self.write(f"crates/{owner}/Cargo.toml", '[package]\nname = "fixture"\n')
+        for owner in ("usher-ui", "usher-ui-settings", "usher-messages", "usher-ui-components"):
+            self.write(f"crates/{owner}/build.rs", "fn main() {}\n")
 
     def write(self, path, source):
         target = self.root / path
@@ -119,6 +123,117 @@ fn fixture() { let _ = another_crate::Client::new(); }
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("src/lib.rs lines is 1101 (budget 1100)", result.stderr)
 
+    def test_window_navigation_accepts_shared_presentation_dependencies(self):
+        path = "ui/components/navigation/github_window_navigation.slint"
+        for source in ((ROOT / path).read_text(), "// No declarations is a valid count of zero.\n"):
+            with self.subTest(source=source[:60]):
+                self.write(path, source)
+                result = self.check()
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(result.stderr, "")
+
+    def test_window_navigation_rejects_feature_and_shell_dependencies(self):
+        path = "ui/components/navigation/github_window_navigation.slint"
+        for dependency in ("../../main.slint", "../../features/project/bridge.slint"):
+            with self.subTest(dependency=dependency):
+                self.write(path, f'import {{ Internal }} from "{dependency}";\n')
+                result = self.check()
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("window navigation depends on shell or feature internals", result.stderr)
+                self.assertNotIn("integer expression expected", result.stderr)
+
+    def test_window_navigation_budget_remains_blocking(self):
+        self.write("ui/components/navigation/github_window_navigation.slint", "// fixture\n" * 181)
+        result = self.check()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("Window navigation UI lines is 181 (budget 180)", result.stderr)
+        self.assertNotIn("integer expression expected", result.stderr)
+
+    def test_i18n_build_boundary_accepts_catalog_free_helper(self):
+        self.write("crates/usher-ui/Cargo.toml", '[build-dependencies]\nusher-i18n-build = { path = "../usher-i18n-build" }\n')
+        self.assert_accepted()
+
+    def test_i18n_ui_runtime_dependency_and_embedded_catalog_are_rejected(self):
+        cases = [
+            ("crates/usher-ui/Cargo.toml", '[build-dependencies]\nusher-i18n = { path = "../usher-i18n" }\n'),
+            ("crates/usher-ui-settings/Cargo.toml", '[build-dependencies]\ncatalog = { package = "usher-i18n", path = "../usher-i18n" }\n'),
+            ("crates/usher-messages/Cargo.toml", '[build-dependencies]\nusher-i18n = "1"\n'),
+            ("crates/usher-i18n-build/src/lib.rs", 'include_str!("catalogs.rs");\n'),
+            ("crates/usher-i18n-build/build.rs", 'fn main() {}\n'),
+            ("crates/usher-i18n-build/Cargo.toml", '[package]\nbuild = "generated.rs"\n'),
+            ("crates/usher-i18n-build/Cargo.toml", '[dependencies]\nslint = "1"\n'),
+        ]
+        for path, source in cases:
+            with self.subTest(path=path):
+                target = self.root / path
+                previous = target.read_text() if target.exists() else None
+                self.write(path, source)
+                result = self.check()
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("i18n UI build support", result.stderr)
+                if previous is None:
+                    target.unlink()
+                else:
+                    target.write_text(previous)
+
+    def test_i18n_owner_budget_remains_blocking(self):
+        self.write("crates/usher-i18n-build/src/lib.rs", "// fixture\n" * 131)
+        result = self.check()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("i18n build facade lines is 131 (budget 130)", result.stderr)
+
+    def test_slint_build_integration_accepts_only_public_build_support(self):
+        self.write("crates/usher-ui-build/Cargo.toml", '[dependencies]\nslint-build = { version = "=1.18.1" }\n')
+        self.write("crates/usher-ui-build/src/lib.rs", 'slint_build::compile_with_output_path(input, output, config);\n')
+        self.write("crates/usher-ui/build.rs", 'usher_ui_build::compile_with_config(input, config);\n')
+        self.assert_accepted()
+
+    def test_slint_build_integration_rejects_catalog_runtime_and_private_compiler_dependencies(self):
+        cases = [
+            ("crates/usher-ui-build/Cargo.toml", '[dependencies]\nusher-i18n-build = "1"\n'),
+            ("crates/usher-ui-build/Cargo.toml", '[dependencies.catalog]\npackage = "usher-i18n"\n'),
+            ("crates/usher-ui-build/Cargo.toml", '[dependencies]\nslint-build = { package = "i-slint-compiler", version = "1" }\n'),
+            ("crates/usher-ui-build/Cargo.toml", '[target.unix.dependencies]\nslint = "1"\n'),
+            ("crates/usher-ui-build/src/lib.rs", 'use i_slint_compiler::CompilerConfiguration;\n'),
+            ("crates/usher-ui-build/src/lib.rs", 'use i_slint_compiler::{CompilerConfiguration};\n'),
+            ("crates/usher-ui-build/src/lib.rs", 'use usher_i18n_build::LocaleSpec;\n'),
+            ("crates/usher-ui-build/src/lib.rs", 'use slint :: { ComponentHandle };\n'),
+            ("crates/usher-ui-build/build.rs", 'fn main() {}\n'),
+            ("crates/usher-ui/build.rs", 'slint_build::compile_with_config(input, config);\n'),
+            ("crates/usher-ui/build.rs", 'use slint_build::{compile_with_config as compile};\n'),
+        ]
+        for path, source in cases:
+            with self.subTest(path=path, source=source):
+                target = self.root / path
+                previous = target.read_text() if target.exists() else None
+                try:
+                    self.write(path, source)
+                    result = self.check()
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertIn("shared Slint build integration", result.stderr)
+                finally:
+                    if previous is None:
+                        target.unlink()
+                    else:
+                        self.write(path, previous)
+
+    def test_slint_build_integration_budgets_remain_blocking(self):
+        for path, label, maximum in [
+            ("crates/usher-ui-build/src/lib.rs", "Slint build integration lines", 150),
+            ("crates/usher-ui-build/src/tests.rs", "Slint build integration tests lines", 160),
+        ]:
+            with self.subTest(path=path):
+                previous = (self.root / path).read_text()
+                try:
+                    self.write(path, "// fixture\n" * maximum)
+                    self.assert_accepted()
+                    self.write(path, "// fixture\n" * (maximum + 1))
+                    result = self.check()
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertIn(f"{label} is {maximum + 1} (budget {maximum})", result.stderr)
+                finally:
+                    self.write(path, previous)
+
     def test_batch_six_original_limits_accept_boundary_and_reject_growth(self):
         # Keep these literal: deriving expected limits from the gate would let
         # a budget increase silently update both the implementation and test.
@@ -153,9 +268,38 @@ fn fixture() { let _ = another_crate::Client::new(); }
             ("crates/usher-preview/src/file_source.rs", "Preview source reader lines", 145, "// fixture\n"),
             ("src/ai/settings_state.rs", "AI Settings state lines", 320, "// fixture\n"),
             ("src/ai/settings_ui.rs", "AI Settings UI lines", 220, "// fixture\n"),
+            ("src/settings_page/ai_agent_drafts.rs", "AI provider draft selection lines", 180, "// fixture\n"),
+            ("src/settings/ai_agents.rs", "AI Agent profile configuration lines", 380, "// fixture\n"),
+            ("src/settings_page/ai_agent_projection.rs", "AI Agent Settings projection lines", 160, "// fixture\n"),
+            ("src/ai/settings_ui/admission.rs", "AI Agent save admission lines", 110, "// fixture\n"),
+            ("src/ai/identity.rs", "AI Agent identity lines", 130, "// fixture\n"),
+            ("src/ai/request_headers.rs", "AI Agent request headers lines", 120, "// fixture\n"),
+            ("src/settings_page/ai_agent_header_object.rs", "AI Agent Header object parser lines", 220, "// fixture\n"),
+            ("src/settings_page/ai_agent_header_drafts.rs", "AI Agent Header draft modes lines", 220, "// fixture\n"),
+            ("ui/components/settings/github_ai_agent_headers.slint", "AI Agent Header editor UI lines", 180, "// fixture\n"),
+            ("src/ai/settings_state/actions.rs", "AI Agent registry actions lines", 140, "// fixture\n"),
+            ("src/settings_page/ai_agent_list.rs", "AI Agent list projection lines", 120, "// fixture\n"),
+            ("src/ai/settings_ui/delete_confirmation.rs", "AI Agent delete confirmation lines", 100, "// fixture\n"),
+            ("src/ai/settings_ui/feedback.rs", "AI Agent save feedback lines", 70, "// fixture\n"),
+            ("src/ai/settings_ui/connection_test.rs", "AI Agent connection probe lines", 100, "// fixture\n"),
+            ("ui/components/navigation/github_fixed_tabs.slint", "Fixed Tabs UI lines", 240, "// fixture\n"),
+            ("ui/components/settings/github_ai_agent_editor.slint", "AI Agent editor UI lines", 260, "// fixture\n"),
+            ("ui/components/settings/github_ai_agent_list.slint", "AI Agent list UI lines", 160, "// fixture\n"),
+            ("ui/components/settings/github_ai_agent_list_row.slint", "AI Agent list row UI lines", 140, "// fixture\n"),
+            ("ui/components/settings/github_ai_agent_tooltip.slint", "AI Agent fixed Tooltip UI lines", 300, "// fixture\n"),
+            ("ui/components/settings/github_ai_agent_header_tooltip.slint", "AI Agent Header Tooltip UI lines", 160, "// fixture\n"),
+            ("ui/components/settings/github_ai_agent_delete.slint", "AI Agent delete UI lines", 60, "// fixture\n"),
+            ("src/chat/request.rs", "Chat request capture lines", 130, "// fixture\n"),
+            ("src/ai_review/request_capture.rs", "AI Review request capture lines", 100, "// fixture\n"),
+            ("src/ai_review/agent_identity.rs", "AI Review Agent identity lines", 160, "// fixture\n"),
             ("src/message_center/commands.rs", "Message command worker lines", 260, "// fixture\n"),
             ("src/message_center/focus.rs", "Message factory focus bridge lines", 200, "// fixture\n"),
-            ("src/message_center/focus/navigation.rs", "Message factory tab navigation lines", 200, "// fixture\n"),
+            ("src/ui_components/mod.rs", "Playground factory bridge lines", 200, "// fixture\n"),
+            ("src/ui_components/feedback.rs", "Playground feedback adapter lines", 220, "// fixture\n"),
+            ("src/ui_components/popover.rs", "Playground popover bridge lines", 100, "// fixture\n"),
+            ("ui/views/ui_components_factory.slint", "Playground factory UI lines", 150, "// fixture\n"),
+            ("src/focus_navigation.rs", "Shared factory tab navigation lines", 200, "// fixture\n"),
+            ("src/ui_components/keyboard.rs", "Playground keyboard bridge lines", 80, "// fixture\n"),
             ("src/notification/ingress.rs", "Notification ingress lines", 370, "// fixture\n"),
             ("src/shutdown/pipeline.rs", "Shutdown pipeline lines", 250, "// fixture\n"),
             ("src/shutdown/pipeline/phase.rs", "Shutdown phase lines", 200, "// fixture\n"),
@@ -194,14 +338,289 @@ fn fixture() { let _ = another_crate::Client::new(); }
                 finally:
                     self.write(path, previous)
 
+    def test_provider_draft_owner_accepts_event_loop_local_selection(self):
+        self.write("src/settings_page/ai_agent_drafts.rs", """use std::{cell::RefCell, rc::Rc};
+use slint::{ComponentHandle, Global};
+use crate::settings::AiAgentProfile;
+fn open_editor(saved: &AiAgentProfile) -> AiAgentProfile {
+    saved.clone()
+}
+""")
+        self.assert_accepted()
+
+    def test_provider_draft_owner_rejects_io_workers_and_concrete_stores(self):
+        cases = [
+            "use std::fs;",
+            "use std::process::Command;",
+            "use std::thread;",
+            "use std::{cell::RefCell, fs};",
+            "use std :: process :: Command;",
+            "use tokio::task;",
+            "fn fixture() { tokio::spawn(async {}); }",
+            "use reqwest::Url;",
+            'fn fixture() { let _ = crate::http::get("https://example.test"); }',
+            "use crate::{http as transport};",
+            "use usher_state_store::LocalStateStore;",
+            "use usher_state_store::PersistentStore;",
+        ]
+        path = "src/settings_page/ai_agent_drafts.rs"
+        for source in cases:
+            with self.subTest(source=source):
+                self.write(path, source + "\n")
+                result = self.check()
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("AI provider draft selection owns I/O, workers or concrete Stores", result.stderr)
+                self.assertIn(path, result.stderr)
+
+    def test_agent_profile_owners_allow_semantic_data_and_ui_capture(self):
+        self.write("src/settings/ai_agents.rs", """use serde::{Deserialize, Serialize};
+use crate::settings::AiAgentSettings;
+fn normalize(settings: AiAgentSettings) -> AiAgentSettings { settings }
+""")
+        self.write("src/ai/identity.rs", """fn label() -> String {
+    usher_i18n::translate("common.custom").into_owned()
+}
+""")
+        self.write("src/ai/settings_ui/admission.rs", "use std::sync::{Arc, Mutex};\n")
+        self.write("src/ai/settings_ui/feedback.rs", 'fn label() -> String { crate::i18n::tr("settings.feedback.ai_agent_saved").into_owned() }\n')
+        for owner in ("src/settings_page/ai_agent_projection.rs",
+                      "src/ai_review/request_capture.rs", "src/ai_review/agent_identity.rs"):
+            self.write(owner, """use slint::{ComponentHandle, Global};
+use crate::MainWindow;
+fn capture() { let _ = crate::ai::settings_state::current_profile(); }
+""")
+        self.assert_accepted()
+
+    def test_agent_profile_owners_reject_io_workers_and_concrete_stores(self):
+        owners = [
+            "src/settings/ai_agents.rs", "src/settings_page/ai_agent_projection.rs", "src/settings_page/ai_agent_list.rs",
+            "src/ai/settings_ui/admission.rs", "src/ai/identity.rs",
+            "src/ai/settings_state/actions.rs", "src/ai/settings_ui/delete_confirmation.rs", "src/ai/settings_ui/feedback.rs",
+            "src/ai_review/request_capture.rs", "src/ai_review/agent_identity.rs",
+        ]
+        forbidden = [
+            "use std::fs;", "use std::io;", "use std::net::TcpStream;",
+            "use std::{sync::Arc, process};", "use std :: thread;",
+            "use tokio::task;", "fn fixture() { tokio::spawn(async {}); }",
+            "use reqwest::Url;", "use usher_state_store::LocalStateStore;",
+            "use usher_state_store::PersistentStore;",
+            'fn fixture() { let _ = crate::http::get("https://example.test"); }',
+            "use crate::{http as transport};",
+        ]
+        for owner in owners:
+            previous = (self.root / owner).read_text()
+            try:
+                for source in forbidden:
+                    with self.subTest(owner=owner, source=source):
+                        self.write(owner, source + "\n")
+                        result = self.check()
+                        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                        self.assertIn("AI Agent configuration, identity or capture owns I/O, workers or concrete Stores", result.stderr)
+                        self.assertIn(owner, result.stderr)
+            finally:
+                self.write(owner, previous)
+
+    def test_agent_probe_owners_preserve_size_budgets(self):
+        for path, label, maximum in [
+            ("src/ai/settings_ui/connection_probe.rs", "AI Agent shared probe lifecycle lines", 150),
+            ("src/ai/settings_ui/list_connection_test.rs", "AI Agent list connection probe lines", 180),
+        ]:
+            with self.subTest(path=path):
+                previous = (self.root / path).read_text()
+                try:
+                    self.write(path, "// fixture\n" * maximum)
+                    self.assert_accepted()
+                    self.write(path, "// fixture\n" * (maximum + 1))
+                    result = self.check()
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertIn(f"{label} is {maximum + 1} (budget {maximum})", result.stderr)
+                finally:
+                    self.write(path, previous)
+
+    def test_agent_probe_owners_keep_lifecycle_and_transport_boundaries(self):
+        lifecycle = "src/ai/settings_ui/connection_probe.rs"
+        listing = "src/ai/settings_ui/list_connection_test.rs"
+        self.write(lifecycle, "use tokio::task::AbortHandle;\nuse crate::ai::agent::ConnectionTestResult;\n")
+        self.write(listing, """use slint::{ComponentHandle, Global};
+use usher_ui_settings::GitHubSettingsPage;
+async fn request() { crate::ai::agent::test_connection(&saved.connection).await; }
+fn run() { crate::app_runtime::shared_runtime().spawn(async {}); }
+""")
+        self.assert_accepted()
+        for owner, message, forbidden in [
+            (lifecycle, "shared probe lifecycle owns UI, transport, scheduling or I/O", [
+                "use slint::Global;", "use usher_ui_settings::GitHubSettingsPage;",
+                "fn run() { crate::app_runtime::shared_runtime(); }",
+                "fn run() { tokio::spawn(async {}); }",
+                "async fn run() { crate::ai::agent::test_connection(&settings).await; }",
+            ]),
+            (listing, "connection probe bypasses its transport or settings facade", [
+                "use crate::MainWindow;", "use crate::settings_page::SettingsPageBridge;",
+                "use std::net::TcpStream;", "use reqwest::Url;",
+                "fn run() { crate::http::get(url); }",
+                "use usher_state_store::PersistentStore;",
+            ]),
+        ]:
+            previous = (self.root / owner).read_text()
+            try:
+                for source in forbidden:
+                    with self.subTest(owner=owner, source=source):
+                        self.write(owner, source + "\n")
+                        result = self.check()
+                        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                        self.assertIn(message, result.stderr)
+                        self.assertIn(owner, result.stderr)
+            finally:
+                self.write(owner, previous)
+
+    def test_chat_request_owner_allows_async_feature_transports_and_http_errors(self):
+        self.write("src/chat/request.rs", """use crate::http::{HttpError, HttpErrorKind};
+async fn request() -> Result<String, HttpError> {
+    crate::ai::agent::complete(&settings, &messages, "AI Chat").await
+}
+async fn rag() { crate::chat::chat::send_message_to_server("question").await; }
+""")
+        self.assert_accepted()
+
+    def test_header_preparation_and_registry_reducers_allow_only_semantic_work(self):
+        self.write("src/ai/request_headers.rs", """use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use crate::http::HttpError;
+fn prepare(value: &mut HeaderValue) { value.set_sensitive(true); }
+""")
+        self.write("src/ai/settings_state/actions.rs", """use usher_state_store::Reduction;
+use crate::settings::AiAgentConfiguration;
+fn reduce(state: &AiAgentConfiguration) { let _ = state.clone(); }
+""")
+        self.assert_accepted()
+
+    def test_header_preparation_rejects_ui_network_scheduling_and_concrete_stores(self):
+        owner = "src/ai/request_headers.rs"
+        for source in ["use std::fs;", "use std::{sync::Arc, net};",
+                       "use tokio::task;", "use crate::MainWindow;",
+                       "use slint::ComponentHandle;", "use super::controller::ControllerInner;",
+                       "use usher_state_store::PersistentStore;",
+                       'fn fixture() { crate::http::get("https://example.test"); }',
+                       'async fn fixture() { crate::ai::agent::complete(&a, &b, "fixture").await; }']:
+            with self.subTest(source=source):
+                self.write(owner, source + "\n")
+                result = self.check()
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("AI Agent request headers owns UI, I/O, scheduling or concrete Stores", result.stderr)
+                self.assertIn(owner, result.stderr)
+
+    def test_header_tooltip_owner_has_an_independent_size_budget(self):
+        owner = "ui/components/settings/github_ai_agent_header_tooltip.slint"
+        self.write(owner, "// fixture\n" * 160)
+        self.assert_accepted()
+        self.write(owner, "// fixture\n" * 161)
+        result = self.check()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("AI Agent Header Tooltip UI lines is 161 (budget 160)", result.stderr)
+
+    def test_header_object_and_draft_modes_accept_data_only_conversion(self):
+        self.write("src/settings_page/ai_agent_header_object.rs", """use crate::settings::AiAgentHeader;
+fn parse(source: &str) { let _: Result<String, _> = serde_json::from_str(source); }
+""")
+        self.write("src/settings_page/ai_agent_header_drafts.rs", """use slint::{Global, ModelRc};
+fn normalize(draft: &crate::settings::AiAgentSettings) {
+    let _ = crate::ai::request_headers::validate(draft);
+}
+""")
+        self.assert_accepted()
+
+    def test_header_object_parser_rejects_ui_io_scheduling_and_store_dependencies(self):
+        owner = "src/settings_page/ai_agent_header_object.rs"
+        for source in ["use std::fs;", "use std::{sync::Arc, net};", "use tokio::task;",
+                       "use reqwest::header::HeaderMap;", "use slint::Model;",
+                       "use crate::MainWindow;", "use crate::settings::SettingsManager;",
+                       "use usher_state_store::PersistentStore;", "use crate::app_runtime;"]:
+            with self.subTest(source=source):
+                self.write(owner, source + "\n")
+                result = self.check()
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("AI Agent Header object parser owns UI, I/O, scheduling or Stores", result.stderr)
+                self.assertIn(owner, result.stderr)
+
+    def test_header_draft_modes_reject_direct_io_workers_and_concrete_stores(self):
+        owner = "src/settings_page/ai_agent_header_drafts.rs"
+        for source in ["use std::process;", "use std::{sync::Arc, fs};", "use tokio::task;",
+                       "use reqwest::header::HeaderMap;", "use usher_state_store::LocalStateStore;",
+                       "use crate::settings::SettingsManager;", "use crate::app_runtime;"]:
+            with self.subTest(source=source):
+                self.write(owner, source + "\n")
+                result = self.check()
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("AI Agent Header draft modes bypass their parser/validation facade", result.stderr)
+                self.assertIn(owner, result.stderr)
+
+    def test_registry_reducer_rejects_ui_and_controller_dependencies(self):
+        owner = "src/ai/settings_state/actions.rs"
+        for source in ["use crate::MainWindow;", "use slint::Global;",
+                       "use super::controller::ControllerInner;"]:
+            with self.subTest(source=source):
+                self.write(owner, source + "\n")
+                result = self.check()
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("AI Agent registry actions depend on UI/controller types", result.stderr)
+                self.assertIn(owner, result.stderr)
+
+    def test_connection_probe_accepts_shared_runtime_and_event_loop_delivery(self):
+        self.write("src/ai/settings_ui/connection_test.rs", """use slint::{ComponentHandle, Global};
+fn probe() {
+    crate::app_runtime::shared_runtime().spawn(async move {
+        let _ = crate::ai::agent::test_connection(&draft.connection).await;
+        let _ = slint::invoke_from_event_loop(move || {});
+    });
+}
+""")
+        self.assert_accepted()
+
+    def test_connection_probe_rejects_direct_io_http_and_concrete_stores(self):
+        owner = "src/ai/settings_ui/connection_test.rs"
+        for source in ["use std::fs;", "use std::{sync::Arc, process};",
+                       "use std::thread;", "use reqwest::Url;",
+                       "use usher_state_store::LocalStateStore;",
+                       "use usher_state_store::PersistentStore;",
+                       'fn fixture() { crate::http::get("https://example.test"); }']:
+            with self.subTest(source=source):
+                self.write(owner, source + "\n")
+                result = self.check()
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("AI Agent connection probe bypasses its transport or settings facade", result.stderr)
+                self.assertIn(owner, result.stderr)
+
+    def test_chat_request_owner_rejects_raw_io_clients_and_concrete_stores(self):
+        owner = "src/chat/request.rs"
+        for source in ["use std::fs;", "use std::io;", "use std::net::TcpStream;",
+                       "use std::{sync::Arc, process};", "use std :: thread;",
+                       "use reqwest::Url;", "use reqwest::Client as Transport;",
+                       "use usher_state_store::LocalStateStore;",
+                       "use usher_state_store::PersistentStore;"]:
+            with self.subTest(source=source):
+                self.write(owner, source + "\n")
+                result = self.check()
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("Chat request capture owns raw I/O, clients or concrete Stores", result.stderr)
+                self.assertIn(owner, result.stderr)
+
+    def test_shared_focus_owner_accepts_only_ui_navigation_dependencies(self):
+        self.write("src/focus_navigation.rs", "use crate::MainWindow;\nuse i_slint_core::item_tree::ItemRc;\nuse slint::ComponentHandle;\n")
+        self.assert_accepted()
+
     def test_extracted_leaves_cannot_import_controller_or_ui(self):
         cases = [
             ("crates/usher-preview/src/file_source.rs", "use crate::MainWindow;"),
             ("src/ai/settings_state.rs", "use crate::SettingsPageBridge;"),
             ("src/message_center/commands.rs", "use slint::ComponentHandle;"),
             ("src/message_center/focus.rs", "use std::fs;"),
+            ("src/ui_components/mod.rs", "use std::fs;"),
+            ("src/ui_components/feedback.rs", "use usher_state_store::LocalStateStore;"),
+            ("src/ui_components/popover.rs", "use usher_state_store::PersistentStore;"),
             ("src/message_center/focus.rs", "use usher_state_store::LocalStateStore;"),
-            ("src/message_center/focus/navigation.rs", "use std::process::Command;"),
+            ("src/focus_navigation.rs", "use std::process::Command;"),
+            ("src/ui_components/keyboard.rs", "use std::fs;"),
+            ("src/focus_navigation.rs", "use crate::message_center;"),
+            ("src/focus_navigation.rs", "use crate::{MainWindow, ui_components};"),
             ("src/ai/settings_ui.rs", "use usher_state_store::PersistentStore;"),
             ("src/notification/ingress.rs", "use usher_state_store::LocalStateStore;"),
             ("src/shutdown/pipeline.rs", "use crate::MainWindow;"),

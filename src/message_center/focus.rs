@@ -9,8 +9,6 @@ use usher_messages::GitHubMessagesPage;
 
 use crate::MainWindow;
 
-mod navigation;
-
 pub(super) fn bind(page: &GitHubMessagesPage, window: &MainWindow) {
     let weak_window = window.as_weak();
     let weak_page = page.as_weak();
@@ -27,7 +25,7 @@ pub(super) fn bind(page: &GitHubMessagesPage, window: &MainWindow) {
         }
         let backtab = text == slint::SharedString::from(Key::Backtab);
         if (text == slint::SharedString::from(Key::Tab) || backtab) && !control && !alt && !meta {
-            return navigation::move_tab(&window, shift || backtab);
+            return crate::focus_navigation::move_tab(&window, shift || backtab);
         }
         false
     });

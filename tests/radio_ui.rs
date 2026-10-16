@@ -1,9 +1,11 @@
 #![cfg(feature = "ui-components")]
 
+#[path = "support/ui_components.rs"]
+mod playground;
+
 use std::time::Duration;
 
 use i_slint_backend_testing::ElementHandle;
-use slint::platform::WindowEvent;
 use slint::{ComponentHandle, LogicalSize};
 use usher_lib::{MainWindow, Route};
 
@@ -17,28 +19,20 @@ fn find(window: &MainWindow, id: &str) -> ElementHandle {
 fn radio_optional_description_preserves_single_and_caption_geometry() {
     i_slint_backend_testing::init_no_event_loop();
     let window = MainWindow::new().unwrap();
+    playground::install(&window);
     slint::select_bundled_translation("en").unwrap();
     window.set_show_navigation_drawer(false);
     window.set_platform_is_macos(false);
     window.set_current_route(Route::UiComponents);
-    window.window().dispatch_event(WindowEvent::Resized {
-        size: LogicalSize::new(1_000.0, 900.0),
-    });
+    window.window().set_size(LogicalSize::new(1_000.0, 900.0));
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
 
-    let scroll = find(&window, "MainWindow::page-scroll-view");
-    for _ in 0..24 {
-        if ElementHandle::find_by_element_id(&window, "GitHubUiComponentsGallery::radio-single")
-            .next()
-            .is_some()
-        {
-            break;
-        }
-        scroll.scroll(0.0, -300.0);
-        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
-    }
+    let scroll = playground::document(&window);
+    playground::reveal(&window, &scroll, "GitHubUiComponentsGallery::radio-single");
 
     let single = find(&window, "GitHubUiComponentsGallery::radio-single");
+    scroll.scroll(0.0, 180.0 - single.absolute_position().y);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
     let caption = find(&window, "GitHubUiComponentsGallery::radio-description");
 
     assert!((single.size().height - 32.0).abs() < 0.5);

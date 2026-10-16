@@ -1,5 +1,0 @@
-    Blocking waiting for file lock on build directory
-   Compiling usher-messages v0.0.9-alpha.1 (/Users/yuankai/yuankai/Demo/rust/usher/crates/usher-messages)
-   Compiling usher-ui v0.0.9-alpha.1 (/Users/yuankai/yuankai/Demo/rust/usher/crates/usher-ui)
-    Checking usher v0.0.9-alpha.4 (/Users/yuankai/yuankai/Demo/rust/usher)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 06s

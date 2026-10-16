@@ -56,6 +56,7 @@ fn queued_initial_session_read_cannot_replace_new_ask_completed_conversation() {
             role: ReviewConversationRole::User,
             content: "old read".into(),
             elapsed_ms: None,
+            agent: None,
             response: None,
         }],
         response_actions: HashMap::new(),

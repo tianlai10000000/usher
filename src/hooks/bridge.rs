@@ -644,7 +644,10 @@ pub(crate) fn apply_settings(page: &GitHubSettingsPage, state: &HookState) {
     global.set_can_clear_history(
         state.ready && state.runs.iter().any(|run| run.conclusion.is_some()),
     );
-    global.set_summaries(sync_choices(global.get_summaries(), hook_summaries(state)));
+    global.set_summaries(sync_choices(
+        global.get_summaries(),
+        hook_summaries(state, global.get_query().as_str()),
+    ));
     global.set_hooks(sync_choices(
         global.get_hooks(),
         state
@@ -808,16 +811,33 @@ fn category_order(state: &HookState) -> Vec<String> {
     categories
 }
 
-fn hook_summaries(state: &HookState) -> Vec<HookSummary> {
+pub(super) fn hook_summaries(state: &HookState, query: &str) -> Vec<HookSummary> {
+    let query = query.trim().to_lowercase();
     let mut summaries = Vec::with_capacity(state.hooks.len());
-    for (category_index, category) in category_order(state).iter().enumerate() {
+    let mut category_index = 0;
+    for category in category_order(state) {
+        let category_label = category_label(&category);
         let hooks = state
             .hooks
             .iter()
             .filter(|hook| event_category(state, &hook.event) == category)
+            .filter(|hook| {
+                query.is_empty()
+                    || [
+                        hook.name.as_str(),
+                        hook.event.as_str(),
+                        &event_label(&hook.event),
+                        &category_label,
+                        hook.language.label(),
+                    ]
+                    .iter()
+                    .any(|value| value.to_lowercase().contains(&query))
+            })
             .collect::<Vec<_>>();
+        if hooks.is_empty() {
+            continue;
+        }
         let category_size = hooks.len() as i32;
-        let category_label = category_label(category);
         for (index, hook) in hooks.into_iter().enumerate() {
             summaries.push(HookSummary {
                 id: hook.id.clone().into(),
@@ -826,12 +846,13 @@ fn hook_summaries(state: &HookState) -> Vec<HookSummary> {
                 description: format!("{} · {}", event_label(&hook.event), hook.language.label())
                     .into(),
                 category: category_label.clone().into(),
-                category_index: category_index as i32,
+                category_index,
                 category_start: index == 0,
                 category_end: index as i32 == category_size - 1,
                 category_size,
             });
         }
+        category_index += 1;
     }
     summaries
 }
@@ -1042,6 +1063,15 @@ pub(super) fn bind_settings_with_service(
     bind_language_selector(page);
     bind_history_actions(page, service.clone());
     apply_settings(page, service.state.snapshot().state());
+    let weak = page.as_weak();
+    let search_service = service.clone();
+    page.global::<HookSettingsState>()
+        .on_query_hooks(move |query| {
+            if let Some(page) = weak.upgrade() {
+                page.global::<HookSettingsState>().set_query(query);
+                apply_settings(&page, search_service.state.snapshot().state());
+            }
+        });
     page.global::<HookSettingsState>()
         .set_code_font_family(ui.get_workflow_pr_review_code_font_family());
     page.global::<HookSettingsState>()
@@ -1497,6 +1527,9 @@ fn settings_command(
                 match result {
                     Ok(()) => {
                         if close_on_success {
+                            if g.get_dialog_mode() == "add" {
+                                g.invoke_query_hooks("".into());
+                            }
                             close_editor(&page);
                         }
                         g.set_result_error(false);

@@ -7,7 +7,8 @@ import { GitHubSpinner } from "../github_spinner.slint";
 import { GitHubScrollView } from "../github_scroll_view.slint";
 import { GitHubSelectState, GitHubSelectPopup, GitHubSelectOption, GitHubSelectGroupHeading } from "../input/github_select.slint";
 import { GitHubDialog } from "../dialog/github_dialog.slint";
-import { GitHubHookEditAction, GitHubHookDeleteAction, GitHubHookStopAction, GitHubHookViewRunAction, GitHubHookClearHistoryAction } from "./github_hook_tooltip.slint";
+import { GitHubCompactTextField } from "../input/compact_text_field.slint";
+import { HookTooltipState, GitHubHookAddAction, GitHubHookEditAction, GitHubHookDeleteAction, GitHubHookStopAction, GitHubHookViewRunAction, GitHubHookClearHistoryAction } from "./github_hook_tooltip.slint";
 import { ScrollView } from "std-widgets.slint";
 
 export struct HookChoice { value: string, label: string }
@@ -50,6 +51,7 @@ export global HookSettingsState {
     in-out property <string> test-run: "";
     in-out property <[HookChoice]> hooks: [];
     in-out property <[HookSummary]> summaries: [];
+    in-out property <string> query: "";
     in-out property <string> dialog-mode: "";
     in-out property <[HookEventChoice]> events: [];
     in-out property <[HookChoice]> history: [];
@@ -87,6 +89,7 @@ export global HookSettingsState {
     callback enable(bool);
     callback set-hook-enabled(string, bool);
     callback create();
+    callback query-hooks(string);
     callback cancel();
     callback request-delete(string);
     callback choose(string, string);
@@ -550,16 +553,23 @@ export component GitHubHookSettingsSection inherits Rectangle {
         }
         Rectangle { height: 1px; background: GitHubTheme.border-default; }
         HorizontalLayout {
-            alignment: end;
-            GitHubButton {
-                text: I18n.hooks-new;
-                leading-icon: @image-url("../../assets/icons/octicon-plus-16.svg");
-                disabled: !HookSettingsState.ready || HookSettingsState.busy;
+            width: parent.width; height: GitHubMetrics.control-medium-size;
+            spacing: GitHubMetrics.size-12;
+            search-field := GitHubCompactTextField {
+                min-width: 0px; horizontal-stretch: 1;
+                text <=> HookSettingsState.query;
+                placeholder: I18n.hooks-search;
+                enabled: HookSettingsState.ready;
+                edited(value) => { HookTooltipState.dismiss(); HookSettingsState.query-hooks(value); }
+            }
+            GitHubHookAddAction {
+                button-enabled: HookSettingsState.ready && !HookSettingsState.busy;
                 clicked => { HookSettingsState.create(); }
             }
         }
         if HookSettingsState.summaries.length == 0: Text {
-            text: HookSettingsState.ready ? I18n.projects-no-hooks : I18n.projects-hooks-loading;
+            text: !HookSettingsState.ready ? I18n.projects-hooks-loading
+                : HookSettingsState.hooks.length > 0 ? I18n.hooks-search-empty : I18n.projects-no-hooks;
             color: GitHubTheme.fg-muted; font-size: 14px;
         }
         if HookSettingsState.summaries.length > 0: Rectangle {
@@ -600,6 +610,35 @@ export component GitHubHookSettingsSection inherits Rectangle {
                 Text {
                     x: 13px; y: 39px; width: parent.width - 162px; height: 20px;
                     text: hook.description; font-size: 12px; color: GitHubTheme.fg-muted; overflow: elide;
+                }
+                row-focus := FocusScope {
+                    private property <bool> keyboard-focus-visible: false;
+                    x: 0px; y: 0px; width: max(0px, row-toggle.x - 8px); height: parent.height;
+                    enabled: HookSettingsState.ready && !HookSettingsState.busy;
+                    accessible-role: button; accessible-label: hook.name;
+                    focus-gained(reason) => { self.keyboard-focus-visible = reason == FocusReason.tab-navigation; }
+                    focus-lost => { self.keyboard-focus-visible = false; }
+                    key-pressed(event) => {
+                        self.keyboard-focus-visible = true;
+                        if event.text == Key.Return || event.text == " " {
+                            HookSettingsState.choose("hook", hook.id); return accept;
+                        }
+                        return reject;
+                    }
+                    if self.has-focus && self.keyboard-focus-visible: Rectangle {
+                        x: GitHubMetrics.size-4; y: GitHubMetrics.size-4;
+                        width: max(0px, parent.width - GitHubMetrics.size-8);
+                        height: max(0px, parent.height - GitHubMetrics.size-8);
+                        background: transparent;
+                        border-width: GitHubMetrics.focus-outline-width;
+                        border-color: GitHubTheme.focus-outline;
+                        border-radius: GitHubMetrics.radius-medium;
+                    }
+                }
+                TouchArea {
+                    x: row-focus.x; y: row-focus.y; width: row-focus.width; height: row-focus.height;
+                    enabled: row-focus.enabled; mouse-cursor: self.enabled ? pointer : default;
+                    clicked => { row-focus.focus(); HookSettingsState.choose("hook", hook.id); }
                 }
                 row-toggle := GitHubToggle {
                     x: parent.width - 137px; y: 25px;

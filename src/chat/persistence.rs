@@ -34,6 +34,8 @@ pub struct StoredChatMessage {
     pub timestamp: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub elapsed_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) agent: Option<crate::ai::identity::AgentIdentity>,
 }
 
 #[derive(Debug, Clone)]
@@ -55,10 +57,12 @@ mod tests {
 
         assert_eq!(message.status, StoredMessageStatus::Normal);
         assert_eq!(message.elapsed_ms, None);
+        assert_eq!(message.agent, None);
     }
 
     fn stored_message(id: i64) -> StoredChatMessage {
         StoredChatMessage {
+            agent: None,
             id,
             role: StoredMessageRole::User,
             status: StoredMessageStatus::Normal,

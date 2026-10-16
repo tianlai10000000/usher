@@ -6,6 +6,9 @@ export struct LanguageOption {
     label: string,
 }
 
+export struct AiAgentListItem { id: string, name: string, model: string, provider: string, active: bool }
+export struct AiAgentHeaderItem { enabled: bool, name: string, value: string }
+
 export global AppState {
     in-out property <int> benchmark-preview-created-lines: -1;
     in-out property <float> benchmark-preview-offset: -1;
@@ -95,8 +98,55 @@ export global AppState {
     in-out property <string> ai-agent-base-url: "";
     in-out property <string> ai-agent-api-key: "";
     in-out property <string> ai-agent-model: "";
-    // Persisted provider preset selection.
+    in-out property <string> ai-agent-name: "";
+    // Editing selection and committed active profile are independent.
     in-out property <string> ai-agent-provider: "custom";
+    in-out property <string> ai-agent-active-provider: "custom";
+    in-out property <string> ai-agent-custom-name: "";
+    in-out property <string> ai-agent-deepseek-name: "";
+    in-out property <string> ai-agent-openai-name: "";
+    in-out property <string> ai-agent-custom-model: "";
+    in-out property <string> ai-agent-deepseek-model: "";
+    in-out property <string> ai-agent-openai-model: "";
+    // Settings list and one dialog-local editor; committed active identity is
+    // projected separately and never inferred from the row being edited.
+    in-out property <[AiAgentListItem]> ai-agent-list: [];
+    in-out property <string> ai-agent-list-testing-id: "";
+    in-out property <string> ai-agent-list-feedback-key: "";
+    in-out property <string> ai-agent-list-feedback: "";
+    in-out property <bool> ai-agent-list-feedback-success: true;
+    in-out property <bool> ai-agent-list-feedback-open: false;
+    in-out property <string> ai-agent-query: "";
+    in-out property <int> ai-agent-page: 1;
+    in-out property <int> ai-agent-total-pages: 1;
+    in-out property <int> ai-agent-total-count: 0;
+    in-out property <[int]> ai-agent-pages: [];
+    in-out property <bool> ai-agent-editor-open: false;
+    in-out property <bool> ai-agent-editor-new: true;
+    in-out property <int> ai-agent-editor-revision: 0;
+    in-out property <string> ai-agent-editor-id: "";
+    in-out property <string> ai-agent-editor-name: "";
+    in-out property <string> ai-agent-editor-provider: "custom";
+    in-out property <string> ai-agent-editor-base-url: "";
+    in-out property <string> ai-agent-editor-api-key: "";
+    in-out property <string> ai-agent-editor-model: "";
+    in-out property <string> ai-agent-editor-reply-language: "auto";
+    in-out property <[AiAgentHeaderItem]> ai-agent-editor-headers: [];
+    in-out property <bool> ai-agent-editor-headers-object-mode: false;
+    in-out property <string> ai-agent-editor-headers-object-text: "";
+    in-out property <int> ai-agent-editor-headers-input-revision: 0;
+    in-out property <bool> ai-agent-editor-feedback-open: false;
+    in-out property <bool> ai-agent-editor-busy: false;
+    in-out property <bool> ai-agent-editor-testing: false;
+    in-out property <string> ai-agent-editor-error: "";
+    in-out property <string> ai-agent-editor-error-key: "";
+    in-out property <string> ai-agent-editor-test-result: "";
+    in-out property <string> ai-agent-editor-test-result-key: "";
+    in-out property <bool> ai-agent-editor-test-success: true;
+    in-out property <string> ai-agent-delete-id: "";
+    in-out property <string> ai-agent-delete-name: "";
+    in-out property <string> ai-agent-delete-message: "";
+    in-out property <bool> ai-agent-delete-confirm-open: false;
 
     /**
      * methods
@@ -106,6 +156,27 @@ export global AppState {
     callback toggle-theme(mode: int);
     callback set-language(language: string);
     callback select-ai-agent-provider(provider: string);
+    callback activate-ai-agent(provider: string);
+    callback open-new-ai-agent();
+    callback edit-ai-agent(id: string);
+    callback delete-ai-agent(id: string);
+    callback confirm-delete-ai-agent();
+    callback cancel-delete-ai-agent();
+    callback query-ai-agents(query: string);
+    callback select-ai-agents-page(page: int);
+    callback save-ai-agent-editor();
+    callback test-ai-agent-editor();
+    callback test-ai-agent(id: string);
+    callback cancel-ai-agent-list-test();
+    callback cancel-ai-agent-test();
+    callback cancel-ai-agent-editor();
+    callback select-ai-agent-header-mode(object-mode: bool);
+    callback edit-ai-agent-header-object(source: string);
+    callback add-ai-agent-header();
+    callback remove-ai-agent-header(index: int);
+    callback set-ai-agent-header-enabled(index: int, enabled: bool);
+    callback set-ai-agent-header-name(index: int, name: string);
+    callback set-ai-agent-header-value(index: int, value: string);
     callback set-ai-agent-base-url(base-url: string);
     callback set-ai-agent-api-key(api-key: string);
     callback set-ai-agent-model(model: string);
@@ -149,7 +220,8 @@ export global AppState {
         base-url: string,
         api-key: string,
         model: string,
-        reply-language: string
+        reply-language: string,
+        name: string
     );
     callback test-ai-agent-connection(base-url: string, api-key: string, model: string);
     

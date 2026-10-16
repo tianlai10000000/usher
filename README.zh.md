@@ -82,8 +82,9 @@ UI/Settings bridge：
 cargo check --no-default-features --features renderer-femtovg --locked
 ```
 
-日常 `dev` 构建对第三方依赖和生成的 Slint UI crate 使用 opt-level 1，同时让应用
-自有 Rust 保持 opt0。`dev` 与 `test` 仍保留源码行号和增量编译，但不再使用 macOS
+日常 `dev` 构建对第三方依赖及生成的 MainWindow、演练场和 Messages UI crate 使用
+opt-level 1；独立生成的 Settings 使用 opt0，减少重建时的 LLVM 优化工作，应用
+自有 Rust 同样保持 opt0。`dev` 与 `test` 仍保留源码行号和增量编译，但不再使用 macOS
 默认的 unpacked 调试对象。这样既保留应用 panic backtrace 与源码断点，也降低普通
 `cargo run` 的代码常驻。确实需要 LLDB 查看完整变量和类型时，使用隔离的重量级
 profile：
@@ -115,20 +116,22 @@ cargo ide-check
 `cargo clean`。实测取舍和清理建议见
 [构建性能与产物策略](docs/build-performance.md)。
 
-修改内容不涉及 PR Review 详情页时，可使用显式开发 Shell。它使用独立 target
-目录，并把完整 PR Review feature package 替换为协议兼容的空实现：
+Rust 专用翻译文案独立放在 `i18n/rust-messages.toml` 与 `usher-rust.po`，修改它们
+保留静态 UI crate 缓存；Slint 可见 catalog 和共享语言元数据改动仍会触发 UI
+重建。新增或迁移文案前请阅读[国际化契约](docs/specs/i18n.md)。
+
+连续修改主壳或 UI Components 演练场的 `.slint` 时，优先启动一次实时预览，
+保持应用运行，保存文件后在进程内刷新：
 
 ```sh
-./scripts/dev-shell-check.sh
-./scripts/dev-shell-run.sh
+./scripts/ui-live-preview.sh
 ```
 
-PowerShell 对应入口为 `scripts/dev-shell-check.ps1` 和
-`scripts/dev-shell-run.ps1`。该模式会有意把进入 PR Review 的尝试回退到
-Workflow。默认构建和所有现有 Release 命令仍会编译完整页面；涉及 PR Review 或
-最终交付前，仍必须执行普通 `cargo check --locked` 和 `cargo run --locked`。
-
-应用内 Slint 实时预览仅用于开发，常规构建和 Release 构建默认不包含它。
+PowerShell 使用 `scripts/ui-live-preview.ps1`。首次启动仍需编译应用和预览依赖；
+之后受支持的 UI 改动在当前进程中重载。每次保存后都重启
+`cargo run --features ui-components`，会重复执行静态 Slint 生成、Rust 编译和链接。
+Rust 改动仍需重建；Settings、Messages 是独立编译的静态 factory 页面，修改它们
+也需要重建，不能依赖主壳的热重载。
 
 UI 快速校验要求安装版本一致的稳定版 viewer：
 
@@ -136,18 +139,21 @@ UI 快速校验要求安装版本一致的稳定版 viewer：
 cargo install slint-viewer --version 1.18.1 --locked
 ```
 
-UI 快速校验和可视化迭代统一使用项目脚本：
+不启动应用、只校验完整根 UI 时使用：
 
 ```sh
 ./scripts/ui-check.sh
-./scripts/ui-live-preview.sh
 ```
 
-PowerShell 对应入口为 `scripts/ui-check.ps1` 和 `scripts/ui-live-preview.ps1`。
-`ui-check` 不启动应用，只校验完整根 UI；live preview 保留应用 callback 和状态，
-但在运行时解释 UI 改动。交付前仍需使用普通 `cargo run --locked` 验证静态构建和
-受影响路由/布局。重复热重载可能保留较多诊断状态，长时间 UI 迭代期间应定期重启
-preview 进程。在 macOS 上，该显式开发路径使用
+PowerShell 使用 `scripts/ui-check.ps1`。live preview 保留应用 callback 和状态，
+但在运行时解释 UI 改动。交付前使用完整静态演练场对照受影响路由和布局：
+
+```sh
+cargo run --locked --features ui-components
+```
+
+同时使用普通 `cargo run --locked` 验证受影响的产品路由。重复热重载可能保留较多
+诊断状态，长时间迭代期间应定期重启 preview 进程。在 macOS 上，该显式开发路径使用
 `vendor/i-slint-live-preview` 中有文档记录的 Slint 文件监听补丁；默认构建和
 Release 构建不会选择它。
 
@@ -156,8 +162,27 @@ UI Components 演练场同样只用于开发。普通 `cargo run` 和现有 Rele
 等价的直接命令为：
 
 ```sh
-SLINT_LIVE_PREVIEW=1 cargo run --features live-preview,ui-components
+SLINT_LIVE_PREVIEW=1 cargo run --locked --features live-preview,ui-components
 ```
+
+普通静态 `ui-components` 构建把演练场放入独立 UI 包；只改演练场不会重新生成
+或编译 MainWindow UI 库，共享组件改动仍会重编译使用方，应用最终链接仍可能执行。
+静态 factory 共用应用窗口的 renderer；`live-preview,ui-components` 组合继续在
+集成图中支持演练场热重载。
+编译边界与验收见 [演练场 spec](docs/specs/ui-components.md)。
+
+改动不涉及 PR Review 时，也可在现有开发 Shell 中启用演练场：
+
+```sh
+./scripts/dev-shell-check.sh
+./scripts/dev-shell-run.sh --features ui-components
+```
+
+PowerShell 对应入口为 `scripts/dev-shell-check.ps1` 和
+`scripts/dev-shell-run.ps1 --features ui-components`。产物隔离在 `target/dev-shell`，
+该 target 首次冷构建仍需编译依赖。此模式将完整 PR Review feature package 替换为
+协议兼容的空实现，进入 PR Review 会回退到 Workflow，因此不能用于 PR Review
+验收；最终交付仍须执行上述完整应用检查。它本身仍是静态构建，不会自动启用实时预览。
 
 演练场中的 **Artifact preview fixtures** 区域可通过真实生产 Preview Registry 与
 Host 打开 Markdown、PNG、纯文本、JSON 和不支持二进制样例。`ui-components` 会
@@ -242,7 +267,7 @@ Usher 使用 `directories::ProjectDirs::from("com", "usher", "app")` 选择各�
 | 日志 | 本地数据目录：`logs/<date>/usher.log` 和 `logs/<date>/usher_tracing.log` |
 | 远程项目 Logo 缓存 | 临时目录：`usher-logo-cache/` |
 
-GitHub、GitLab 和 Gitee Token 可在设置页面管理。Gitee 公有版与企业版凭据独立保存，仓库 remote host 自动选择公有 v5 或已配置的企业 v8 API，两套 Token 不共用。**代码托管 API 配置**区块以 `[git.platform.<provider>]` 保存各平台企业版 API 地址和企业名称；可填写服务主机或完整 REST API 根地址（例如 `https://git.example.com` 或 `https://git.example.com/api/v4`），缺少版本路径时由对应 Provider 自动补齐。这些值只保存在本地，且仅在配置的 API 主机与项目 remote 主机匹配时使用。**AI Agent** 区块支持 OpenAI-compatible 的 Base URL、API Key、模型名称和回复语言；该语言应用于 AI Chat、AI Code Review 与 Review Ask，`auto` 跟随当前界面语言，RAG 不受影响。**AI Review** 配置本地 Markdown 规则、默认规则和并发上限。配置分别保存到 `[ai.agent]` 和 `ai-review.json`。所有内置 Agent 指令统一位于受版本控制的 `src/ai/prompts.toml` catalog。不要提交生成的设置、日志、聊天记录、Review Session 或凭据。详见 [AI Agent 配置规格](docs/specs/ai-agent.md)和 [AI Code Review](docs/specs/ai-code-review.md)。
+GitHub、GitLab 和 Gitee Token 可在设置页面管理。Gitee 公有版与企业版凭据独立保存，仓库 remote host 自动选择公有 v5 或已配置的企业 v8 API，两套 Token 不共用。**代码托管 API 配置**区块以 `[git.platform.<provider>]` 保存各平台企业版 API 地址和企业名称；可填写服务主机或完整 REST API 根地址（例如 `https://git.example.com` 或 `https://git.example.com/api/v4`），缺少版本路径时由对应 Provider 自动补齐。这些值只保存在本地，且仅在配置的 API 主机与项目 remote 主机匹配时使用。**AI Agent** 区块以可搜索列表管理命名的 OpenAI-compatible Agent，每页十条。新增/编辑弹窗配置 Base URL、API Key、模型、回复语言和可启停的自定义 Header；编辑与激活独立，当前 Agent 不可删除。AI Chat、AI Code Review 与 Review Ask 同时显示所用 Agent 名称和模型；回复语言应用于这三项功能，`auto` 跟随当前界面语言，RAG 不受影响。**AI Review** 配置本地 Markdown 规则、默认规则和并发上限。配置分别保存到 `[ai.agent]` 和 `ai-review.json`。所有内置 Agent 指令统一位于受版本控制的 `src/ai/prompts.toml` catalog。不要提交生成的设置、日志、聊天记录、Review Session 或凭据。详见 [AI Agent 配置规格](docs/specs/ai-agent.md)和 [AI Code Review](docs/specs/ai-code-review.md)。
 
 ## 架构概览
 
@@ -250,10 +275,12 @@ GitHub、GitLab 和 Gitee Token 可在设置页面管理。Gitee 公有版与企
 src/main.rs
   -> src/lib.rs                应用装配和 callback 绑定
      -> crates/usher-ui/       Slint 生成 API 边界
-     -> crates/usher-i18n/     locale 注册表与 Rust/Slint 共用翻译 catalog
         -> ui/main.slint       根窗口和导出的 UI 契约
            -> ui/views/        页面级视图
            -> ui/components/   应用可复用组件
+     -> crates/usher-ui-build/ 构建期 Slint 输入与生成输出边界
+     -> crates/usher-i18n/     locale 注册表与合并后的运行时 catalog
+     -> crates/usher-i18n-build/ 无内嵌 catalog 的构建校验与 Slint bundle
      -> src/app_runtime.rs     共享 Tokio runtime
      -> src/http/mod.rs        统一 HTTP 客户端和拦截器
      -> src/platform/          原生外观、标题栏、窗口交互和字体适配
@@ -306,6 +333,17 @@ GitHub Release 工作流会生成 macOS 压缩包/DMG 和 Windows ZIP Bundle。
 push `v*` tag 是唯一的自动构建触发器，只会启动 Release workflow；直接 push
 `main` 或创建 Pull Request 都不会再启动第二次构建。需要额外验证时仍可通过
 `workflow_dispatch` 手动运行 CI。
+
+发布使用 `cargo build --release --locked`，缓存 Cargo 下载与未签名编译产物，保持
+生产优化参数。诊断工具准备、缓存/计时导出和 `Release timing report` 尽力执行；
+构建、打包、已启用的签名、产品上传及发布失败仍阻断发布。
+
+不同 tag 不能共享彼此的 tag 缓存。预热时在 **Release → Run workflow** 选择默认
+分支，并将 `cache_only` 设为 `true`（默认 `false`）；checkout 前会做区分大小写的
+精确分支校验。该模式构建相同三个 target 并保存缓存，跳过打包工具安装、打包、
+签名、产品上传及发布。分层缓存恢复后仍由 Cargo 校验已跟踪输入。本地策略检查
+已通过，托管 runner 冷/暖耗时仍未测量。详见 [Release CI 契约](docs/specs/release-ci.md)
+和[构建指南](docs/build-performance.md#production-ci-cache-and-timings--生产-ci-缓存与计时)。
 
 ## 文档
 

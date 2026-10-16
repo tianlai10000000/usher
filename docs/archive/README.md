@@ -42,7 +42,7 @@ for current development.
 | Terminal 排查 | [terminal_viewport_iteration_notes.md](terminal_viewport_iteration_notes.md) |
 | AI Review 超时 | [ai-review-response-timeout-investigation.md](ai-review-response-timeout-investigation.md) |
 | Workflow 回滚 | [workflow-optimization-rollback.md](workflow-optimization-rollback.md) |
-| 2026-10-14 维护 | [安全批次 1–5](maintenance/security-maintenance-20261014.md) · [结构批次 6](maintenance/structure-cleanup-20261014.md)；原始门禁输出保留在 [validation/](../validation/) |
+| 2026-10-14 维护 | [安全批次 1–5](maintenance/security-maintenance-20261014.md) · [结构批次 6](maintenance/structure-cleanup-20261014.md)；原始门禁输出已校验并本地归档，恢复索引见 [validation/（归档：docs/validation/）](../local-archives.md#validation-tracked-history-20261016) |
 
 ## UI 与 PR 冲突 / UI and PR conflicts
 

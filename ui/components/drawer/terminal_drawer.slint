@@ -1,3 +1,4 @@
+import { GitHubResizeHandle } from "../github_resize_handle.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubButton } from "../settings/github_settings_controls.slint";
 import { GitHubTheme } from "../../theme/github_theme.slint";
@@ -65,6 +66,8 @@ export component GitHubTerminalDrawer inherits Rectangle {
     callback paste-requested();
     callback selection-mode-changed(bool);
 
+    private property <length> drag-start-height;
+    private property <bool> drag-start-fullscreen;
     private property <length> max-available-height: max(root.min-drawer-height, root.available-height - root.top-safe-margin - root.bottom-margin);
     private property <length> effective-drawer-height: root.drawer-height > 0px ? root.drawer-height : root.initial-height;
     private property <length> resolved-drawer-height: root.fullscreen
@@ -246,33 +249,30 @@ export component GitHubTerminalDrawer inherits Rectangle {
                 height: 40px;
                 background: root.canvas-subtle;
 
-                Rectangle {
-                    x: (parent.width - self.width) / 2;
-                    y: 2px;
-                    width: 40px;
-                    height: 4px;
-                    border-radius: 2px;
-                    background: resize-handle.has-hover || resize-handle.pressed
-                        ? GitHubTheme.fg-muted
-                        : GitHubTheme.border-strong;
-                }
-
-                resize-handle := TouchArea {
-                    x: (parent.width - 64px) / 2;
+                resize-handle := GitHubResizeHandle {
+                    x: 0px;
                     y: 0px;
-                    width: 64px;
-                    height: 16px;
-                    enabled: root.drawer-open;
-                    mouse-cursor: n-resize;
-                    moved => {
-                        if max(root.min-drawer-height,
-                            min(root.max-available-height,
-                                root.resolved-drawer-height - (self.mouse-y - self.pressed-y))) < root.max-available-height {
+                    width: parent.width;
+                    horizontal: true;
+                    leading-edge: true;
+                    z: 102;
+                    resize-enabled: root.drawer-open;
+                    drag-started => {
+                        root.drag-start-height = root.drawer-height;
+                        root.drag-start-fullscreen = root.fullscreen;
+                    }
+                    drag-delta(delta) => {
+                        root.drawer-height = max(root.min-drawer-height,
+                            min(root.max-available-height, root.resolved-drawer-height - delta));
+                        if root.drawer-height < root.max-available-height {
                             root.fullscreen = false;
                         }
-                        root.drawer-height = max(root.min-drawer-height,
-                            min(root.max-available-height,
-                                root.resolved-drawer-height - (self.mouse-y - self.pressed-y)));
+                    }
+                    drag-finished(cancelled) => {
+                        if cancelled {
+                            root.drawer-height = root.drag-start-height;
+                            root.fullscreen = root.drag-start-fullscreen;
+                        }
                     }
                 }
 

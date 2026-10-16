@@ -35,6 +35,8 @@ used by the PR-list AI review action.
 status icon used by the PR review summary badge.
 `octicon-arrow-left-16.svg` is the unchanged Primer back-navigation icon used
 by the PR review header and the breadcrumb IconButton.
+`octicon-arrow-right-16.svg` is the unchanged upstream `arrow-right-16` icon
+used by the persistent macOS full-screen Forward control.
 `octicon-repo-push-16.svg` is downloaded unchanged from Primer Octicons and is
 used by the Conversation timeline's `added N commits` batch record.
 `octicon-stack-16.svg` and `octicon-x-16.svg` are the upstream controls used

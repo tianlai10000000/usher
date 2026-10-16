@@ -83,6 +83,13 @@ impl PendingHistoryLoad {
 }
 
 impl PendingChatMessage {
+    pub(crate) fn set_agent_identity(
+        &mut self,
+        identity: Option<crate::ai::identity::AgentIdentity>,
+    ) {
+        self.message.agent = identity;
+    }
+
     pub(crate) fn message(&self) -> &StoredChatMessage {
         &self.message
     }
@@ -207,6 +214,7 @@ impl ChatSessionService {
                 let base = i64::from(group) * 4 + 1;
                 [
                     StoredChatMessage {
+                        agent: None,
                         id: base,
                         role: StoredMessageRole::User,
                         status: StoredMessageStatus::Normal,
@@ -215,6 +223,7 @@ impl ChatSessionService {
                         elapsed_ms: None,
                     },
                     StoredChatMessage {
+                        agent: None,
                         id: base + 1,
                         role: StoredMessageRole::Assistant,
                         status: StoredMessageStatus::Normal,
@@ -223,6 +232,7 @@ impl ChatSessionService {
                         elapsed_ms: Some(1_250),
                     },
                     StoredChatMessage {
+                        agent: None,
                         id: base + 2,
                         role: StoredMessageRole::Assistant,
                         status: StoredMessageStatus::Normal,
@@ -231,6 +241,7 @@ impl ChatSessionService {
                         elapsed_ms: Some(2_500),
                     },
                     StoredChatMessage {
+                        agent: None,
                         id: base + 3,
                         role: StoredMessageRole::Assistant,
                         status: StoredMessageStatus::Normal,
@@ -275,6 +286,7 @@ impl ChatSessionService {
         PendingChatMessage {
             store: self.store.clone(),
             message: StoredChatMessage {
+                agent: None,
                 id: self.next_id,
                 role,
                 status,
@@ -464,6 +476,7 @@ mod tests {
 
     fn stored_message(id: i64) -> StoredChatMessage {
         StoredChatMessage {
+            agent: None,
             id,
             role: StoredMessageRole::User,
             status: StoredMessageStatus::Normal,

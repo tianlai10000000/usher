@@ -560,3 +560,7 @@ where
     })?;
     Ok((latest, combined_log))
 }
+
+#[cfg(test)]
+#[path = "execution_tests.rs"]
+mod tests;

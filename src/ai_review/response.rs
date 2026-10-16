@@ -99,6 +99,10 @@ pub(super) fn conversation_item(
     );
 
     AiReviewConversationItem {
+        agent_label: "".into(),
+        agent_name: "".into(),
+        agent_provider: "".into(),
+        agent_model: "".into(),
         id: message_id.into(),
         role: role.into(),
         content: content.into(),

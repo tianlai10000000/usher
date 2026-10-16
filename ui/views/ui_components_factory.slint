@@ -1,0 +1,149 @@
+import { GitHubUiComponentsPage } from "ui_components.slint";
+import { GitHubFilterDemoState, GitHubNotificationDemoState, GitHubUiComponentsOverlay } from "../components/showcase/github_ui_components_gallery.slint";
+import { GitHubScrollView } from "../components/github_scroll_view.slint";
+import { GitHubPrMenuState, GitHubPullRequestMenuOverlay } from "../components/workflow/github_pr_menu_overlay.slint";
+import { GitHubTabOverflowPopup } from "../components/navigation/github_underline_nav.slint";
+import { GitHubTooltipOverlayHost } from "../components/github_tooltip_overlay.slint";
+import { GitHubShowcaseTooltipOverlay } from "../components/showcase/github_showcase_tooltip.slint";
+import { FactoryTooltipKind, FactoryTooltipState } from "../state/factory_tooltip_state.slint";
+import { TooltipOverlayState } from "../state/tooltip_overlay_state.slint";
+import { TransientOverlayState } from "../state/transient_overlay_state.slint";
+import { GitHubSelectState } from "../components/input/github_select.slint";
+import { GitHubMetrics } from "../theme/github_theme.slint";
+import { Route } from "../route/routeMap.slint";
+
+export { Route } from "../route/routeMap.slint";
+export { AppState } from "../state/app_state.slint";
+export { ToastManager, ToastOptions, ToastType } from "../components/toast/toast_manager.slint";
+export { NotificationManager, NotificationOptions, NotificationType, NotificationDelivery, CustomComponentType } from "../components/notify/notification.slint";
+export { DialogManager, DialogOptions } from "../components/dialog/dialog_manager.slint";
+export { FloatingOverlayBridge, FloatingOverlayRect } from "../state/floating_overlay_bridge.slint";
+export { FactoryTooltipState, FactoryTooltipKind } from "../state/factory_tooltip_state.slint";
+
+// The stable factory occupies the actual window, with one inset document
+// viewport. Popovers and Tooltip portals share its globals and escape clipping.
+export component GitHubUiComponentsWindow inherits Window {
+    in property <length> window-width: 1100px;
+    in property <length> window-height: 700px;
+    in property <length> content-x;
+    in property <length> content-y;
+    in property <length> content-width;
+    in property <length> content-height;
+    in property <length> content-top-padding;
+    in property <string> application-font-family;
+    in property <bool> route-active: true;
+    out property <bool> transient-open: GitHubSelectState.open
+        || GitHubPrMenuState.current.menu != "" || GitHubFilterDemoState.menu != ""
+        || GitHubNotificationDemoState.open || TooltipOverlayState.open
+        || FactoryTooltipState.kind != FactoryTooltipKind.None;
+    callback host-key-pressed(string, bool, bool, bool, bool) -> bool;
+    callback claim-host-exclusive();
+    private property <int> local-exclusive-generation: TransientOverlayState.exclusive-generation;
+    changed local-exclusive-generation => { if root.route-active { root.claim-host-exclusive(); } }
+    callback navigate(Route);
+    callback open-artifact-preview-fixture(string);
+    callback dismiss-transients(bool);
+    callback select-pointer-released(length, length);
+    width: root.window-width;
+    height: root.window-height;
+    background: transparent;
+    default-font-family: root.application-font-family;
+    default-font-weight: 445;
+    init => {
+        FactoryTooltipState.enabled = true;
+        GitHubSelectState.restore-before-tab = true;
+        root.update-tooltip-bounds();
+    }
+    changed content-x => { root.update-tooltip-bounds(); }
+    changed content-y => { root.update-tooltip-bounds(); }
+    changed content-width => { root.update-tooltip-bounds(); }
+    changed content-height => { root.update-tooltip-bounds(); }
+    changed content-top-padding => { root.update-tooltip-bounds(); }
+    function update-tooltip-bounds() {
+        FactoryTooltipState.viewport = { x: root.content-x, y: root.content-y + root.content-top-padding,
+            width: root.content-width, height: max(0px, root.content-height - root.content-top-padding - 2px) };
+    }
+    changed route-active => {
+        root.dismiss-transients(true);
+    }
+    dismiss-transients(all) => {
+        GitHubSelectState.close(false);
+        GitHubPrMenuState.close();
+        GitHubFilterDemoState.menu = "";
+        GitHubNotificationDemoState.open = false;
+        TooltipOverlayState.dismiss-all();
+        FactoryTooltipState.dismiss-all();
+        if all { TransientOverlayState.dismiss-all(); }
+        else { TransientOverlayState.dismiss-popovers(); }
+    }
+    select-pointer-released(x, y) => { GitHubSelectState.pointer-released(x, y); }
+
+    // Static factory roots have no parent link to the shell shortcut scope.
+    // Let Select/menu descendants handle Tab dismissal before host traversal.
+    FocusScope {
+        width: root.width; height: root.height;
+        focus-on-click: false; focus-on-tab-navigation: false;
+        capture-key-pressed(event) => {
+            if event.text != Key.Tab && event.text != Key.Backtab
+                    && root.host-key-pressed(event.text, event.modifiers.control,
+                        event.modifiers.alt, event.modifiers.shift, event.modifiers.meta) {
+                return accept;
+            }
+            return reject;
+        }
+        key-pressed(event) => {
+            if (event.text == Key.Tab || event.text == Key.Backtab)
+                    && root.host-key-pressed(event.text, event.modifiers.control,
+                        event.modifiers.alt, event.modifiers.shift, event.modifiers.meta) {
+                return accept;
+            }
+            return reject;
+        }
+        // Keep the factory itself stable across visits, releasing its document and
+        // transient children while hidden instead of remounting a cross-crate root.
+        if root.route-active: document := GitHubScrollView {
+            x: root.content-x; y: root.content-y;
+            width: root.content-width; height: root.content-height;
+            VerticalLayout {
+                width: document.visible-width;
+                spacing: 0px; alignment: start;
+                padding-left: GitHubMetrics.size-4;
+                padding-right: GitHubMetrics.size-4;
+                padding-top: root.content-top-padding;
+                padding-bottom: 1px;
+                GitHubUiComponentsPage {
+                    viewport-global-x: document.absolute-position.x;
+                    viewport-global-y: document.absolute-position.y;
+                    viewport-width: document.visible-width;
+                    viewport-height: document.visible-height - root.content-top-padding - 2px;
+                    navigate(route) => { root.navigate(route); }
+                    open-artifact-preview-fixture(id) => { root.open-artifact-preview-fixture(id); }
+                    scroll-to-section(position) => {
+                        document.viewport-y = -max(0px, min(
+                            -document.viewport-y + position - document.absolute-position.y
+                                - root.content-top-padding - GitHubMetrics.size-16,
+                            document.content-height - document.visible-height
+                        ));
+                    }
+                }
+            }
+        }
+        if root.route-active: GitHubUiComponentsOverlay {
+            z: 9000;
+            viewport-x: root.content-x; viewport-y: root.content-y + root.content-top-padding;
+            viewport-width: root.content-width;
+            viewport-height: root.content-height - root.content-top-padding - 2px;
+        }
+        if root.route-active: GitHubPullRequestMenuOverlay {
+            z: 9000;
+            viewport-x: root.content-x; viewport-y: root.content-y + root.content-top-padding;
+            viewport-width: root.content-width;
+            viewport-height: root.content-height - root.content-top-padding - 2px;
+        }
+        if root.route-active: GitHubTabOverflowPopup { width: root.width; height: root.height; z: 20000; }
+        // Data-dependent PR metadata retains the generic dynamic portal. Fixed
+        // icon actions use the separate literal-kind portal below.
+        GitHubTooltipOverlayHost { z: 100000; }
+        GitHubShowcaseTooltipOverlay { z: 100001; }
+    }
+}

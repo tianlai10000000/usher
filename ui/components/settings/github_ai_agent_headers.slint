@@ -1,0 +1,160 @@
+import { AppState, AiAgentHeaderItem } from "../../state/app_state.slint";
+import { I18n } from "@i18n";
+import { GitHubTheme } from "../../theme/github_theme.slint";
+import { GitHubButton, GitHubToggle } from "./github_settings_controls.slint";
+import { GitHubCompactTextField } from "../input/compact_text_field.slint";
+import { GitHubUnderlineNavItem } from "../navigation/github_underline_nav.slint";
+import { GitHubAiAgentHeaderDeleteAction } from "./github_ai_agent_header_tooltip.slint";
+import { ScrollView } from "@material";
+
+component GitHubAiAgentHeaderRow inherits Rectangle {
+    in property <int> slot;
+    private property <bool> shown: root.slot < AppState.ai-agent-editor-headers.length;
+    private property <AiAgentHeaderItem> item: root.shown ? AppState.ai-agent-editor-headers[root.slot] : { };
+    changed item => {
+        if name-field.text != root.item.name { name-field.text = root.item.name; }
+        if value-field.text != root.item.value { value-field.text = root.item.value; }
+    }
+    width: 100%; height: root.shown ? 40px : 0px; visible: root.shown;
+    GitHubToggle {
+        x: 0px; y: 8px; checked: root.item.enabled;
+        enabled: !AppState.ai-agent-editor-busy;
+        accessible-label: I18n.settings-ai-agent-header-enabled;
+        toggled(value) => { AppState.set-ai-agent-header-enabled(root.slot, value); }
+    }
+    name-field := GitHubCompactTextField {
+        x: 60px; y: 4px; width: max(80px, (remove.x - self.x - 16px) * 0.4);
+        text: root.item.name; placeholder: I18n.settings-ai-agent-header-name;
+        enabled: !AppState.ai-agent-editor-busy;
+        edited(value) => { AppState.set-ai-agent-header-name(root.slot, value); }
+    }
+    value-field := GitHubCompactTextField {
+        x: name-field.x + name-field.width + 8px; y: 4px;
+        width: max(40px, remove.x - self.x - 8px);
+        text: root.item.value; placeholder: I18n.settings-ai-agent-header-value;
+        enabled: !AppState.ai-agent-editor-busy;
+        edited(value) => { AppState.set-ai-agent-header-value(root.slot, value); }
+    }
+    remove := GitHubAiAgentHeaderDeleteAction {
+        x: parent.width - self.width; y: 4px;
+        tip-eligible: root.shown;
+        button-enabled: !AppState.ai-agent-editor-busy;
+        activated => { AppState.remove-ai-agent-header(root.slot); }
+    }
+}
+
+// Native plain text owns glyphs, selection and line metrics. The fixed height
+// is the code viewport; both axes follow exact native preferred extents.
+component GitHubAiAgentHeaderObjectInput inherits Rectangle {
+    private property <string> source: AppState.ai-agent-editor-headers-object-text;
+    changed source => { if input.text != root.source { input.text = root.source; } }
+    width: 100%; height: 160px;
+    border-radius: 6px; border-width: input.has-focus ? 2px : 1px;
+    border-color: input.has-focus ? GitHubTheme.focus-outline : GitHubTheme.border-default;
+    background: GitHubTheme.canvas-default; clip: true;
+    // Slint exposes the caret origin, but no public caret-height property.
+    // Measure the same source as one native line to include fallback glyphs;
+    // use that exact bound only for reveal, never as the document extent.
+    cursor-line-measure := TextInput {
+        visible: false; enabled: false; read-only: true; accessible-role: none;
+        text: root.source; single-line: true; wrap: no-wrap;
+        font-family: input.font-family; font-size: input.font-size;
+        line-height-factor: input.line-height-factor;
+    }
+    scroll := ScrollView {
+        x: 8px; y: 8px; width: parent.width - 16px; height: parent.height - 16px;
+        content-width: max(self.visible-width, input.preferred-width + 4px);
+        content-height: max(self.visible-height, input.preferred-height + 4px);
+        input := TextInput {
+            x: 0px; y: 0px;
+            width: max(scroll.visible-width - 4px, self.preferred-width);
+            height: max(scroll.visible-height - 4px, self.preferred-height);
+            text: root.source; enabled: !AppState.ai-agent-editor-busy;
+            single-line: false; wrap: no-wrap; line-height-factor: 1.2;
+            font-family: "monospace"; font-size: 13px;
+            color: GitHubTheme.fg-default; text-cursor-width: 2px;
+            selection-background-color: GitHubTheme.selection-bg;
+            selection-foreground-color: self.color;
+            page-height: scroll.visible-height;
+            accessible-role: text-input;
+            accessible-label: I18n.settings-ai-agent-header-object-input;
+            accessible-value <=> self.text;
+            cursor-position-changed(position) => {
+                if position.x + scroll.content-x < 0px {
+                    scroll.content-x = -position.x;
+                } else if position.x + scroll.content-x > scroll.visible-width - 4px {
+                    scroll.content-x = scroll.visible-width - position.x - 4px;
+                }
+                if position.y + scroll.content-y < 0px {
+                    scroll.content-y = -position.y;
+                } else if position.y + scroll.content-y > scroll.visible-height - cursor-line-measure.preferred-height {
+                    scroll.content-y = scroll.visible-height - position.y - cursor-line-measure.preferred-height;
+                }
+            }
+            edited => { AppState.edit-ai-agent-header-object(self.text); }
+        }
+    }
+}
+
+export component GitHubAiAgentHeaders inherits VerticalLayout {
+    width: 100%; spacing: 12px;
+    headers-title := Text {
+        width: parent.width; height: 24px;
+        text: I18n.settings-ai-agent-headers;
+        font-size: 14px; font-weight: 600; color: GitHubTheme.fg-default;
+        vertical-alignment: center;
+    }
+    mode-tabs := Rectangle {
+        width: parent.width; height: 48px;
+        accessible-role: tab-list; accessible-label: I18n.settings-ai-agent-headers;
+        Rectangle {
+            y: parent.height - 1px; width: parent.width; height: 1px;
+            background: GitHubTheme.border-muted;
+        }
+        rows-mode := GitHubUnderlineNavItem {
+            x: 0px; label: I18n.settings-ai-agent-header-rows-mode;
+            item-enabled: !AppState.ai-agent-editor-busy;
+            selected: !AppState.ai-agent-editor-headers-object-mode;
+            clicked => { AppState.select-ai-agent-header-mode(false); }
+            navigate(_) => { object-mode.focus(); }
+        }
+        object-mode := GitHubUnderlineNavItem {
+            x: rows-mode.width + 4px; label: I18n.settings-ai-agent-header-object-mode;
+            item-enabled: !AppState.ai-agent-editor-busy;
+            selected: AppState.ai-agent-editor-headers-object-mode;
+            clicked => { AppState.select-ai-agent-header-mode(true); }
+            navigate(_) => { rows-mode.focus(); }
+        }
+    }
+    if !AppState.ai-agent-editor-headers-object-mode: VerticalLayout {
+        width: parent.width; spacing: 12px;
+        Text {
+            width: parent.width; text: I18n.settings-ai-agent-headers-caption;
+            font-size: 12px; color: GitHubTheme.fg-muted;
+            wrap: word-wrap; line-height-factor: 1.2;
+        }
+        rows-toolbar := Rectangle {
+            width: parent.width; height: 32px;
+            add-header := GitHubButton {
+                x: (parent.width - self.width) / 2; y: 0px;
+                text: I18n.settings-ai-agent-add-header;
+                leading-icon: @image-url("../../assets/icons/octicon-plus-16.svg");
+                disabled: AppState.ai-agent-editor-busy || AppState.ai-agent-editor-headers.length >= 32;
+                clicked => { AppState.add-ai-agent-header(); }
+            }
+        }
+        rows-container := VerticalLayout {
+            width: parent.width; spacing: 0px;
+            for slot in 32: header-row := GitHubAiAgentHeaderRow { slot: slot; }
+        }
+    }
+    if AppState.ai-agent-editor-headers-object-mode: VerticalLayout {
+        width: parent.width; spacing: 12px;
+        Text {
+            width: parent.width; text: I18n.settings-ai-agent-header-object-caption;
+            font-size: 12px; color: GitHubTheme.fg-muted;
+            wrap: word-wrap; line-height-factor: 1.2;
+        }
+        GitHubAiAgentHeaderObjectInput { }
+    }
+}

@@ -167,10 +167,10 @@ completion fails acceptance, regardless of the process exit code.
 任何 `FAIL` 或缺少完成记录均表示验收失败，即使进程退出码为零。
 
 The macOS native locale fixture passed; evidence is in
-[tray locale validation](../validation/tray-locale-20261014/README.md).
+[tray locale validation（归档：docs/validation/tray-locale-20261014/README.md）](../local-archives.md#validation-tracked-history-20261016).
 Native acceptance of the macOS pointer-click/menu matrix and Windows tray
 behavior remains pending; locale inspection does not establish those results.
 
-macOS 原生菜单语言夹具已通过，证据见[托盘语言验证](../validation/tray-locale-20261014/README.md)。
+macOS 原生菜单语言夹具已通过，证据见[托盘语言验证（归档：docs/validation/tray-locale-20261014/README.md）](../local-archives.md#validation-tracked-history-20261016)。
 macOS 指针点击/菜单矩阵与 Windows 托盘行为的原生验收仍待完成；语言检查不能
 替代这些验收结果。

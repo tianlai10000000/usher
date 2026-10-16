@@ -1,4 +1,0 @@
-[Tray][LocaleFixture] PASS stage=1 locale=en title=Quit menu_same=true
-[Tray][LocaleFixture] PASS stage=2 locale=zh-CN title=退出 menu_same=true
-[Tray][LocaleFixture] PASS stage=3 locale=en title=Quit menu_same=true
-[Tray][LocaleFixture] PASS complete stages=3 existing_menu=true

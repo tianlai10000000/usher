@@ -1,3 +1,0 @@
-Checked 38 Markdown documents, 432 local links/anchors, 1111 explicit source references, 25 indexed specs.
-Skipped 6 historical references to the 3 pre-existing staged deletions; these are not live source references.
-PASS

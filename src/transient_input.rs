@@ -1,4 +1,3 @@
-#[cfg(not(target_os = "macos"))]
 use anyhow::{Context, Result};
 use i_slint_core::context::set_window_event_hook;
 use i_slint_core::input::FocusReason;
@@ -111,53 +110,91 @@ fn field_contains_pointer(tree: &ItemTreeRc, field: &ItemRc, position: LogicalPo
 /// reusable surface owns the coordinate. The composition root routes the click
 /// after the target has handled links and controls.
 /// Production must call this after `Window::show()` has created its adapter.
-#[cfg(not(target_os = "macos"))]
 pub(crate) fn install(app: &MainWindow) -> Result<()> {
-    install_for_window(app).context("Failed to install transient input bridge")
+    install_with_pointer_forwarding(app, !cfg!(target_os = "macos"))
+        .context("Failed to install transient input bridge")
 }
 
 #[doc(hidden)]
 pub fn install_for_window(app: &MainWindow) -> Result<(), slint::PlatformError> {
+    install_with_pointer_forwarding(app, true)
+}
+
+fn classify_text_input_press(app: &MainWindow, position: slint::LogicalPosition) -> bool {
+    clear_text_input_focus_outside(app.window(), position);
+    let inside = focused_text_input_contains_pointer(app.window(), position);
+    if inside {
+        app.invoke_dismiss_transient_popovers();
+    }
+    inside
+}
+
+fn install_with_pointer_forwarding(
+    app: &MainWindow,
+    forward_pointer: bool,
+) -> Result<(), slint::PlatformError> {
     let weak = app.as_weak();
     let previous = set_window_event_hook(None)?;
+    let pending_press = std::cell::RefCell::new(None);
 
     set_window_event_hook(Some(Box::new(move |adapter, event, result| {
         if let Some(previous) = previous.as_ref() {
             previous(adapter, event, result);
         }
 
-        let (position, released) = match event {
-            WindowEvent::PointerPressed {
-                position,
-                button: PointerEventButton::Left,
-            } => (position, false),
-            WindowEvent::PointerReleased {
-                position,
-                button: PointerEventButton::Left,
-            } => (position, true),
-            _ => return,
-        };
         let Some(app) = weak.upgrade() else {
             return;
         };
 
         // The hook is process-global. Restrict it to the MainWindow adapter;
         // detached Preview windows have their own transient interaction scope.
-        if adapter.size() != app.window().size()
-            || adapter.position().unwrap_or_default() != app.window().position()
-        {
+        if !std::rc::Rc::ptr_eq(
+            adapter,
+            &WindowInner::from_pub(app.window()).window_adapter(),
+        ) {
             return;
         }
-        if !released {
-            clear_text_input_focus_outside(app.window(), *position);
-            if focused_text_input_contains_pointer(app.window(), *position) {
-                app.invoke_dismiss_transient_popovers();
+
+        let (position, released) = match event {
+            WindowEvent::PointerPressed {
+                position,
+                button: PointerEventButton::Left,
+            } => {
+                pending_press.take();
+                let route = app.get_current_route();
+                if !classify_text_input_press(&app, *position) {
+                    pending_press.replace(Some((*position, route)));
+                }
+                (position, false)
             }
-        }
-        if released {
-            app.invoke_post_dispatch_pointer_released(position.x, position.y);
-        } else {
-            app.invoke_post_dispatch_pointer_pressed(position.x, position.y);
+            WindowEvent::PointerReleased {
+                position,
+                button: PointerEventButton::Left,
+            } => {
+                // A scrollable Flickable can defer the child press until its
+                // timer or release dispatch. Reconcile that original press
+                // once after Slint has delivered it, never the release point.
+                if let Some((press, route)) = pending_press.take() {
+                    if app.get_current_route() == route {
+                        classify_text_input_press(&app, press);
+                    }
+                }
+                (position, true)
+            }
+            WindowEvent::PointerExited | WindowEvent::WindowActiveChanged(false) => {
+                pending_press.take();
+                return;
+            }
+            _ => return,
+        };
+        // AppKit owns native chrome and release forwarding on macOS. Input
+        // classification and delayed-press reconciliation belong to this hook.
+        if forward_pointer {
+            if released {
+                app.invoke_post_dispatch_pointer_released(position.x, position.y);
+            } else {
+                app.invoke_post_dispatch_pointer_pressed(position.x, position.y);
+            }
         }
     })))?;
 
@@ -193,32 +230,38 @@ mod tests {
         export component TextFocusTestWindow inherits Window {
             width: 360px;
             height: 240px;
+            in property <bool> delay-press: false;
             out property <bool> first-focused: first.has-focus;
             out property <bool> second-focused: second.has-focus;
 
-            first-field := Rectangle {
-                x: 20px;
-                y: 20px;
-                width: 180px;
-                height: 32px;
-                clip: true;
+            Flickable {
+                width: 100%; height: 100%;
+                content-width: self.width;
+                content-height: root.delay-press ? self.height * 2 : self.height;
+                first-field := Rectangle {
+                    x: 20px;
+                    y: 20px;
+                    width: 180px;
+                    height: 32px;
+                    clip: true;
 
-                first := TextInput {
-                    x: 12px;
-                    y: 4px;
-                    width: 156px;
-                    height: 24px;
-                    text: "first";
+                    first := TextInput {
+                        x: 12px;
+                        y: 4px;
+                        width: 156px;
+                        height: 24px;
+                        text: "first";
+                        single-line: true;
+                    }
+                }
+                second := TextInput {
+                    x: 20px;
+                    y: 84px;
+                    width: 180px;
+                    height: 32px;
+                    text: "second";
                     single-line: true;
                 }
-            }
-            second := TextInput {
-                x: 20px;
-                y: 84px;
-                width: 180px;
-                height: 32px;
-                text: "second";
-                single-line: true;
             }
         }
 
@@ -485,5 +528,354 @@ mod tests {
             !page.get_first_focused(),
             "clipped part above the viewport loses focus"
         );
+    }
+
+    struct HookFixture {
+        host: MainWindow,
+        page: TextFocusTestWindow,
+        dismissals: std::rc::Rc<std::cell::Cell<usize>>,
+        presses: std::rc::Rc<std::cell::Cell<usize>>,
+        releases: std::rc::Rc<std::cell::Cell<usize>>,
+    }
+
+    fn hook_fixture(forward_pointer: bool) -> HookFixture {
+        i_slint_backend_testing::init_no_event_loop();
+        let host = MainWindow::new().unwrap();
+        host.set_platform_is_macos(false);
+        host.set_show_navigation_drawer(false);
+        host.set_show_breadcrumb(false);
+        host.window()
+            .set_size(slint::LogicalSize::new(640.0, 480.0));
+        let page = TextFocusTestWindow::new().unwrap();
+        let weak = page.as_weak();
+        host.set_settings_page_factory(slint::ComponentFactory::new(move |_| weak.upgrade()));
+        host.set_current_route(crate::Route::Settings);
+        WindowInner::from_pub(host.window()).ensure_tree_instantiated();
+        let dismissals = std::rc::Rc::new(std::cell::Cell::new(0));
+        let presses = std::rc::Rc::new(std::cell::Cell::new(0));
+        let releases = std::rc::Rc::new(std::cell::Cell::new(0));
+        let count = dismissals.clone();
+        host.on_dismiss_transient_popovers(move || count.set(count.get() + 1));
+        let count = presses.clone();
+        host.on_post_dispatch_pointer_pressed(move |_, _| count.set(count.get() + 1));
+        let count = releases.clone();
+        host.on_post_dispatch_pointer_released(move |_, _| count.set(count.get() + 1));
+        install_with_pointer_forwarding(&host, forward_pointer).unwrap();
+        HookFixture {
+            host,
+            page,
+            dismissals,
+            presses,
+            releases,
+        }
+    }
+
+    fn pointer(
+        window: &slint::Window,
+        position: slint::LogicalPosition,
+        button: PointerEventButton,
+        pressed: bool,
+    ) {
+        window.dispatch_event(WindowEvent::PointerMoved { position });
+        window.dispatch_event(if pressed {
+            WindowEvent::PointerPressed { position, button }
+        } else {
+            WindowEvent::PointerReleased { position, button }
+        });
+    }
+
+    #[test]
+    fn post_dispatch_hook_ignores_a_detached_window_with_identical_geometry() {
+        let fixture = hook_fixture(true);
+        let inside = slint::LogicalPosition::new(40.0, 36.0);
+        pointer(
+            fixture.host.window(),
+            inside,
+            PointerEventButton::Left,
+            true,
+        );
+        pointer(
+            fixture.host.window(),
+            inside,
+            PointerEventButton::Left,
+            false,
+        );
+        assert!(fixture.page.get_first_focused());
+        assert_eq!(
+            fixture.dismissals.get(),
+            1,
+            "real host press is the positive control"
+        );
+        let detached = TextFocusTestWindow::new().unwrap();
+        detached.window().set_size(fixture.host.window().size());
+        detached
+            .window()
+            .set_position(fixture.host.window().position());
+        assert_eq!(detached.window().size(), fixture.host.window().size());
+        assert_eq!(
+            detached.window().position(),
+            fixture.host.window().position()
+        );
+        let outside = slint::LogicalPosition::new(300.0, 180.0);
+        pointer(detached.window(), outside, PointerEventButton::Left, true);
+        pointer(detached.window(), outside, PointerEventButton::Left, false);
+        assert!(
+            fixture.page.get_first_focused(),
+            "another adapter must not blur the host"
+        );
+        assert_eq!(fixture.dismissals.get(), 1);
+        assert_eq!(fixture.presses.get(), 1);
+        assert_eq!(fixture.releases.get(), 1);
+    }
+
+    #[test]
+    fn post_dispatch_hook_classifies_the_press_without_reclassifying_an_outside_release() {
+        let fixture = hook_fixture(true);
+        pointer(
+            fixture.host.window(),
+            slint::LogicalPosition::new(40.0, 36.0),
+            PointerEventButton::Left,
+            true,
+        );
+        assert!(fixture.page.get_first_focused());
+        assert_eq!(
+            fixture.dismissals.get(),
+            1,
+            "first press sees the newly focused input"
+        );
+        pointer(
+            fixture.host.window(),
+            slint::LogicalPosition::new(300.0, 180.0),
+            PointerEventButton::Left,
+            false,
+        );
+        assert!(
+            fixture.page.get_first_focused(),
+            "selection dragged outside keeps input focus"
+        );
+        assert_eq!(fixture.dismissals.get(), 1);
+        assert_eq!(fixture.presses.get(), 1);
+        assert_eq!(fixture.releases.get(), 1);
+    }
+
+    #[test]
+    fn post_dispatch_hook_ignores_right_and_middle_button_phases() {
+        let fixture = hook_fixture(true);
+        pointer(
+            fixture.host.window(),
+            slint::LogicalPosition::new(40.0, 36.0),
+            PointerEventButton::Left,
+            true,
+        );
+        pointer(
+            fixture.host.window(),
+            slint::LogicalPosition::new(40.0, 36.0),
+            PointerEventButton::Left,
+            false,
+        );
+        assert!(fixture.page.get_first_focused());
+        assert_eq!(
+            fixture.dismissals.get(),
+            1,
+            "left press is the positive control"
+        );
+        assert_eq!(fixture.presses.get(), 1);
+        assert_eq!(fixture.releases.get(), 1);
+        fixture.dismissals.set(0);
+        fixture.presses.set(0);
+        fixture.releases.set(0);
+        for button in [PointerEventButton::Right, PointerEventButton::Middle] {
+            let outside = slint::LogicalPosition::new(300.0, 180.0);
+            pointer(fixture.host.window(), outside, button, true);
+            pointer(fixture.host.window(), outside, button, false);
+        }
+        assert_eq!(fixture.dismissals.get(), 0);
+        assert_eq!(fixture.presses.get(), 0);
+        assert_eq!(fixture.releases.get(), 0);
+    }
+
+    #[test]
+    fn native_forwarding_mode_classifies_input_without_forwarding_pointer_phases() {
+        let fixture = hook_fixture(false);
+        let inside = slint::LogicalPosition::new(40.0, 36.0);
+        pointer(
+            fixture.host.window(),
+            inside,
+            PointerEventButton::Left,
+            true,
+        );
+        pointer(
+            fixture.host.window(),
+            inside,
+            PointerEventButton::Left,
+            false,
+        );
+        assert!(fixture.page.get_first_focused());
+        assert_eq!(fixture.dismissals.get(), 1);
+        assert_eq!(fixture.presses.get(), 0);
+        assert_eq!(
+            fixture.releases.get(),
+            0,
+            "AppKit owns the only production release delivery"
+        );
+    }
+
+    #[test]
+    fn flickable_short_click_reconciles_its_delayed_child_press_once() {
+        let fixture = hook_fixture(true);
+        fixture.page.set_delay_press(true);
+        let inside = slint::LogicalPosition::new(40.0, 36.0);
+        pointer(
+            fixture.host.window(),
+            inside,
+            PointerEventButton::Left,
+            true,
+        );
+        i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(50));
+        assert!(
+            !fixture.page.get_first_focused(),
+            "Flickable still holds the child press"
+        );
+        assert_eq!(fixture.dismissals.get(), 0);
+        pointer(
+            fixture.host.window(),
+            inside,
+            PointerEventButton::Left,
+            false,
+        );
+        assert!(fixture.page.get_first_focused());
+        assert_eq!(
+            fixture.dismissals.get(),
+            1,
+            "release dispatch delivered the pending child press"
+        );
+        assert_eq!(fixture.presses.get(), 1);
+        assert_eq!(fixture.releases.get(), 1);
+        pointer(
+            fixture.host.window(),
+            inside,
+            PointerEventButton::Left,
+            false,
+        );
+        assert_eq!(
+            fixture.dismissals.get(),
+            1,
+            "an unmatched release cannot replay the press"
+        );
+    }
+
+    #[test]
+    fn flickable_held_press_reconciles_after_its_internal_timer_without_polling() {
+        let fixture = hook_fixture(false);
+        fixture.page.set_delay_press(true);
+        let inside = slint::LogicalPosition::new(40.0, 36.0);
+        pointer(
+            fixture.host.window(),
+            inside,
+            PointerEventButton::Left,
+            true,
+        );
+        assert!(!fixture.page.get_first_focused());
+        i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(150));
+        assert!(
+            fixture.page.get_first_focused(),
+            "Flickable's timer delivered the child press"
+        );
+        assert_eq!(fixture.dismissals.get(), 0);
+        let focused = WindowInner::from_pub(fixture.host.window())
+            .focus_item
+            .borrow()
+            .upgrade()
+            .expect("held native text input");
+        let input = focused.downcast::<TextInput>().expect("native TextInput");
+        let input = input.as_pin_ref();
+        // Drag horizontally so this vertical Flickable keeps forwarding the
+        // gesture to the editor after its delayed press has been delivered.
+        let outside = slint::LogicalPosition::new(300.0, inside.y);
+        fixture
+            .host
+            .window()
+            .dispatch_event(WindowEvent::PointerMoved { position: outside });
+        let selection = (
+            input.anchor_position_byte_offset(),
+            input.cursor_position_byte_offset(),
+        );
+        assert_ne!(
+            selection.0, selection.1,
+            "the real drag must create a nonempty selection"
+        );
+        assert!(!focused_text_input_contains_pointer(
+            fixture.host.window(),
+            outside
+        ));
+        pointer(
+            fixture.host.window(),
+            outside,
+            PointerEventButton::Left,
+            false,
+        );
+        assert!(
+            input.has_focus(),
+            "release outside the field preserves editor focus"
+        );
+        assert_eq!(
+            (
+                input.anchor_position_byte_offset(),
+                input.cursor_position_byte_offset()
+            ),
+            selection
+        );
+        assert_eq!(fixture.dismissals.get(), 1);
+        assert_eq!(fixture.presses.get(), 0);
+        assert_eq!(fixture.releases.get(), 0);
+    }
+
+    fn assert_pending_press_cancelled(event: WindowEvent) {
+        let fixture = hook_fixture(false);
+        fixture.page.set_delay_press(true);
+        let inside = slint::LogicalPosition::new(40.0, 36.0);
+        pointer(
+            fixture.host.window(),
+            inside,
+            PointerEventButton::Left,
+            true,
+        );
+        i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(150));
+        let window = WindowInner::from_pub(fixture.host.window());
+        let focused = window
+            .focus_item
+            .borrow()
+            .upgrade()
+            .expect("delayed input focus");
+        fixture.host.window().dispatch_event(event);
+        fixture
+            .host
+            .window()
+            .dispatch_event(WindowEvent::WindowActiveChanged(true));
+        // A later programmatic focus must not revive the cancelled gesture.
+        window.set_focus_item(&focused, false, FocusReason::Programmatic);
+        window.set_focus_item(&focused, true, FocusReason::Programmatic);
+        assert!(fixture.page.get_first_focused());
+        pointer(
+            fixture.host.window(),
+            inside,
+            PointerEventButton::Left,
+            false,
+        );
+        assert_eq!(
+            fixture.dismissals.get(),
+            0,
+            "cancelled press cannot dismiss a later surface"
+        );
+    }
+
+    #[test]
+    fn pointer_exit_discards_the_pending_delayed_press() {
+        assert_pending_press_cancelled(WindowEvent::PointerExited);
+    }
+
+    #[test]
+    fn window_deactivation_discards_the_pending_delayed_press() {
+        assert_pending_press_cancelled(WindowEvent::WindowActiveChanged(false));
     }
 }

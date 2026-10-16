@@ -10,6 +10,8 @@ import { I18n } from "@i18n";
 export component GitHubCopyButton inherits Rectangle {
     in property <bool> button-enabled: true;
     in property <string> tooltip-text: I18n.common-copy-to-clipboard;
+    in property <bool> show-tooltip: true;
+    out property <bool> tooltip-active: copy-button.tooltip-active;
     in property <bool> tooltip-above: true;
     in property <bool> tooltip-align-right: false;
     out property <bool> has-hover: copy-button.has-hover;
@@ -32,6 +34,7 @@ export component GitHubCopyButton inherits Rectangle {
             ? @image-url("../../assets/icons/octicon-check-16.svg")
             : @image-url("../../assets/icons/octicon-copy-16.svg");
         tooltip-text: root.copied ? I18n.common-copied : root.tooltip-text;
+        show-tooltip: root.show-tooltip;
         tooltip-above: root.tooltip-above;
         tooltip-align-right: root.tooltip-align-right;
         force-tooltip: root.copied;

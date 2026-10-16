@@ -91,6 +91,33 @@ accessibility remain part of the component contract.
    绘制。不得仅为给尾部子串添加交互而拆成多个绘制节点；应保留单一绘制节点，并在
    该子串上放置实测的透明交互 overlay。
 
+## Settings text ownership / Settings 文本所有权
+
+The AI Agent list in `ui/components/settings/github_ai_agent_list.slint` keeps
+Pagination without a separate Total/Page/per-page summary. Its percentage-width
+root and flexible search field allow `min-width: 0px`; the search layout, row
+stack and pagination bind their width to the parent.
+
+AI Agent 列表保留 Pagination，不再绘制独立的 Total/Page/每页条数摘要。百分比宽度
+的列表根与弹性搜索输入框允许 `min-width: 0px`；搜索布局、行栈和分页显式采用父宽。
+
+`github_ai_agent_headers.slint` uses a 160 px object-editing viewport with a native
+multiline `TextInput`, `wrap: no-wrap` and `line-height-factor: 1.2`. The Material
+ScrollView consumes exact native preferred width/height plus cursor safety;
+the fixed height bounds the viewport rather than replacing text line metrics.
+The editor retains native selection/caret handling and scrolls both axes.
+Caret reveal safety uses a hidden single-line native TextInput with the same
+source, font and line-height factor; its preferred height includes fallback
+glyph metrics. It does not derive line height from font-size times the factor.
+Only the editable input's preferred width/height owns document extents.
+
+Header 对象编辑器使用 160px 视口及原生多行 `TextInput`，设置 `wrap: no-wrap` 和
+`line-height-factor: 1.2`。Material ScrollView 使用原生精确 preferred 宽高和光标安全
+余量；固定高度只限制视口，不替代文本行度量，并保留原生选区/光标与双轴滚动。
+光标露出安全高度来自同源文本、字体和行高倍率的隐藏单行原生 TextInput 的 preferred
+高度，覆盖 fallback 字形度量，不用 font-size 乘倍率推导行高。滚动正文 extent 始终
+只由可编辑输入自身的 preferred 宽高决定。
+
 ## Unsupported-surface exceptions / 暂不支持组件的例外
 
 Every multiline `StyledText` or `TextEdit` use that needs non-default line

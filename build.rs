@@ -1,8 +1,5 @@
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=i18n/manifest.toml");
-    println!("cargo:rerun-if-changed=i18n/messages.toml");
-    println!("cargo:rerun-if-changed=i18n/locales");
 
     // slint::slint! accepts library mappings only as string literals. Prepare
     // the generated catalog at a stable, ignored path so integration-test
@@ -10,7 +7,8 @@ fn main() {
     let manifest_dir = std::path::PathBuf::from(
         std::env::var_os("CARGO_MANIFEST_DIR").expect("Cargo must provide CARGO_MANIFEST_DIR"),
     );
-    let i18n = usher_i18n::build_support::prepare_slint_bundle(
+    let i18n = usher_i18n_build::prepare_slint_bundle(
+        &manifest_dir,
         manifest_dir.join("target/slint-macro-tests"),
         env!("CARGO_PKG_NAME"),
     )

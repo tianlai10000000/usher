@@ -10,12 +10,13 @@ import {
     GitHubToggle
 } from "./github_settings_controls.slint";
 import {
-    ManifestInterfaceLanguagePicker,
-    ManifestReplyLanguagePicker
+    ManifestInterfaceLanguagePicker
 } from "@language-picker";
 import { GitHubAiReviewSettingsSection, AiReviewRuleItem } from "@ai-review-settings";
 import { GitHubHookSettingsSection } from "./github_hook_settings.slint";
 import { GitHubHttpTimeoutSettings, GitHubDefaultPrMergeSettings } from "./github_request_settings.slint";
+import { GitHubFixedThreeTabs } from "../navigation/github_fixed_tabs.slint";
+import { GitHubAiAgentList } from "./github_ai_agent_list.slint";
 
 export component GitHubSettingsSectionHeader inherits Rectangle {
     in property <string> title;
@@ -99,36 +100,6 @@ export component GitHubSettingToggleRow inherits Rectangle {
         checked: root.checked;
         enabled: root.enabled;
         toggled(value) => { root.toggled(value); }
-    }
-}
-
-export component GitHubProviderNavigation inherits Rectangle {
-    in property <int> selected: 0;
-    callback changed(int);
-
-    width: 100%;
-    height: 32px;
-    background: transparent;
-
-    HorizontalLayout {
-        spacing: 8px;
-        alignment: start;
-
-        GitHubSegment {
-            text: "Gitee";
-            selected: root.selected == 0;
-            clicked => { root.changed(0); }
-        }
-        GitHubSegment {
-            text: "GitHub";
-            selected: root.selected == 1;
-            clicked => { root.changed(1); }
-        }
-        GitHubSegment {
-            text: "GitLab";
-            selected: root.selected == 2;
-            clicked => { root.changed(2); }
-        }
     }
 }
 
@@ -648,11 +619,19 @@ export component GitHubSettingsPane inherits Rectangle {
                     wrap: word-wrap;
                 }
 
-                GitHubProviderNavigation {
-                    selected: root.hosting-config-tab;
-                    changed(value) => {
-                        root.hosting-config-tab = value;
-                        root.git-hosting-config-saved = false;
+                GitHubFixedThreeTabs {
+                    owner: "settings-hosting-provider";
+                    variant: flush;
+                    group-label: I18n.settings-code-hosting-enterprise-api;
+                    selected-index: root.hosting-config-tab;
+                    first-item: { label: "Gitee" };
+                    second-item: { label: "GitHub" };
+                    third-item: { label: "GitLab" };
+                    selected(index) => {
+                        if index != root.hosting-config-tab {
+                            root.hosting-config-tab = index;
+                            root.git-hosting-config-saved = false;
+                        }
                     }
                 }
 
@@ -759,175 +738,11 @@ export component GitHubSettingsPane inherits Rectangle {
             width: parent.width;
             spacing: 24px;
             alignment: start;
-
             GitHubSettingsSectionHeader {
                 title: I18n.settings-ai-agent-title;
                 description: I18n.settings-ai-agent-description;
             }
-
-            VerticalLayout {
-                width: parent.width;
-                spacing: 12px;
-                alignment: start;
-
-                Text {
-                    text: I18n.settings-ai-agent-provider;
-                    font-size: 14px;
-                    font-weight: 600;
-                    color: GitHubTheme.fg-default;
-                }
-
-                HorizontalLayout {
-                    width: parent.width;
-                    height: 32px;
-                    spacing: 8px;
-                    alignment: start;
-
-                    GitHubSegment {
-                        text: I18n.common-custom;
-                        selected: AppState.ai-agent-provider == "custom";
-                        clicked => {
-                            AppState.select-ai-agent-provider("custom");
-                            root.ai-agent-saved = false;
-                        }
-                    }
-                    GitHubSegment {
-                        text: "DeepSeek";
-                        selected: AppState.ai-agent-provider == "deepseek";
-                        clicked => {
-                            AppState.select-ai-agent-provider("deepseek");
-                            root.ai-agent-saved = false;
-                        }
-                    }
-                    GitHubSegment {
-                        text: "OpenAI";
-                        selected: AppState.ai-agent-provider == "openai";
-                        clicked => {
-                            AppState.select-ai-agent-provider("openai");
-                            root.ai-agent-saved = false;
-                        }
-                    }
-                }
-
-                GitHubTextField {
-                    label: I18n.settings-ai-agent-base-url;
-                    text <=> AppState.ai-agent-base-url;
-                    placeholder: "https://api.example.com/v1";
-                    caption: I18n.settings-ai-agent-provider-api-caption;
-                    edited(value) => {
-                        AppState.set-ai-agent-base-url(value);
-                        root.ai-agent-saved = false;
-                    }
-                }
-                GitHubTextField {
-                    label: I18n.settings-ai-agent-api-key;
-                    text <=> AppState.ai-agent-api-key;
-                    placeholder: "sk-...";
-                    secret: true;
-                    reveal: root.reveal-ai-agent-api-key;
-                    edited(value) => {
-                        AppState.set-ai-agent-api-key(value);
-                        root.ai-agent-saved = false;
-                    }
-                }
-                GitHubTextField {
-                    label: I18n.settings-ai-agent-model;
-                    text <=> AppState.ai-agent-model;
-                    placeholder: I18n.settings-ai-agent-model-placeholder;
-                    caption: I18n.settings-ai-agent-model-caption;
-                    edited(value) => {
-                        AppState.set-ai-agent-model(value);
-                        root.ai-agent-saved = false;
-                    }
-                }
-
-                VerticalLayout {
-                    width: parent.width;
-                    spacing: 6px;
-
-                    Text {
-                        width: parent.width;
-                        text: I18n.settings-ai-agent-reply-language;
-                        font-size: 14px;
-                        font-weight: 600;
-                        color: GitHubTheme.fg-default;
-                    }
-                    Text {
-                        width: parent.width;
-                        text: I18n.settings-ai-agent-reply-language-description;
-                        font-size: 12px;
-                        color: GitHubTheme.fg-muted;
-                        wrap: word-wrap;
-                    }
-                    ManifestReplyLanguagePicker {
-                        reset-revision: root.route-entry-revision;
-                        width: parent.width;
-                        changed => {
-                            root.ai-agent-saved = false;
-                        }
-                    }
-                }
-
-                Rectangle {
-                    width: parent.width;
-                    height: 40px;
-                    background: transparent;
-
-                    GitHubToggle {
-                        x: 0px;
-                        y: 8px;
-                        checked: root.reveal-ai-agent-api-key;
-                        toggled(value) => { root.reveal-ai-agent-api-key = value; }
-                    }
-                    Text {
-                        x: 60px;
-                        width: parent.width - 330px;
-                        height: parent.height;
-                        text: root.reveal-ai-agent-api-key
-                            ? I18n.settings-ai-agent-api-key-visible
-                            : I18n.common-show-api-key;
-                        font-size: 13px;
-                        color: GitHubTheme.fg-muted;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-                    save-agent := GitHubButton {
-                        x: parent.width - self.width;
-                        y: 4px;
-                        text: root.ai-agent-saved ? I18n.common-saved : I18n.common-save;
-                        primary: true;
-                        clicked => {
-                            AppState.save-ai-agent-settings(
-                                AppState.ai-agent-provider,
-                                AppState.ai-agent-base-url,
-                                AppState.ai-agent-api-key,
-                                AppState.ai-agent-model,
-                                AppState.ai-agent-reply-language-selection.id
-                            );
-                        }
-                    }
-                }
-
-                HorizontalLayout {
-                    width: parent.width;
-                    height: 32px;
-                    alignment: end;
-                    GitHubButton {
-                        text: root.ai-agent-testing ? I18n.common-testing : I18n.common-test-connection;
-                        busy: root.ai-agent-testing;
-                        clicked => {
-                            // Busy flag is host-owned; Rust dual-writes begin/end.
-                            if (!root.ai-agent-testing) {
-                                AppState.test-ai-agent-connection(
-                                    AppState.ai-agent-base-url,
-                                    AppState.ai-agent-api-key,
-                                    AppState.ai-agent-model
-                                );
-                            }
-                        }
-                    }
-                }
-            }
+            GitHubAiAgentList { width: parent.width; }
         }
 
         ai-review-section := VerticalLayout {

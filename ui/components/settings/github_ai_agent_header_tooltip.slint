@@ -1,0 +1,109 @@
+import { I18n } from "@i18n";
+import { FloatingOverlayRect } from "../../state/floating_overlay_bridge.slint";
+import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint";
+import { GitHubIconButton } from "../button/github_icon_button.slint";
+import { GitHubFixedTooltipAnchor } from "../github_fixed_tooltip_anchor.slint";
+import { GitHubTransientFloatingOverlayHost } from "../github_floating_overlay.slint";
+import { GitHubTooltipSurface } from "../github_tooltip.slint";
+
+// This modal owns one literal Delete action. No row text crosses the portal.
+export global AgentHeaderTooltipState {
+    in-out property <bool> enabled: false;
+    in-out property <FloatingOverlayRect> viewport;
+    in-out property <bool> open: false;
+    in-out property <length> anchor-x;
+    in-out property <length> anchor-y;
+    in-out property <length> anchor-width;
+    in-out property <length> anchor-height;
+    in-out property <int> token: 0;
+    in-out property <int> lease: 0;
+    in-out property <int> dismiss-revision: 0;
+    callback show(length, length, length, length) -> int;
+    callback renew(int, length, length, length, length);
+    callback hide(int);
+    callback dismiss();
+    show(x, y, width, height) => {
+        if !root.enabled || width <= 0px || height <= 0px { return 0; }
+        root.token += 1; root.open = true;
+        root.anchor-x = x; root.anchor-y = y;
+        root.anchor-width = width; root.anchor-height = height;
+        root.lease += 1;
+        return root.token;
+    }
+    renew(token, x, y, width, height) => {
+        if root.enabled && root.open && token == root.token {
+            root.anchor-x = x; root.anchor-y = y;
+            root.anchor-width = width; root.anchor-height = height;
+            root.lease += 1;
+        }
+    }
+    hide(token) => { if token == root.token { root.open = false; } }
+    dismiss() => { root.open = false; root.token += 1; root.dismiss-revision += 1; }
+}
+
+export component GitHubAiAgentHeaderDeleteAction inherits GitHubIconButton {
+    in property <bool> tip-eligible: true;
+    callback activated();
+    private property <int> claim: 0;
+    private property <bool> suppressed: false;
+    private property <int> dismiss-revision: AgentHeaderTooltipState.dismiss-revision;
+    private property <bool> tip-publishable: AgentHeaderTooltipState.enabled
+        && root.visible && root.tip-eligible && root.button-enabled
+        && root.tooltip-active && !root.suppressed;
+    icon: @image-url("../../assets/icons/octicon-trash-16.svg");
+    danger: true;
+    tooltip-text: I18n.common-delete;
+    show-tooltip: false;
+    changed dismiss-revision => { root.suppressed = root.tooltip-active; }
+    changed tooltip-active => { if !root.tooltip-active { root.suppressed = false; } }
+    clicked => { AgentHeaderTooltipState.dismiss(); root.activated(); }
+    GitHubFixedTooltipAnchor {
+        active: root.tip-publishable;
+        bounded: true; viewport: AgentHeaderTooltipState.viewport;
+        publish(x, y, w, h) => { root.claim = AgentHeaderTooltipState.show(x, y, w, h); }
+        release(x, y) => { AgentHeaderTooltipState.hide(root.claim); }
+        renew(x, y, w, h) => { AgentHeaderTooltipState.renew(root.claim, x, y, w, h); }
+    }
+}
+
+// A sibling of the Dialog frame, positioned at its body viewport. The portal
+// has no clipped ancestor; the shared host owns flip/shift/size in body bounds.
+export component GitHubAiAgentHeaderTooltipOverlay inherits Rectangle {
+    in property <bool> tooltip-enabled: false;
+    out property <bool> active: root.tooltip-enabled && AgentHeaderTooltipState.open;
+    private property <int> observed-lease: 0;
+    width: 100%; height: 100%; background: transparent; clip: false;
+    function update-viewport() {
+        AgentHeaderTooltipState.viewport = { x: root.absolute-position.x,
+            y: root.absolute-position.y, width: root.width, height: root.height };
+        AgentHeaderTooltipState.dismiss();
+    }
+    init => { AgentHeaderTooltipState.enabled = root.tooltip-enabled; root.update-viewport(); }
+    changed tooltip-enabled => {
+        AgentHeaderTooltipState.enabled = root.tooltip-enabled;
+        AgentHeaderTooltipState.dismiss();
+    }
+    changed absolute-position => { root.update-viewport(); }
+    changed width => { root.update-viewport(); }
+    changed height => { root.update-viewport(); }
+    floating := GitHubTransientFloatingOverlayHost {
+        active: root.active;
+        anchor-x: AgentHeaderTooltipState.anchor-x; anchor-y: AgentHeaderTooltipState.anchor-y;
+        anchor-width: AgentHeaderTooltipState.anchor-width; anchor-height: AgentHeaderTooltipState.anchor-height;
+        floating-width: delete-surface.width; floating-height: delete-surface.height;
+        preferred-placement: GitHubTooltipPlacement.Top;
+        alignment: GitHubTooltipAlignment.Center;
+        delete-surface := GitHubTooltipSurface {
+            text: I18n.common-delete;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+    }
+    Timer {
+        interval: 48ms; running: root.active;
+        triggered => {
+            if AgentHeaderTooltipState.lease == root.observed-lease { AgentHeaderTooltipState.dismiss(); }
+            else { root.observed-lease = AgentHeaderTooltipState.lease; }
+        }
+    }
+}

@@ -49,9 +49,9 @@ class I18nBuildPathTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="usher i18n paths ") as directory:
             scratch = Path(directory)
             outputs = []
-            for name, source, translation in [
-                ("checkout alpha", "Quit alpha", "退出甲"),
-                ("checkout beta", "Quit beta", "退出乙"),
+            for name, source, translation, visible, visible_translation in [
+                ("checkout alpha", "Quit alpha", "退出甲", "Visible alpha", "界面甲"),
+                ("checkout beta", "Quit beta", "退出乙", "Visible beta", "界面乙"),
             ]:
                 repository = scratch / name
                 manifest_dir = repository / "crates/usher-i18n"
@@ -68,10 +68,23 @@ class I18nBuildPathTests(unittest.TestCase):
                     encoding="utf-8",
                 )
                 (i18n / "messages.toml").write_text(
+                    f'[[messages]]\nkey = "fixture.visible"\ntext = {json.dumps(visible)}\n',
+                    encoding="utf-8",
+                )
+                (i18n / "rust-messages.toml").write_text(
                     f'[[messages]]\nkey = "tray.quit"\ntext = {json.dumps(source)}\nslint = false\n',
                     encoding="utf-8",
                 )
                 (po_dir / "usher.po").write_text(
+                    'msgid ""\nmsgstr ""\n'
+                    '"Language: zh-CN\\n"\n'
+                    '"Content-Type: text/plain; charset=UTF-8\\n"\n'
+                    '\nmsgctxt "fixture.visible"\n'
+                    f'msgid {json.dumps(visible)}\n'
+                    f'msgstr {json.dumps(visible_translation, ensure_ascii=False)}\n',
+                    encoding="utf-8",
+                )
+                (po_dir / "usher-rust.po").write_text(
                     'msgid ""\nmsgstr ""\n'
                     '"Language: zh-CN\\n"\n'
                     '"Content-Type: text/plain; charset=UTF-8\\n"\n'
@@ -92,8 +105,13 @@ class I18nBuildPathTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 catalog = (out_dir / "catalogs.rs").read_text(encoding="utf-8")
-                for expected in [source, translation]:
-                    expected_entry = f'CatalogEntry {{ key: "tray.quit", value: "{expected}" }}'
+                for key, expected in [
+                    ("tray.quit", source),
+                    ("tray.quit", translation),
+                    ("fixture.visible", visible),
+                    ("fixture.visible", visible_translation),
+                ]:
+                    expected_entry = f'CatalogEntry {{ key: "{key}", value: "{expected}" }}'
                     self.assertTrue(
                         expected_entry in catalog,
                         f"{executable} did not read {expected!r} from {manifest_dir}",
@@ -106,8 +124,13 @@ class I18nBuildPathTests(unittest.TestCase):
                 ]
                 self.assertEqual(
                     set(watched),
-                    {(i18n / "manifest.toml").resolve(), (i18n / "messages.toml").resolve(),
-                     (po_dir / "usher.po").resolve()},
+                    {
+                        (i18n / "manifest.toml").resolve(),
+                        (i18n / "messages.toml").resolve(),
+                        (i18n / "rust-messages.toml").resolve(),
+                        (po_dir / "usher.po").resolve(),
+                        (po_dir / "usher-rust.po").resolve(),
+                    },
                 )
                 outputs.append(catalog)
             self.assertNotEqual(outputs[0], outputs[1])

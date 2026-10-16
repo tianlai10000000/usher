@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -177,61 +176,6 @@ fn normalize_locale(locale: &str) -> String {
         .to_ascii_lowercase()
 }
 
-pub mod build_support {
-    use super::*;
-    use std::fs;
-
-    #[derive(Debug)]
-    pub struct PreparedSlintBundle {
-        pub library_path: PathBuf,
-        pub translations_path: PathBuf,
-    }
-
-    pub fn prepare_slint_bundle(
-        out_dir: impl AsRef<Path>,
-        package_name: &str,
-    ) -> std::io::Result<PreparedSlintBundle> {
-        if package_name.is_empty()
-            || !package_name
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-        {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!("invalid Slint translation domain: {package_name:?}"),
-            ));
-        }
-
-        let generated_root = out_dir.as_ref().join("usher-i18n");
-        let library_path = generated_root.join("i18n.slint");
-        write_if_changed(&library_path, GENERATED_SLINT_CATALOG.as_bytes())?;
-
-        let translations_path = generated_root.join("translations");
-        for (locale, contents) in GENERATED_PO_SOURCES {
-            let domain_path = translations_path
-                .join(locale)
-                .join("LC_MESSAGES")
-                .join(format!("{package_name}.po"));
-            write_if_changed(&domain_path, contents.as_bytes())?;
-        }
-
-        Ok(PreparedSlintBundle {
-            library_path,
-            translations_path,
-        })
-    }
-
-    fn write_if_changed(path: &Path, contents: &[u8]) -> std::io::Result<()> {
-        if fs::read(path).is_ok_and(|existing| existing == contents) {
-            return Ok(());
-        }
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(path, contents)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,12 +244,14 @@ mod tests {
     }
 
     #[test]
-    fn rust_only_platform_copy_does_not_change_the_slint_catalog() {
+    fn rust_only_platform_copy_remains_available_to_runtime() {
         assert_eq!(
             source_message("workflow.show_in_finder"),
             Some("Show in Finder")
         );
-        assert!(!GENERATED_SLINT_CATALOG.contains("workflow.show_in_finder"));
-        assert!(!GENERATED_SLINT_CATALOG.contains("workflow.show_in_explorer"));
+        assert_eq!(
+            source_message("workflow.show_in_explorer"),
+            Some("Show in Explorer")
+        );
     }
 }

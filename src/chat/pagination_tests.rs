@@ -55,6 +55,7 @@ fn mode_switch_mounts_latest_history_before_revealing_viewport() {
         for id in 1..=count {
             store
                 .append(&StoredChatMessage {
+                    agent: None,
                     id,
                     role: if id % 2 == 0 {
                         StoredMessageRole::Assistant
@@ -133,6 +134,7 @@ fn real_layout_prepend_and_bidirectional_scrolling() {
     let rag = JsonlHistoryStore::open_test_path(directory.path().join("rag.jsonl")).unwrap();
     for id in 1..=100 {
         let message = StoredChatMessage {
+            agent: None,
             id,
             role: if id % 3 == 0 {
                 StoredMessageRole::Assistant

@@ -224,6 +224,10 @@ fn formatted_assistant_conversation(
                 })
                 .collect::<Vec<_>>();
             AiReviewConversationItem {
+                agent_label: "".into(),
+                agent_name: "".into(),
+                agent_provider: "".into(),
+                agent_model: "".into(),
                 id: format!("message-{}", message_index + 1).into(),
                 role: "assistant".into(),
                 content: format!(
@@ -840,6 +844,10 @@ fn ai_review_content_click_dismisses_the_adjacent_diff_settings_popover() {
     let target = "https://example.com/review-details";
     window.set_ai_review_conversation(ModelRc::new(Rc::new(VecModel::from(vec![
         AiReviewConversationItem {
+            agent_label: "".into(),
+            agent_name: "".into(),
+            agent_provider: "".into(),
+            agent_model: "".into(),
             id: "message-with-link".into(),
             role: "assistant".into(),
             content: "Review details".into(),
@@ -1007,6 +1015,70 @@ fn ai_review_content_click_dismisses_the_adjacent_diff_settings_popover() {
             .is_none(),
         "focusing the Conversation comment input must dismiss the review action menu"
     );
+}
+
+#[test]
+fn ai_review_composer_divider_tracks_editor_width_and_clears_rounded_corners() {
+    i_slint_backend_testing::init_no_event_loop();
+    let window = configure_pr_review_window(800.0);
+    window.show().unwrap();
+    for width in [800.0, 1300.0] {
+        window.window().dispatch_event(WindowEvent::Resized {
+            size: LogicalSize::new(width, 860.0),
+        });
+        for locale in ["en", "zh-CN"] {
+            slint::select_bundled_translation(locale).unwrap();
+            for dark in [false, true] {
+                AppState::get(&window).set_effective_dark_mode(dark);
+                window.window().dispatch_event(WindowEvent::PointerMoved {
+                    position: LogicalPosition::new(1.0, 1.0),
+                });
+                i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(16));
+                let handle = ElementHandle::find_by_element_id(
+                    &window,
+                    "GitHubAiReviewPanel::composer-resize-handle",
+                )
+                .next()
+                .expect("AI Review composer resize handle");
+                let editor =
+                    ElementHandle::find_by_element_id(&window, "GitHubAiReviewPanel::composer-box")
+                        .next()
+                        .expect("AI Review composer editor");
+                let line = handle
+                    .query_descendants()
+                    .match_id("GitHubResizeHandle::divider-line")
+                    .find_first()
+                    .expect("composer painted divider");
+                let editor_left = editor.absolute_position().x;
+                let editor_right = editor_left + editor.size().width;
+                assert_close(handle.absolute_position().x, editor_left);
+                assert_close(handle.size().width, editor.size().width);
+                assert_close(handle.size().height, 9.0);
+                assert_close(line.size().height, 1.0);
+                assert_close(line.absolute_position().x, editor_left + 6.0);
+                assert_close(
+                    line.absolute_position().x + line.size().width,
+                    editor_right - 6.0,
+                );
+                let position = LogicalPosition::new(
+                    editor_left + editor.size().width / 2.0,
+                    handle.absolute_position().y + handle.size().height / 2.0,
+                );
+                window
+                    .window()
+                    .dispatch_event(WindowEvent::PointerMoved { position });
+                i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(16));
+                assert_close(line.size().height, 2.0);
+                assert_close(line.absolute_position().x, editor_left + 6.0);
+                assert_close(
+                    line.absolute_position().x + line.size().width,
+                    editor_right - 6.0,
+                );
+                assert_close(handle.size().width, editor.size().width);
+                assert_close(handle.size().height, 9.0);
+            }
+        }
+    }
 }
 
 #[test]
@@ -1237,6 +1309,10 @@ fn virtualized_response_list_forwards_preview_and_markdown_link_actions() {
 
     let target = "usher-repo-file:virtualized-token";
     let link_conversation = ModelRc::new(Rc::new(VecModel::from(vec![AiReviewConversationItem {
+        agent_label: "".into(),
+        agent_name: "".into(),
+        agent_provider: "".into(),
+        agent_model: "".into(),
         id: "link-message".into(),
         role: "assistant".into(),
         content: "AGENTS.md".into(),

@@ -24,6 +24,8 @@ use usher_ai_review::{FindingDiffSide, FindingSeverity, ReviewFinding};
 use usher_messages::{MessageCenter, MessageDraft, MessageSeverity, NativeDelivery};
 use usher_state_store::{LocalStateStore, StateStore, StateStoreExt, Subscription};
 
+#[cfg(test)]
+use crate::WorkflowPullRequestItem;
 use crate::agent_response::{
     AgentResponseProjector, ProjectionCacheStats, REPOSITORY_FILE_LINK_PREFIX,
 };
@@ -33,11 +35,13 @@ use crate::project::load_repository_metadata;
 use crate::settings::AiAgentSettings;
 use crate::{
     AiReviewFindingItem, AiReviewResponseVisualRow, AiReviewRuleChoice, AiReviewTaskItem,
-    MainWindow, Route, SettingsPageBridge, WorkflowPullRequestItem,
+    MainWindow, Route, SettingsPageBridge,
 };
 
+use super::agent_identity;
 use super::config::{ReviewConfigFacade, default_session_dir};
 use super::producers::{ProducerPermit, Producers};
+use super::request_capture::request_from_ui;
 use super::response::{self, ResponseVariant};
 #[cfg(any(test, feature = "test-fixtures"))]
 use super::review_input::bounded_utf8_prefix;
@@ -303,6 +307,7 @@ struct ProjectedConversationMessage {
     role: ReviewConversationRole,
     content: String,
     elapsed_ms: Option<u64>,
+    agent: Option<usher_ai_review::AgentIdentity>,
     response: Option<response::PreparedAgentResponse>,
 }
 
@@ -439,6 +444,7 @@ impl SessionProjection {
                     role: message.role.clone(),
                     content: message.content.clone(),
                     elapsed_ms: message.elapsed_ms,
+                    agent: message.agent.clone(),
                     response: prepared_response,
                 }
             })
@@ -1335,7 +1341,7 @@ impl ControllerInner {
             .resolved_rule_for(&request.project_key)
             .map(|rule| rule.name.clone())
             .unwrap_or_default();
-        let model_name = request.model_name.clone();
+        let model_name = request.profile.connection.model.clone();
         let target = ReviewTarget {
             author_name: None,
             author_email: None,
@@ -1351,6 +1357,7 @@ impl ControllerInner {
             updated_at: request.updated_at.clone(),
         };
         let summary = ReviewTaskSummary {
+            agent: Some(agent_identity::capture(&request.profile)),
             id: id.clone(),
             target,
             rule_name,
@@ -1549,7 +1556,7 @@ impl ControllerInner {
         id: &ReviewTaskId,
         request: PendingReviewRequest,
     ) -> Result<ReviewSession, String> {
-        let settings = crate::ai::settings_state::current();
+        let settings = request.profile.connection.clone();
         let fixture = self.fixture_enabled();
         if !fixture {
             validate_model_settings(&settings)?;
@@ -2069,7 +2076,8 @@ impl ControllerInner {
             ui.get_workflow_pr_review_target_branch().as_str(),
             "",
         );
-        let settings = crate::ai::settings_state::current();
+        let identity = agent_identity::capture(&request.profile);
+        let settings = request.profile.connection.clone();
         let fallback = PullRequestChatSession {
             input: provisional_chat_input(&request, &settings, &task.target),
             task,
@@ -2077,7 +2085,7 @@ impl ControllerInner {
         };
         let accepted = self.sessions.accept_user(
             id.clone(),
-            user_chat_message(message.clone()),
+            agent_identity::attribute(user_chat_message(message.clone()), &identity),
             fallback,
             cancellation.flag(),
         );
@@ -2103,6 +2111,8 @@ impl ControllerInner {
             generation
         };
         append_ui_conversation(&ui, "user", message.as_str(), None);
+        agent_identity::attribute_latest_ui_message(&ui, &identity);
+        rebuild_response_visual_rows(&ui);
         ui.set_ai_review_chat_sending(true);
         ui.set_ai_review_chat_status(
             crate::i18n::tr("ai_review.preparing_context")
@@ -2133,7 +2143,7 @@ impl ControllerInner {
                     self.update_chat_status(&id, &work_cancellation, delivery_generation, "ai_review.thinking");
                     let result = match &snapshot { SessionSnapshot::Review(review) => Some(&review.result), SessionSnapshot::Chat(_) => None };
                     let (answer, prompt) = complete_chat(&settings, &id, snapshot.input(), result, snapshot.conversation(), fixture).await?;
-                    let assistant = assistant_chat_message(answer, elapsed_millis(request_started.elapsed()), prompt);
+                    let assistant = agent_identity::attribute(assistant_chat_message(answer, elapsed_millis(request_started.elapsed()), prompt), &identity);
                     let committed = self.sessions.append_assistant(attempt.clone(), assistant).await?;
                     Ok::<_, String>(committed.as_ref().and_then(|session| project_session_snapshot(session, self.as_ref(), mount_generation)))
                 }).await,
@@ -2228,7 +2238,18 @@ impl ControllerInner {
                             + request.source_branch.len()
                             + request.target_branch.len()
                             + request.updated_at.len()
-                            + request.model_name.len()
+                            + request.profile.id.len()
+                            + request.profile.name.len()
+                            + request.profile.connection.model.len()
+                            + request.profile.connection.base_url.len()
+                            + request.profile.connection.api_key.len()
+                            + request
+                                .profile
+                                .connection
+                                .headers
+                                .iter()
+                                .map(|header| header.name.len() + header.value.len())
+                                .sum::<usize>()
                             + request.extra_requirements.len()
                     })
                     .sum::<usize>()
@@ -2276,42 +2297,6 @@ impl ControllerInner {
                 .unwrap_or(0),
         );
         crate::memory_diagnostics::log_checkpoint("ai_review.lifecycle");
-    }
-}
-
-fn request_from_ui(
-    ui: &MainWindow,
-    number: &str,
-    title: &str,
-    source_branch: &str,
-    target_branch: &str,
-    extra_requirements: &str,
-) -> PendingReviewRequest {
-    let row = current_pr_row(ui, number);
-    PendingReviewRequest {
-        project_alias: ui.get_workflow_project_alias().to_string(),
-        project_key: ProjectReviewKey(ui.get_workflow_project_id().to_string()),
-        project_name: ui.get_workflow_project_name().to_string(),
-        local_repo: ui.get_workflow_project_local_repo().to_string(),
-        remote_repo: ui.get_workflow_project_remote_repo().to_string(),
-        repo_type: ui.get_workflow_pr_repo_type().to_string(),
-        repo_project_id: ui.get_workflow_pr_repo_project_id().to_string(),
-        number: number.to_string(),
-        title: title.to_string(),
-        author: row
-            .as_ref()
-            .map(|row| row.author.to_string())
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| ui.get_workflow_pr_review_author().to_string()),
-        source_branch: source_branch.to_string(),
-        target_branch: target_branch.to_string(),
-        updated_at: row
-            .as_ref()
-            .map(|row| row.updated_at_raw.to_string())
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| ui.get_workflow_pr_review_updated_at().to_string()),
-        model_name: crate::AppState::get(ui).get_ai_agent_model().to_string(),
-        extra_requirements: extra_requirements.trim().to_string(),
     }
 }
 
@@ -2430,6 +2415,7 @@ async fn complete_chat(
 
 fn user_chat_message(content: String) -> ReviewConversationMessage {
     ReviewConversationMessage {
+        agent: None,
         message_id: None,
         role: ReviewConversationRole::User,
         content,
@@ -2445,6 +2431,7 @@ fn assistant_chat_message(
     prompt: Option<PromptProvenance>,
 ) -> ReviewConversationMessage {
     ReviewConversationMessage {
+        agent: None,
         message_id: None,
         role: ReviewConversationRole::Assistant,
         content,
@@ -2568,15 +2555,6 @@ fn project_session_snapshot(
     }
 }
 
-fn current_pr_row(ui: &MainWindow, number: &str) -> Option<WorkflowPullRequestItem> {
-    let model = ui.get_workflow_pr_list_items();
-    (0..model.row_count()).find_map(|index| {
-        model
-            .row_data(index)
-            .filter(|row| row.number.as_str() == number)
-    })
-}
-
 fn apply_configuration_to_ui(ui: &MainWindow, state: &usher_ai_review::ReviewConfigurationState) {
     let project = ProjectReviewKey(ui.get_workflow_project_id().to_string());
     let binding = state
@@ -2627,6 +2605,7 @@ struct TaskRowProjection {
     pull_request_title: SharedString,
     rule_name: SharedString,
     model_name: SharedString,
+    agent: Option<usher_ai_review::AgentIdentity>,
     status: ReviewTaskStatus,
     progress_percent: u8,
     completed_chunks: u32,
@@ -2648,6 +2627,7 @@ fn project_task_rows(state: &ReviewTaskState) -> Vec<TaskRowProjection> {
             pull_request_title: task.target.pull_request_title.as_str().into(),
             rule_name: task.rule_name.as_str().into(),
             model_name: task.model_name.as_str().into(),
+            agent: task.agent.clone(),
             status: task.status,
             progress_percent: task.progress_percent,
             completed_chunks: task.completed_chunks,
@@ -2669,7 +2649,7 @@ fn task_item_from_projection(row: &TaskRowProjection) -> AiReviewTaskItem {
         } else {
             row.rule_name.clone()
         },
-        model_name: row.model_name.clone(),
+        model_name: agent_identity::display(row.agent.as_ref(), &row.model_name).into(),
         status: row.status.as_str().into(),
         progress_percent: i32::from(row.progress_percent),
         completed_chunks: row.completed_chunks.min(i32::MAX as u32) as i32,
@@ -2807,7 +2787,9 @@ fn apply_task_header(ui: &MainWindow, task: &ReviewTaskSummary) {
         }
         .into(),
     );
-    ui.set_ai_review_model_name(task.model_name.clone().into());
+    ui.set_ai_review_model_name(
+        agent_identity::display(task.agent.as_ref(), &task.model_name).into(),
+    );
     ui.set_ai_review_status(task.status.as_str().into());
     ui.set_ai_review_progress_percent(i32::from(task.progress_percent));
     ui.set_ai_review_completed_chunks(task.completed_chunks.min(i32::MAX as u32) as i32);
@@ -2879,13 +2861,15 @@ fn apply_projection(
                         .elapsed_ms
                         .map(format_elapsed_ms)
                         .unwrap_or_default();
-                    response::conversation_item(
+                    let mut item = response::conversation_item(
                         &message.id,
                         message.role.as_str(),
                         &message.content,
                         &elapsed,
                         message.response,
-                    )
+                    );
+                    agent_identity::project(&mut item, message.agent.as_ref());
+                    item
                 })
                 .collect::<Vec<_>>(),
         )));
@@ -2896,7 +2880,10 @@ fn apply_projection(
 fn append_ui_conversation(ui: &MainWindow, role: &str, content: &str, elapsed_ms: Option<u64>) {
     let id = format!("optimistic:{role}:{}", unix_millis());
     let elapsed = elapsed_ms.map(format_elapsed_ms).unwrap_or_default();
-    let item = response::plain_conversation_item(&id, role, content, &elapsed);
+    let mut item = response::plain_conversation_item(&id, role, content, &elapsed);
+    if role != "user" {
+        agent_identity::inherit_latest(&mut item, ui);
+    }
     let conversation = ui.get_ai_review_conversation();
     // Append in place so the chat ListView keeps its model identity and
     // scroll anchor instead of rebuilding every delegate per message.
@@ -2920,10 +2907,11 @@ fn sync_conversation_language(ui: &MainWindow) {
         let Some(mut item) = conversation.row_data(index) else {
             continue;
         };
+        agent_identity::refresh(&mut item);
         if item.preview_available && item.preview_title != preview_title {
             item.preview_title = preview_title.clone().into();
-            conversation.set_row_data(index, item);
         }
+        conversation.set_row_data(index, item);
     }
     rebuild_response_visual_rows(ui);
 }
@@ -2978,7 +2966,11 @@ fn rebuild_response_visual_rows(ui: &MainWindow) {
     rows.push(AiReviewResponseVisualRow {
         kind: "chat-status".into(),
         finding: empty_finding,
-        message: empty_message,
+        message: conversation
+            .row_count()
+            .checked_sub(1)
+            .and_then(|index| conversation.row_data(index))
+            .unwrap_or(empty_message),
     });
     ui.set_ai_review_response_rows(ModelRc::new(VecModel::from(rows)));
 }
@@ -3066,6 +3058,7 @@ fn response_fixture_session(
     bytes_per_response: usize,
 ) -> PullRequestChatSession {
     let task = ReviewTaskSummary {
+        agent: None,
         id: ReviewTaskId("response-fixture-task".to_string()),
         target: ReviewTarget {
             author_name: None,
@@ -3114,6 +3107,7 @@ fn response_fixture_session(
     for index in 0..message_count {
         let created_at = 1_777_088_600_000 + index as u64 * 2_000;
         conversation.push(ReviewConversationMessage {
+            agent: None,
             message_id: None,
             role: ReviewConversationRole::User,
             content: if index == 0 {
@@ -3126,6 +3120,7 @@ fn response_fixture_session(
             prompt: None,
         });
         conversation.push(ReviewConversationMessage {
+            agent: None,
             message_id: None,
             role: ReviewConversationRole::Assistant,
             content: response_fixture_markdown(index + 1, bytes_per_response),

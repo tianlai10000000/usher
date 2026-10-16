@@ -64,8 +64,10 @@ workflow still performs Git network operations.
    the parsed `major.minor.patch` core.
 3. Major, minor, and patch selection derives the next tag without mutating repository state.
    Invalid current input falls back to the `v0.0.0` baseline.
-4. A create plan validates the repository, updates `release`, rebases and pushes `main`,
-   creates an annotated tag, then pushes that tag. A remove plan validates the repository,
+4. A create plan validates the repository, updates `release`, checks out `main`,
+   pulls `origin main`, rebases onto `release` and pushes `main`, creates an annotated
+   tag, then pushes that tag. A failed main pull stops the run before rebase or tagging.
+   A remove plan validates the repository,
    deletes the local tag, then deletes the remote tag.
 5. Every command is executed as an argument vector, never through shell interpolation.
    Repository paths, tag names, and descriptions remain distinct arguments.
@@ -112,8 +114,9 @@ workflow still performs Git network operations.
    `v`/`V` 前缀；预发布和 build qualifier 不改变 `major.minor.patch` 核心。
 3. major、minor、patch 选择只计算下一个 Tag，不修改仓库；当前输入非法时以
    `v0.0.0` 为基线。
-4. 创建计划依次校验仓库、更新 `release`、rebase 并推送 `main`、创建 annotated
-   Tag、推送 Tag。删除计划依次校验仓库、删除本地 Tag、删除远端 Tag。
+4. 创建计划依次校验仓库、更新 `release`、checkout `main`、拉取 `origin main`、
+   rebase 到 `release` 并推送 `main`、创建 annotated Tag、推送 Tag。拉取 main 失败
+   必须在 rebase 或打 Tag 前停止。删除计划依次校验仓库、删除本地 Tag、删除远端 Tag。
 5. 命令始终以 argv 执行，禁止 shell 插值；仓库路径、Tag 名称和描述保持独立参数。
 6. 长任务使用应用共享 runtime，通过 workflow state 防止重复启动，并在步骤之间及
    命令执行期间检查取消 token。UI 只能通过 Slint event loop 回写，过期初始化序列
@@ -261,6 +264,9 @@ running 标记；Stop 后重置配置会拒绝旧终态。退出先关 UI 准入
 - Verify major/minor/patch results and invalid-input fallback.
 - Verify paths and descriptions containing spaces remain one argv item.
 - Verify create/remove command ordering.
+- With a temporary bare origin, verify a stale local main includes the latest remote main
+  in the created annotated tag; keep an already-synchronized main control and a failed
+  main pull that leaves rebase/push/tag steps queued and creates no tag.
 - Manually verify project switching, duplicate-start protection, cancellation, bounded progress
   logs, the explicit Remote-mode unavailable state, and Settings → Back state restoration.
 - Verify valid Create/Remove opens Job Run, invalid input stays on Tag, Back
@@ -274,6 +280,8 @@ running 标记；Stop 后重置配置会拒绝旧终态。退出先关 UI 准入
 - 验证 major/minor/patch 结果与非法输入回退。
 - 验证包含空格的路径和描述仍是单个 argv 参数。
 - 验证创建/删除命令顺序。
+- 使用临时裸远端验证落后的本地 main 拉取后，新 annotated Tag 包含远端最新 main；
+  保留 main 已同步对照，并验证 main 拉取失败后 rebase/push/tag 仍待执行且不创建 Tag。
 - 手工验证项目切换、防重复启动、取消、有界进度日志、Remote 模式明确不可用状态，
   以及 Settings → Back 后的状态恢复。
 - 验证合法 Create/Remove 打开 Job Run、非法输入留在 Tag、Back 恢复配置，以及

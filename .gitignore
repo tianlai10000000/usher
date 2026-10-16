@@ -35,3 +35,7 @@ artifact-preview-scroll-benchmark-results/
 # Local compressed history retained during repository cleanup.
 .local-archives/
 __pycache__/
+
+# Local validation output and one-off experiments stay out of Git.
+/docs/validation/**
+!/docs/validation/README.md

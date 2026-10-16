@@ -13,7 +13,7 @@
 | 根 Slint properties | 425 | 401 | 410 |
 | PR Review actions 行数 | 1150 | 545 | 580 |
 
-原有 22 条 `check_max` 声明逐字保留，没有调高阈值、删除检查或增加豁免。候选结构门禁通过；这仅说明结构约束满足，不代表全部质量检查或性能验收通过。原始输出、预算比较与正反例结果位于 [validation/structure-cleanup-20261014/](../../validation/structure-cleanup-20261014)。
+原有 22 条 `check_max` 声明逐字保留，没有调高阈值、删除检查或增加豁免。候选结构门禁通过；这仅说明结构约束满足，不代表全部质量检查或性能验收通过。原始输出、预算比较与正反例结果位于 [validation/structure-cleanup-20261014/（归档：docs/validation/structure-cleanup-20261014）](../../local-archives.md#validation-tracked-history-20261016)。
 
 新增 7 条预算：AI 输入模块 330 行；PR action presentation 460 行、remote 310 行；Project bridge 70 行/9 callbacks/24 properties；Project dialog host 90 行。提取模块仍被反向 controller 依赖门禁检查，输入/remote 模块另禁止 UI/controller 类型。正好等于阈值的正例必须通过，超过一项的负例必须失败。
 

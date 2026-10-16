@@ -1,0 +1,58 @@
+import { FactoryTooltipKind, FactoryTooltipState } from "../../state/factory_tooltip_state.slint";
+import { GitHubFixedTooltipAnchor } from "../github_fixed_tooltip_anchor.slint";
+
+export component ShowcaseMoreFiltersTooltipAnchor inherits GitHubFixedTooltipAnchor {
+    bounded: FactoryTooltipState.enabled;
+    viewport: FactoryTooltipState.viewport;
+    publish(x, y, w, h) => { FactoryTooltipState.show(FactoryTooltipKind.MoreFilters, x, y, w, h); }
+    release(x, y) => { FactoryTooltipState.hide(FactoryTooltipKind.MoreFilters, x, y); }
+    renew(x, y, w, h) => { FactoryTooltipState.renew(FactoryTooltipKind.MoreFilters, x, y, w, h); }
+}
+
+export component ShowcaseCancelReviewTooltipAnchor inherits GitHubFixedTooltipAnchor {
+    bounded: FactoryTooltipState.enabled;
+    viewport: FactoryTooltipState.viewport;
+    publish(x, y, w, h) => { FactoryTooltipState.show(FactoryTooltipKind.CancelReview, x, y, w, h); }
+    release(x, y) => { FactoryTooltipState.hide(FactoryTooltipKind.CancelReview, x, y); }
+    renew(x, y, w, h) => { FactoryTooltipState.renew(FactoryTooltipKind.CancelReview, x, y, w, h); }
+}
+
+export component ShowcaseOpenConversationTooltipAnchor inherits GitHubFixedTooltipAnchor {
+    bounded: FactoryTooltipState.enabled;
+    viewport: FactoryTooltipState.viewport;
+    publish(x, y, w, h) => { FactoryTooltipState.show(FactoryTooltipKind.OpenConversation, x, y, w, h); }
+    release(x, y) => { FactoryTooltipState.hide(FactoryTooltipKind.OpenConversation, x, y); }
+    renew(x, y, w, h) => { FactoryTooltipState.renew(FactoryTooltipKind.OpenConversation, x, y, w, h); }
+}
+
+export component ShowcaseReviewWithAiTooltipAnchor inherits GitHubFixedTooltipAnchor {
+    bounded: FactoryTooltipState.enabled;
+    viewport: FactoryTooltipState.viewport;
+    publish(x, y, w, h) => { FactoryTooltipState.show(FactoryTooltipKind.ReviewWithAi, x, y, w, h); }
+    release(x, y) => { FactoryTooltipState.hide(FactoryTooltipKind.ReviewWithAi, x, y); }
+    renew(x, y, w, h) => { FactoryTooltipState.renew(FactoryTooltipKind.ReviewWithAi, x, y, w, h); }
+}
+
+export component ShowcaseQueuedAiTooltipAnchor inherits GitHubFixedTooltipAnchor {
+    bounded: FactoryTooltipState.enabled;
+    viewport: FactoryTooltipState.viewport;
+    publish(x, y, w, h) => { FactoryTooltipState.show(FactoryTooltipKind.QueuedAi, x, y, w, h); }
+    release(x, y) => { FactoryTooltipState.hide(FactoryTooltipKind.QueuedAi, x, y); }
+    renew(x, y, w, h) => { FactoryTooltipState.renew(FactoryTooltipKind.QueuedAi, x, y, w, h); }
+}
+
+export component ShowcaseRunningAiTooltipAnchor inherits GitHubFixedTooltipAnchor {
+    bounded: FactoryTooltipState.enabled;
+    viewport: FactoryTooltipState.viewport;
+    publish(x, y, w, h) => { FactoryTooltipState.show(FactoryTooltipKind.RunningAi, x, y, w, h); }
+    release(x, y) => { FactoryTooltipState.hide(FactoryTooltipKind.RunningAi, x, y); }
+    renew(x, y, w, h) => { FactoryTooltipState.renew(FactoryTooltipKind.RunningAi, x, y, w, h); }
+}
+
+export component ShowcaseFailedAiTooltipAnchor inherits GitHubFixedTooltipAnchor {
+    bounded: FactoryTooltipState.enabled;
+    viewport: FactoryTooltipState.viewport;
+    publish(x, y, w, h) => { FactoryTooltipState.show(FactoryTooltipKind.FailedAi, x, y, w, h); }
+    release(x, y) => { FactoryTooltipState.hide(FactoryTooltipKind.FailedAi, x, y); }
+    renew(x, y, w, h) => { FactoryTooltipState.renew(FactoryTooltipKind.FailedAi, x, y, w, h); }
+}

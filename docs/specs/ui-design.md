@@ -53,6 +53,16 @@ Use the following evidence in order:
    [Octicons](https://github.com/primer/octicons)。
 4. 没有对应参考或权威资料冲突时，记录问题并取得产品决策，禁止自行拼接近似样式。
 
+The user-selected ChatGPT desktop splitter interaction is a scoped exception
+for resizable dividers only. `GitHubResizeHandle` keeps the existing application
+component-library name and semantic theme tokens. Its dimensions below are
+Usher's implementation contract; they are not measured or verified pixel values
+from the current ChatGPT client.
+
+用户指定的 ChatGPT 桌面端分割线交互，仅对可拖拽分割线构成局部参考例外。
+`GitHubResizeHandle` 保留应用组件库命名与语义主题令牌。下文几何值是 Usher 的
+实现约定，不表示已经测量或验证当前 ChatGPT 客户端的精确像素值。
+
 ## 3. Naming and ownership / 命名与归属
 
 - Every application-owned component anywhere under `ui/` that implements a
@@ -217,6 +227,13 @@ to be a Primer primitive.
   再次进入时创建新的视口，领域状态与运行中的任务仍归 feature 所有。离开路由还必须
   停用宿主可见的 Dialog 镜像、关闭局部临时浮层，并阻止路由专属键盘事件进入隐藏
   factory。
+- Settings content uses the live-window width bound
+  `min(viewport-width, max(0px, window-width - content-origin-x))` in
+  `ui/views/settings.slint`. Page/compact-navigation/scroll geometry and content
+  popup collision bounds share it, including while the shell retains a wider
+  layout during sidebar motion. Modal surfaces and dialog-owned pickers keep
+  full-window bounds. / Settings 内容在侧栏移动时按实时窗口剩余宽度钳制，页面、
+  紧凑导航、滚动区与内容浮层共用此边界；模态弹窗及其选择浮层保持完整窗口边界。
 - Application-owned UI must not declare Slint `drop-shadow-*`, regardless of
   surface size or bounded geometry. FemtoVG rasterizes those shadows at the
   target's physical size and may retain the texture after the item or route is
@@ -263,7 +280,13 @@ expanded/collapsed, and success confirmation.
 - Icon-only controls require an accessible action label and a persistent hit
   target. They show that label in a tooltip except for the sidebar About
   action and the familiar Dialog, Notification, and Toast dismiss controls,
-  which keep the accessible label without showing a visual tooltip.
+  plus the Settings AI Agent list's Add/Use/Edit/Delete controls. These keep
+  the accessible label without showing a visual tooltip. The Agent list uses
+  existing semantic I18n `tooltip-text` with `show-tooltip: false`, keeps action
+  chrome mounted, and creates no Tooltip publisher in the independent factory.
+  / Settings AI Agent 列表的新增/使用/编辑/删除是明确的纯无障碍标签例外：复用既有
+  语义 I18n `tooltip-text`，设置 `show-tooltip: false`，保留常驻按钮外观与命中区，
+  不在独立 factory 内新增 Tooltip 发布方。
 - Destructive actions use danger semantics and require confirmation when the
   consequence is difficult to reverse.
 - Loading prevents duplicate starts and preserves the control's dimensions.
@@ -300,7 +323,8 @@ expanded/collapsed, and success confirmation.
   Octicon, default/primary/danger/invisible states, small/medium/large control
   geometry, loading support, Enter/Space activation, focus outline, and an
   accessible action label. It shows the label as a tooltip on hover or focus
-  unless the caller selects the documented About/dismiss exception.
+  unless the caller selects the documented About/dismiss or Settings AI Agent
+  list exception.
 - `GitHubSegmentedControl`: the shared Primer track for one immediately applied
   choice among closely related options. Text and icon-only variants use an
   accessible pressed/selected state and one independent variable-width knob
@@ -417,8 +441,20 @@ expanded/collapsed, and success confirmation.
   `#f9f9f9` light or `#000000` dark fallback beneath the renderer layers.
   Undocked mode removes it from page layout; an 8 px left-edge hover target
   opens the same component as a rounded, border-only root-layer overlay with a
-  short pointer-exit delay. macOS places Toggle/Back/Forward in a native
-  left title-bar accessory. Windows and Linux expose equivalent controls in
+  short pointer-exit delay. In a normal macOS window, Back/Forward/Sidebar are
+  ordered left to right in a native left title-bar accessory. In system full
+  screen, the same actions stay visible in a root-owned Slint control strip at
+  the content's top-left corner; the native action container is hidden. Hovering
+  the screen's top edge lets AppKit reveal its traffic lights and a left-aligned
+  `Usher` label, without a second set of application actions. The label uses its
+  intrinsic height and a native center-Y constraint to the traffic lights, so
+  subsequent reveal layouts preserve vertical alignment; do not freeze its
+  frame at full-screen entry. AppKit owns that
+  title-bar reveal and dismissal; the application must not simulate it with
+  pointer polling or a custom full-window overlay. The full-screen sidebar
+  button receives the existing native macOS SF Symbol image, retaining its
+  collapsed/expanded variants instead of substituting an unverified icon source.
+  Windows and Linux expose equivalent controls in
   the sidebar header and collapsed-state control strip. Back/Forward enabled
   state always comes from Router history; the visual shell must not invent or
   mutate route history.
@@ -427,9 +463,10 @@ expanded/collapsed, and success confirmation.
   must remain free of hit targets for native window dragging, and its leading
   edge must stay clear of traffic lights and native accessories throughout the
   sidebar transition. In a normal undocked window that safe area includes the
-  traffic lights and native history controls; in macOS system full screen,
-  where AppKit removes that leading chrome, the breadcrumb aligns with the
-  page content's left edge. A stable trailing action slot is excluded from the
+  traffic lights and native history controls. In macOS system full screen,
+  the persistent content controls reserve the first 112 px of the window;
+  the breadcrumb starts at the greater of that boundary and the animated
+  page-content edge. A stable trailing action slot is excluded from the
   breadcrumb's clipping width; title-bar actions use shared IconButtons and
   must never overlay the route hierarchy or native drag region. One root-owned
   hairline spans the native left region, breadcrumb, and trailing action slot
@@ -441,8 +478,11 @@ expanded/collapsed, and success confirmation.
   focus, and pressed chrome cannot be clipped. The initial Slint window title is empty so
   AppKit cannot flash the standard product label before accessory installation;
   Rust restores the metadata title only after hiding native title presentation.
-  macOS must not render substitute Slint title-bar controls while the native
-  accessory is pending; only the final AppKit controls may appear there.
+  A normal macOS window must not render substitute Slint title-bar controls
+  while the native accessory is pending; only the final AppKit controls may
+  appear there. The full-screen Slint strip is a separate presentation of the
+  same callbacks and Router state. It stays below modal scrims, becomes
+  non-interactive during a modal, and uses shared localized IconButton tooltips.
 - `GitHubNavigationSidebar` 是统一的 240px 桌面应用侧栏，展示完整标签、当前
   路由选中态和固定在底部的 Settings/About，并持久化固定状态。首帧渲染前必须把
   持久化开关、弹簧进度和路由宽度一次性吸附到同一个最终几何，启动恢复不得播放用户
@@ -491,16 +531,36 @@ expanded/collapsed, and success confirmation.
   取整为 `#1d1d1d`。浅色模式维持现有的 `#ffffffa6` 处理。失去 Key 状态时关闭
   Effect，原生窗口继续在渲染层下使用 Codex 的浅色 `#f9f9f9` 或深色 `#000000`
   fallback。
-  macOS 使用原生左侧标题栏附件，Windows/Linux 使用侧栏页头和收起态
-  控制条；macOS 侧栏按钮在收起态使用轮廓 `sidebar.left`，展开态使用左侧
+  macOS 普通窗口使用原生左侧标题栏附件，按从左到右 Back、Forward、Sidebar
+  排列；系统全屏时，同一组操作常驻在 Slint 根层左上角，原生操作容器隐藏。
+  鼠标移到屏幕顶部时，由 AppKit 揭示交通灯与左对齐的 `Usher` 标题，不重复显示
+  应用操作。标题栏的出现与收回由 AppKit 管理，禁止用指针轮询或自制全窗口浮层模拟。
+  标题须使用固有高度和相对交通灯的原生 center-Y 约束，确保后续揭示布局仍保持垂直
+  居中；禁止将文字 frame 固定为进入全屏时的坐标。
+  全屏侧栏按钮接收既有 macOS SF Symbol 图像，保留原生收起/展开变体，不替换为
+  未确认来源一致的图标。
+  Windows/Linux 使用侧栏页头和收起态控制条；macOS 侧栏按钮在收起态使用轮廓 `sidebar.left`，展开态使用左侧
   三分之一填充图标，两种状态不得共用同一视觉；Back/Forward 可用状态只能来自
   Router 历史。Slint 窗口初始标题必须为空，避免原生附件安装前由 AppKit 闪现标准
   产品标题；Rust 只有在隐藏原生标题展示后才恢复系统元数据中的 `Usher`。原生附件
-  尚未就绪时，macOS 不得绘制替代的 Slint 标题栏控件；该区域只允许最终 AppKit
-  控件出现。macOS 附件 SF Symbols 使用整点号 14pt，并以 `NSImageScaleNone` 禁止
+  尚未就绪时，macOS 普通窗口不得绘制替代的 Slint 标题栏控件；该区域只允许最终
+  AppKit 控件出现。全屏 Slint 控制条复用同一组 callback 与 Router 状态，位于模态
+  遮罩下方，弹窗期间不可交互，并使用共享、本地化的 IconButton Tooltip。
+  macOS 附件 SF Symbols 使用整点号 14pt，并以 `NSImageScaleNone` 禁止
   Bezel 对半点号符号再次双线性缩放。普通非固定侧栏窗口中的面包屑必须避开交通灯及
-  原生历史控件；进入 macOS 系统全屏、AppKit 移除这些左侧 Chrome 后，面包屑必须与
-  页面内容左缘对齐。
+  原生历史控件；macOS 系统全屏时，常驻操作占用窗口左侧 112px，面包屑起点取该边界
+  与动画中的页面内容左缘二者的较大值。
+- Full-screen shell acceptance must exercise native enter/exit cycles, top-edge
+  hover reveal/dismissal, docked and collapsed sidebars, enabled/disabled Router
+  history, and single-click activation from an unfocused control. Check light
+  and dark themes, a modal while full screen and across a transition, and both
+  the source locale and one packaged non-source locale with a runtime switch.
+  Verify that tooltips fit inside the window and disappear on activation or
+  modal opening. Slint-only assertions cannot establish AppKit hover behavior.
+- 全屏 Shell 验收必须覆盖原生进入/退出循环、顶部 Hover 出现/收回、侧栏固定/收起、
+  Router 历史可用/不可用，以及未聚焦控件的单次点击。检查亮/暗主题、全屏期间及跨
+  全屏切换的弹窗，并在源语言和一种内置非源语言间运行时切换。Tooltip 必须完整位于
+  窗口内，点击或打开弹窗后消失；仅 Slint 断言不能证明 AppKit Hover 行为正确。
 ### Links, tooltips and labels / 链接、Tooltip 与标签
 
 - `GitHubLink`: default, inline, and muted text-link states with visible
@@ -619,21 +679,45 @@ expanded/collapsed, and success confirmation.
 - Form Select geometry: shared `GitHubSelectPopup`/`GitHubSelectOption` use
   explicit 32 px option rows, 4 px padding per edge,
   and content-sized height (40 px for one plain option, capped for scrolling).
-  When the full menu cannot fit below and more room is available above, open
-  above the trigger with a 4 px gap and retain an 8 px viewport margin; do not
-  clamp a downward menu over its trigger. Convert the trigger's content position
+  Compare available space above and below the trigger and prefer the larger
+  side, even when a short menu fits on both; equal space opens below. Keep a
+  4 px anchor gap and an 8 px viewport margin. Height remains the minimum of
+  264 px, available space on the chosen side and content height; overflow
+  scrolls. Convert the trigger's content position
   to viewport coordinates after scrolling and before collision checks.
   Independent selectors must not reuse
   each other's option model subtree in a Settings factory. Verify one/multiple
   options, top/bottom anchors, changing selectors, and row-to-value selection.
   These dimensions are the application's shared Primer-style geometry.
   / 共享选择浮层使用明确的 32px 选项行、每边 4px 内边距，按内容决定高度
-  （单个普通选项 40px，长列表限制高度并滚动）。下方不足且上方更宽裕时向上
-  展开，距触发框 4px、距视口边缘至少 8px，不能向下展开后挤压到触发框上。
+  （单个普通选项 40px，长列表限制高度并滚动）。比较触发框上下可用空间，优先
+  空间更多的一侧，即使短菜单在两侧都能放下；相等时向下展开。距触发框 4px、
+  距视口边缘至少 8px，高度继续取 264px、选中侧可用空间与内容高度的最小值，
+  超出内容滚动。
   滚动后先将触发框内容坐标换算为视口坐标，再进行边界判断。
   Settings factory 中不同选择器的选项模型子树必须隔离，避免文案残留。
   验收覆盖单/多选项、顶部/底部锚点、选择器切换和选项值对应关系。
   这些尺寸是本应用统一的 Primer 风格几何约定。
+
+- Select placement uses only the caller-supplied viewport and anchor geometry;
+  explicit viewport bounds and root Portal mounting stay unchanged. It has no
+  Dialog context, instance registry or timer. Settings page menus retain page
+  bounds; AI Agent and Hook Dialog menus retain their window bounds. A particular
+  short menu fitting inside a Dialog is a tested layout result, not a shared
+  body-boundary guarantee.
+  / Select 仅使用调用方提供的视口和锚点几何，显式视口边界与根 Portal 挂载不变，
+  不引入 Dialog 上下文、实例注册表或 Timer。Settings 页面级菜单保留页面边界，
+  AI Agent 与 Hook Dialog 菜单保留窗口边界；特定短菜单位于弹窗内是实际布局结果，
+  不是共享正文边界保证。
+  Primer's AnchoredOverlay defaults to outside-bottom and exposes top/bottom
+  placement, alignment and anchor offsets; Overlay supports Portal placement,
+  viewport-responsive width and maximum height. Always preferring the side
+  with more space is Usher's shared Select policy, not Primer's documented default.
+  [AnchoredOverlay](https://primer.style/product/components/anchored-overlay/),
+  [Overlay](https://primer.style/product/components/overlay/).
+  / Primer AnchoredOverlay 默认 outside-bottom，并提供上下方定位、对齐、锚点偏移
+  及 Portal、视口响应宽度、最大高度能力；始终优先空间更多侧是 Usher 的共享 Select
+  策略，不是 Primer 文档的默认规则。
 
 - Form Select: `GitHubSelectPopup` and `GitHubSelectOption` pair with the shared
   `GitHubSettingsSectionMenuButton` trigger. Opening never changes form height
@@ -641,6 +725,14 @@ expanded/collapsed, and success confirmation.
   menu without changing the selection and restores trigger focus; activating
   another selector opens that selector on the same click. Trigger handlers may
   use the shared `GitHubSelectState.toggle()` to keep this behavior consistent.
+  Pointer activation dispatches the trigger callback without first focusing
+  its in-flow FocusScope; the root `GitHubActionMenu` acquires focus on open.
+  A first click on the visible portion of a clipped trigger must open the menu
+  without revealing the trigger or changing its form scroll offset/position,
+  including after pointer release and subsequent layout frames. Retain keyboard
+  activation and close-time trigger-focus restoration, and retain real
+  scroll/resize dismissal. Test top/bottom clipping, an unfocused trigger and
+  post-release layout frames, with fully visible controls as a comparison.
   This follows [Primer SelectPanel nonmodal dismissal](https://primer.style/product/components/select-panel/guidelines/).
   Opening never pushes following fields. Mount the menu at the owning window/factory root
   outside scrolling layouts, using the Tooltip's
@@ -665,12 +757,26 @@ expanded/collapsed, and success confirmation.
   sidebar/title/status chrome and the isolated Settings factory; it must not
   intercept that click or restore focus away from the clicked control. The
   full-window keyboard scope must disable automatic pointer focus acquisition.
+  Tab/Shift+Tab and standalone Backtab close with
+  `GitHubSelectState.close(restore-before-tab)`, then bubble. The flag defaults
+  to `false`, preserving the existing ordinary Slint host policy. Only the static
+  playground enables it in its own global graph. Its mounted-host traversal
+  must flush queued close/focus handlers so the opener is restored before reading
+  the current item and choosing its next/previous peer. Closing must neither
+  restart at the directory nor stop at the opener. Escape always restores focus;
+  outside-pointer dismissal keeps `close(false)`.
   References: [Primer Select](https://primer.style/product/components/select/)
   and [SelectPanel dismissal](https://primer.style/product/components/select-panel/).
 - 表单 Select 使用共享 `GitHubSelectPopup`、`GitHubSelectOption` 与
   `GitHubSettingsSectionMenuButton` 触发器；展开不得改变表单高度或挤压后续字段。
   再次激活已展开的触发器必须收起选项，保留当前值并恢复触发器焦点；点击其他
   选择器须在同一次点击中切换。触发回调可复用 `GitHubSelectState.toggle()`。
+  指针激活直接派发触发回调，不先聚焦流内 FocusScope，由根层 `GitHubActionMenu`
+  展开时获取焦点。部分裁切触发框的可见区域首次点击必须展开菜单，不能因聚焦自动
+  reveal 触发框或改变正文滚动偏移/触发框位置，鼠标释放和后续布局帧也须保持；
+  键盘激活、关闭时恢复触发器焦点及真实滚动/resize 关闭
+  继续保留。验收上下裁切、未聚焦触发器与鼠标释放后的多个布局帧，并以完整可见
+  控件作为对照。
   浮层在所属窗口/factory 根层挂载，复用 `GitHubActionMenu`，负责外部关闭和焦点恢复，支持 Escape 取消、方向键/Home/End 导航、
   Enter/Space 选择和有界内部滚动。选中项使用默认前景色勾选标记，不使用导航条或
   常驻选中底色。Settings 保留 manifest 生成的固定语言叶子；UI Components 必须
@@ -685,6 +791,12 @@ expanded/collapsed, and success confirmation.
   窗口级鼠标释放在目标处理完点击后通知关闭，覆盖侧栏、标题栏、状态栏与 Settings
   factory；全窗口键盘作用域关闭鼠标自动获取焦点，
   不得拦截首次点击或抢走目标焦点。
+  Inbox 与静态演练场通过 `src/focus_navigation.rs` 共用 mounted-host Tab 遍历。
+  演练场 capture scope 转发普通快捷键；Tab/Shift+Tab 与独立 Backtab 先关闭 Select
+  再冒泡，不能在 capture 阶段提前吞掉。共享 `restore-before-tab` 默认 false，保留
+  普通宿主原策略；仅静态演练场在本地 global 开启恢复触发器，不得影响 Settings。
+  宿主须先完成排队的关闭/焦点变更，再读取当前项并选择触发器的前后相邻项，
+  不能跳回目录或仅停在触发器。
 - `GitHubActionMenu`: ActionList inside an AnchoredOverlay; 12 px overlay
   radius. PR-list menus opt into `adaptive-placement`, backed by the pinned
   Rust `floating-ui-core` adapter in `crates/usher-ui/src/floating_overlay.rs`:
@@ -710,7 +822,16 @@ expanded/collapsed, and success confirmation.
   the borderless ActionMenu/ActionList variant. Outside dismissal is split on purpose: the menu owns Escape and chrome
   `dismiss-revision` (native title-bar / docked-shell); opening also
   `claim-exclusive` so peer ActionMenu/Diff-settings popovers close on the same
-  click without page-local dismiss wiring. Each host still mounts a sibling
+  click without page-local dismiss wiring.
+  [`GitHubActionMenu`](../../ui/components/github_action_menu.slint) runs one
+  idempotent opening path from both `init` and `changed open`, including when
+  first mounted with `open: true`. That path stamps the next exclusive generation
+  before claiming, initializes scroll reveal and takes focus; closing resets its
+  opening guard. Initial construction must not skip exclusivity, and duplicate
+  init/change notifications must not repeat the claim. / 初始 `open: true` 与
+  后续打开共用幂等路径：先标记下一互斥代际，再 claim、初始化滚动定位并获取焦点；
+  关闭复位 guard，不能漏掉首次 claim，也不能因 init/change 重复通知再次 claim。
+  Each host still mounts a sibling
   blank outside-click TouchArea under the menu—and under chrome that must keep
   receiving clicks. ActionMenu itself must not paint a full-viewport hit target
   at its overlay z, or filter/popover switching would only close instead of
@@ -723,6 +844,29 @@ expanded/collapsed, and success confirmation.
   text input use the application input bridge's popover-only dismissal channel:
   Select, ActionMenu, and Diff-settings close after the input receives the
   press, while Dialog and Toast lifecycles remain unchanged.
+  [`src/transient_input.rs`](../../src/transient_input.rs) scopes the actual
+  window-dispatch hook to MainWindow's adapter. Flickable may delay forwarding
+  the child press, so window post-dispatch alone does not guarantee TextInput
+  focus. Classify the left press immediately; retain only a miss's original
+  point and route. Its real left release consumes that pending identity and
+  retries the original point once if the route is unchanged. Exit/deactivation
+  cancels it; successful presses are not repeated, and other buttons/adapters
+  do not consume it. Release coordinates never become an outside press. This
+  bridge adds no timer/polling; macOS native forwarding remains separate and
+  production avoids duplicate delivery. Verify short/held clicks and real
+  selection dragged outside. / Flickable 可能延迟子节点 press，窗口 post-dispatch
+  不等于 TextInput 已聚焦。主窗口左键按下先立即分类，仅未命中者保存原坐标与路由；
+  实际左键松开派发后取出 pending，同路由才按原按下点补分类一次。离开窗口或失活
+  取消，已命中者不重复，其他键/adapter 不消费。松开坐标绝不作为外部按下，不新增
+  Timer/轮询；macOS 原生转发保持独立并避免重复。验收包含短击、长按与真实越界拖选。
+  Independent factory global graphs need an explicit two-way exclusive-claim
+  bridge. The static playground stamps the next host generation before its
+  claim, ignores that echo, and forwards external host claims only as
+  popover dismissal. Verify root-to-factory and factory-to-root switching;
+  the new opener must stay open and Dialog/Toast lifecycles must be preserved.
+  / 独立 factory 的 global graph 须显式双向桥接互斥 claim；演练场在 claim 前
+  标记下一宿主代际，忽略自身回传，仅把外部宿主 claim 转为 popover 关闭。验收覆盖
+  根菜单与工厂菜单双向切换，新打开者须保持展开，Dialog/Toast 生命周期不受影响。
   The UI Components playground's borderless ActionMenu demonstrates the same
   contract with a fixed 48 px trigger row: the overlay is mounted at the
   playground root and positioned from the selected trigger's measured edge
@@ -782,17 +926,124 @@ expanded/collapsed, and success confirmation.
   descriptive label, selected underline, hover, disabled, Enter/Space, and
   keyboard-visible focus states; page owners retain selected-panel semantics.
   `GitHubUnderlineNav` owns the full-width baseline and accessible tab-list,
-  keeps the first and last items inside a 16 px horizontal safe area, and uses
-  an explicit 4 px gap between items. A composite row with trailing content may
+  with an explicit 4 px gap between items. It and `GitHubFixedThreeTabs` expose
+  `variant: GitHubUnderlineNavVariant`, whose `inset` default gives the list a
+  16 px horizontal inset and whose `flush` value removes that list inset.
+  The existing numeric `content-inset` remains an explicit override; its default
+  binding is `variant == flush ? 0px : GitHubMetrics.size-16`. All item positions,
+  natural/available widths, visible-prefix calculation and More placement use
+  the resulting `content-inset`. Changing it dismisses an open overflow menu so
+  its anchor cannot retain stale geometry. `flush` aligns the first item's outer
+  edge and selected underline with the surrounding content; each item's 8 px
+  internal padding and full pointer/focus target remain intact. Use `flush` when
+  the containing section already owns its gutters. PR Review, Workflow, Tag
+  operations and other production callers retain the default `inset`. UI Components
+  compares real inset/flush rows using one localized item model and independent
+  owners and selections. This follows Primer's
+  [inset/flush variant API](https://primer.style/product/components/underline-nav/#props)
+  and [alignment rationale](https://github.com/primer/react/blob/main/packages/react/src/UnderlineNav/UnderlineNav.tsx).
+  A composite row with trailing content may
   set `show-bottom-border: false` and paint one full-row 1px baseline at the same
   bottom inset using `border-muted`, behind the 2px selected underline. Never stack a second separator
-  below the navigation or pin shared tab items directly to a container edge. Its `items` model supports
+  below the navigation. Keep the default safe area unless the caller explicitly
+  uses `flush` inside a container that owns the gutters. Its `items` model supports
   arbitrary item counts; native text measurement reserves the selected label
   width, optional icon and capped CounterLabel before choosing a visible prefix.
   Overflow uses the root-owned `GitHubTabOverflowPopup` and the shared Select
   overlay lifecycle, including outside click, Escape, focus return and collision
   handling. Resize, model/locale changes and route exit dismiss stale menus.
-  PR Review, Workflow, Tag operations and the gallery share this implementation.
+  PR Review, Workflow, Tag operations and the gallery use this dynamic model.
+  Settings code hosting uses the factory-safe `GitHubFixedThreeTabs` wrapper
+  from `navigation/github_fixed_tabs.slint`, with three static
+  `GitHubUnderlineNavItem` leaves and explicit first/second/third literal/I18n
+  item bindings. It retains the same native width measurement, inset/flush API,
+  4 px gap, prefix overflow, keyboard behavior and activation state. The
+  enterprise API provider tabs are the only production caller using `variant: flush`, to
+  align their outer edge with the section heading and fields. The code-hosting
+  group mounts its fixed `GitHubFixedThreeTabsOverflowPopup` at the factory root;
+  its `<owner>-overflow` Select id and three fixed option leaves may not share
+  label inputs through an owner-switched model. Navigation never owns editor
+  state or recreates provider forms. AI Agent settings use a searched, ten-row paginated list and independent root
+  Add/Edit/Delete dialogs; their Provider/language Select options retain fixed
+  leaves. Agent Save and activation remain separate. The Hooks-style Agent group
+  uses one 1px border/6px radius, 72px rows, no row gaps and internal 1px dividers.
+  Name/model and row editing exclude a trailing 168px action group with a 16px
+  right inset. A 48×24 shared Toggle followed by 32px Test (Plug), Edit and Delete IconButtons have
+  8px gaps and matching vertical centers. An inactive Toggle only activates on
+  On; the current On Toggle keeps its enabled green appearance with interaction
+  disabled, so it cannot clear the only active Agent. Delete is disabled for it.
+  Search ends with an icon-only primary Add button. Seven separate fixed tooltip
+  kinds/surfaces and one factory-root transient host cover Add, Activate,
+  Current, TestConnection, Edit, Delete and disabled Delete, including hover-only disabled targets.
+  Test captures that saved Agent without opening an editor or activating it.
+  One list request runs at a time, with that row's spinner and peer Test buttons
+  disabled. Semantic success/failure feedback uses a closable 3-second Toast at
+  the current Settings content viewport's bottom; dismissal retains the result
+  and locale refresh must not reopen it. Query/page changes retain the request;
+  section/route/dialog changes cancel it.
+  The editor requests 620 px width and
+  `min(560px, max(320px, root.height - 140px))` height with narrow fullscreen
+  disabled; shared Dialog clamping preserves the 16 px viewport margin.
+  At 800×600 it is 620×460 px, with a scrolling body and fixed header/footer.
+  The body viewport meets the 56px header and 64px footer edges; its 16px
+  top/bottom padding scrolls with the form. Header Key/Value content puts the
+  shared Add button with a leading Plus icon below its caption, horizontally
+  centered in a 32px toolbar before the rows; JS object
+  has no Add. Each row ends with a shared 32×32 trash IconButton; these actions
+  publish to one separate fixed Delete Tooltip portal bounded to the editor body.
+  Actual form borders leave at least 8px before the 8px overlay scrollbar;
+  Show API key's toggle and text share a centerline. A 16px Spinner or outcome
+  icon occupies the same slot 8px after Test. The editor's closable GitHubToast
+  uses the body viewport's bottom center above the footer; dismissing it leaves
+  the outcome, draft and saved configuration intact.
+  The percentage-width list root and flexible search field use `min-width:
+  0px`; the other layouts bind their width to the parent. Pagination remains;
+  no additional Total/Page/per-page summary row is rendered. Agent rows show
+  newest-created first; editing and activation preserve their position, while
+  successful creation clears the query and shows page one.
+  Native factory acceptance includes actual painted tab/overflow labels after
+  Settings → Chat → Settings, sidebar-triggered wide/compact replacement, and
+  source/non-source locale switches. Accessibility state and compile-only checks
+  cannot substitute for inspecting painted labels.
+  Settings Code hosting Provider 分组通过 `GitHubFixedThreeTabs` 的三个静态共享 Item 叶子及
+  显式 first/second/third 字面量/I18n 输入隔离 factory 文案，仍保留原生实测宽度、
+  4 px 间距、可见前缀溢出及键盘行为。动态 `GitHubUnderlineNav` 与固定三项容器
+  共用 `GitHubUnderlineNavVariant { inset, flush }`：默认 `inset` 为列表保留两侧
+  16px 缩进，`flush` 将列表缩进设为 0。既有数值 `content-inset` 仍可显式覆盖；
+  所有位置、自然/可用宽度、可见前缀和 More 位置均使用最终值，最终缩进变化时关闭
+  已打开菜单。`flush` 只对齐首项外边缘与强调线，保留每项内部 8px 留白及完整
+  点击/焦点区域。Settings 企业 API Provider Tab 使用 `flush` 与区块标题和字段对齐，
+  其容器负责页边距；PR 等其他生产调用方均保留默认缩进。演练场使用真实组件
+  对照展示 inset/flush，两行共享本地化 Item model，各自持有独立 owner 与选中态。
+  Code hosting 独立挂载根层固定
+  `GitHubFixedThreeTabsOverflowPopup`，使用 `<owner>-overflow` Select id；禁止
+  用按 owner 切换的共享 model 复用文案叶子。AI Agent 设置采用搜索/每页十条列表和独立根层新增、编辑、删除确认弹窗，
+  Provider/语言 Select 保持固定选项叶子，Save 与当前 Agent 激活分离。列表采用 Hooks 式
+  1px 统一边框/6px 圆角、72px 行高、无行间空隙和内部 1px 分隔线；名称/模型及行编辑
+  命中区避开 168px 右侧操作组及 16px 内缩。共享 48×24 Toggle 之后依次为 32px
+  测试（Plug）、编辑、删除 IconButton，间隔 8px，垂直中心一致。非当前 Toggle 切 On 才激活；当前 On 保留绿色
+  启用外观但禁用交互，不能清空唯一当前项，且仍禁删。七种固定 Tooltip 身份/Surface
+  共用一个根层 transient host，禁用 Current/Delete 保留纯 hover 命中区。
+  TestConnection 使用自己的固定叶子和 Surface，捕获该已保存 Agent，不打开编辑器
+  或激活；列表同时一个请求，对应行显示 Spinner，其他 Test 禁用。结果用当前
+  Settings 内容视口底部可关闭的 3 秒 Toast，关闭保留语义结果，切语言不重开隐藏反馈。
+  查询/分页不取消，分区/路由/弹窗变化取消。
+  搜索尾部为纯图标 Primary 新增按钮。编辑器请求 620px 宽、高度为
+  `min(560px, max(320px, root.height - 140px))`，关闭窄屏全屏，保留共享 Dialog 的
+  16px 视口边距钳制；800×600 时为 620×460px，正文滚动且页头/页脚固定。
+  正文视口直抵 56px 页头及 64px 页脚边缘，16px 上下留白随表单滚动。Header 的
+  Key/Value 内容在说明下方、行上方的 32px 工具栏居中显示带前导 Plus 图标的共享
+  Add 按钮，JS object 中无 Add；
+  每行末尾复用 32×32 垃圾桶 IconButton，独立固定 Delete Tooltip Portal 以正文为边界。
+  实际字段边缘与 8px 滚动轨道之间至少留 8px 空隙；Show API key 开关/文字共用中心线。
+  测试按钮右侧间隔 8px 的同一槽显示 16px Spinner 或完成图标；可关闭的 GitHubToast
+  固定在正文底部居中、页脚之上，关闭不改结果、草稿或已提交配置。
+  百分比宽度的列表根与弹性搜索输入框使用 `min-width: 0px`，其余布局显式采用父宽；
+  保留 Pagination，移除独立 Total/Page/每页条数摘要。按新建顺序倒序显示，编辑和激活
+  不重排；创建成功清空查询并回第一页。
+  原生验收必须在 Settings → Chat → Settings、侧栏触发的
+  宽窄布局替换及中英文切换后检查 Tab/溢出菜单实际绘制文字，不能只断言无障碍状态
+  或编译通过。
   Reference: [Primer UnderlineNav guidelines](https://primer.style/product/components/underline-nav/guidelines/)
   and [UnderlinePanels](https://primer.style/product/components/underline-panels/).
   Baseline geometry follows the shared [Primer implementation](https://github.com/primer/react/blob/main/packages/react/src/internal/components/UnderlineTabbedInterface.module.css):
@@ -859,7 +1110,6 @@ expanded/collapsed, and success confirmation.
   continuous animation cannot destabilize text antialiasing on non-Retina
   60 Hz displays. / 单行编辑器在裁剪框内保留完整内容宽度；鼠标拖选越过左右边界时
   必须自动横向滚动，使拖动端点始终可见。
-
 - `GitHubToggle`: immediate-save boolean setting only; permanently visible
   external label/caption supplied by its owner, 24 px minimum target, loading
   and disabled protection, Enter/Space activation, and keyboard-visible focus.
@@ -887,6 +1137,33 @@ expanded/collapsed, and success confirmation.
   labels do not wrap and the group has a visible or contextual label.
 ### Dialog / 弹窗
 
+- Primer recommends scrolling overflowing body content, a 16px content safe
+  area, and a divider above the footer when content scrolls. [Primer Dialog guidelines](https://primer.style/product/components/dialog/guidelines/)
+  Usher derives its geometry API from those principles: `GitHubDialog` exposes
+  raw `body-x/y/width/height` between the current header/footer, while existing
+  `content-x/y/width/height` subtract `body-padding` and retain their original
+  values. These property names are application APIs, not Primer APIs.
+  Full-body scrolling uses `body-y/body-height` and owns its top/bottom padding
+  inside the scroll content; horizontal safe-area inputs may remain padded.
+  Static content continues using `content-*`. Zero-padding edge lists remain
+  valid, and a bounded form with its own scrolling editor must not gain an
+  additional same-axis outer ScrollView merely to adopt these properties.
+  AI Agent and DialogEnhance use the full-body path; Project already owns its
+  16px content spacing with shell padding zero; PR commit selection deliberately
+  uses an edge list; Hooks keeps its bounded form/code-editor scroll contract.
+  The [source inventory（归档：docs/validation/header-controls-20261015/README.md）](../local-archives.md#validation-experiments-20261016)
+  records all 11 direct hosts across 7 files and distinguishes these cases.
+  The current consumer registry is `dialog_consumer_requirements` in
+  `scripts/check-ui-policy.sh`; the historical inventory is a source audit,
+  not evidence that every host passed native acceptance.
+  Primer 建议溢出的正文滚动、内容保留 16px 安全区，并在滚动正文与页脚之间显示分隔线。[Primer Dialog 指南](https://primer.style/product/components/dialog/guidelines/)
+  Usher 据此推导自己的几何 API：`body-*` 是页头/页脚之间的原始区域，既有
+  `content-*` 继续扣除 `body-padding`，保持原值兼容；这些属性名不是 Primer API。
+  整段正文滚动使用 `body-y/body-height`，上下 padding 放进滚动内容，水平安全区可
+  继续缩进；静态正文沿用 `content-*`，零 padding 的贴边列表与仅编辑器滚动的有界
+  表单不应被统一套进新的同轴外层 ScrollView。
+  当前消费者清单由 `scripts/check-ui-policy.sh` 的 `dialog_consumer_requirements`
+  维护；归档表只记录当次源码审查，不代表所有窗口均通过原生验收。
 - `GitHubDialog`: root-layer modal/non-modal overlay with owned backdrop input,
   stable header/body/footer safe areas, visible close control, close/Esc
   semantics, initial focus ownership, consistent action ordering, and a
@@ -1027,7 +1304,72 @@ expanded/collapsed, and success confirmation.
 - Terminal chrome reuses shared GitHub controls, but terminal cells retain
   their dedicated monospace/ANSI rendering contract. Product theme changes
   must not recolor or reflow PTY-provided cell content.
+
+### Resizable dividers / 可拖拽分割线
+
+- `ui/components/github_resize_handle.slint` owns the shared
+  `GitHubResizeHandle`. Vertical dividers resize width with `ew-resize`;
+  horizontal dividers resize height with `ns-resize`. The complete 9 px hit
+  band stays mounted across idle, hover, and drag states and sits above adjacent
+  content so either edge captures the first press.
+- Paint one continuous neutral 1 px hairline at rest and a 2 px muted line
+  during hover or drag. Do not add a centered grip pill. An existing structural
+  pane edge must coincide with the interactive line rather than add a parallel
+  hairline. Hosts that own only one side of the boundary use `leading-edge`
+  to keep the hit band inside the host while painting directly on its edge.
+  Use shared semantic colors in both themes.
+- `line-inset` defaults to 0 px and trims only the painted line at both ends
+  of its long dimension; it never narrows the 9 px interaction band. Rounded
+  editor boundaries set this from their own corner radius, keeping the visible
+  line on the straight top edge while retaining the complete resize target.
+- The component owns pointer start/delta/finish and cancel lifecycle. Disabling
+  an active handle finishes it as canceled. Consumers own width/height,
+  bounds, any rollback value, persistence, and layout-commit timing; moving
+  handles apply local deltas to the current size. Modal overlays and hidden
+  panes disable their handles. Pointer release or cancel must clear dragging
+  so the next drag starts cleanly.
+- Preview/PR trailing panes, PR Files changed and Conflicts file panes, Chat
+  and AI Review composers, and the Terminal drawer reuse this component.
+  Their feature-specific clamp and content/model lifecycle remain owned by
+  those features.
+- The UI Components Layout category demonstrates real width and height
+  changes, both cursor axes, idle/hover/drag, enabled/disabled, reset, and
+  bounded sizes through `github_resize_handle_showcase.slint`. Acceptance
+  additionally covers each product host at both bounds, a first drag from an
+  unfocused surface, pointer exit while held, release/cancel and reentry,
+  modal suppression where applicable, light/dark themes, and English/Chinese
+  runtime locale switches. A compile-only check does not establish native
+  cursor appearance or pointer capture.
+
+- `ui/components/github_resize_handle.slint` 的 `GitHubResizeHandle` 统一拥有
+  分割线。竖向分割线用 `ew-resize` 调宽，横向分割线用 `ns-resize` 调高。
+  9px 完整命中带在空闲、hover、拖拽期间始终常驻，并位于相邻内容上方，确保从
+  两侧首次按下都能捕获。
+- 空闲时绘制一条连续中性 1px 细线，hover/拖拽时加粗为 2px muted 线；不再使用
+  居中的胶囊握柄。既有面板结构边线必须与交互线重合，不得另加平行细线。
+  只拥有边界一侧的 Host 使用 `leading-edge` 将线画在边缘，命中带仍完整位于 Host 内。
+  明暗主题统一消费语义颜色。
+- `line-inset` 默认 0px，仅按长轴两端缩进绘制线，不缩小 9px 交互命中带。圆角
+  编辑器边界按自身圆角半径设置此值，使可见线只覆盖平直顶边，同时保留完整拖拽目标。
+- 组件拥有指针开始、增量、结束与取消生命周期；拖拽中禁用按取消结束。调用方拥有
+  宽高、边界、回滚值、持久化和最终布局提交时点；移动中的命中带将局部增量应用于
+  当前尺寸。Modal 打开或面板隐藏时禁用对应命中带；释放/取消必须清除 dragging，
+  使下一次拖拽正常开始。
+- Preview/PR 右侧面板、PR Files changed/Conflicts 文件栏、Chat/AI Review 编辑器
+  和 Terminal Drawer 复用此组件；各功能继续拥有自己的 clamp 与内容/model 生命周期。
+- UI Components 的布局分类通过 `github_resize_handle_showcase.slint` 展示实际
+  调宽/调高、两轴光标、空闲/hover/拖拽、启用/禁用、重置及尺寸边界。验收还须覆盖各真实
+  Host 两端边界、未聚焦 Surface 首次拖拽、按住后移出命中带、释放/取消与重入、
+  适用的 Modal 屏蔽、明暗主题及英文/中文即时切换。仅编译不能证明原生光标与指针
+  捕获行为正确。
+
+Compiled interaction checks / 编译后交互检查：
+`cargo test --locked --test resize_handle_ui --test artifact_preview_resize_ui`.
+
 ### Component playground / 组件演练场
+
+Static/interpreter compilation, factory lifetime and host feedback forwarding follow
+[UI Components](ui-components.md). 静态/实时预览编译边界、工厂生命周期与反馈桥接遵循该契约。
 
 - `Route.UiComponents` is the mandatory interactive component playground for
   development builds and is compiled only with the non-default
@@ -1043,7 +1385,7 @@ expanded/collapsed, and success confirmation.
   must not create a second business-state implementation.
 - The playground uses the real shared components and root-layer managers.
   Its directory and section headings group examples as Foundations, Actions,
-  Containment, Communication, Navigation, Selection, Text input, and Scenarios.
+  Layout, Containment, Communication, Navigation, Selection, Text input, and Scenarios.
   These are application ordering choices based on [Primer's component categories](https://primer.style/product/components/),
   not a prescribed Primer display order. Composite PR menu fixtures belong in
   Scenarios after the reusable components. Directory links and return links
@@ -1070,7 +1412,7 @@ expanded/collapsed, and success confirmation.
 - 演练场必须使用真实共享组件和根层 Manager。静态仿制、截图或只在 Gallery 中
   存在的变体不能视为组件验证。Notification、Toast、Dialog 统一在此路由演练，
   不再拥有独立 demo 路由。
-- 目录与分组依次为基础、操作、容器、反馈、导航、选择、文本输入、场景。这是
+- 目录与分组依次为基础、操作、布局、容器、反馈、导航、选择、文本输入、场景。这是
   应用依据 Primer 组件分类制定的展示顺序，不是 Primer 强制规定的顺序。PR 菜单
   综合样例放在基础组件之后的场景组；目录跳转和返回入口复用页面滚动视口，
   分类名称随语言切换即时更新。

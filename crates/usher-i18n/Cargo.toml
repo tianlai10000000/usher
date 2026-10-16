@@ -10,6 +10,4 @@ build = "build.rs"
 sys-locale = "0.3.2"
 
 [build-dependencies]
-rspolib = "0.1.2"
-serde = { version = "1.0.229", features = ["derive"] }
-toml = "1.1.6"
+usher-i18n-build = { path = "../usher-i18n-build" }

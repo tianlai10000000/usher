@@ -4,20 +4,14 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock, mpsc};
 
 use usher_state_store::{PersistentStore, Reduction, StoreSnapshot};
 
-use crate::settings::{self, AiAgentSettings};
+use crate::settings::{self, AiAgentConfiguration, AiAgentProfile};
+mod actions;
+use actions::{AiAgentSettingsAction, reduce_ai_agent_settings};
 
-const DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com";
-const DEEPSEEK_MODEL: &str = "deepseek-v4-flash";
-const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
-const OPENAI_MODEL: &str = "gpt-4o-mini";
 const SAVE_CAPACITY: usize = 8;
 
-#[derive(Debug)]
-enum AiAgentSettingsAction {
-    Replace(AiAgentSettings),
-}
-
-type AiAgentStore = PersistentStore<AiAgentSettings, AiAgentSettingsAction, ()>;
+type AiAgentStore =
+    PersistentStore<AiAgentConfiguration, AiAgentSettingsAction, Result<(), String>>;
 
 #[derive(Clone)]
 pub(crate) struct AiAgentSettingsFacade {
@@ -28,24 +22,26 @@ pub(crate) struct AiAgentSettingsFacade {
 
 struct SaveAdmission {
     sender: Option<tokio::sync::mpsc::Sender<SaveCommand>>,
-    pending: Vec<(u64, AiAgentSettings)>,
+    pending: Vec<(u64, AiAgentSettingsAction)>,
     next_id: u64,
 }
 
 struct SaveCommand {
     id: u64,
-    draft: AiAgentSettings,
+    action: AiAgentSettingsAction,
     completion: mpsc::Sender<AiAgentSaveOutcome>,
 }
 
 pub(crate) struct AiAgentSaveReceipt {
     pub(crate) id: u64,
+    pub(crate) profile_id: String,
     result: mpsc::Receiver<AiAgentSaveOutcome>,
 }
 
 pub(crate) struct AiAgentSaveOutcome {
-    pub(crate) snapshot: StoreSnapshot<AiAgentSettings>,
+    pub(crate) snapshot: StoreSnapshot<AiAgentConfiguration>,
     pub(crate) persisted: Result<(), String>,
+    pub(crate) applied: Result<(), String>,
 }
 
 impl AiAgentSaveReceipt {
@@ -60,44 +56,43 @@ impl AiAgentSaveReceipt {
 static REGISTERED_STATE: OnceLock<AiAgentSettingsFacade> = OnceLock::new();
 
 impl AiAgentSettingsFacade {
-    pub(crate) fn open(initial: AiAgentSettings) -> std::io::Result<Self> {
+    pub(crate) fn open(initial: AiAgentConfiguration) -> std::io::Result<Self> {
         let facade = Self::with_persistence(initial, reduce_ai_agent_settings, |state| {
-            settings::save_ai_agent_settings(
-                &state.provider,
-                &state.base_url,
-                &state.api_key,
-                &state.model,
-                &state.reply_language,
-            )
+            settings::save_ai_agent_settings(state)
         })?;
         let _ = REGISTERED_STATE.set(facade.clone());
         Ok(facade)
     }
 
     #[cfg(test)]
-    pub(crate) fn memory(initial: AiAgentSettings) -> Self {
-        Self::with_persistence(initial, reduce_ai_agent_settings, |_| Ok(()))
+    pub(crate) fn memory(initial: impl Into<AiAgentConfiguration>) -> Self {
+        Self::with_persistence(initial.into(), reduce_ai_agent_settings, |_| Ok(()))
             .expect("failed to start in-memory AI Agent settings state")
     }
 
     #[cfg(test)]
     pub(super) fn with_test_persistence(
-        initial: AiAgentSettings,
-        persist: impl Fn(&AiAgentSettings) -> Result<(), String> + Send + Sync + 'static,
+        initial: impl Into<AiAgentConfiguration>,
+        persist: impl Fn(&AiAgentConfiguration) -> Result<(), String> + Send + Sync + 'static,
     ) -> Self {
-        Self::with_persistence(initial, reduce_ai_agent_settings, persist).unwrap()
+        Self::with_persistence(initial.into(), reduce_ai_agent_settings, persist).unwrap()
     }
 
     fn with_persistence(
-        initial: AiAgentSettings,
-        reducer: impl Fn(&AiAgentSettings, AiAgentSettingsAction) -> Reduction<AiAgentSettings, ()>
+        initial: AiAgentConfiguration,
+        reducer: impl Fn(
+            &AiAgentConfiguration,
+            AiAgentSettingsAction,
+        ) -> Reduction<AiAgentConfiguration, Result<(), String>>
         + Send
         + Sync
         + 'static,
-        persist: impl Fn(&AiAgentSettings) -> Result<(), String> + Send + Sync + 'static,
+        persist: impl Fn(&AiAgentConfiguration) -> Result<(), String> + Send + Sync + 'static,
     ) -> std::io::Result<Self> {
+        let initial = initial.normalized();
+        initial.validate().map_err(std::io::Error::other)?;
         let store = PersistentStore::new(
-            settings::normalize_ai_agent_settings(initial),
+            initial,
             reducer,
             "ai-agent-settings",
             persist,
@@ -118,8 +113,10 @@ impl AiAgentSettingsFacade {
                 let id = command.id;
                 let save_store = worker_store.clone();
                 let result = tokio::task::spawn_blocking(move || {
-                    let commit = save_store.dispatch(AiAgentSettingsAction::Replace(command.draft));
-                    let persisted = if commit.changed {
+                    let commit = save_store.dispatch(command.action);
+                    let persisted = if let Err(error) = &commit.output {
+                        Err(error.clone())
+                    } else if commit.changed {
                         save_store.flush()
                     } else {
                         save_store.retry_failed().and_then(|_| save_store.flush())
@@ -127,6 +124,7 @@ impl AiAgentSettingsFacade {
                     AiAgentSaveOutcome {
                         snapshot: commit.snapshot,
                         persisted,
+                        applied: commit.output,
                     }
                 })
                 .await;
@@ -163,17 +161,37 @@ impl AiAgentSettingsFacade {
         })
     }
 
-    pub(crate) fn snapshot(&self) -> StoreSnapshot<AiAgentSettings> {
+    pub(crate) fn snapshot(&self) -> StoreSnapshot<AiAgentConfiguration> {
         self.store.snapshot()
     }
 
-    /// Capture the complete draft and FIFO identity synchronously. Admission is
-    /// bounded/nonblocking; reduction, retries and durable barriers run off UI.
-    /// An identical in-flight draft shares the existing operation (no new Toast).
-    pub(crate) fn save_draft(
+    /// Create/Update/Delete/Activate share one ordered nonblocking admission.
+    pub(crate) fn create_profile(
         &self,
-        draft: AiAgentSettings,
+        mut profile: AiAgentProfile,
     ) -> Result<Option<AiAgentSaveReceipt>, String> {
+        if profile.id.trim().is_empty() {
+            profile.id = AiAgentProfile::new_id();
+        }
+        self.submit(AiAgentSettingsAction::Create(profile))
+    }
+
+    pub(crate) fn update_profile(
+        &self,
+        profile: AiAgentProfile,
+    ) -> Result<Option<AiAgentSaveReceipt>, String> {
+        self.submit(AiAgentSettingsAction::Update(profile))
+    }
+
+    pub(crate) fn delete_profile(&self, id: &str) -> Result<Option<AiAgentSaveReceipt>, String> {
+        self.submit(AiAgentSettingsAction::Delete(id.to_string()))
+    }
+
+    pub(crate) fn activate_profile(&self, id: &str) -> Result<Option<AiAgentSaveReceipt>, String> {
+        self.submit(AiAgentSettingsAction::Activate(id.to_string()))
+    }
+
+    fn submit(&self, action: AiAgentSettingsAction) -> Result<Option<AiAgentSaveReceipt>, String> {
         let mut admission = self
             .commands
             .lock()
@@ -184,7 +202,7 @@ impl AiAgentSettingsFacade {
         if admission
             .pending
             .last()
-            .is_some_and(|(_, pending)| *pending == draft)
+            .is_some_and(|(_, pending)| *pending == action)
         {
             return Ok(None);
         }
@@ -192,6 +210,7 @@ impl AiAgentSettingsFacade {
             return Err("AI Agent settings save queue is full".into());
         }
         let id = admission.next_id.wrapping_add(1);
+        let profile_id = action.target_id().to_string();
         let (completion, result) = mpsc::channel();
         admission
             .sender
@@ -199,13 +218,17 @@ impl AiAgentSettingsFacade {
             .unwrap()
             .try_send(SaveCommand {
                 id,
-                draft: draft.clone(),
+                action: action.clone(),
                 completion,
             })
             .map_err(|_| "AI Agent settings command worker unavailable")?;
         admission.next_id = id;
-        admission.pending.push((id, draft));
-        Ok(Some(AiAgentSaveReceipt { id, result }))
+        admission.pending.push((id, action));
+        Ok(Some(AiAgentSaveReceipt {
+            id,
+            profile_id,
+            result,
+        }))
     }
 
     /// Close admission before draining every accepted save. The caller must be
@@ -244,42 +267,20 @@ impl AiAgentSettingsFacade {
     }
 }
 
-pub(crate) fn apply_provider_preset(current: &AiAgentSettings, provider: &str) -> AiAgentSettings {
-    let mut next = current.clone();
-    match provider {
-        "deepseek" => {
-            next.provider = "deepseek".to_string();
-            next.base_url = DEEPSEEK_BASE_URL.to_string();
-            next.model = DEEPSEEK_MODEL.to_string();
-        }
-        "openai" => {
-            next.provider = "openai".to_string();
-            next.base_url = OPENAI_BASE_URL.to_string();
-            next.model = OPENAI_MODEL.to_string();
-        }
-        _ => next.provider = "custom".to_string(),
-    }
-    next
-}
-
-pub(crate) fn current() -> AiAgentSettings {
-    REGISTERED_STATE
-        .get()
-        .map(|state| state.snapshot().state().clone())
-        .unwrap_or_else(|| settings::load_settings().ai.agent)
-}
-
-fn reduce_ai_agent_settings(
-    current: &AiAgentSettings,
-    action: AiAgentSettingsAction,
-) -> Reduction<AiAgentSettings, ()> {
-    let next = match action {
-        AiAgentSettingsAction::Replace(settings) => settings::normalize_ai_agent_settings(settings),
-    };
-    if next == *current {
-        Reduction::unchanged(next, ())
-    } else {
-        Reduction::changed(next, ())
+pub(crate) fn current_profile() -> AiAgentProfile {
+    match REGISTERED_STATE.get() {
+        Some(state) => state
+            .snapshot()
+            .state()
+            .active_profile()
+            .cloned()
+            .unwrap_or_default(),
+        None => settings::load_settings()
+            .ai
+            .agent
+            .active_profile()
+            .cloned()
+            .unwrap_or_default(),
     }
 }
 

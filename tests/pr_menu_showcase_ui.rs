@@ -1,7 +1,10 @@
 #![cfg(feature = "ui-components")]
 
+#[path = "support/ui_components.rs"]
+mod playground;
+
 use i_slint_backend_testing::ElementHandle;
-use slint::platform::{PointerEventButton, WindowEvent};
+use slint::platform::PointerEventButton;
 use slint::{ComponentHandle, LogicalSize};
 use std::time::Duration;
 use usher_lib::{MainWindow, Route};
@@ -22,15 +25,15 @@ fn find(window: &MainWindow, id: &str) -> ElementHandle {
 fn compact_pr_menu_escapes_sections_and_closes_when_anchor_leaves_view() {
     i_slint_backend_testing::init_no_event_loop();
     let window = MainWindow::new().unwrap();
+    playground::install(&window);
     usher_lib::install_floating_overlay_positioning(&window);
     window.set_platform_is_macos(false);
     window.set_show_navigation_drawer(false);
-    window.window().dispatch_event(WindowEvent::Resized {
-        size: LogicalSize::new(640.0, 800.0),
-    });
+    window.window().set_size(LogicalSize::new(640.0, 800.0));
 
     for (locale, directory) in [("en", "Selection"), ("zh-CN", "选择")] {
         window.set_current_route(Route::Home);
+        settle();
         window.set_current_route(Route::UiComponents);
         slint::select_bundled_translation(locale).unwrap();
         settle();
@@ -39,17 +42,8 @@ fn compact_pr_menu_escapes_sections_and_closes_when_anchor_leaves_view() {
             .unwrap()
             .mock_single_click(PointerEventButton::Left);
         settle();
-        let scroll = find(&window, "MainWindow::page-scroll-view");
-        for _ in 0..30 {
-            if ElementHandle::find_by_element_id(&window, "GitHubPullRequestFlow::more-btn")
-                .next()
-                .is_some()
-            {
-                break;
-            }
-            scroll.scroll(0.0, -150.0);
-            settle();
-        }
+        let scroll = playground::document(&window);
+        playground::reveal(&window, &scroll, "GitHubPullRequestFlow::more-btn");
         let trigger = find(&window, "GitHubPullRequestFlow::more-btn");
         scroll.scroll(0.0, 160.0 - trigger.absolute_position().y);
         settle();

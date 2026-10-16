@@ -1,3 +1,4 @@
+import { GitHubResizeHandle } from "../../components/github_resize_handle.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { GitHubScrollView, GitHubVirtualListScrollbar, ListView } from "../../components/github_scroll_view.slint";
 import { GitHubIconButton } from "../../components/button/github_icon_button.slint";
@@ -275,7 +276,10 @@ component GitHubAiReviewVirtualResponseRow inherits Rectangle {
                 && root.visual-row.message.elapsed != "": Text {
             width: parent.width;
             height: GitHubMetrics.size-20;
-            text: I18n.ai-review-worked-for + " " + root.visual-row.message.elapsed;
+            text: root.visual-row.message.agent-label
+                + (root.visual-row.message.agent-label == "" ? "" : " · ")
+                + I18n.ai-review-worked-for + " " + root.visual-row.message.elapsed;
+            overflow: elide;
             font-size: GitHubMetrics.text-small;
             color: GitHubTheme.fg-muted;
             vertical-alignment: center;
@@ -309,7 +313,8 @@ component GitHubAiReviewVirtualResponseRow inherits Rectangle {
                 }
             }
             Text {
-                text: root.model-name == "" ? "AI Agent" : root.model-name;
+                text: root.visual-row.message.agent-label != "" ? root.visual-row.message.agent-label
+                    : (root.model-name == "" ? I18n.settings-ai-agent-title : root.model-name);
                 font-size: 13px;
                 font-weight: 600;
                 color: GitHubTheme.fg-default;
@@ -383,6 +388,7 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
     private property <length> observed-response-scroll-y: root.active-response-viewport-y;
     private property <length> header-height: 64px;
     private property <length> composer-height: 136px;
+    private property <length> composer-drag-start-height;
     private property <length> composer-max-height:
         max(136px, min(360px, root.height / 2));
     private property <length> stable-response-content-width: root.active-response-visible-width;
@@ -796,7 +802,9 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
                 if message.role != "user" && message.elapsed != "": Text {
                     width: parent.width;
                     height: GitHubMetrics.size-20;
-                    text: I18n.ai-review-worked-for + " " + message.elapsed;
+                    text: message.agent-label + (message.agent-label == "" ? "" : " · ")
+                        + I18n.ai-review-worked-for + " " + message.elapsed;
+                    overflow: elide;
                     font-size: GitHubMetrics.text-small;
                     color: GitHubTheme.fg-muted;
                     vertical-alignment: center;
@@ -828,7 +836,9 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
                         }
                     }
                     Text {
-                        text: root.model-name == "" ? "AI Agent" : root.model-name;
+                        text: root.conversation.length > 0 && root.conversation[root.conversation.length - 1].agent-label != ""
+                            ? root.conversation[root.conversation.length - 1].agent-label
+                            : (root.model-name == "" ? I18n.settings-ai-agent-title : root.model-name);
                         font-size: 13px;
                         font-weight: 600;
                         color: GitHubTheme.fg-default;
@@ -1028,44 +1038,21 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
         height: root.composer-height;
         background: GitHubTheme.canvas-default;
 
-        // Match Chat's bounded north-resize interaction, but keep the handle on
-        // the editor's top border instead of floating above the mode tabs. The
-        // composer remains bottom-pinned, so tabs and editor move together.
-        composer-resize-strip := Rectangle {
-            x: 0px;
-            y: 42px;
-            width: parent.width;
-            height: 8px;
+        // Retain the complete editor hit band; paint only its straight top edge.
+        composer-resize-handle := GitHubResizeHandle {
+            x: composer-box.x;
+            y: composer-box.y - 4px;
+            width: composer-box.width;
+            horizontal: true;
+            line-inset: composer-box.border-radius;
             z: 102;
-            background: transparent;
-
-            Rectangle {
-                x: (parent.width - self.width) / 2;
-                y: 2px;
-                width: 40px;
-                height: 4px;
-                border-radius: 2px;
-                background: composer-resize-handle.has-hover
-                        || composer-resize-handle.pressed
-                    ? GitHubTheme.fg-muted
-                    : GitHubTheme.border-strong;
+            drag-started => { root.composer-drag-start-height = root.composer-height; }
+            drag-delta(delta) => {
+                root.composer-height = max(136px,
+                    min(root.composer-max-height, root.composer-height - delta));
             }
-
-            composer-resize-handle := TouchArea {
-                x: (parent.width - 64px) / 2;
-                y: 0px;
-                width: 64px;
-                height: parent.height;
-                mouse-cursor: n-resize;
-                moved => {
-                    root.composer-height = max(
-                        136px,
-                        min(
-                            root.composer-max-height,
-                            root.composer-height - (self.mouse-y - self.pressed-y)
-                        )
-                    );
-                }
+            drag-finished(cancelled) => {
+                if cancelled { root.composer-height = root.composer-drag-start-height; }
             }
         }
 

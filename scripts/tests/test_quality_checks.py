@@ -53,6 +53,8 @@ class PolicyTests(unittest.TestCase):
             "ui/components/project/github_project_dialog.slint",
             "ui/features/project/dialog.slint",
             "ui/components/settings/github_hook_settings.slint",
+            "ui/components/settings/github_ai_agent_editor.slint",
+            "ui/components/settings/github_ai_agent_delete.slint",
             "ui/components/update/update.slint",
             "ui/components/github_action_menu.slint",
             "ui/components/button/github_icon_button.slint",
@@ -60,6 +62,7 @@ class PolicyTests(unittest.TestCase):
             "ui/components/toast/toast.slint",
             "ui/components/pr_review/content.slint",
             "ui/components/navigation/github_breadcrumb.slint",
+            "ui/components/navigation/github_window_navigation.slint",
             "ui/views/workflow/pr_review_workspace.slint",
             "ui/main.slint",
         ):
@@ -196,6 +199,54 @@ class PolicyTests(unittest.TestCase):
             "ui/components/messages/github_message_tooltip.slint",
             "GitHubTransientFloatingOverlayHost { active: true; }\n" * 2,
         )
+        result = self.check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("must share one transient Floating Overlay host", result.stderr)
+
+    def test_showcase_fixed_portal_accepts_one_host(self):
+        self.copy("ui/components/showcase/github_showcase_tooltip.slint")
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_agent_connection_action_keeps_seven_fixed_surfaces(self):
+        self.copy("ui/components/settings/github_ai_agent_tooltip.slint")
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_agent_connection_gate_rejects_peer_identity_and_surface_aliases(self):
+        path = "ui/components/settings/github_ai_agent_tooltip.slint"
+        source = (ROOT / path).read_text()
+        gate = (self.root / "scripts/check-ui-policy.sh").read_text()
+        start = gate.index("# Agent factory actions use fixed semantic leaves")
+        end = gate.index("if elevation_path.exists():", start)
+        baseline = gate[:start] + gate[end:]
+        cases = [
+            ("AgentTooltipState.show(AgentTooltipKind.TestConnection,",
+             "AgentTooltipState.show(AgentTooltipKind.Edit,", "literal leaf"),
+            ("tooltip-text: I18n.common-test-connection;",
+             "tooltip-text: I18n.settings-ai-agent-edit;", "literal leaf"),
+            ("            text: I18n.common-test-connection;",
+             "            text: I18n.settings-ai-agent-edit;", "seven fixed literal surfaces"),
+            ("surface-test-connection := GitHubTooltipSurface {",
+             "surface-test-connection := Rectangle {", "seven fixed literal surfaces"),
+        ]
+        for previous, changed, message in cases:
+            with self.subTest(change=changed):
+                candidate = source.replace(previous, changed, 1)
+                self.assertNotEqual(source, candidate)
+                self.write(path, candidate)
+                # The old general portal rules accepted these ownership bugs.
+                self.write("scripts/check-ui-policy.sh", baseline)
+                before = self.check()
+                self.assertEqual(before.returncode, 0, before.stdout + before.stderr)
+                self.write("scripts/check-ui-policy.sh", gate)
+                after = self.check()
+                self.assertEqual(after.returncode, 1, after.stdout + after.stderr)
+                self.assertIn(message, after.stderr)
+
+    def test_showcase_fixed_portal_rejects_extra_host(self):
+        path = "ui/components/showcase/github_showcase_tooltip.slint"
+        self.write(path, (ROOT / path).read_text() + "\nGitHubTransientFloatingOverlayHost { active: true; }\n")
         result = self.check()
         self.assertEqual(result.returncode, 1)
         self.assertIn("must share one transient Floating Overlay host", result.stderr)
@@ -455,6 +506,20 @@ class PolicyTests(unittest.TestCase):
         result = self.check()
         self.assertEqual(result.returncode, 1)
         self.assertIn("unregistered GitHubDialog instance", result.stderr)
+
+    def test_ai_agent_dialogs_cannot_replace_the_shared_shell(self):
+        self.copy_elevation_fixture()
+        for path in ("ui/components/settings/github_ai_agent_editor.slint",
+                     "ui/components/settings/github_ai_agent_delete.slint"):
+            with self.subTest(path=path):
+                source = (ROOT / path).read_text()
+                self.assertIn("frame := GitHubDialog {", source)
+                self.write(path, source.replace("frame := GitHubDialog {", "frame := Rectangle {", 1))
+                result = self.check()
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn(path, result.stderr)
+                self.assertIn("must own exactly one GitHubDialog", result.stderr)
+                self.write(path, source)
 
     def test_dialog_elevation_cannot_bypass_the_shared_shell(self):
         self.copy_elevation_fixture()

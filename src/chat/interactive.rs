@@ -1,7 +1,7 @@
-use crate::ai::agent::{self, CompletionMessage};
-use crate::ai::prompts;
+use super::request;
+use crate::ai::agent::CompletionMessage;
 use crate::app_runtime::shared_runtime;
-use crate::chat::chat::{handle_api_error, send_message_to_server};
+use crate::chat::chat::handle_api_error;
 use crate::chat::persistence::{StoredMessageRole, StoredMessageStatus};
 use crate::chat::renderer::{clear_render_cache, record_model_commit, render_for_ui};
 use crate::chat::session::{ChatMode, ChatRequestState, ChatSessions};
@@ -113,6 +113,7 @@ thread_local! {
 }
 
 pub(crate) fn sync_language(ui: &MainWindow) {
+    request::sync_agent_identity(ui);
     clear_render_cache();
     clear_virtual_layout_cache();
     LAST_RENDER_SIGNATURE.with(|last| *last.borrow_mut() = None);
@@ -122,6 +123,11 @@ pub(crate) fn sync_language(ui: &MainWindow) {
     let Some(session) = CHAT_SESSION.with(|slot| slot.borrow().clone()) else {
         return;
     };
+    CHAT_MESSAGE_MODEL.with(|slot| {
+        if let Some(bridge) = slot.borrow().as_ref() {
+            bridge.clear(ui);
+        }
+    });
     apply_chat_state_to_ui(
         ui,
         &session,
@@ -851,33 +857,6 @@ fn ai_completion_messages(
         .collect()
 }
 
-async fn send_chat_message(
-    mode: ChatMode,
-    user_message: &str,
-    ai_history: Vec<CompletionMessage>,
-) -> Result<String, crate::http::HttpError> {
-    match mode {
-        ChatMode::Ai => {
-            let settings = crate::ai::settings_state::current();
-            let envelope = prompts::general_chat(&settings, &ai_history).map_err(|error| {
-                log::error!("[AI Prompt] Failed to prepare general chat prompt: {error}");
-                crate::http::HttpError {
-                    kind: crate::http::HttpErrorKind::Build,
-                    operation: "Prepare AI chat prompt".to_string(),
-                    method: None,
-                    url: None,
-                    status: None,
-                    message: "Unable to prepare the built-in AI prompt".to_string(),
-                    response_body: None,
-                }
-            })?;
-            envelope.log_metadata("general_chat");
-            agent::complete(&settings, &envelope.messages, "Send AI chat message").await
-        }
-        ChatMode::Rag => send_message_to_server(user_message).await,
-    }
-}
-
 /// 设置聊天交互逻辑和事件回调
 pub fn setup_interactive(ui: &MainWindow) {
     setup_interactive_with_sessions(ui, None);
@@ -895,7 +874,7 @@ fn setup_interactive_with_sessions(ui: &MainWindow, initial: Option<ChatSessions
     let request_state = Arc::new(Mutex::new(ChatRequestState::default()));
     let drafts = Arc::new(Mutex::new(ChatDrafts::default()));
     ui.set_chat_ai_mode(true);
-    ui.set_chat_ai_model_name(crate::ai::settings_state::current().model.into());
+    request::sync_agent_identity(&ui);
     let performance_variant = crate::chat::performance::variant();
     ui.set_chat_performance_optimized(performance_variant.is_optimized());
     log::info!(
@@ -1319,6 +1298,7 @@ fn setup_interactive_with_sessions(ui: &MainWindow, initial: Option<ChatSessions
             return;
         }
 
+        let profile = request::capture(&ui, mode);
         let request_started = Instant::now();
         if let Ok(mut drafts) = drafts_send.lock() {
             drafts.set(mode, String::new());
@@ -1402,6 +1382,7 @@ fn setup_interactive_with_sessions(ui: &MainWindow, initial: Option<ChatSessions
                             ui.set_chat_loading_phase(0);
                             ui.set_chat_request_elapsed_seconds(0);
                         }
+                        request::finish(&ui, mode);
                         show_chat_storage_error(&ui);
                     });
                     return;
@@ -1430,7 +1411,16 @@ fn setup_interactive_with_sessions(ui: &MainWindow, initial: Option<ChatSessions
                 });
             }
 
-            let result = send_chat_message(mode, &text_str, ai_history).await;
+            let identity = profile
+                .as_ref()
+                .map(crate::ai::identity::AgentIdentity::from_profile);
+            let result = request::send_chat_message(
+                mode,
+                &text_str,
+                ai_history,
+                profile.map(|profile| profile.connection),
+            )
+            .await;
             let elapsed_ms = request_started
                 .elapsed()
                 .as_millis()
@@ -1446,7 +1436,7 @@ fn setup_interactive_with_sessions(ui: &MainWindow, initial: Option<ChatSessions
                         let sessions = guard
                             .as_ref()
                             .ok_or_else(|| "chat session unavailable".to_string())?;
-                        match result {
+                        let mut pending = match result {
                             Ok(response) => sessions.prepare_assistant_message_for(
                                 mode,
                                 response,
@@ -1462,7 +1452,9 @@ fn setup_interactive_with_sessions(ui: &MainWindow, initial: Option<ChatSessions
                                     elapsed_ms,
                                 )
                             }
-                        }
+                        };
+                        pending.set_agent_identity(identity);
+                        pending
                     };
                     pending.persist().map_err(|e| e.to_string())?;
                     let mut guard = session
@@ -1490,6 +1482,7 @@ fn setup_interactive_with_sessions(ui: &MainWindow, initial: Option<ChatSessions
                 let Some(ui) = ui_weak_clone.upgrade() else {
                     return;
                 };
+                request::finish(&ui, mode);
                 if chat_mode_from_ui(&ui) == mode {
                     loading_phase_active_response.store(false, Ordering::Relaxed);
                     ui.set_chat_is_sending(false);
@@ -1704,7 +1697,7 @@ fn setup_interactive_with_sessions(ui: &MainWindow, initial: Option<ChatSessions
                     .unwrap_or((false, 0));
                 ui.set_chat_is_sending(sending);
                 ui.set_chat_request_elapsed_seconds(elapsed_seconds.min(i32::MAX as u64) as i32);
-                ui.set_chat_ai_model_name(crate::ai::settings_state::current().model.into());
+                request::sync_agent_identity(&ui);
                 let revision = next_chat_ui_mount_revision(&chat_ui_mount_revision_route);
                 begin_chat_ui_mount(&ui, &session_route, mode);
                 schedule_chat_ui_mount(

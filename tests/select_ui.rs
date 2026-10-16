@@ -1,5 +1,8 @@
 #![cfg(feature = "ui-components")]
 
+#[path = "support/ui_components.rs"]
+mod playground;
+
 use std::time::Duration;
 
 use i_slint_backend_testing::ElementHandle;
@@ -11,6 +14,7 @@ use usher_lib::{MainWindow, Route};
 fn showcase_select_layout_and_popup_stay_inside_their_surfaces() {
     i_slint_backend_testing::init_no_event_loop();
     let window = MainWindow::new().unwrap();
+    playground::install(&window);
     slint::select_bundled_translation("en").unwrap();
     window.set_show_navigation_drawer(false);
     window.set_platform_is_macos(false);
@@ -21,29 +25,19 @@ fn showcase_select_layout_and_popup_stay_inside_their_surfaces() {
         (800.0, 600.0),
         (1280.0, 900.0),
     ] {
-        window.window().dispatch_event(WindowEvent::Resized {
-            size: LogicalSize::new(width, height),
-        });
+        window.window().set_size(LogicalSize::new(width, height));
         i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
         let find = |id| {
             ElementHandle::find_by_element_id(&window, id)
                 .next()
                 .unwrap_or_else(|| panic!("missing UI element {id}"))
         };
-        let scroll = find("MainWindow::page-scroll-view");
-        for _ in 0..20 {
-            if ElementHandle::find_by_element_id(
-                &window,
-                "GitHubUiComponentsGallery::select-trigger",
-            )
-            .next()
-            .is_some()
-            {
-                break;
-            }
-            scroll.scroll(0.0, -300.0);
-            i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
-        }
+        let scroll = playground::document(&window);
+        playground::reveal(
+            &window,
+            &scroll,
+            "GitHubUiComponentsGallery::select-trigger",
+        );
         let trigger = find("GitHubUiComponentsGallery::select-trigger");
         scroll.scroll(0.0, 150.0 - trigger.absolute_position().y);
         i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));

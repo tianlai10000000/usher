@@ -3,7 +3,10 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-fn prepare_language_picker(out_dir: &Path) -> std::io::Result<PathBuf> {
+fn prepare_language_picker(
+    out_dir: &Path,
+    locales: &[usher_i18n_build::LocaleSpec],
+) -> std::io::Result<PathBuf> {
     let path = out_dir.join("manifest_language_picker.slint");
     let mut source = String::from(
         "import { AppState } from \"@app-state\";\n\
@@ -11,7 +14,6 @@ fn prepare_language_picker(out_dir: &Path) -> std::io::Result<PathBuf> {
          import { GitHubSelectState, GitHubSelectPopup, GitHubSelectOption } from \"@select\";\n\
          import { GitHubSettingsSectionMenuButton } from \"@settings-controls\";\n\n",
     );
-    let locales = usher_i18n::available_locales();
 
     for (component, selection, auto_label, select_callback) in [
         (
@@ -37,7 +39,7 @@ fn prepare_language_picker(out_dir: &Path) -> std::io::Result<PathBuf> {
             &mut source,
             component,
             selection,
-            usher_i18n::AUTO_LANGUAGE,
+            usher_i18n_build::AUTO_LANGUAGE,
             auto_label,
             0,
         );
@@ -46,7 +48,7 @@ fn prepare_language_picker(out_dir: &Path) -> std::io::Result<PathBuf> {
                 &mut source,
                 component,
                 selection,
-                locale.id,
+                &locale.id,
                 &format!("{:?}", locale.native_name),
                 index + 1,
             );
@@ -56,18 +58,18 @@ fn prepare_language_picker(out_dir: &Path) -> std::io::Result<PathBuf> {
             "}}\n\nexport component {component}Overlay inherits GitHubSelectPopup {{\n    owner: {component:?};\n    option-count: {option_count};\n    selected(index) => {{ root.select-option(index); }}"
         )
         .expect("writing to String cannot fail");
-        write_option(&mut source, usher_i18n::AUTO_LANGUAGE, auto_label, 0);
+        write_option(&mut source, usher_i18n_build::AUTO_LANGUAGE, auto_label, 0);
         for (index, locale) in locales.iter().enumerate() {
             write_option(
                 &mut source,
-                locale.id,
+                &locale.id,
                 &format!("{:?}", locale.native_name),
                 index + 1,
             );
         }
         source.push_str("\n    function select-option(index: int) {\n");
-        for (index, id) in std::iter::once(usher_i18n::AUTO_LANGUAGE)
-            .chain(locales.iter().map(|locale| locale.id))
+        for (index, id) in std::iter::once(usher_i18n_build::AUTO_LANGUAGE)
+            .chain(locales.iter().map(|locale| locale.id.as_str()))
             .enumerate()
         {
             writeln!(source, "        if index == {index} {{\n            GitHubSelectState.selected-value = {id:?};\n            {select_callback}({id:?});\n        }}")
@@ -107,27 +109,31 @@ fn write_option(source: &mut String, id: &str, label: &str, index: usize) {
 }
 
 fn main() {
-    let repository_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let repository_root = PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("Cargo must provide CARGO_MANIFEST_DIR"),
+    )
+    .join("../..");
     let ai_review_settings_library = if std::env::var_os("CARGO_FEATURE_AI_CODE_REVIEW").is_some() {
         repository_root.join("ui/features/ai_review_settings/full.slint")
     } else {
         repository_root.join("ui/features/ai_review_settings/disabled.slint")
     };
-    let i18n = usher_i18n::build_support::prepare_slint_bundle(
+    let i18n = usher_i18n_build::prepare_slint_bundle(
+        &repository_root,
         std::env::var_os("OUT_DIR").expect("Cargo must provide OUT_DIR"),
         env!("CARGO_PKG_NAME"),
     )
     .expect("failed to prepare Slint translations");
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("Cargo must provide OUT_DIR"));
-    let language_picker =
-        prepare_language_picker(&out_dir).expect("failed to prepare manifest language picker");
+    let language_picker = prepare_language_picker(&out_dir, &i18n.locales)
+        .expect("failed to prepare manifest language picker");
     println!(
         "cargo:rerun-if-changed={}",
         repository_root.join("i18n/manifest.toml").display()
     );
     let emit_debug_info = std::env::var_os("SLINT_EMIT_DEBUG_INFO").is_some()
         || std::env::var("PROFILE").is_ok_and(|profile| profile == "debug");
-    let config = slint_build::CompilerConfiguration::new()
+    let config = usher_ui_build::CompilerConfiguration::new()
         .with_debug_info(emit_debug_info)
         .with_bundled_translations(i18n.translations_path)
         .with_library_paths(HashMap::from([
@@ -158,8 +164,7 @@ fn main() {
                 "settings-controls".to_string(),
                 repository_root.join("ui/components/settings/github_settings_controls.slint"),
             ),
-        ]))
-        .as_library("usher_ui_settings");
+        ]));
 
     // Slint 1.17's live-preview generator produces a dynamic component handle,
     // while ComponentFactory currently requires a statically generated VWeak.
@@ -171,8 +176,11 @@ fn main() {
         // no thread is concurrently reading or mutating its environment.
         unsafe { std::env::remove_var("SLINT_LIVE_PREVIEW") };
     }
-    let result =
-        slint_build::compile_with_config(repository_root.join("ui/views/settings.slint"), config);
+    let result = usher_ui_build::compile_library_with_config(
+        repository_root.join("ui/views/settings.slint"),
+        config,
+        "usher_ui_settings",
+    );
     if let Some(value) = live_preview {
         // SAFETY: same single-threaded build-script invariant as above.
         unsafe { std::env::set_var("SLINT_LIVE_PREVIEW", value) };

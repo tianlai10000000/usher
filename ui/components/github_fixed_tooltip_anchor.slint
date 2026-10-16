@@ -1,0 +1,40 @@
+import { FloatingOverlayRect } from "../state/floating_overlay_bridge.slint";
+
+// Geometry/lease mechanics carry no action or label. Each semantic leaf below
+// publishes its own literal identity; never replace these leaves with a kind input.
+export component GitHubFixedTooltipAnchor inherits Rectangle {
+    in property <bool> active: false;
+    in property <bool> bounded: false;
+    in property <FloatingOverlayRect> viewport;
+    callback publish(length, length, length, length);
+    callback release(length, length);
+    callback renew(length, length, length, length);
+    width: 100%; height: 100%; background: transparent;
+    private property <bool> positioned: false;
+    private property <bool> detached: root.positioned
+        && root.absolute-position.x == 0px && root.absolute-position.y == 0px;
+    private property <bool> in-view: !root.bounded || (
+        root.absolute-position.x + root.width > root.viewport.x
+        && root.absolute-position.x < root.viewport.x + root.viewport.width
+        && root.absolute-position.y + root.height > root.viewport.y
+        && root.absolute-position.y < root.viewport.y + root.viewport.height);
+    changed in-view => { root.update(); }
+    init => { root.update(); }
+    changed active => { root.update(); }
+    changed absolute-position => { root.update(); }
+    changed width => { root.update(); }
+    changed height => { root.update(); }
+    function update() {
+        if root.active && root.in-view && !root.detached && root.width > 0px && root.height > 0px {
+            root.publish(root.absolute-position.x, root.absolute-position.y, root.width, root.height);
+            if root.absolute-position.x != 0px || root.absolute-position.y != 0px { root.positioned = true; }
+        } else { root.release(root.absolute-position.x, root.absolute-position.y); }
+    }
+    Timer {
+        interval: 32ms; running: root.active;
+        triggered => {
+            if root.in-view && !root.detached { root.renew(root.absolute-position.x, root.absolute-position.y, root.width, root.height); }
+        }
+    }
+}
+

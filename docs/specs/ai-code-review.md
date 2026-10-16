@@ -31,6 +31,10 @@ review task does not own a route or require a visible page.
 - `src/ai_review/review_input.rs`: immutable request and Provider-diff normalization,
   UTF-8-safe 48 KiB Ask context, model validation and worker-only rule snapshots;
   no controller/UI dependency.
+- `src/ai_review/request_capture.rs`: event-loop capture of PR metadata and the
+  saved active Agent before Review/Ask work is queued.
+- `src/ai_review/agent_identity.rs` and `src/ai/identity.rs`: raw request attribution
+  and locale-aware Agent name/model presentation without credential fields.
 - `src/ai_review/session_transactions.rs`: production Review/PR Chat read-modify-write
   transactions, operation/attempt identity, owned blocking I/O receipts, and file
   reconciliation coordinated with those transactions. Aggregate drain receipts,
@@ -67,6 +71,10 @@ review task does not own a route or require a visible page.
   后续处理完成后才停止持久化 Worker。
 - `src/ai_review/review_input.rs`：不可变请求、Provider diff 规范化、UTF-8 安全的
   48 KiB Ask 上下文、模型校验及仅在 Worker 读取的规则快照，不依赖 controller/UI。
+- `src/ai_review/request_capture.rs`：在 Review/Ask 排队前于 event loop 捕获 PR
+  元数据与已保存的当前 Agent。
+- `src/ai_review/agent_identity.rs` 与 `src/ai/identity.rs`：原始请求身份与随 locale
+  更新的 Agent 名称/模型展示，不包含凭据字段。
 - `src/ai_review/session_transactions.rs`：生产环境的 Review/PR Chat 读改写事务、
   operation/attempt 身份、实际 blocking IO receipt，以及与事务协调的文件对账。
   聚合 drain receipt、关闭准入/重试/drain helper 与 retained-owner 检查仅在
@@ -184,7 +192,7 @@ platform or candidate has passed. / Session 竞态、任务调度、回复展示
 
 ## Inputs and configuration / 输入与配置
 
-Each task receives a selected AI model, the current PR commit diff, optional
+Each task receives the saved active Agent profile captured at admission, the current PR commit diff, optional
 local and remote repository locations, the resolved Markdown rule snapshot,
 and optional one-off requirements. Rule files are limited to 512 KiB and are
 read on a worker only when a review starts.
@@ -197,7 +205,7 @@ Adding a preset validates, on a worker, that its path is absolute and identifies
 an existing regular `.md` or `.markdown` file within the 512 KiB limit. Invalid
 input remains in the form and receives field-level feedback; it is never stored.
 
-每个任务接收选中的 AI 模型、当前 PR commit diff、可选本地/远程仓库地址、解析后的
+每个任务接收准入时捕获的已保存当前 Agent Profile、当前 PR commit diff、可选本地/远程仓库地址、解析后的
 Markdown 规则快照，以及一次性的附加要求。规则文件最大 512 KiB，只在任务开始时由
 Worker 读取。
 
@@ -340,28 +348,65 @@ latest-value delivery; scheduler actions are still processed individually.
 补写同一 hydration revision，以新的提交版本纳入 flush/shutdown 屏障。任务、当前
 结果、PR 标记和配置 UI 快照最多一个最新值投递回调；调度器动作仍逐项处理。
 
+## Agent selection and attribution / Agent 选择与身份
+
+The AI Agent configuration owns an arbitrary list of stable-id named profiles
+and an independent active id; multiple Agents may use the same Provider.
+Editing or updating an Agent dialog does not activate it. Review admission captures that active profile before
+queueing, so waiting for a scheduler slot does not change its connection or
+identity. Each Ask captures the currently active saved profile independently of
+the Agent used by its Review task or earlier questions. See [AI Agent](ai-agent.md)
+for the Settings schema, migration, and ordered Save/Activate boundary.
+
+`ReviewTaskSummary.agent` and `ReviewConversationMessage.agent` persist optional
+raw name/provider/model attribution. Task rows, the result header, and Ask
+pending/completed response labels project the captured Agent name plus model.
+Renaming, editing, or activating another profile cannot relabel queued/running
+work or historical messages. Runtime locale changes rebuild only formatting and
+empty-name fallbacks, retaining literal names and model ids. Legacy tasks and
+messages without identity remain readable using their existing model metadata
+or generic presentation; they never inherit the currently active Agent. Identity
+records contain neither endpoint nor key.
+
+AI Agent 配置保存任意数量的稳定 id 命名 Profile 和独立当前使用 id；同一 Provider
+可有多份 Agent，编辑或更新弹窗不会激活它。Review 准入在排队前捕获当前 Profile，
+因此等待调度槽不能改变其连接或身份。每次 Ask 独立捕获当时已保存的当前 Profile，
+不沿用 Review 任务或上一次问题的 Agent。Settings schema、迁移与有序 Save/Activate
+边界见 [AI Agent](ai-agent.md)。
+
+`ReviewTaskSummary.agent` 与 `ReviewConversationMessage.agent` 持久化可选的原始
+名称/Provider/模型身份。任务行、结果标题及 Ask 等待/完成回复标签投影捕获的 Agent
+名称与模型。之后重命名、编辑或激活其他 Profile 不得重标记排队/运行任务或历史消息。
+运行时切语言只重建格式和空名称回退，用户名称与模型 id 保持原文。缺少身份的旧任务
+和消息继续使用原有模型元数据或通用展示，不得继承当前 Agent。身份记录不包含
+Endpoint 或 Key。
+
 ## Presentation / 展示
 
 The PR detail Files changed view remains visible on the left. The right panel
 follows GitHub Copilot Chat's PR-side information architecture: one compact
-header with rule/model context, one continuous scroll containing review status,
+header with rule and Agent name/model context, one continuous scroll containing review status,
 summary, High/Medium/Low findings, and the review-scoped conversation, plus one
 pinned composer. `Ask` and `Review again` reuse that composer through a Primer
 segmented mode instead of stacking separate text fields or mounting a second
 conversation header. A mode changes on the first pointer click even when the
 text input previously held focus. The pinned canvas has no full-width rule
 crossing behind the rounded input; the input border alone frames the composer.
-The composer is bottom-pinned and grows upward from the resize handle centered
-on the editor's top border below the mode tabs,
+The composer is bottom-pinned and grows upward from the shared horizontal
+`GitHubResizeHandle` aligned to the editor's top border below the mode tabs,
 clamped between its 136 px default/minimum and the smaller of 360 px or half
-the panel height. The segmented mode control stays attached above the editor
+the panel height. The handle binds its position and width to `composer-box`;
+its 9 px hit band spans the complete editor width. Its painted line uses the
+editor's corner radius as `line-inset` at each end, so its visible length is
+exactly editor width minus twice that radius (currently 6 px per end).
+The segmented mode control stays attached above the editor
 throughout the drag. Ask and Review again use internally scrollable multiline
 native inputs, so content beyond the current bounded height remains reachable.
 Like GitHub Copilot Chat on a pull request, `Ask` remains available for queued,
 running, completed, failed, and cancelled tasks. The current PR metadata and a
 bounded diff excerpt are its primary context; a completed AI Review result is
 optional additional context. Conversation history is stored locally and sent
-to the Settings-configured OpenAI-compatible AI Agent. Ask only performs
+to the saved active OpenAI-compatible AI Agent captured for that Ask. Ask only performs
 read-only PR context loading and never submits a hosting-provider comment,
 review, approval, or other write.
 Each real Ask uses the versioned `review_conversation` catalog entry and stores
@@ -427,8 +472,9 @@ components; it is not a standalone review page. Its divider has a persistent res
 retains a session width preference, clamps the panel between its readable
 minimum and the remaining diff workspace, moves and clips the lightweight diff
 viewport continuously, and commits the heavy diff layout once when the drag
-ends. The live diff viewport exclusively owns the single-pixel resting divider;
-the wider hit target paints only its hover/drag affordance and captures the first
+ends. The shared `GitHubResizeHandle` paints the interactive line over the
+coincident structural viewport edge. Its mounted 9 px hit band and `ew-resize`
+cursor follow the [shared divider contract](ui-design.md#resizable-dividers--可拖拽分割线) and capture the first
 pointer press after a Dialog closes. The Files changed toolbar opens the panel through the official 16 px
 Copilot Octicon in a 32 px Primer IconButton with a 12 px trailing
 inset; hover, pressed, selected, focus-visible, and loading states use the shared
@@ -446,17 +492,20 @@ panel remains independent of AppKit, PR routes, and popover implementations.
 PR and status-bar popovers therefore close without blocking the message action.
 
 PR 详情左侧持续显示 Files changed diff；右侧面板采用 GitHub Copilot Chat 的 PR 侧栏
-信息结构：一个显示规则/模型上下文的紧凑标题栏，一个连续承载 Review 状态、摘要、
+信息结构：一个显示规则与 Agent 名称/模型上下文的紧凑标题栏，一个连续承载 Review 状态、摘要、
 High/Medium/Low finding 与 Review 专属对话的滚动流，以及一个固定在底部的 composer。
 `Ask` 与 `Review again` 通过 Primer 分段模式复用同一个 composer，不再堆叠两个输入框
 或挂载第二个对话标题栏；即使输入框此前持有焦点，第一次指针点击也必须完成模式切换。
 固定 composer 的画布不绘制贯穿圆角输入框背后的横线，只由输入框自身边框界定区域。
-composer 固定在面板底部，通过模式 Tab 下方、输入框顶边居中的拖拽条向上增长；高度从默认/最小 136 px 到
-360 px 与面板高度一半两者中的较小值。拖动期间分段模式控件始终吸附在编辑器上方。
+composer 固定在面板底部，通过模式 Tab 下方、与输入框顶边对齐的共享分割线向上增长；
+高度从默认/最小 136 px 到 360 px 与面板高度一半两者中的较小值。命中带位置与宽度
+直接绑定 `composer-box`，9px 命中带覆盖完整输入框宽度；绘制线两端以编辑器自身圆角
+半径设置 `line-inset`，可见长度严格等于输入框宽度减去左右圆角半径（当前各 6px）。
+拖动期间分段模式控件始终吸附在编辑器上方。
 Ask 与 Review again 使用内部可滚动的多行原生输入框，超过当前有界高度的内容仍须可达。
 与 GitHub Pull Request 中的 Copilot Chat 一致，`Ask` 在任务排队、运行、完成、失败和取消
 状态下均可使用。当前 PR 元数据与有界 diff 摘要是主要上下文；已完成的 AI Review 结果
-只是可选附加上下文。对话历史仅保存在本地，并发送给 Settings 中配置的
+只是可选附加上下文。对话历史仅保存在本地，并发送给该次 Ask 捕获的已保存当前
 OpenAI-compatible AI Agent。Ask 只读取 PR 上下文，绝不向代码托管平台提交评论、Review、
 Approval 或其他写操作。
 每次真实 Ask 都使用带版本的 `review_conversation` catalog 条目，并把纯元数据 provenance
@@ -500,8 +549,9 @@ finding 导航绝不自动切换到完整文件。若 head SHA 已过期或当�
 PR Review 自有的 Reveal 代际实现 latest-request-wins。面板遵循
 Primer 密度并复用仓库自有 `GitHub*` 组件，不提供独立 Review 页面。分隔线提供常驻拖拽命中区：拖动会保留本次会话的
 宽度偏好，在面板可读最小宽度与剩余 Diff 工作区之间夹紧；轻量 Diff viewport 与裁剪
-边界持续跟随拖动，仅在释放鼠标后提交一次重型 Diff 排版。静止态的单像素分隔线只由
-实时 Diff viewport 绘制；更宽的命中区只绘制 Hover/拖动态并在 Dialog 关闭后的第一次
+边界持续跟随拖动，仅在释放鼠标后提交一次重型 Diff 排版。共享 `GitHubResizeHandle`
+在重合的结构边缘上绘制交互线；常驻 9px 命中带、`ew-resize` 光标及指针生命周期遵循
+[共享分割线契约](ui-design.md#resizable-dividers--可拖拽分割线)，在 Dialog 关闭后的第一次
 按下时直接捕获拖拽。Files changed 工具栏使用
 32 px Primer IconButton 中的官方 16 px Copilot Octicon 打开面板，右侧留白为 12 px；
 Hover、按下、选中、键盘可见焦点和加载态统一遵循共享 IconButton 语义契约。PR Dialog
@@ -822,13 +872,13 @@ blocking writes, check closed-admission rejection and queued cancellation, cance
 shutdown waiter, recover before the first frame, and verify a repaired same-text Ask
 does not poison shutdown. Fixtures use isolated configuration and temporary Session
 paths. The scope and validation outcomes belong to the
-[producer shutdown record](../validation/spec-gap-followups-20261015/ai-review-producers.md).
+[producer shutdown record（归档：docs/validation/spec-gap-followups-20261015/ai-review-producers.md）](../local-archives.md#validation-tracked-history-20261016).
 
 生产关闭回归入口为 `src/ai_review/controller_producer_tests.rs` 与
 `src/ai_review/producers.rs`，过滤命令如上。测试在真实 controller 的 Review Session
 完成后续处理与 Ask blocking 写入处设置屏障，核验关闭准入拒绝、排队任务取消、取消关闭
 等待方、首帧前恢复，以及 IO 修复后同文案 Ask 成功不污染关闭。夹具使用隔离配置和临时
-Session 路径；覆盖边界和验证结果见[发布方关闭记录](../validation/spec-gap-followups-20261015/ai-review-producers.md)。
+Session 路径；覆盖边界和验证结果见[发布方关闭记录（归档：docs/validation/spec-gap-followups-20261015/ai-review-producers.md）](../local-archives.md#validation-tracked-history-20261016)。
 
 Session tests use controlled write/admission barriers to cover early Stop,
 same-operation retry versus a distinct identical submission, Review promotion,
@@ -861,6 +911,11 @@ promotion、receipt 被丢弃、活跃临时文件、对账期间退役，以及
   apply only the last location, stale/missing locations show the fallback, and
   `View file` is the only action that opens the complete source.
 - Send a follow-up question, add one-off requirements, and run Review again.
+- Queue a named Agent A Review, activate/edit B before it starts, and verify its
+  actual connection, task/header attribution, and restored history remain A.
+  Send a new Ask using B, switch Agents while it is pending, and verify its
+  user/assistant records retain B's captured name/model. Repeat after restart
+  and an `en`/`zh-CN` locale switch, including legacy records without identity.
 - Send an Ask question and verify the user row appears before the Agent
   completes. Verify the pending Agent row advances from context preparation to
   thinking, its elapsed timer advances in real time, the Send action becomes
@@ -885,8 +940,10 @@ promotion、receipt 被丢弃、活跃临时文件、对账期间退役，以及
 - Focus each composer input, then switch between `Ask` and `Review again` with
   one click. Verify the mode changes on that click and no horizontal rule is
   visible behind the rounded input.
-- Drag the handle centered on the composer editor's top border upward and
-  downward. Verify its bounds, bottom
+- Drag the handle aligned with the composer editor's top border upward and
+  downward. Verify its painted ends follow the editor's straight top edge
+  (editor width minus both corner radii) while its complete 9 px band remains
+  interactive. Verify its bounds, bottom
   pin, attached mode tabs, and internal scrolling for long Ask and Review again
   content.
 - Start a review in `Review again` mode; verify the composer action changes to
@@ -930,6 +987,9 @@ promotion、receipt 被丢弃、活跃临时文件、对账期间退役，以及
   快速连续点击只应用最后位置、过期/缺失位置显示 fallback，且只有显式 `View file` 才打开
   完整源码。
 - 发送追问、增加一次性要求并再次 Review。
+- 用命名 Agent A 排队 Review，在开始前激活/编辑 B，确认实际连接、任务/标题身份
+  及恢复的历史仍为 A。用 B 发送新 Ask，等待时再次切 Agent，确认用户/assistant
+  记录保留 B 捕获时的名称/模型。重启并切换中英文后重复，包含无身份旧记录对照。
 - 发送 Ask 后确认用户行在 Agent 完成前立即出现；确认等待行从准备上下文进入思考状态，
   实时耗时持续增长，Send 操作切换为 Stop，且 Stop 只终止该次回复。阻住用户写入时，
   确认实际 IO 完成前保持正在停止与防重入保护；随后终态投递冻结耗时，重开仍保留用户行。

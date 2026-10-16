@@ -17,6 +17,8 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
 - Locale-aware timestamp and application-error projection:
   `src/chat/timestamp.rs`, `src/chat/renderer.rs`.
 - AI completion and independent RAG transport: `src/ai/agent.rs`, `src/chat/chat.rs`.
+- Active Agent capture and historical name/model attribution: `src/chat/request.rs`,
+  `src/ai/identity.rs`, `src/chat/persistence.rs`, `src/chat/renderer.rs`.
 - Production bounded height estimation, prefix cache, and virtual-window selection:
   `src/chat/virtual_layout.rs`.
 - Presentation: `ui/views/chat.slint`, bridged through `ui/main.slint`.
@@ -28,6 +30,8 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
 - 稳定增量 Slint 消息 model：`src/chat/message_model.rs`。
 - 按 locale 投影时间和应用错误：`src/chat/timestamp.rs`、`src/chat/renderer.rs`。
 - AI completion 与独立 RAG transport：`src/ai/agent.rs`、`src/chat/chat.rs`。
+- 当前 Agent 捕获及历史名称/模型身份：`src/chat/request.rs`、`src/ai/identity.rs`、
+  `src/chat/persistence.rs`、`src/chat/renderer.rs`。
 - 生产使用的有界高度估算、prefix cache 与虚拟窗口选择：`src/chat/virtual_layout.rs`。
 - 展示：`ui/views/chat.slint`，通过 `ui/main.slint` 桥接。
 
@@ -169,7 +173,7 @@ and [virtual scrolling](virtual-scrolling.md). Complete Markdown rendering follo
     wheel/touchpad direction across the complete viewport without adding a second
     position-writing chain.
 29. One Primer segmented control switches the shared page between AI Chat and
-    RAG. AI uses the OpenAI-compatible provider configured under `[ai.agent]`;
+    RAG. AI uses the saved OpenAI-compatible profile selected by `[ai.agent].active_id`;
     RAG continues to use the repository-knowledge endpoint in `src/chat/chat.rs`.
 30. AI and RAG persist to separate JSONL files: `im/ai_chat_history.jsonl` and
     the legacy `im/chat_history.jsonl`. Pagination, next IDs, loaded tails, and
@@ -178,7 +182,7 @@ and [virtual scrolling](virtual-scrolling.md). Complete Markdown rendering follo
     and its absence is idle, so the timer and sending flag cannot diverge.
 31. AI requests include at most the latest 20 loaded AI messages plus the
     `general_chat` system instruction from `src/ai/prompts.toml`, including the
-    effective `[ai.agent].reply_language` instruction. Switching mode while a response is in
+    captured profile's effective `reply_language` instruction. Switching mode while a response is in
     flight must not cancel it, append it to the other history, clear the other
     mode's sending state, or project it into the other mode.
 32. A late response may update its original Rust session and persistence while
@@ -217,6 +221,15 @@ and [virtual scrolling](virtual-scrolling.md). Complete Markdown rendering follo
     page already starts below the native title bar, so its scrollbar must not
     apply the window title-bar inset a second time; at document offset zero the
     thumb starts at the top of the message viewport track.
+41. AI request admission captures one complete saved active profile before worker
+    scheduling. Its connection and raw name/provider/model attribution remain
+    paired for that request. The header shows the captured Agent name and model
+    while sending, then follows the current saved active profile while idle.
+    Assistant/error JSONL records retain their optional captured identity;
+    later activation, profile edits, and history reloads must not relabel them.
+    Empty-name fallbacks and label formatting re-project with the locale, while
+    literal names/models remain unchanged. Legacy records without attribution
+    and RAG rows remain readable without borrowing the current Agent identity.
 
 1. Chat 历史继续使用 JSONL；缺少 `status` 字段的旧记录按普通消息兼容读取。
 2. 应用生成的错误/成功状态与正文分开保存，并使用矢量图标展示；禁止重新加入会触发彩色字体回退的固定 Emoji 前缀。
@@ -304,14 +317,14 @@ and [virtual scrolling](virtual-scrolling.md). Complete Markdown rendering follo
     一次最终无上限收敛，并将仅覆盖可见区的 drag 窗口保留到下一次普通滚动。滚轮/触控板
     方向由 Flickable `flicked()` 观测，不得增加第二条位置写入链。
 29. 同一个页面使用 Primer segmented control 在 AI Chat 与 RAG 间切换。AI 使用
-    `[ai.agent]` 配置的 OpenAI-compatible Provider；RAG 继续使用
+    `[ai.agent].active_id` 指向的已保存 OpenAI-compatible Profile；RAG 继续使用
     `src/chat/chat.rs` 中的仓库知识 endpoint。
 30. AI 与 RAG 分别持久化到 `im/ai_chat_history.jsonl` 和旧有
     `im/chat_history.jsonl`；分页、next ID、加载尾部和发送状态按模式隔离。每个模式
     用一个可选的单调时钟起点表示活动请求：存在即发送中、缺失即空闲，计时器与发送
     标记不能分离。
 31. AI 请求最多携带最近 20 条已加载 AI 消息，以及 `src/ai/prompts.toml` 中包含
-    `[ai.agent].reply_language` 实际语言指令的 `general_chat` system 指令。
+    捕获 Profile 的 `reply_language` 实际语言指令的 `general_chat` system 指令。
     响应进行中切换模式不得取消请求、写入另一历史、清除另一模式 sending 状态，或把
     响应投影到另一模式。
 32. 晚到响应可以更新原模式 Rust Session 与持久化；只有 Chat 可见且原模式仍为活动模式时，
@@ -338,6 +351,12 @@ and [virtual scrolling](virtual-scrolling.md). Complete Markdown rendering follo
 40. AI/RAG 消息滚动条以消息 viewport 为边界。Chat 页面本身已经位于原生标题栏下方，
     因此滚动条不得再次应用窗口标题栏 inset；文档偏移为零时，thumb 必须位于消息 viewport
     轨道顶部。
+41. AI 请求准入在调度 Worker 前捕获完整已保存当前 Profile，connection 与原始
+    名称/Provider/模型身份在该请求内保持配对。发送期间标题显示捕获的 Agent 名称和
+    模型，空闲后才跟随当前已保存 Profile。Assistant/错误 JSONL 保留可选捕获身份，
+    之后激活、编辑 Profile 或重载历史都不得重标记它。空名称回退与标签格式随 locale
+    重新投影，用户名称/模型保持原文。无身份的旧记录和 RAG 行继续兼容，不得借用当前
+    Agent 身份。
 
 ## History localization compatibility / 历史文案本地化兼容
 
@@ -396,6 +415,13 @@ cargo test --locked --test chat_history_ui
 - While a request or history page is loading, leave Chat and verify the response persists without recreating the Chat component/model; re-enter and verify the completed content appears.
 - Switch AI Chat -> RAG while each mode has an in-flight request; verify responses,
   loading states, pagination, and persisted histories remain isolated.
+- Send with named Agent A, activate/rename Agent B while the response is pending,
+  and verify both the actual connection and pending/completed attribution remain A.
+  The next request must use B. Restart with attributed and legacy history, then
+  switch `en`/`zh-CN`; preserve literal names/models and localize only fallbacks.
+  / 用命名 Agent A 发送，等待期间激活/重命名 Agent B；实际连接和等待/完成身份必须
+  仍为 A，下一请求才使用 B。重启读取带身份及旧历史，再切换中英文，确认名称/模型
+  保持原文，只有回退名称参与翻译。
 - Type distinct unsent drafts in AI and RAG and switch repeatedly; verify both
   survive. Fail user-message persistence, switch mode before completion, then
   return and verify the originating draft is restored with visible feedback.

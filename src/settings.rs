@@ -1,7 +1,9 @@
 // Settings module - Responsible for configuration read/write
+mod ai_agents;
 pub(crate) mod request_preferences;
 pub(crate) mod request_preferences_ui;
 mod save_worker;
+pub use ai_agents::{AiAgentConfiguration, AiAgentHeader, AiAgentProfile, MAX_AI_AGENT_HEADERS};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
@@ -169,7 +171,7 @@ impl Default for PreviewProviderSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AiSettings {
     #[serde(default)]
-    pub agent: AiAgentSettings,
+    pub agent: AiAgentConfiguration,
     #[serde(default)]
     pub chat: AiChatSettings,
 }
@@ -197,6 +199,8 @@ pub struct AiAgentSettings {
     pub api_key: String,
     #[serde(default)]
     pub model: String,
+    #[serde(default)]
+    pub headers: Vec<AiAgentHeader>,
     /// Preferred AI response locale. `auto` follows the active UI locale.
     #[serde(
         default = "default_ai_agent_reply_language",
@@ -227,6 +231,7 @@ impl Default for AiAgentSettings {
             base_url: String::new(),
             api_key: String::new(),
             model: String::new(),
+            headers: Vec::new(),
             reply_language: default_ai_agent_reply_language(),
         }
     }
@@ -520,7 +525,7 @@ impl SettingsManager {
             Ok(config) => match deserialize_settings(config) {
                 Ok(mut settings) => {
                     migrate_legacy_gitee_token(&mut settings);
-                    settings.ai.agent = normalize_ai_agent_settings(settings.ai.agent);
+                    settings.ai.agent = settings.ai.agent.normalized();
                     log::debug!("[Settings] Loaded settings from {:?}", config_path);
                     SettingsLoad {
                         settings,
@@ -753,24 +758,10 @@ impl SettingsManager {
         self.notify_git_changed(changed);
     }
 
-    /// Update the OpenAI-compatible AI Agent connection settings.
-    pub fn set_ai_agent_settings(
-        &self,
-        provider: &str,
-        base_url: &str,
-        api_key: &str,
-        model: &str,
-        reply_language: &str,
-    ) {
+    /// Replace the complete named-profile registry and its active selection.
+    pub fn set_ai_agent_settings(&self, configuration: AiAgentConfiguration) {
         if let Ok(mut settings) = self.settings.write() {
-            settings.ai.agent.provider = match provider {
-                "deepseek" | "openai" => provider.to_string(),
-                _ => default_ai_agent_provider(),
-            };
-            settings.ai.agent.base_url = base_url.trim().trim_end_matches('/').to_string();
-            settings.ai.agent.api_key = api_key.trim().to_string();
-            settings.ai.agent.model = model.trim().to_string();
-            settings.ai.agent.reply_language = normalize_ai_agent_reply_language(reply_language);
+            settings.ai.agent = configuration.normalized();
         }
     }
 }
@@ -959,20 +950,8 @@ pub fn save_git_hosted_repository_configs(
 }
 
 /// Update and persist OpenAI-compatible AI Agent settings.
-pub fn save_ai_agent_settings(
-    provider: &str,
-    base_url: &str,
-    api_key: &str,
-    model: &str,
-    reply_language: &str,
-) -> Result<(), String> {
-    get_settings_manager().set_ai_agent_settings(
-        provider,
-        base_url,
-        api_key,
-        model,
-        reply_language,
-    );
+pub fn save_ai_agent_settings(configuration: &AiAgentConfiguration) -> Result<(), String> {
+    get_settings_manager().set_ai_agent_settings(configuration.clone());
     get_settings_manager().save()
 }
 
@@ -1051,11 +1030,7 @@ pub fn setup_settings(app: &MainWindow, settings: &AppSettings) {
     app_state.set_git_gitlab_enterprise(settings.git.platform.gitlab.enterprise.clone().into());
     app_state.set_git_gitee_api_base_url(settings.git.platform.gitee.api_base_url.clone().into());
     app_state.set_git_gitee_enterprise(settings.git.platform.gitee.enterprise.clone().into());
-    app_state.set_ai_agent_base_url(settings.ai.agent.base_url.clone().into());
-    app_state.set_ai_agent_api_key(settings.ai.agent.api_key.clone().into());
-    app_state.set_ai_agent_model(settings.ai.agent.model.clone().into());
-    app_state.set_ai_agent_provider(settings.ai.agent.provider.clone().into());
-    crate::i18n::sync_ai_reply_language(app, &settings.ai.agent.reply_language);
+    crate::settings_page::apply_ai_agent_configuration_to_window(app, &settings.ai.agent);
 
     // Restore the persisted drawer state before the first frame. This snaps
     // shell geometry to its final position instead of running the interactive
@@ -1088,17 +1063,32 @@ pub fn setup_settings(app: &MainWindow, settings: &AppSettings) {
         } else {
             "set"
         },
-        if settings.ai.agent.base_url.is_empty() {
+        if settings
+            .ai
+            .agent
+            .active()
+            .is_none_or(|active| active.base_url.is_empty())
+        {
             "empty"
         } else {
             "set"
         },
-        if settings.ai.agent.api_key.is_empty() {
+        if settings
+            .ai
+            .agent
+            .active()
+            .is_none_or(|active| active.api_key.is_empty())
+        {
             "empty"
         } else {
             "set"
         },
-        if settings.ai.agent.model.is_empty() {
+        if settings
+            .ai
+            .agent
+            .active()
+            .is_none_or(|active| active.model.is_empty())
+        {
             "empty"
         } else {
             "set"
@@ -1401,8 +1391,10 @@ application_console_logging = false
                     base_url: "https://api.example.com/v1".into(),
                     api_key: "secret".into(),
                     model: "example-model".into(),
+                    headers: Vec::new(),
                     reply_language: "zh-CN".into(),
-                },
+                }
+                .into(),
                 chat: AiChatSettings::default(),
             },
             ..Default::default()
@@ -1424,7 +1416,10 @@ model = "gpt-4o-mini"
         )
         .unwrap();
 
-        assert_eq!(settings.ai.agent.reply_language, usher_i18n::AUTO_LANGUAGE);
+        assert_eq!(
+            settings.ai.agent.active().unwrap().reply_language,
+            usher_i18n::AUTO_LANGUAGE
+        );
     }
 
     #[test]
@@ -1438,7 +1433,7 @@ reply_language = "{configured}"
             ))
             .unwrap();
 
-            assert_eq!(settings.ai.agent.reply_language, expected);
+            assert_eq!(settings.ai.agent.active().unwrap().reply_language, expected);
         }
     }
 
@@ -1448,11 +1443,26 @@ reply_language = "{configured}"
             unique_test_directory("reply-language").join("settings.toml"),
         );
 
-        manager.set_ai_agent_settings("custom", "", "", "", "zh-Hans");
-        assert_eq!(manager.get().ai.agent.reply_language, "zh-CN");
-        manager.set_ai_agent_settings("custom", "", "", "", "unsupported");
+        manager.set_ai_agent_settings(
+            AiAgentSettings {
+                reply_language: "zh-Hans".into(),
+                ..Default::default()
+            }
+            .into(),
+        );
         assert_eq!(
-            manager.get().ai.agent.reply_language,
+            manager.get().ai.agent.active().unwrap().reply_language,
+            "zh-CN"
+        );
+        manager.set_ai_agent_settings(
+            AiAgentSettings {
+                reply_language: "unsupported".into(),
+                ..Default::default()
+            }
+            .into(),
+        );
+        assert_eq!(
+            manager.get().ai.agent.active().unwrap().reply_language,
             usher_i18n::AUTO_LANGUAGE
         );
     }

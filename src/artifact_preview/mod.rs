@@ -1850,6 +1850,8 @@ mod tests {
 
     #[test]
     fn parser_progress_messages_name_the_active_language() {
+        let _locale = crate::i18n::test_locale_guard();
+        usher_i18n::activate_preference("en");
         assert_eq!(
             preparation_progress_message(PreviewPreparationProgress::ParserLoading {
                 language: "typescript".to_string(),
@@ -1866,6 +1868,7 @@ mod tests {
             }),
             "The TypeScript Parser is ready. Preparing preview…"
         );
+        usher_i18n::activate_preference(usher_i18n::fallback_locale().id);
     }
 
     #[test]

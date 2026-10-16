@@ -8,7 +8,7 @@ license = "LicenseRef-Proprietary"
 publish = false
 
 [workspace]
-members = [".", "crates/usher-ai-review", "crates/usher-fs", "crates/usher-i18n", "crates/usher-messages", "crates/usher-preview", "crates/usher-search", "crates/usher-state-store", "crates/usher-ui", "crates/usher-ui-settings", "crates/usher-virtual-list"]
+members = [".", "crates/usher-ai-review", "crates/usher-fs", "crates/usher-i18n", "crates/usher-i18n-build", "crates/usher-messages", "crates/usher-preview", "crates/usher-search", "crates/usher-state-store", "crates/usher-ui", "crates/usher-ui-build", "crates/usher-ui-settings", "crates/usher-ui-components", "crates/usher-virtual-list"]
 default-members = ["."]
 exclude = ["dpi-flicker-repro"]
 resolver = "3"
@@ -21,15 +21,15 @@ name = "usher_lib"
 # Production builds use one deterministic renderer. Skia remains available for
 # diagnostics and renderer comparisons without being linked into normal builds.
 default = ["renderer-femtovg", "ai-code-review"]
-renderer-femtovg = ["slint/renderer-femtovg", "usher-messages/renderer-femtovg", "usher-ui/renderer-femtovg", "usher-ui-settings/renderer-femtovg"]
-renderer-femtovg-wgpu = ["slint/renderer-femtovg-wgpu", "usher-messages/renderer-femtovg-wgpu", "usher-ui/renderer-femtovg-wgpu", "usher-ui-settings/renderer-femtovg-wgpu"]
-renderer-skia = ["slint/renderer-skia", "usher-messages/renderer-skia", "usher-ui/renderer-skia", "usher-ui-settings/renderer-skia"]
+renderer-femtovg = ["slint/renderer-femtovg", "usher-messages/renderer-femtovg", "usher-ui/renderer-femtovg", "usher-ui-settings/renderer-femtovg", "usher-ui-components?/renderer-femtovg"]
+renderer-femtovg-wgpu = ["slint/renderer-femtovg-wgpu", "usher-messages/renderer-femtovg-wgpu", "usher-ui/renderer-femtovg-wgpu", "usher-ui-settings/renderer-femtovg-wgpu", "usher-ui-components?/renderer-femtovg-wgpu"]
+renderer-skia = ["slint/renderer-skia", "usher-messages/renderer-skia", "usher-ui/renderer-skia", "usher-ui-settings/renderer-skia", "usher-ui-components?/renderer-skia"]
 # Development-only in-process UI hot reload. Production builds must leave this
 # feature disabled so the live-preview interpreter and watcher are not built.
-live-preview = ["slint/live-preview", "usher-ui/live-preview"]
+live-preview = ["slint/live-preview", "usher-ui/live-preview", "usher-ui-components?/integrated-preview"]
 # Development-only component playground. Keep this out of the default feature
 # set so normal and production builds do not compile the large showcase page.
-ui-components = ["usher-ui/ui-components", "test-fixtures"]
+ui-components = ["usher-ui/ui-components", "dep:usher-ui-components", "test-fixtures"]
 # Development-only shell build. The PR Review feature package is replaced by
 # a protocol-compatible empty implementation to keep unrelated UI iteration
 # out of its large generated render tree. Default and release builds omit it.
@@ -40,7 +40,7 @@ test-fixtures = ["slint/unstable-winit-030"]
 # Headless AI review engine plus its optional application UI/settings bridges.
 # `--no-default-features --features renderer-femtovg` keeps the complete feature
 # out of the compile graph for constrained or comparison builds.
-ai-code-review = ["dep:usher-ai-review", "usher-ui/ai-code-review", "usher-ui-settings/ai-code-review"]
+ai-code-review = ["dep:usher-ai-review", "usher-ui/ai-code-review", "usher-ui-settings/ai-code-review", "usher-ui-components?/ai-code-review"]
 
 [[bin]]
 path = "src/main.rs"
@@ -65,6 +65,7 @@ slint = { version = "1.18.1", default-features = false, features = ["std", "comp
 i-slint-core = "=1.18.1"
 usher-ui = { path = "crates/usher-ui", default-features = false }
 usher-ui-settings = { path = "crates/usher-ui-settings", default-features = false }
+usher-ui-components = { path = "crates/usher-ui-components", default-features = false, optional = true }
 usher-fs = { path = "crates/usher-fs" }
 usher-i18n = { path = "crates/usher-i18n" }
 usher-messages = { path = "crates/usher-messages", default-features = false }
@@ -136,7 +137,7 @@ dark-light = { version = "3.0.0", default-features = false }
 i-slint-backend-testing = "=1.18.1"
 
 [build-dependencies]
-usher-i18n = { path = "crates/usher-i18n" }
+usher-i18n-build = { path = "crates/usher-i18n-build" }
 
 # [target.'cfg(target_arch = "wasm32")'.dependencies]
 # wasm-bindgen = { version = "0.2" }
@@ -181,9 +182,13 @@ opt-level = 1
 debug = "none"
 opt-level = 1
 
-[profile.dev.package.usher-ui-settings]
+[profile.dev.package.usher-ui-components]
 debug = "none"
 opt-level = 1
+
+[profile.dev.package.usher-ui-settings]
+debug = "none"
+opt-level = 0
 
 [profile.dev.package.usher-messages]
 debug = "none"
@@ -195,6 +200,9 @@ split-debuginfo = "off"
 incremental = true
 
 [profile.test.package.usher-ui]
+debug = "none"
+
+[profile.test.package.usher-ui-components]
 debug = "none"
 
 [profile.test.package.usher-ui-settings]

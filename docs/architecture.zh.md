@@ -66,7 +66,7 @@ PR Review 通过稳定的 Slint `@pr-review` feature package 入口暴露，与�
 回退到 Workflow，使无关 Shell 修改不编译大型审核渲染树。这不是跨 crate 拆页；
 完整页面的状态、浮层和交互仍作为一个整体保留。
 
-在 macOS 上，进入或退出全屏后会在 AppKit 最终标题栏布局完成时重新对齐原生控件，并把原生全屏状态发布给 Slint，使面包屑释放已经移除的左侧 Chrome 占位；交通灯簇整体右移 8pt 以对齐侧栏图标中线，存在这些按钮时应用自有控件始终位于其右侧。
+在 macOS 上，进入或退出全屏后会在 AppKit 最终标题栏布局完成时重新对齐原生控件，并把原生全屏状态发布给 Slint。普通窗口通过交通灯右侧的原生附件提供 Back、Forward、Sidebar；全屏时隐藏这些原生操作，并在内容左上角常驻同一组控件。顶部 Hover 由 AppKit 揭示交通灯与左对齐的 `Usher` 标题。侧栏收起时，面包屑为全屏常驻控件预留左侧 112px。交通灯簇整体右移 8pt 以对齐侧栏图标中线。
 
 ## 系统上下文
 
@@ -129,7 +129,11 @@ Worker 取消请求。
 保存和任务完成提交后发布。`HookStateFacade` 隐藏共享 Store 引擎，自动持久化
 配置和有界运行摘要；独立的有界 JSONL 日志保留生命周期与输出顺序。Shell 和外部
 Node.js 作为可取消子进程运行在共享 Runtime。独立设置页在 Diagnostics 前新增
-Hooks Tab，定义列表提供直接持久化的行内 Switch 与编辑/删除操作；由代码注册的事件
+Hooks Tab，定义列表提供直接持久化的行内 Switch 与编辑/删除操作。
+列表工具栏复用 AI Agent 设置的搜索框与绿色加号按钮；factory 内的临时查询匹配名称、
+事件 ID/标题、分类及运行方式，不改写已保存定义。Bridge 重算筛选后的分组几何，
+行主体、编辑、删除与开关始终通过稳定 ID 操作；点击行主体打开编辑器。语言切换时
+保留查询并按新语言的标题重新筛选；创建成功后清空查询以显示新定义。由代码注册的事件
 同时声明稳定模块分类，Bridge 将分类投影为分组定义列表和分组事件
 Select，后续模块无需按 UI 名称匹配即可沿用同一布局。总开关关闭时禁止行内切换但
 保留各条目的配置值。新增和编辑复用共享 Dialog，支持未保存
@@ -147,6 +151,14 @@ Select，后续模块无需按 UI 名称匹配即可沿用同一布局。总开�
 和选区。macOS 使用独立选区色光标；光标跟随文字色的平台聚焦时使用不透明原生
 纯文本，失焦后恢复高亮。不常驻高亮引擎或语言缓存。
 所有应用自有 Modal 的框架统一经过 `GitHubDialog`。
+Shell 提供页头/页脚之间未缩进的 `body-x/y/width/height`，既有
+`content-x/y/width/height` 则继续由 `body-padding` 派生安全区，保持原几何兼容。
+整段正文滚动使用原始垂直边界，把上下留白放进滚动内容；静态正文继续使用安全区。
+AI Agent 与 `GitHubDialogEnhance` 遵循完整正文滚动契约。Project 已使用 Shell 零
+padding 与内容自有 16px 留白；PR Commit 选择是有意采用零 padding 的贴边列表。
+Hook 保持有界表单，仅 code editor 滚动，不能再增加同轴外层 ScrollView；其余静态/
+有界消费者保留既有安全区布局。详见 [Dialog 契约](specs/ui-design.md#dialog--弹窗)
+及 [已核对消费者清单（归档：docs/validation/header-controls-20261015/README.md）](local-archives.md#validation-experiments-20261016)。
 `ui/components/github_elevation.slint` 集中拥有生成的 Dialog、Floating、Compact 固定源
 PNG mask、nine-slice 几何与语义着色。Dialog、ActionMenu、浮动 IconButton、Toast、
 Notification、PR 代码渲染指示器及紧凑导航表面分别复用对应 profile；Breadcrumb 使用
@@ -203,7 +215,11 @@ i18n catalog 构建脚本从当前 Cargo 调用定位仓库输入；共享 targe
 | `src/main.rs` | 最小二进制入口，转发到库入口。 |
 | `src/lib.rs` | 导入并重新导出生成的 UI API，创建 `MainWindow`、初始化模块、绑定跨模块 callback，并管理窗口和关闭流程。 |
 | `crates/usher-ui/` | 负责 Slint build script 和生成的 Rust API；编译仓库根目录的 `ui/main.slint` 树，并导出窗口、global、model、struct 和 enum；`crates/usher-ui/src/pagination.rs` 负责共享的有界 Primer 页码链接投影。 |
-| `crates/usher-i18n/` | 与框架无关的 locale 注册表和编译后消息 catalog。构建阶段校验根 `i18n/` manifest/PO 资产、生成强类型 Slint `I18n` global，并为每个独立编译的 UI 根准备索引完全一致的翻译 bundle；运行时 locale 解析与 Rust 文案查询不依赖具体 UI 引擎。 |
+| `crates/usher-ui-build/` | 四个静态 Slint 根共享的 Cargo 编译集成；使用公开编译 API，保留源/资源/环境输入及 library metadata，排除当前 `OUT_DIR` 输出的重编触发。 |
+| `crates/usher-ui-components/` | 可选的静态演练场编译单元；透明全窗口 factory 共同持有页面、滚动和浮层。实时预览组合使用原集成图，此包不编译静态产品。 |
+| `src/ui_components/`, `ui/features/ui_components_bridge.slint` | Event-loop 宿主桥接与懒加载生命周期；同步几何/主题/字体，转发既有反馈控制器，不创建第二套 Inbox 或持久化。 |
+| `crates/usher-i18n-build/` | 无内嵌 catalog、无自身 build script 的编译与构建 helper。从调用方当前工作区校验根 `i18n/` 输入、生成合并后的 Rust catalog，以及强类型 Slint `I18n` global 和语言顺序一致的完整 Slint 可见输入；向 Settings picker 生成器提供已校验的语言元数据。 |
+| `crates/usher-i18n/` | 与框架无关的运行时 locale 注册表和合并消息 catalog。构建阶段通过 `usher-i18n-build` 合并 Slint 可见与 Rust-only registry/PO，并校验总覆盖率；运行时 locale 解析与 Rust 文案查询不依赖具体 UI 引擎。 |
 | `crates/usher-messages/` | 独立编译的消息中心包：持久领域/存储服务、快照订阅、后台持久化/原生投递 Worker、`notify-rust` OS 适配器及生成的 Inbox 页面 API。可嵌入 Slint 页面使用 library-module 模式编译，不再依赖已废弃的非 Window 根组件兼容路径。 |
 | `crates/usher-search/` | 与框架无关的通用 Find 引擎：Unicode 安全的非重叠文本命中、首尾循环的相邻结果导航，以及 Chromium/Blink `CenterIfNeeded` 视口策略。Feature 只提供领域/model 与视觉换行适配。 |
 | `crates/usher-state-store/` | 与框架无关的跨页面 State 接口与内置引擎：强类型 reducer/action、不可变 revision 快照、selector、立即 hydration、自动单调订阅、RAII 取消，以及支持延迟启用、合并、flush 和 shutdown 的 Worker `PersistentStore` 门面。Feature 门面隐藏具体引擎，未来可通过 adapter 替换社区 Store。 |
@@ -240,7 +256,7 @@ i18n catalog 构建脚本从当前 Cargo 调用定位仓库输入；共享 targe
 | `src/router/` | 路由映射、历史、可见性、普通 transition hook 与路由 scope 可达性 hook；不执行 feature 清理。 |
 | `src/shortcuts/` | 应用命令 ID、声明式键位、平台归一化匹配、路由作用域、冲突校验、分发与展示标签。 |
 | `src/app_lifecycle.rs` | composition 层生命周期注册，负责 Chat transition 可见性与 Workflow scope 清理。 |
-| `src/settings.rs` | TOML 设置模型与串行原子持久化，包含 AI Agent 凭据和可配置 RAG endpoint。 |
+| `src/settings.rs` | TOML 设置模型与串行原子持久化，包含命名 AI Agent Profile、`src/settings/ai_agents.rs` 中的旧配置迁移及可配置 RAG endpoint。 |
 | `src/settings_feedback.rs` | 共用的设置保存 Worker 完成回写、saved 状态复位计时器及本地化 Toast；装配根只绑定动作。 |
 | `src/ai/` | 共用 OpenAI-compatible AI Agent transport、Feature 自有的强类型/持久化配置 Store 与内置 Prompt catalog；`agent.rs` 负责连通性测试及 AI Chat/AI Code Review 使用的 chat completion，不负责 RAG transport。 |
 | `src/network.rs` | 网络可达性与 `AppState.network-online`：macOS 使用 SystemConfiguration 回调，其它平台使用不发包的路由检查与离线退避。 |
@@ -249,9 +265,14 @@ i18n catalog 构建脚本从当前 Cargo 调用定位仓库输入；共享 targe
 | `src/toast.rs` | 单条短时 Toast 管理器绑定。 |
 | `src/notification.rs` | 通知队列、计时器、Hover 暂停、操作按钮和图标。 |
 | `src/message_center.rs` | 主窗口与 `usher-messages` 之间的薄桥接层；同步主题/视口、下发 All/Unread/Read 计数，并把不可变快照转换为独立页面 Slint model。 |
-| `src/message_center/focus.rs`, `src/message_center/focus/navigation.rs` | 仅在 event loop 处理 Inbox 键盘所有权：将中立鼠标焦点交给真实宿主 adapter、转发既有应用快捷键，并跨 static factory 按已挂载可用控件遍历。赋予 Tab 焦点前，按真实滚动视口精确显示选中目标。不得承担持久化、reducer 或 Worker 工作。 |
+| `src/message_center/focus.rs`、`src/ui_components/keyboard.rs` | Inbox 与演练场的 event-loop 键盘适配器；Inbox 将中立鼠标焦点交给实际宿主，两者转发既有应用快捷键。演练场捕获普通快捷键，但让 Tab 先到达局部 Select 执行关闭并请求恢复触发器，再进入宿主遍历。 |
+| `src/focus_navigation.rs` | Inbox 与演练场共用的 mounted-host Tab/Backtab 遍历，读取当前焦点前先完成排队的关闭/焦点变更，跨 static factory 选择可用目标，赋予焦点前按真实滚动视口精确显示。不得承担持久化、reducer 或 Worker 工作。 |
 | `src/message_center/commands.rs`、`src/notification/ingress.rs` | UI 消息的有序有界命令与 ticket 完成；领域 reduction 留在命令 Worker，非 Send Banner payload 在 event loop 以独立预算持有。 |
 | `src/dialog.rs` | 命令式 `DialogManager` 绑定与操作分发；不再拥有独立视觉变体。 |
+
+Select 在 Tab 前恢复触发器是本地显式 opt-in：`GitHubSelectState.restore-before-tab`
+默认 false，仅静态演练场配合 mounted-host 遍历开启；MainWindow、Settings 与集成
+演练场保留普通 Slint 关闭策略。
 
 仓库接口地址与可执行行为必须保持分离：`src/git/` 可以引用 `src/codereview/api/` 中的常量，但 `src/codereview/api/` 不得依赖 `src/git/`、`src/http/`、reqwest 或 serde。
 
@@ -331,7 +352,7 @@ bridge；它不是另一份领域 Store。列表行的焦点与指针区域使�
 
 | 路径 | 职责 |
 | --- | --- |
-| `crates/usher-ui/build.rs` | 编译根 Slint 源码树，将内置 Material 映射为 `@material`，并把 `@ui-components` 映射到真实开发演练场或契约兼容的关闭 stub。 |
+| `crates/usher-ui/build.rs` | 编译根 Slint 源码树，将内置 Material 映射为 `@material`，并将 `@ui-components` 映射到静态 factory host、实时预览集成演练场或关闭 stub。 |
 | `crates/usher-ui/src/lib.rs` | 包含并公开导出 Slint 生成模块。 |
 | `ui/main.slint` | 根窗口、路由装配、Rust-facing property/callback、Modal 层和 Terminal Dock。 |
 | `ui/route/routeMap.slint` | 完整 `Route` 枚举；主导航只开放其中一部分。 |
@@ -339,14 +360,16 @@ bridge；它不是另一份领域 Store。列表行的焦点与指针区域使�
 | `ui/views/` | 只负责路由级页面编排；活跃入口统一使用 `GitHub*Page` 命名，并从 `ui/components/` 引入全部视觉积木，view 文件不再声明局部控件。 |
 | `ui/views/job_run.slint` | 应用级 `Route.JobRun` 装配，可从任意来源路由复用。 |
 | `ui/views/ui_components.slint` | 交互式 UI Components 演练场的纯路由编排。 |
+| `ui/views/ui_components_factory.slint` | 可选静态演练场的透明全窗口 factory；一个内缩滚动文档与本地 Select、PR、通知、Tab、Tooltip Portal 共同编译。 |
 | `ui/views/workflow/` | Workflow 路由编排和完整的全窗口 PR Review 实现；Flow、Tab、Filter、Field、Panel 组件归 `ui/components/workflow/`。 |
 | `ui/features/pr_review/` | 稳定的 PR Review feature package 入口及公开页面协议；构建配置把 `@pr-review` 映射到完整实现或显式 `dev-shell` 替代实现。路由只是使用方而非所有者，后续入口复用同一个包。 |
 | `ui/features/ai_review/`、`ui/features/ai_review_settings/` | 可选编译包，提供完整实现和协议兼容 disabled 实现；完整 Review 包只暴露 PR 右侧面板，不拥有独立路由。 |
 | `ui/components/` | 所有应用视觉组件的统一归属目录，包括 Control、Row、Card、Menu、Tab、Panel、Dialog、Field、Feedback 和功能专用视觉积木；GitHub/Primer 实现统一使用 `GitHub*` 符号。 |
+| `ui/components/github_resize_handle.slint` | 共享常驻分割线命中带、宽高轴光标、中性空闲/hover/拖拽线和指针取消生命周期；功能调用方拥有尺寸、clamp 与布局提交，布局演练场展示实际调宽/调高。 |
 | `ui/components/artifact_preview/` | 应用级通用预览外壳、基于 Primer token 的原生 Markdown/文本/图片 Surface、右侧固定面板与独立原生窗口；不承担解析或 I/O，也不引入 WebView。 |
 | `ui/components/agent_response/` | Agent 回复的紧凑原生 block renderer；只消费准备好的结构并上报 link/action callback，不承担 Markdown 解析、仓库路径解析或文件 I/O。 |
 | `ui/components/about/`、`ai_review/`、`chat/`、`project/`、`workflow/` | 从路由页面抽出的功能级 GitHub/Primer 视觉积木，不负责 I/O 或路由跳转。 |
-| `ui/components/showcase/` | GitHub/Primer 属性对比矩阵按基础、操作、容器、反馈、导航、选择、文本输入、场景排序；本地化目录与返回入口复用页面滚动宿主；浅色 Primer Box-header 通栏明确章节边界，示例文案绑定共享 catalog，AI Agent 回复反馈保存操作标识并随语言即时刷新；登记表把依赖业务 model 的组合组件链接到真实路由；带边框与无边框 PR 菜单相邻放在“选择”的 Select Menu 分区；带边框菜单通过实时窗口锚点与共享 Floating UI adapter 挂到根浮层，分区高度保持固定；Select 示例共用受约束的列宽，在共享 small 断点以下单列排列，分区高度从控件几何计算；分页样例在宽屏以共同测量的说明列与真实 `GitHubPagination` 垂直居中对齐，空间不足时同一已挂载节点上下居中堆叠，章节高度从实际样例几何计算，并保留交互状态与运行时翻译；PR 菜单直接复用生产工具栏和 `GitHubPullRequestRuleMenu`，使用本地 2/14 条规则 model 和可见视口边界，不持久化选择；可选 Preview 样例只发出 fixture id，不得绕过 Provider 或 Host；新增或实质变更的视觉组件必须同步登记。 |
+| `ui/components/showcase/` | GitHub/Primer 属性对比矩阵按基础、操作、布局、容器、反馈、导航、选择、文本输入、场景排序；本地化目录与返回入口复用页面滚动宿主；浅色 Primer Box-header 通栏明确章节边界，示例文案绑定共享 catalog，AI Agent 回复反馈保存操作标识并随语言即时刷新；登记表把依赖业务 model 的组合组件链接到真实路由；带边框与无边框 PR 菜单相邻放在“选择”的 Select Menu 分区；带边框菜单通过实时窗口锚点与共享 Floating UI adapter 挂到根浮层，分区高度保持固定；Select 示例共用受约束的列宽，在共享 small 断点以下单列排列，分区高度从控件几何计算；分页样例在宽屏以共同测量的说明列与真实 `GitHubPagination` 垂直居中对齐，空间不足时同一已挂载节点上下居中堆叠，章节高度从实际样例几何计算，并保留交互状态与运行时翻译；PR 菜单直接复用生产工具栏和 `GitHubPullRequestRuleMenu`，使用本地 2/14 条规则 model 和可见视口边界，不持久化选择；可选 Preview 样例只发出 fixture id，不得绕过 Provider 或 Host；新增或实质变更的视觉组件必须同步登记。 |
 | `ui/components/button/github_icon_button.slint` | 图标按钮、浮动按钮、Terminal、项目卡片和复制操作共用的 `GitHubIconButton` 基础，统一键盘焦点、Tooltip、加载态和语义变体。 |
 | `ui/components/label/github_counter_label.slint` | 共用的强类型 Primer CounterLabel，提供 Default/Primary/Secondary Scheme、可选上限、紧凑叠加几何与零值隐藏；状态栏通知徽标及后续导航/操作计数统一复用。 |
 | `ui/components/github_metadata_label.slint` | 共享的 Primer small Label：透明背景、包含边框的留白计算、内容居中与强类型 Default/Primary/Secondary 变体；Hook 状态元数据采用 Secondary。 |
@@ -354,10 +377,12 @@ bridge；它不是另一份领域 Store。列表行的焦点与指针区域使�
 | `ui/components/github_spinner.slint` | 控件和加载界面统一使用的应用自有 Primer 不定进度 Spinner。 |
 | `ui/components/github_progress_bar.slint` | 状态栏和更新界面共用的语义化确定/不确定进度条；确定进度的填充条固定在左侧，宽度随进度向右增长。 |
 | `ui/components/github_scroll_view.slint` | 应用自有的常驻纵向视口和语义滚动条基础。 |
-| `ui/components/navigation/github_underline_nav.slint` | Workflow 及其功能子页签共用的、支持键盘的 Primer UnderlineNav/UnderlinePanels 容器与 Item；容器统一管理全宽底线、安全区内边距和页签间距。 |
+| `ui/components/navigation/github_underline_nav.slint` | Workflow、功能子页签与 Settings Provider 分组共用的、支持键盘的 Primer UnderlineNav/UnderlinePanels 容器与 Item；容器统一管理全宽底线、安全区内边距和页签间距。 |
+| `ui/components/navigation/github_window_navigation.slint` | 共用窗口导航展示：`GitHubWindowNavigation` 拥有 macOS 全屏常驻的 Back/Forward/Sidebar 操作组；侧栏图像由既有 macOS SF Symbol 经 `native-sidebar-toggle-image` 投影，保留原生收起/展开图标来源。同文件的 `GitHubCollapsedWindowNavigation` 拥有既有 Windows/Linux 侧栏收起操作面，保留 112×40px 几何、32px 控件与 Sidebar/Back/Forward 顺序。两者只接收历史/快捷键输入并发出 Shell callback；规模与依赖门禁防止组件接管路由职责。 |
 | `ui/components/github_segmented_control.slint` | 共用的紧凑 Primer SegmentedControl 外壳、Item、Divider 及焦点/禁用交互。 |
 | `ui/components/github_elevation.slint` | 固定源 Elevation 的中央所有者。生成的 Dialog、Floating、Compact PNG mask 通过 nine-slice 拉伸和语义着色复用；应用 UI 必须使用这些 profile，不得声明 raw Slint `drop-shadow-*`。 |
 | `ui/components/github_tooltip.slint` | 共用的 GitHub TooltipV2 契约：调用方挂载透明锚点定位器，由 `ui/state/tooltip_overlay_state.slint` 与根层 `GitHubTooltipOverlayHost` 统一执行 offset/flip/shift/size，在窗口根绘制并避开滚动/裁剪祖先与窗口边界。 |
+| `ui/components/github_fixed_tooltip_anchor.slint`、`ui/components/workflow/github_pr_factory_tooltip_anchors.slint` | 共享且不带动作的锚点几何/续租机制与 PR 固定动作叶子。生产 PR 控件直接依赖这些 owner，禁止反向导入开发演练场目录。 |
 | `ui/components/github_floating_overlay.slint` | 共享的全窗口浮层定位边界。底层几何树为私有实现；持久根层 Portal 统一使用 `GitHubTransientFloatingOverlayHost`，且只能通过其 `active` 输入控制内部可见性。Feature 可提供锚点和固定内容，但不得直接实例化几何宿主、按动作复制宿主或用 opacity 隐藏宿主。 |
 | `ui/state/tooltip_overlay_state.slint` | 窗口根 Tooltip 门户状态（文案、锚点矩形、首选方向/对齐、claim token、lease 心跳）。 |
 | `ui/components/github_action_menu.slint` | 点击浮层共用的 Primer ActionMenu/AnchoredOverlay 表面，统一焦点归属、Esc 关闭、打开时 peer exclusive-claim、视口碰撞定位、限高纵向滚动、ActionList 行，以及 `GitHubActionMenuTriggerArea` 的 press 态开/关（避免标题栏 Chrome dismiss 与 toggle 同一次点击先关后开）。页面空白点击关闭仍由各宿主在菜单之下自行挂载 TouchArea。`ui/state/transient_overlay_state.slint` 提供 `dismiss-revision` 与 `exclusive-generation`。 |
@@ -431,7 +456,7 @@ Shell 过渡期间只暂停文档绘制，同时保留准备后的 model；轻�
 `usher-virtual-list` 精确 extent 门面，只实例化有界的可见/overscan block，在不改变
 Provider/Session 所有权的前提下限制正文恢复的一次性成本。清除视觉投影时还会重置
 Feature 自有的虚拟 rows、extent、projection guard 以及 Parley 字体/layout 缓存，同时
-保留根 callback 使用的稳定 Slint model 身份。预览模块自有的 resize-handle 组件负责稳定命中区、光标、
+保留根 callback 使用的稳定 Slint model 身份。共享 `GitHubResizeHandle` 组件负责稳定命中区、光标、
 hover 反馈和 pointer cancel 生命周期；根 Shell 持有有界的会话宽度，并对预览与路由面板
 对称应用。停靠分割线的完整命中区位于预览 Host 上方，确保各所属路由在分割线两侧
 首次按下即可捕获拖动；Modal 浮层打开时禁用该命中区。
@@ -532,9 +557,14 @@ macOS 使用原生 `.AppleSystemUIFont`，Windows 使用 `Microsoft YaHei UI`，
 UI 源码继续保留在仓库根目录的 `ui/` 下。主窗口与普通路由树由
 `usher-ui` workspace crate 生成；Settings 与 Messages 路由分别由
 `usher-ui-settings` 和 `usher-messages` 以 library-module 模式独立生成，再通过
-Slint 实验性的 `ComponentContainer`/component-factory 边界挂载。这会正式
+Slint 实验性的 `ComponentContainer`/component-factory 边界挂载。
 Settings 显式声明透明 Window 根，由 factory 嵌入且不打开额外原生窗口，避免
-Slint 隐式 Window 包装绘制不透明的默认背景。应用 crate 继续重新导出主 UI
+Slint 隐式 Window 包装绘制不透明的默认背景。
+`src/settings_page.rs::create_page` 使用 MainWindow 实际的 `WindowAdapter` 创建
+产品，在同步状态或绑定 callback 前立即恢复 shell 的 item-tree 根；构造返回错误时
+也先恢复。条件/model 子树销毁后由真正绘制它的 renderer 释放文本/布局缓存。
+独立隐藏 adapter 不能持有这些资源：renderer 缓存按组件身份和 item index 定位，
+地址复用时未清理的条目可能绘制另一个已销毁子树的文字。应用 crate 继续重新导出主 UI
 API，并由 `src/settings_page.rs` 与 `src/message_center.rs` 显式桥接。
 跨 crate factory 创建的组件拥有独立 Slint global 图，因此桥接层必须复制初始
 `AppState`、把 callback 转发给 `MainWindow`，并同步后续状态变化，不能假定两边
@@ -549,8 +579,34 @@ placeholder；在当前固定版本完成新的原生重入验收前，继续保
 只隐藏这些 host；各 Feature bridge 分别负责状态重置生命周期，
 并把 transient host 切为非活动。
 
-Settings factory host 位于窗口根层、状态栏上方；普通 ScrollView 保持内容面板的
-原点和视口尺寸。`src/settings_page.rs` 同步两组几何及 Hook 弹窗可见状态到主窗口，
+普通静态 `ui-components` 构建通过 `usher-ui-components` 另行生成 library-module
+产品。MainWindow 只导入 feature host 与协议 stub，其传递输入不得包含 showcase
+源码。`src/ui_components/` 直接绑定功能自有的 `UiComponentsBridge`，同步窗口/内容
+几何、主题和字体，转发 dismiss 与 pointer release，并把生成的反馈 DTO 转交既有
+应用控制器。透明全窗口产品在首次访问后保留本地 global 身份；离开路由时清理
+临时状态并释放路由文档与菜单浮层子树，Tooltip Portal 保持挂载；再次进入从顶部
+创建新演练场。`create_page`
+使用 MainWindow 实际的 `WindowAdapter`，使销毁的子树在负责绘制的 renderer
+释放资源。首次惰性创建在同一 event-loop turn 保存 MainWindow item-tree 身份、
+调用共享窗口构造器并立即恢复宿主根；错误结果也先恢复，再同步状态和绑定应用
+callback。共享 PR 锚点与
+Tooltip 几何留在 `showcase/` 之外，演练场持有自己的固定动作 Portal。
+`live-preview,ui-components` 组合则把演练场纳入 MainWindow 的解释器图，并令可选
+静态包跳过 Slint 生成。详见[演练场契约](specs/ui-components.md)。
+
+`src/ui_components/popover.rs` 将本地互斥 claim 转发到宿主 `UiComponentsBridge`，
+后者在 claim 前标记下一宿主代际，使同步观察者同样能排除自身回传；其他宿主
+claim 只关闭 factory popover。
+根状态栏与演练场菜单由此跨独立 global graph 保持互斥，不会关闭新打开者、形成
+claim 回环或改变 Dialog/Toast 所有权。
+共享 [`GitHubActionMenu`](../ui/components/github_action_menu.slint) 的初始展开与
+后续 open 变化共用幂等 claim/滚动/焦点路径，新挂载的展开菜单也必须发布互斥 claim。
+
+Settings factory host 位于窗口根层、状态栏上方。`ui/views/settings.slint` 的内容视口
+宽度为 `min(viewport-width, max(0px, window-width - content-origin-x))`，侧栏移动
+内容原点时，保留的宽版 Shell 几何不能把尾部操作推到实时窗口之外。页面宽度、紧凑导航、
+普通 ScrollView 与内容菜单浮层使用该边界；模态弹窗及其内部选择浮层仍使用完整窗口几何。
+`src/settings_page.rs` 同步两组几何及 Hook 弹窗可见状态到主窗口，
 使原生窗口控件参与模态禁用。Dialog 及其选择浮层共享 factory 内的 Hook 草稿
 global，并覆盖整个窗口。
 全局 Hover 侧栏及其边缘触发区位于该 factory（含页面吸顶导航和菜单）之上；
@@ -567,7 +623,25 @@ section 或 provider 表单，否则重复 Tab 切换可能保留兄弟节点的
 placeholder、值或选中态。路由级选择索引必须从哨兵值开始，并在下一次 UI tick 切到
 默认值，以便新建视觉树主动失效旧绑定。选择器文字、选中样式和显示字段必须来自同一
 状态源。该规则覆盖 Settings section 菜单、Git hosting provider、AI Agent provider
-预设和 Hook 运行方式选择。Hook 复用共享 `GitHubRadio` 互斥单选，固定挂载持有
+和 Hook 运行方式选择。正确的 I18n 绑定、各字段输入所有权与 renderer 缓存所有权
+是不同边界；字面叶子隔离不能替代 factory 的共享窗口创建契约。
+Settings Code hosting Provider 导航使用
+`ui/components/navigation/github_fixed_tabs.slint` 中的 `GitHubFixedThreeTabs`，
+通过三个固定 Item 叶子复用共享 `GitHubUnderlineNavItem` 的视觉、测量与键盘控件。
+该分组持有独立 owner 与固定根层 `GitHubFixedThreeTabsOverflowPopup`，Item 输入使用
+各自字面量/I18n 绑定，Select 身份为独立的 `<owner>-overflow`；不得跨 factory 复用
+承载文案的 repeater 或按 owner 切文案的 popup 子树。真实文字宽度仍决定可见前缀与
+More 溢出。动态 `GitHubUnderlineNav` 与固定 `GitHubFixedThreeTabs` 共用
+`GitHubUnderlineNavVariant { inset, flush }`，默认保留列表两侧 16px 缩进。
+Settings 企业 API Tab 使用 `flush`，页边距由所在区块负责；PR 等其他生产调用方保留 `inset`。
+UI Components 使用真实 `GitHubUnderlineNav` 对照展示 inset/flush，共享本地化 Item
+model，各自持有独立 owner 与选中态。
+数值 `content-inset` 仍支持显式覆盖，所有位置、宽度和溢出计算均使用最终值，
+缩进变化时关闭失效菜单；每项内部 8px 留白及完整命中区域保持不变。详见
+[页签对齐契约](specs/ui-design.md#page-headers-and-navigation--页头与导航)。
+这些控件不得拥有或重建固定编辑字段叶子。原生验收必须在路由重入及
+宽窄布局替换后检查实际绘制字形，仅无障碍标签一致不足以通过。
+Hook 复用共享 `GitHubRadio` 互斥单选，固定挂载持有
 字面占位文字的 Shell/Node 字段；bridge 隔离各语言临时草稿，保存/测试只读取选中
 语言和解释器，持久化仍为单一语言及内容。编辑后废弃旧测试反馈。Hook Tooltip
 通过固定文案叶子和设置页根层常驻 Surface 避免串用（UI-103）。Tooltip 框内文字居中，
@@ -589,7 +663,7 @@ Monitor 归一化 Return/Escape。固定测试区显示紧凑状态及操作下�
 compact section 菜单为每个 section 使用独立的固定触发器叶子，并在每次展开时快照
 当前 section，因此折叠标签与选中行不会在 factory 复用后保留上一条路由的 section。
 界面语言与 AI 回复语言选择器同样遵守固定叶子规则，但不在应用 UI 中硬编码语言
-列表。`usher-ui-settings` 构建脚本读取经过校验的 `usher-i18n` locale manifest，
+列表。`usher-ui-settings` 构建脚本从 `usher-i18n-build` 准备的 bundle 读取已校验的语言元数据，
 为每个语言生成固定的触发器和选项叶子。因此新增语言仍然只需维护 manifest 与翻译
 catalog，同时运行时 repeater delegate 不会在 factory 产品之间残留其他语言的标签、
 id 或选中状态。每次展开菜单时，picker 都会把当前规范化选择快照到自身局部状态；
@@ -599,18 +673,26 @@ global binding。
 两个语言选择器统一复用 `GitHubSelectPopup`/`GitHubSelectOption` 表单基础组件。
 Select 触发器切换自身展开状态：再次激活时收起、不提交选项，并恢复触发器焦点。
 Hook 事件及历史触发器通过 `GitHubSelectState.toggle()` 遵循同一契约。
+共享触发器的指针路径直接报告激活，不先聚焦滚动容器内的触发框；根层
+`GitHubActionMenu` 在展开时获取焦点。部分裁切触发框的可见区域首次点击不能因
+自动 reveal 触发框而移动视口、随即撤销新菜单。键盘激活和关闭时的焦点恢复仍由
+触发器 FocusScope 承担；指针打开期间，正文滚动偏移和触发框位置在释放及后续布局帧
+保持不变，消费方的实际滚动仍关闭旧锚点菜单。
 只有 40px 触发器参与表单布局；Settings factory 根层在滚动表单外挂载浮层，复用
 Tooltip 同样使用的 `GitHubTransientFloatingOverlayHost` 负责活动生命周期、翻转、
 边缘位移与像素对齐；Select 把 `active` 绑定到展开状态，并限制宽度及可用垂直高度。
+共享 Select 选择上下可用空间更多的一侧，即使短菜单在两侧都能放下也遵循此规则；
+空间相等时向下展开，现有高度上限和滚动使菜单适应该侧空间。
 Settings 页面级 Select 以独立页面视口作为碰撞边界，固定状态栏覆盖区域不得计入锚点
-下方可用空间；Hook Dialog 内的 Select 则继续使用完整窗口边界。
+下方可用空间；AI Agent 与 Hook Dialog 的 Select 保持原有完整窗口视口。
+Select 仅使用调用方提供的视口和锚点几何，不引入 Dialog 上下文、注册表或 probe。
 `GitHubActionMenu` 提供表面、滚动与焦点生命周期。
 选项叶子使用明确的菜单内容宽度和零水平起点，不能继承外层 factory 的宽度。
-独立 factory 的窗口上下文与可见 host
-不同，禁止在其中使用原生 `PopupWindow` 承载选项。
+Settings 的私有窗口上下文与可见 host 不同，禁止使用原生 `PopupWindow` 承载这些选项。
 Escape 取消，方向键及 Home/End 移动活动选项，Enter/Space 确认选择。
 选项用前导勾选标记表示当前值，不再复用导航行的选中样式。UI Components 使用同一
-弹层，并包含相邻输入框与禁用触发器；示例浮层挂载在 `MainWindow` 根层。
+弹层，并包含相邻输入框与禁用触发器；示例浮层挂载在所属全窗口根层，集成实时
+预览使用 MainWindow，静态演练场使用独立 factory。
 分组示例从零偏移普通触发器的视口原点加自身局部偏移计算锚点，避免未经验证的继承
 `absolute-position` 重复计入组件偏移。两个示例菜单的活动选项仅在自身
 所属选择器展开时获取焦点。
@@ -622,23 +704,105 @@ Escape 和确认选择仍恢复触发器焦点。
 
 窗口指针桥接为普通页面和独立生成页面统一恢复文本框失焦语义。鼠标主键按下时，
 只有指针位于可见字段边界（包括裁剪字段内边距）之外才清除已聚焦 `TextInput`。
-`src/transient_input.rs` 从实际挂载树向下遍历，逐层转换指针坐标并处理容器偏移、
+[`src/transient_input.rs`](../src/transient_input.rs) 从实际挂载树向下遍历，逐层转换指针坐标并处理容器偏移、
 变换和视口裁剪；从独立 factory 产品向上映射坐标可能漏掉宿主偏移。
 即使 `Flickable` 消费空白点击，该规则仍生效，并保留输入框间第一次点击的焦点转移。
-macOS 通过本地 mouse-down 监视器投递同一判定，其他平台使用事件派发后的窗口 hook。
-mouse-up 不清除文本焦点，因此从框内拖选到框外松开时仍保留键盘焦点。
+所有平台使用 Slint 实际派发后的窗口 hook，但 Flickable 仍可能延迟子节点 press。
+左键按下先立即分类，仅未命中者保存原点与路由；实际左键松开派发后取出 pending，
+同路由才按原按下点补分类一次。离开窗口或失活会取消，已命中者不重复，其他键或
+adapter 不消费 pending；桥接不新增 Timer/轮询。生产入口
+在 `Window::show()` 后安装，并按实际 adapter 身份限定 MainWindow，不影响独立
+窗口。macOS 原生监视器转发 chrome/release，不分类文本输入；生产 hook 避免重复
+转发指针，公开夹具入口仍转发两个阶段。松开位置绝不作为外部按下分类，因此框内
+拖选、框外松开仍保留焦点与选区。
 
-Settings 打开期间，凭据、Endpoint 与 AI Agent 文本字段都采用页面局部编辑所有权；
-代码托管分组只有点击各自可见的 Save 命令才提交完整草稿。AI Agent 另用一份已提交的
-强类型 Store 快照供 Settings 之外的 Chat 与 Review 消费。选择预设只在独立页面草稿中
-原子更新 Provider、Base URL 与 Model，其他编辑同样不修改 `MainWindow` 或 Store。
-Save 把完整草稿捕获到 `src/ai/settings_state.rs` 的有界 FIFO（含活动保存最多八项），
-Worker 执行强类型 Action 并等待持久化 flush。`src/ai/settings_ui.rs` 在 event loop
-投影每个 receipt，另持独立八项 UI owner 预算直至回调完成或丢弃：请求顺序保护宿主已提交状态，factory 身份、路由访问与未变化草稿
-保护可编辑字段，仅最新尝试拥有保存反馈。有效 commit 通过既有原子 TOML 边界写入
-`[ai.agent]`；显式同值 Save 可重试失败写入。每次进入 Settings 路由时，bridge 都在稳定 factory host 绘制前，用最近提交的
-宿主/Store 快照覆盖这些页面局部草稿，不能再分别读取多个选择器字段。因此未点击 Save
-就离开再返回时，编辑会被丢弃，但视觉树不会重挂载。
+凭据与 Endpoint 分组保留页面草稿，只有 Save 才提交。AI Agent 改为通过
+`AiAgentConfiguration { active_id, profiles }` 与
+`AiAgentProfile { id, name, connection }` 管理任意数量的稳定 id 记录；Provider 仅是
+连接类型，不是 Agent 身份。`src/settings/ai_agents.rs` 拥有 schema 迁移和 Header
+验证。`src/settings_page/ai_agent_list.rs` 按已保存名称/模型/Provider 搜索，每页投影
+十条记录和有界页码窗口，按新建顺序倒序显示。持久化列表仍按追加顺序保存，编辑和
+激活不重排；新增成功后清空查询并定位到第一页。
+`github_ai_agent_list.slint` 的十个固定行实例共用 Hooks 式 1px 外框、6px 圆角，
+行高 72px、无行间空隙、内部使用 1px 分隔线。`github_ai_agent_list_row.slint` 拥有
+行布局和编辑命中区；名称/模型避开尾部 168px 操作组及 16px 内缩。共享 48×24 Toggle
+之后依次为 32px 连通性测试（Plug）、编辑、删除 IconButton，间隔 8px，垂直中心一致。启用非当前 Agent 才发送
+Activate；当前 Toggle 保持绿色 On 并禁用交互，只能通过启用另一个 Agent 使其关闭，
+当前项仍禁止删除。搜索右侧为纯图标 Primary 新增按钮。
+`github_ai_agent_tooltip.slint` 为 Add、Activate、Current、TestConnection、Edit、Delete、DeleteDisabled
+保留独立字面发布方与七个常驻 I18n Surface，复用一个根层
+`GitHubTransientFloatingOverlayHost`。Claim 只传 kind/几何/token/lease，不传标签；
+查询、分页、滚动、布局、模态或路由变化均 dismiss。禁用的 Current/Delete 保留纯 hover
+命中区，不能触发业务动作。
+列表根和搜索输入框允许最小宽度为零；搜索布局、行栈与分页显式绑定父宽。列表下方
+保留 Pagination，不再显示额外的 Total/Page/每页条数说明行。
+
+`src/ai/settings_ui/list_connection_test.rs` 按稳定 id 捕获已保存 Profile，复用编辑器的
+`agent::test_connection` transport，不打开、保存或激活草稿。列表同时最多一个 probe，
+对应行显示 Spinner，其他 Test 按钮禁用。共享 `connection_probe.rs` 拥有 ticket、
+取消句柄和终态语义 key，编辑器与列表各自持有独立实例。完成回到 event loop 后重验
+ticket、列表活跃状态及完整最新已保存 Profile；被测试项更新/删除拒绝旧反馈，激活
+其他项不改变捕获内容。查询/分页不取消请求，离开分区/路由或打开弹窗会取消。
+可关闭的 `GitHubToast` 覆盖当前 Settings 内容视口底部，3 秒后收起；关闭保留结果
+key，切语言重投影但不重开隐藏反馈。列表测试共用编辑器的 Header/重定向/诊断安全
+边界，不能持久化修改。
+
+`src/settings_page/ai_agent_drafts.rs` 拥有单份新增/编辑弹窗草稿、新稳定 id、Header
+编辑、取消及 editor revision；`ai_agent_projection.rs` 投影列表和弹窗字段，不能
+激活正在编辑的 Agent。根层 `github_ai_agent_editor.slint` 与
+`github_ai_agent_delete.slint` 复用 `GitHubDialog`；Provider/回复语言 Select 位于
+滚动表单之外。编辑器请求 620px 宽、高度为
+`min(560px, max(320px, root.height - 140px))`，关闭窄屏全屏并保留共享 Dialog 的
+16px 视口边距钳制；800×600 视口下为 620×460px。正文滚动视口从 56px 页头下缘
+直抵 64px 页脚上缘，16px 上下留白归滚动内容所有，不能在正文中留下固定空白裁切带。
+表单内部滚动，页头与测试/取消/保存页脚固定。编辑器包含名称、Provider、URL、Key、模型、回复语言及最多 32 行
+启用/名称/值 Header。滚动区使用满宽子容器，把表单固定在左侧并在右侧预留 16px，
+包含 8px 滚动条命中轨道和实际字段边缘外的 8px 空隙。Show API key 开关与文字共享
+32px 行及垂直中心线。测试按钮右侧间隔 8px 的 16px 独立槽显示进行中 Spinner 或
+成功/失败图标。`GitHubToast` 覆盖在正文底部居中位置、固定页脚之上；关闭标志与
+错误/测试语义 key 分离，关闭反馈不清除结果、修改草稿或保存/激活 Agent。
+
+`github_ai_agent_headers.slint` 拥有 Key/Value 与 JS object 两种编辑模式。
+只有 Key/Value 内容区挂载 Add Header，复用带前导 Plus 图标的 `GitHubButton`，
+水平居中于该模式说明之后、各行之前的 32px 工具栏；JS object 只显示自己的说明和
+输入框，不存在添加按钮。每行末尾复用 32×32
+垃圾桶 IconButton，与 Agent 列表删除使用同一语义 danger 状态；一次点击仅删除当前
+弹窗草稿的对应槽位。busy/模式/数量上限仍由
+`ai_agent_header_drafts.rs` 独立于按钮状态核验。
+`github_ai_agent_header_tooltip.slint` 拥有独立固定 Delete 发布叶子、token/lease
+状态及单个 transient host 内的固定 I18n Surface；Portal 是 dialog frame 的同级，
+边界为实际正文视口，不传递 Header 名称或值。行/输入 revision、滚动、模式/编辑会话
+切换及关闭都撤销 claim；busy 或对象模式不发布提示。
+`ai_agent_header_object.rs` 仅解析有界数据字面量：引号或 identifier key、字符串/
+字符串数组值及可选尾逗号，不执行代码，不支持注释、表达式或嵌套对象。对象输入最多
+65,536 字节，归一化后仍最多 32 行（含禁用行）。`ai_agent_header_drafts.rs` 保留
+禁用草稿和未改动的往返转换，通过共享 Header 边界校验启用行。无效对象仍可切回
+Key/Value，不替换原表格草稿；原文（包括空字符串）暂存，重进 Object 时恢复并重验。
+真实行编辑/新增/删除使暂存原文失效，同值或被拒绝的 callback 保留它。Save/Test
+只校验当前模式：当前 Object 无效时拒绝准入，非当前的暂存无效原文不阻止有效表格，
+也不进入持久化或请求。私有 `Cell<Option<i32>>` 标识暂存原文，
+不增加 UI 属性或凭据副本。模式变化和真实编辑取消 probe 并递增 Header 输入 revision，
+完整草稿/editor 身份继续保护迟到结果。取消、离开路由或打开另一编辑器清空原文并
+使 revision 标记失效；测试捕获完整
+草稿，只投影本地化且核验 revision 的结果，编辑清除旧测试反馈。删除必须另行确认名称。
+
+Create/Update/Delete/Activate 共用 `src/ai/settings_state.rs` 的有界 FIFO（含活动
+命令最多八项）；`src/ai/settings_state/actions.rs` 在 reducer 执行时重新核验稳定 id
+与当前 Agent 禁删约束。保存已有或后续新增 Agent 不激活它，首个 Create 初始化当前
+使用 id。Worker reduction 与自动持久化/flush 不在 event loop 执行。
+`src/ai/settings_ui.rs` 按命令顺序、捕获的 factory/editor revision 和完整草稿保护
+完成投影；独立八项 UI owner 预算持续到 UI 投递或丢弃。已提交列表刷新不得覆盖更新
+弹窗。Header 值属于敏感数据，由 `src/ai/request_headers.rs` 验证启用行并通过共享
+同 origin HTTP 管线发送。
+
+`src/ai/identity.rs` 在 locale 边界格式化原始 Agent 名称/Provider/模型元数据；
+消费者通过 `src/ai/settings_state.rs::current_profile()` 获取已保存当前 Profile。
+`src/chat/request.rs` 在每次 AI 请求时捕获该 Profile；
+`src/ai_review/request_capture.rs` 在 Review 准入及每次 Ask 时完成相同捕获。
+即使排队或运行期间切换当前 Profile，请求 connection 与可见身份也必须保持同源。
+Chat assistant JSONL、Review 任务摘要及 Ask 对话记录保留可选原始身份；
+`src/chat/renderer.rs` 与 `src/ai_review/agent_identity.rs` 在切语言时重新投影名称/模型，
+不得用当前 Profile 替换历史身份。该身份数据不包含 Key 或 Endpoint。
 
 Messages 同样在首次访问后保留稳定 factory 根与页面外壳。`MessageSnapshot::page`
 先筛选不可变历史，再选取每页 20 条；`src/message_center.rs` 只把当前页转换为
@@ -658,8 +822,10 @@ host 中，并在类型为 `None` 或离开路由时把该 host 切为非活动�
 实现，但不尝试跨 factory 边界共享 global 实例。修改 `settings.slint` 或
 `messages.slint` 不得重新生成或编译
 `usher-ui`；修改主壳仍会重编主生成 crate。启用 `SLINT_LIVE_PREVIEW` 时，两套独立
-build script 都在编译静态 factory 产品期间临时移除该环境变量，随后恢复。主窗口与
-UI Components 路由仍可正常热更新；这是当前构建边界，不表示每次升级后都重新验收了
+build script 都在编译静态 factory 产品期间临时移除该环境变量，随后恢复。显式启用
+`live-preview,ui-components` 组合时，主窗口和集成演练场仍可热更新；只设置环境变量
+时，可选演练场 factory 仍保持静态，其 build script 也会在生成期间移除该变量。
+这是当前构建边界，不表示每次升级后都重新验收了
 历史 Slint 限制。
 
 设置页宽屏导航在距视口顶部 16px 处吸顶，并受导航列底部约束。
@@ -748,11 +914,19 @@ workspace 根 `Cargo.toml` 中的 profile 统一负责构建产物策略。日�
 这会覆盖 macOS 上 Cargo 默认的 full/unpacked 调试策略：panic backtrace
 仍有文件名和行号，但 `target/debug/deps` 不再积累松散 `.rcgu.o`。
 
+`crates/usher-ui-build` 统一负责四个静态 Slint 根的 Cargo 编译集成，使用公开
+output-path API，保留现有 compiler 配置、translation domain、生成 include 与
+library metadata。catalog helper 继续登记原始 catalog 输入；此 owner 监听真实
+Slint/资源与 Slint 环境输入，过滤当前 `OUT_DIR` 中的生成输出，避免翻译输出使
+下一次无修改构建再次失效。无内嵌 catalog 的 i18n helper 保持独立依赖边界。
+
 `dev` profile 对非 workspace 依赖使用 opt-level 1；生成的 `usher-ui`、
-`usher-ui-settings` 与 `usher-messages` workspace crate 同样使用 opt-level 1，且不
-生成调试元数据。应用自有 Rust crate 保持 opt0 与行表，因此普通 `cargo run` 仍可
-使用源码断点并定位应用 panic，同时避开最大的 Debug 代码常驻成本。该策略只改变
-开发产物；test 与 Release profile 保持各自独立设置。
+`usher-ui-components` 与 `usher-messages` workspace crate 同样使用 opt-level 1，且不生成
+调试元数据。独立生成的 `usher-ui-settings` 使用 dev opt0，减少 Settings 重建时的
+LLVM 优化/codegen 工作，codegen-unit 数量保留默认值。应用自有 Rust crate 保持 opt0
+与行表，因此普通 `cargo run` 仍可使用源码断点并定位应用 panic。test 按 Cargo 的 dev
+继承及其显式 profile/package override 生效；Release 保留既有优化策略。当前测量与
+验收状态见[构建策略](build-performance.md)。
 
 需要 LLDB 查看完整变量和类型时，显式使用 `dev-full` profile。它继承日常开发
 设置，但把完整 packed 调试信息写入独立 profile 目录；因此可以通过
@@ -764,6 +938,21 @@ profile。
 
 Release 打包使用既有 custom workflow 和 cargo-bundle；未使用的 cargo-dist
 配置及独立 profile 已移除。
+Release workflow 负责 macOS/Windows 下载与未签名编译缓存、手动预热及生产失败
+传播。生产构建使用 `--release --locked`，保持既有优化参数与自动触发器。严格 key
+保留构建配置/源码身份，后续粗层 fallback 只保留 OS、宿主架构、target、Rust 和
+`release-default`，允许跨 manifest/config/workflow 及实际 profile 变化恢复，再由
+Cargo 校验已跟踪输入。fingerprint 未覆盖的 SDK/native 变化需提升缓存 epoch 或
+使用空缓存。默认关闭的 `cache_only` 只允许在默认分支手动执行；Bash 先精确校验
+完整 ref 与大小写，再为相同三个 target 构建/保存缓存，跳过打包工具、打包、签名、
+产品上传和发布。
+
+`scripts/ci_release_metrics.py` 负责白名单缓存元数据与当前 attempt 的 GitHub job/step
+时间投影。诊断 Python 准备、元数据/导出步骤及只读计时报告 job 尽力执行；构建、
+打包、已启用签名、产品上传和发布保持阻断。发布只下载产品 artifact。本地策略与
+负例验证这些边界，不证明托管缓存命中率或耗时收益。详见 [Release CI 契约](specs/release-ci.md)、
+[构建策略](build-performance.md#production-ci-cache-and-timings--生产-ci-缓存与计时)
+及[本地验证（归档：docs/validation/release-ci-reliability-20261016/README.md）](local-archives.md#validation-experiments-20261016)。
 
 未使用的 Rust 模块、未挂载的旧 Slint 标题栏及其图标例外已移除。Project
 Provider 身份使用现有 ribbon 资源，侧栏与 Terminal 控件保留当前实现。
@@ -816,8 +1005,9 @@ dispatch 失败为 `ERROR`。这些分类不改变初始化、显示与清理顺
 固定侧栏都绘制主题对应的不透明 fallback。挂载后，Effect 与原生 Canvas 会在样式
 改变后及原生 resize 时按全尺寸父视图 bounds 同步几何，确保 Menu 材质覆盖标题栏带，
 而不是沿用启用 FullSizeContentView 前较短的 Render View frame。
-Slint 窗口启动时不显示标准标题。macOS 等待原生标题栏附件时不挂载替代的 Slint
-控件；该区域只显示最终 AppKit 侧栏与历史控件。
+Slint 窗口启动时不显示标准标题。macOS 普通窗口等待原生标题栏附件时不挂载替代的
+Slint 控件；该区域只显示最终 AppKit 侧栏与历史控件。进入系统全屏后，原生展示状态
+切换到常驻 Slint 控制条与原生 Hover 标题。
 
 Debug 构建默认启用进程内存诊断；持久化的 Settings 控制项可在运行时关闭，Release 基准仍可通过 `USHER_MEMORY_DIAGNOSTICS=1` 强制启用。`[Memory][Diag]` 记录当前/峰值 RSS 与物理 footprint、相对上次/启动基线的增量、进程生命周期高水位、运行/场景标识，以及最近页面、逻辑/物理窗口尺寸、缩放和 Terminal 可见性；同时保留 VM 分类、macOS 全部 malloc zone 汇总的在用/保留/slack 容量、region、Mach port、线程、fault 与 page-in。`[Memory][UI Models]` 区分 AI Review 源 rows/blocks 与 retained/virtual delegate 创建计数，区分已挂载内容与实际绘制内容，并关联 PR 上下文 Preview host；`[Memory][UI]` 关联稳定后的页面/窗口变化，`[Workflow][PR Review][Memory]` 等功能归属日志只记录有界 model/cache 的数量和容量，不得输出源码内容或凭据。采样任务复用共享 runtime，并由正常的 pre-shutdown 流程停止。`scripts/benchmark-memory.sh` 负责 macOS Release 测量协议并汇总外部 RSS/footprint 采样。仅在显式设置 `USHER_MEMORY_WINDOW_CONTROL=signal-file-v1` 时，基准专用信号 Worker 才读取每个 run 独立的命令文件，并把 AppKit resize/fullscreen 请求投递到 Slint event loop；pre-shutdown 会关闭其信号 handle。外部 Swift helper 只读取 CoreGraphics 窗口状态，用于确认每次切换并独立记录实际全屏尺寸。基准元数据记录应用变体与二进制哈希；比较器只允许渲染器、应用所有权或 Tokio worker 中的一个维度变化，其他 fixture/协议不匹配一律拒绝。`.github/workflows/nightly-performance.yml` 保留完整性能门禁，但其托管定时触发已暂时暂停，目前只有 `workflow_dispatch` 可以启动。手动运行时会使用 3 个隔离进程执行静态 Release Home 协议；`scripts/check-memory-benchmark-thresholds.py` 必须观察到预期路由，并在上传原始证据前同时检查 RSS/footprint 绝对峰值与周期中位增长预算。
 
@@ -884,25 +1074,39 @@ UI bridge 在 event loop 订阅最新快照，成功反馈等待实际写盘。�
 `[update]` 保存 `auto_update` 和 `update_channel`。加载时逐字段兼容旧顶层键，
 分类内显式值优先；缺失字段保持原有默认值，下次保存仅写入新的分类结构。
 
-`AppSettings` 以 TOML 保存到平台配置目录，包括主题、`auto` 或规范 locale id 的语言偏好、自动更新、相互独立的 Console/`usher.log`/`usher_tracing.log` 输出目标、Terminal verbose 与内存诊断、UI 声效开关、导航抽屉状态、Git 平台 Token、位于 `[git.platform.<provider>]` 的各平台企业版 API 地址和企业名称、位于 `[ai.agent]` 的 OpenAI-compatible AI Agent 连接配置，以及位于 `[ai.chat]` 的可选 HTTPS RAG endpoint（环境变量回退为 `USHER_RAG_API_URL`）。AI Agent 编辑由其 Feature Store 归约并自动持久化，其他设置继续使用既有的即时或显式保存入口。保存操作由写锁串行化，先写入并同步同目录唯一临时文件，再原子替换目标；解析失败时必须先把原文件保留为 `settings.toml.corrupt-*`，若保留失败，则本进程禁止继续写 Settings。Logger 输出目标通过运行时原子过滤控制；`usher.log` 在首次启用写入时按需打开，Settings 使用 GitHub 风格的 `Enable all` / `Disable all` 批量操作，同时保留每项独立状态。Gitee 的公有版 `token` 与 `enterprise_token` 分开保存；只有旧配置已经存在企业 API 地址时，旧版单一 Token 才迁移到企业字段，两套凭据不得跨 profile fallback。Slint 需要的数据同步到 `AppState`；API Key、企业名称和配置 URL 均属于本地配置，不得写入日志。Provider API 只有在企业 API 地址主机与项目 remote 主机匹配时才使用该配置；用户既可填写服务主机，也可填写完整 API 根地址，缺少版本路径时由 Provider 自动补齐。否则继续使用由 remote 推导出的公共平台默认地址。自动主题在 macOS 通过 AppKit、Windows 通过用户级应用主题设置、Linux 通过 XDG Desktop Portal 判断。选中 Auto 时会持续跟随系统外观变化：macOS 使用 `AppleInterfaceThemeChangedNotification` 并辅以 1 秒轮询兜底；Windows 与 Linux 每秒轮询同一检测路径。选择 Auto 会清除强制的 AppKit appearance，使进程跟随系统；显式浅色/深色则锁定 Aqua/DarkAqua。开启 UI 声效后，面包屑返回统一调用 `platform::play_ui_click`：macOS 播放 `Tink`，Windows 异步播放用户配置的默认系统音，Linux 在后台线程播放桌面 Sound Theme 事件，并以常见的 PipeWire/PulseAudio/ALSA 命令行播放器作为回退。
+`AppSettings` 以 TOML 保存到平台配置目录，包括主题、`auto` 或规范 locale id 的语言偏好、自动更新、相互独立的 Console/`usher.log`/`usher_tracing.log` 输出目标、Terminal verbose 与内存诊断、UI 声效开关、导航抽屉状态、Git 平台 Token、位于 `[git.platform.<provider>]` 的各平台企业版 API 地址和企业名称、位于 `[ai.agent]` 的 AI Agent 当前使用 id 和 `[[ai.agent.profiles]]` 中的稳定 id 命名连接记录，以及位于 `[ai.chat]` 的可选 HTTPS RAG endpoint（环境变量回退为 `USHER_RAG_API_URL`）。AI Agent 编辑由其 Feature Store 归约并自动持久化，其他设置继续使用既有的即时或显式保存入口。保存操作由写锁串行化，先写入并同步同目录唯一临时文件，再原子替换目标；解析失败时必须先把原文件保留为 `settings.toml.corrupt-*`，若保留失败，则本进程禁止继续写 Settings。Logger 输出目标通过运行时原子过滤控制；`usher.log` 在首次启用写入时按需打开，Settings 使用 GitHub 风格的 `Enable all` / `Disable all` 批量操作，同时保留每项独立状态。Gitee 的公有版 `token` 与 `enterprise_token` 分开保存；只有旧配置已经存在企业 API 地址时，旧版单一 Token 才迁移到企业字段，两套凭据不得跨 profile fallback。Slint 需要的数据同步到 `AppState`；API Key、企业名称和配置 URL 均属于本地配置，不得写入日志。Provider API 只有在企业 API 地址主机与项目 remote 主机匹配时才使用该配置；用户既可填写服务主机，也可填写完整 API 根地址，缺少版本路径时由 Provider 自动补齐。否则继续使用由 remote 推导出的公共平台默认地址。自动主题在 macOS 通过 AppKit、Windows 通过用户级应用主题设置、Linux 通过 XDG Desktop Portal 判断。选中 Auto 时会持续跟随系统外观变化：macOS 使用 `AppleInterfaceThemeChangedNotification` 并辅以 1 秒轮询兜底；Windows 与 Linux 每秒轮询同一检测路径。选择 Auto 会清除强制的 AppKit appearance，使进程跟随系统；显式浅色/深色则锁定 Aqua/DarkAqua。开启 UI 声效后，面包屑返回统一调用 `platform::play_ui_click`：macOS 播放 `Tink`，Windows 异步播放用户配置的默认系统音，Linux 在后台线程播放桌面 Sound Theme 事件，并以常见的 PipeWire/PulseAudio/ALSA 命令行播放器作为回退。
 
-`[ai.agent]` 下的 `reply_language` 取值为 `auto` 或规范 locale id。`auto` 在组装每次请求时
+`src/settings/ai_agents.rs` 把旧单连接迁移为一条命名记录，把旧固定 Provider 表分别
+迁移为隔离凭据的稳定 id 记录。现代保存输出 `active_id` 与 `[[ai.agent.profiles]]`，
+每项包含平铺 connection 字段及自己的 Header 数组。重复/空 id、超额 Header 或无效
+启用 Header 验证失败；未知当前使用 id 清空选择，不得隐式选择另一份凭据。
+
+每份 Profile 的 `reply_language` 取值为 `auto` 或规范 locale id。`auto` 在组装每次请求时
 解析当前 UI locale；该设置应用于 AI Chat、AI Review 与 Review Ask，绝不影响 RAG。
 未知持久值归一化为 `auto`；独立 Settings factory 通过 event-loop bridge 同步选中 id 与
 manifest 驱动的选项列表。
 
 根目录 `i18n/` 是唯一翻译资产源：manifest 驱动 locale 发现、原生语言名称、别名、
-回退和覆盖率门禁；语义消息 catalog 同时驱动生成的 Slint property 与 Rust 查询。
+回退和覆盖率门禁。`messages.toml` / `usher.po` 负责 Slint 可见文案，Rust 也可使用；
+`rust-messages.toml` / `usher-rust.po` 负责仅 Rust 使用的文案，声明 `slint = false`。
+源语言英文直接使用 registry，每个非源语言提供两份 PO。运行时构建合并两组，拒绝
+跨组重复 key/属性名，并按合并后的消息集合统一校验覆盖率。
+`usher-i18n-build` 负责校验与生成，不内嵌输入资产，也没有自身 build script。各
+UI 包（包含可选静态演练场）与根包内联测试的构建脚本直接依赖该 helper，只读取和监听 manifest、Slint 可见
+registry 及非源语言的 `usher.po`。因此仅 Rust 文案修改更新应用链接的 Rust catalog，
+不使 UI 编译单元失效；共享 manifest 或 Slint 可见文案变化仍使全部根失效。
+构建耗时收益以受控 A/B 为准；这次边界拆分保持运行时 locale API 与原生行为契约。
 选择 bundled locale 后，应用会显式把全部 Slint translation 标记为 dirty，使独立编译的
-MainWindow、Settings 与 Messages root 在同一个 event-loop turn 重新绘制既有 `@tr` binding。
-`src/i18n.rs` 在 Slint event loop 上、创建独立 Factory 页面前应用语言。由于 Slint
-每个运行时上下文只保存一个 bundle，MainWindow、Settings 和 Messages 必须编译同一
-份完整生成 catalog，禁止各页面维护局部 `@tr()` 索引。Rust 动态状态在构建 UI 投影
+MainWindow、Settings、Messages 与静态演练场 root 在同一个 event-loop turn 重新绘制既有 `@tr` binding。
+`src/i18n.rs` 在 Slint event loop 上、创建独立 Factory 页面前应用语言。Slint 在同一
+运行时上下文共享语言列表与当前语言索引；消息数组与引用属于各生成模块，编译器可剪除
+未使用项。MainWindow、Settings、Messages 和静态演练场接收相同的完整 Slint 可见源
+catalog 与 locale 输入，并保持语言顺序一致。Rust 动态状态在构建 UI 投影
 之前始终保留语义 key、结构化类型或 `LocalizedText`；因此切换 locale 时可以重新投影
 已经挂载的 Preview、Terminal、Project、Chat、Workflow、Hook 和 AI Review 状态，无需匹配
 显示文案。Provider、PTY 与文件系统技术细节只进入日志，UI 只解析稳定的 catalog 错误。
-仅由 Rust 使用的消息设置 `slint = false`：它们保留在语义与 PO catalog 中，但不会进入
-或扰动 Slint 的实时 UI 翻译索引。
+仅由 Rust 使用的消息保留在每个合并后的 Rust catalog 与覆盖率校验中，不会进入或扰动
+Slint 的实时 UI 翻译索引。
 已持久化的应用自有 Chat 错误是兼容性例外：Renderer 会在所有已注册 locale catalog 中
 精确反查语义 key，再按当前语言解析；不得用这套机制识别任意 Provider 内容。产品和
 工程专业术语保留英文，命名占位符允许调序但禁止改名。详见
@@ -1059,7 +1263,7 @@ Tag 草稿保留完整原始输入，并以 pending-input 护栏保护新编辑�
 窗口显示前，设置恢复会把持久化的侧栏开关、弹簧进度和路由宽度一次性吸附到同一个
 最终状态；只有之后由用户触发的展开或收起才启用侧栏动画。
 
-应用 Shell 统一拥有一个 240px 桌面侧栏。持久化固定状态驱动同一个可中断、按显示帧推进的弹簧，移动侧栏、内容表面、标题栏分割线和状态栏绘制起点。Slint 显示动画时钟把真实帧间隔交给闭式阻尼振子，因此在 120Hz 屏幕上每个渲染帧都会更新位置，延迟帧也不会积累固定步长误差；目标反转保留当前进度和速度。路由只在运动开始时采用一次目标布局宽度，状态栏透明宿主与右侧常驻工具组保持窗口坐标。连续点击标题栏按钮重定向同一运动，不排队旧回调。原生 Live Resize 会把侧栏运动吸附到目标，冻结已挂载路由宽度，并在拖拽结束后一次应用最终宽度。固定态边界 Elevation 由主内容面拥有并只向侧栏方向投射；取消固定后，窗口左侧 8px Hover 热区把同一侧栏作为只有边框、尾部上下圆角的根层临时浮层打开。macOS 通过原生标题栏附件提供侧栏、Back 和 Forward。面包屑占用剩余原生标题栏安全区，原生附件、Slint 面包屑和尾部操作统一按完整 46px inset 中轴线对齐。macOS 的 `NSVisualEffectView` 固定为 240px 宽，只在侧栏下方提供 Menu/BehindWindow 材质；Slint 渲染器下方另有与当前主题 Canvas 一致的全窗口不透明原生底面，GPU Surface resize 晚一帧时也不会在右侧露出壁纸蓝色。Vibrancy 安装先切换全尺寸透明标题栏样式，再在窗口仍不透明时挂上 Effect 与底面，最后才打开透明窗口路径并使用近透明背景而非 `clearColor`；整个过程在启动窗口 alpha 门控期间的同一个 AppKit 事务内完成，避免启动瞬间侧栏透出桌面内容。固定侧栏按 Codex 桌面 Settings 的实现，在 Effect 上先绘制深色 `#131313cc` 页面底层，再绘制 `#212121a6` 导航层；两层按 source-over 合成后的不透明 fallback 取整为 `#1d1d1d`。激活状态浅色仍为 `#ffffffa6`。失去 Key 后隐藏 Effect，原生 `#000000` 深色或 `#f9f9f9` 浅色 fallback 保留在渲染层下方。按钮可用状态由 Router 历史驱动；三端共享 Router callback 和侧栏偏好，平台代码不持有路由历史。
+应用 Shell 统一拥有一个 240px 桌面侧栏。持久化固定状态驱动同一个可中断、按显示帧推进的弹簧，移动侧栏、内容表面、标题栏分割线和状态栏绘制起点。Slint 显示动画时钟把真实帧间隔交给闭式阻尼振子，因此在 120Hz 屏幕上每个渲染帧都会更新位置，延迟帧也不会积累固定步长误差；目标反转保留当前进度和速度。路由只在运动开始时采用一次目标布局宽度，状态栏透明宿主与右侧常驻工具组保持窗口坐标。连续点击标题栏按钮重定向同一运动，不排队旧回调。原生 Live Resize 会把侧栏运动吸附到目标，冻结已挂载路由宽度，并在拖拽结束后一次应用最终宽度。固定态边界 Elevation 由主内容面拥有并只向侧栏方向投射；取消固定后，窗口左侧 8px Hover 热区把同一侧栏作为只有边框、尾部上下圆角的根层临时浮层打开。macOS 普通窗口通过原生标题栏附件按顺序提供 Back、Forward、Sidebar；系统全屏时隐藏原生操作容器，由窗口根层的共享 Slint IconButton 提供同一组 callback，位于模态遮罩下方且弹窗期间不可交互。顶部 Hover 中交通灯与左对齐 `Usher` 标题的出现和收回仍归 AppKit 管理。标题采用自身固有高度，并通过原生中线/边缘约束跟随交通灯，避免 AppKit 揭示时重新布局后仍保留进入全屏时的文字坐标；宿主改变时重绑约束，退出全屏及关闭时释放。面包屑占用剩余标题栏安全区，避开普通窗口的原生控件或全屏常驻操作占用的前 112px；原生附件、Slint 面包屑和尾部操作统一按完整 46px inset 中轴线对齐。macOS 的 `NSVisualEffectView` 固定为 240px 宽，只在侧栏下方提供 Menu/BehindWindow 材质；Slint 渲染器下方另有与当前主题 Canvas 一致的全窗口不透明原生底面，GPU Surface resize 晚一帧时也不会在右侧露出壁纸蓝色。Vibrancy 安装先切换全尺寸透明标题栏样式，再在窗口仍不透明时挂上 Effect 与底面，最后才打开透明窗口路径并使用近透明背景而非 `clearColor`；整个过程在启动窗口 alpha 门控期间的同一个 AppKit 事务内完成，避免启动瞬间侧栏透出桌面内容。固定侧栏按 Codex 桌面 Settings 的实现，在 Effect 上先绘制深色 `#131313cc` 页面底层，再绘制 `#212121a6` 导航层；两层按 source-over 合成后的不透明 fallback 取整为 `#1d1d1d`。激活状态浅色仍为 `#ffffffa6`。失去 Key 后隐藏 Effect，原生 `#000000` 深色或 `#f9f9f9` 浅色 fallback 保留在渲染层下方。按钮可用状态由 Router 历史驱动；三端共享 Router callback 和侧栏偏好，平台代码不持有路由历史。
 
 Workflow PR 列表与全窗口审核工作区统一通过 `src/git/` 的 Provider-neutral façade 请求数据。`RepoContext::discover` 解析 remote locator，`ProjectContext::from_saved` 再校验当前项目持久化的 Provider/id，随后列表、详情/diff、仓库文件、review state、review submit、merge 和 revert 均由对象安全的 `GitProvider` 分发；`ProviderCapabilities` 统一暴露 endpoint 能力，UI 不自行推断。共享 JSON 解码与分页 helper 归 `src/git/json.rs` 所有。`workflow/pr_review.rs` 是稳定 façade，`workflow/pr_review/controller.rs` 负责异步编排和 UI 回写；共享缓存/Diff 所有权与头像 I/O 分别位于 `cache.rs`、`avatar.rs`。固定源码对齐与 hunk 展开纯算法位于 `workflow/pr_review/hunk.rs`，本地文件树构建与分类位于 `workflow/pr_review/file_tree.rs`，Unified/Split 行映射位于 `workflow/pr_review/diff_projection.rs`，Slint 惰性行适配器位于 `workflow/pr_review/diff_model.rs`，选择几何与剪贴板投影位于 `workflow/pr_review/selection.rs`，Conversation/Commit 展示与范围映射位于 `workflow/pr_review/timeline.rs`。审核控制器只持有一份共享且不可变的归一化 diff，其 feature 自有 state-store façade 为 diff、高亮、展开、AI finding Reveal、Conversation、Commits、远端 action-state 读取和远端 mutation 保存八类独立强类型 generation。归一化详情会把每个基础文件移动到独立 `Arc` 中，当前文件的惰性 model 与高亮任务直接共享该分配，不再深拷贝全部行；只有展开 hunk 时才创建对应文件的写时复制 override。Provider HTML 与 Diff 别名在 adapter 边界解码。`DiffChangeType` 和 `DiffLineKind` 在仓库、hunk、搜索、高亮与 AI unified-diff 逻辑中保持强类型，仅由 Slint 惰性适配器投影为既有字符串。每条 diff 记录在进入固定高度的 Slint 行渲染前都会归一为不含 CR/LF 控制符的单个视觉源码行。收起文件时删除 override 并重新使用共享基础文件。hunk 展开或应用内查看完整文件时按固定 head/base commit 懒加载源码；修改文件展开时会在本地对齐两份固定版本，确保单侧独有行不会丢失。每文件 Diff 高亮使用 4 项 LRU，固定源码文本使用 3 项 LRU；完整文件高亮 model 只是临时 UI 状态。当前 Diff 通过只读惰性适配器暴露给 Slint，最多物化 64 行转换后的 UI 数据；完整高亮结果继续由 Rust 持有，以保留任意语言支持和快速滚动。所有异步回写均由对应 generation 防止迟到响应污染当前项目或 PR。
 
@@ -1073,7 +1277,9 @@ PR Review 将逻辑选区与 shaped-text 几何分离：`selection.rs` 负责行
 原生绘制 `syntect` token model，且不导入 Parley 类型。不嵌入 WebView/浏览器编辑器；
 门面缓存有界，滚动或 resize 路径不执行 Find viewport 定位工作。
 
-Local Tag Add 读取排序后的本地标签。Local Remove 初始化与删除成功后的刷新执行
+Local Tag Add 读取排序后的本地标签。创建计划更新 `release` 后 checkout `main`，
+先拉取 `origin main`，再 rebase 到 `release`、推送 `main` 并创建/推送 annotated Tag；
+拉取失败在 rebase 或打 Tag 前停止。Local Remove 初始化与删除成功后的刷新执行
 `fetch origin --tags --force` 和 `ls-remote --tags --refs origin`，Local 不表示离线。
 初始化复用有界流式进程驱动，每命令 30 秒 deadline，取消时清理进程树。完整 Tag
 草稿（含 description）归 Workflow，由真实 editor `edited` callback 原子提交，
@@ -1361,8 +1567,9 @@ Toast、Dialog demo 路由已删除。关闭 feature 时，两个侧边栏都不
 
 ### AI Agent Prompt 组装
 
-1. AI Chat、AI Review 与 Review Ask 读取 `[ai.agent]`，并把所有内置指令委托给
-   `src/ai/prompts.rs`；调用点不保留 Prompt 字面量。
+1. AI Chat、AI Review 与 Review Ask 在请求准入时捕获 `[ai.agent].active_id`
+   指向的已保存 Profile，并把所有内置指令委托给 `src/ai/prompts.rs`；调用点不保留
+   Prompt 字面量。
 2. Adapter 只解析一次内嵌 `src/ai/prompts.toml` catalog，拒绝不支持的 schema，并以
    strict undefined 模式渲染每个带版本条目。
 3. 所选回复 locale 向 system 消息恰好注入一条语言指令；强类型上下文组装在 transport
@@ -1398,7 +1605,8 @@ Toast、Dialog demo 路由已删除。关闭 feature 时，两个侧边栏都不
 
 ### AI Agent 连通性测试
 
-1. 设置页独立保存 OpenAI-compatible Base URL、API Key、模型名称和回复语言。
+1. Editor Test 捕获独立命名草稿，行 Test 捕获被点击的已保存稳定 id Profile；
+   两者均包含 connection 的 Headers，不保存或激活。
 2. 用户触发测试后，共享 runtime 执行 `ai/agent.rs`。
 3. 统一 HTTP 模块请求 Provider 的 `/models` endpoint，并通过 Toast 反馈结果。
 4. 此流程不得改变 RAG Chat 的 endpoint、payload 或历史行为。
@@ -1480,6 +1688,12 @@ Interceptor 按注册顺序执行。Request hook 可修改 header；Response hoo
   `GitHubBlankslate`、`GitHubActionMenu`、`GitHubDialog`、Banner 反馈和
   项目终端入口。
 - Hover 关键节点应常驻，通过 opacity/state 控制，不要条件创建命中区域。
+- 可拖拽边界统一复用 `GitHubResizeHandle`：常驻 9px 命中带，调宽用 `ew-resize`、
+  调高用 `ns-resize`，空闲为中性 1px 线、hover/拖拽为 2px 线。Preview/PR 右栏、
+  PR 文件/冲突栏、Chat/AI Review 编辑器及 Terminal 共用交互；功能继续拥有自己的
+  clamp、状态和布局时点。`line-inset` 仅让绘制线避开编辑器圆角，不缩小命中带。
+  布局演练场用同一组件展示可调尺寸样例，见
+  [分割线契约](specs/ui-design.md#resizable-dividers--可拖拽分割线)。
 - 全窗口 Modal 必须挂在根层。
 - 滚动和窗口缩放期间避免重建 layout/model，精确计算应延迟到交互稳定后。
 - 多行排版遵循[文本布局契约](specs/text-layout.md)：原生 `Text` 和直接 `TextInput` 使用 Slint 已支持的 `line-height-factor`，Slint 1.18 的 `StyledText`/`TextEdit` Surface 则保留明确记录的 fallback。Artifact Preview 与 Agent Response 富文本当前继续使用 `StyledText` 排版及与之匹配的 Worker 测量。任何 factor 或 fallback 变化都属于 layout-key 变化，必须同步更新绘制、preferred height 与精确虚拟 extent。
@@ -1528,9 +1742,11 @@ Terminal viewport/session、更新取消、托盘关闭和路由布局需要做�
   原生反向遍历仍缺可信输入：CUA Shift+Tab 在普通宿主控件
   间也表现为前进；Windows 和读屏未测。原生应用最小为 800 × 600px，强制 640px
   组件 fallback 属于 compiled 边界覆盖。详见
-  [专项回归记录](validation/ui120-macos-focus-20261015/README.md)。
+  [专项回归记录（归档：docs/validation/ui120-macos-focus-20261015/README.md）](local-archives.md#validation-tracked-history-20261016)。
 
 - `Route.UiComponents` 是由 `ui-components` 控制的长期维护开发演练场；旧
   Login/Tools/List/Detail/Notification/Toast/Dialog demo 路由已删除。
 - 应用为专有/非开源软件，见根目录 `LICENSE.txt`；第三方 vendored 组件仍保留各自许可证。
 - `docs/archive/terminal_viewport_iteration_notes.md` 是历史证据，不是当前规格。
+
+UI Components 的静态/实时预览编译边界和工厂验收见 [演练场契约](specs/ui-components.md)。

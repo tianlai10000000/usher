@@ -320,55 +320,6 @@ component GitHubArtifactPreviewMarkdownBlock inherits Rectangle {
     }
 }
 
-// Docked-host interaction only: the visible divider stays one logical pixel,
-// while this wider stable hit target owns hover, pointer capture, and cancel.
-export component GitHubArtifactPreviewResizeHandle inherits Rectangle {
-    in property <bool> resize-enabled: true;
-    out property <bool> dragging: false;
-    callback drag-started();
-    callback drag-delta(length);
-    callback drag-finished(bool);
-
-    width: 9px;
-    background: transparent;
-
-    Rectangle {
-        x: (parent.width - self.width) / 2;
-        y: 0px;
-        width: 3px;
-        height: parent.height;
-        background: GitHubTheme.fg-muted;
-        opacity: root.resize-enabled && (root.dragging || resize-touch.has-hover)
-            ? 0.8
-            : 0;
-        animate opacity { duration: 100ms; easing: ease-out; }
-    }
-
-    resize-touch := TouchArea {
-        width: parent.width;
-        height: parent.height;
-        enabled: root.resize-enabled;
-        mouse-cursor: col-resize;
-        moved => {
-            if root.dragging {
-                root.drag-delta(self.mouse-x - self.pressed-x);
-            }
-        }
-        pointer-event(event) => {
-            if event.kind == PointerEventKind.down {
-                root.dragging = true;
-                root.drag-started();
-            } else if event.kind == PointerEventKind.up {
-                root.dragging = false;
-                root.drag-finished(false);
-            } else if event.kind == PointerEventKind.cancel {
-                root.dragging = false;
-                root.drag-finished(true);
-            }
-        }
-    }
-}
-
 export component GitHubArtifactPreviewSurface inherits Rectangle {
     in property <ArtifactPreviewKind> preview-kind: ArtifactPreviewKind.None;
     in property <[ArtifactPreviewBlock]> markdown-blocks: [];

@@ -1,7 +1,0 @@
-platform=macOS-27.0.1-arm64-arm-64bit-Mach-O
-machine=arm64
-backend=winit-femtovg
-Slint=1.18.1
-input=CUA native mouse/key; no synthetic WindowEvent or callback invocation
-HEAD=dbf871c092d4818c6d303446aa344ce455834688
-baseline=working tree before UI120 runtime changes; prior fixes retained

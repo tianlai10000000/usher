@@ -1,6 +1,9 @@
 use std::time::Duration;
 
 use i_slint_backend_testing::ElementHandle;
+use i_slint_backend_testing::testing_backend::TestingWindow;
+use i_slint_core::cursor::MouseCursorInner;
+use i_slint_core::items::BuiltInMouseCursor;
 use slint::platform::{PointerEventButton, WindowEvent};
 use slint::{ComponentHandle, Global, LogicalPosition, LogicalSize};
 use usher_lib::{AppState, ArtifactPreviewKind, MainWindow, Route};
@@ -13,6 +16,15 @@ fn move_pointer(window: &MainWindow, x: f32, y: f32) {
     window.window().dispatch_event(WindowEvent::PointerMoved {
         position: LogicalPosition::new(x, y),
     });
+}
+
+fn cursor(window: &MainWindow) -> MouseCursorInner {
+    let adapter = i_slint_core::window::WindowInner::from_pub(window.window()).window_adapter();
+    let testing = adapter
+        .internal(i_slint_core::InternalToken)
+        .and_then(|adapter| (adapter as &dyn std::any::Any).downcast_ref::<TestingWindow>())
+        .expect("testing window adapter");
+    testing.mouse_cursor()
 }
 
 #[test]
@@ -71,6 +83,11 @@ fn docked_preview_captures_first_drag_across_the_complete_divider() {
                         let x = start + offset;
                         let y = 300.0;
                         move_pointer(&window, x, y);
+                        assert_eq!(
+                            cursor(&window),
+                            MouseCursorInner::BuiltIn(BuiltInMouseCursor::EwResize),
+                            "divider hover: mode={mode}, width={width}, route={route:?}, locale={locale}, offset={offset}"
+                        );
                         window.window().dispatch_event(WindowEvent::PointerPressed {
                             position: LogicalPosition::new(x, y),
                             button: PointerEventButton::Left,
@@ -157,6 +174,11 @@ fn pr_review_divider_keeps_first_drag_capture_with_either_trailing_surface() {
             let width = window.get_pr_review_trailing_surface_width();
             let x = 1280.0 - width + offset;
             move_pointer(&window, x, 300.0);
+            assert_eq!(
+                cursor(&window),
+                MouseCursorInner::BuiltIn(BuiltInMouseCursor::EwResize),
+                "PR trailing divider hover: preview={preview}, offset={offset}"
+            );
             window.window().dispatch_event(WindowEvent::PointerPressed {
                 position: LogicalPosition::new(x, 300.0),
                 button: PointerEventButton::Left,

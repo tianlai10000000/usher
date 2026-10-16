@@ -1,0 +1,167 @@
+import { FactoryTooltipKind, FactoryTooltipState } from "../../state/factory_tooltip_state.slint";
+import { GitHubTransientFloatingOverlayHost } from "../github_floating_overlay.slint";
+import { GitHubTooltipSurface } from "../github_tooltip.slint";
+import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint";
+import { I18n } from "@i18n";
+
+export component GitHubShowcaseTooltipOverlay inherits Rectangle {
+    width: 100%; height: 100%; background: transparent;
+    private property <int> observed-lease: 0;
+    floating := GitHubTransientFloatingOverlayHost {
+        active: FactoryTooltipState.kind != FactoryTooltipKind.None;
+        anchor-x: FactoryTooltipState.anchor-x; anchor-y: FactoryTooltipState.anchor-y;
+        anchor-width: FactoryTooltipState.anchor-width; anchor-height: FactoryTooltipState.anchor-height;
+        preferred-placement: FactoryTooltipState.kind == FactoryTooltipKind.Copy
+            || FactoryTooltipState.kind == FactoryTooltipKind.Copied
+            || FactoryTooltipState.kind == FactoryTooltipKind.MoreFilters
+            ? GitHubTooltipPlacement.Bottom : GitHubTooltipPlacement.Top;
+        alignment: GitHubTooltipAlignment.Center;
+        floating-width:
+            FactoryTooltipState.kind == FactoryTooltipKind.OpenConversation ? surface-openconversation.width :
+            FactoryTooltipState.kind == FactoryTooltipKind.ReviewWithAi ? surface-reviewwithai.width :
+            FactoryTooltipState.kind == FactoryTooltipKind.QueuedAi ? surface-queuedai.width :
+            FactoryTooltipState.kind == FactoryTooltipKind.RunningAi ? surface-runningai.width :
+            FactoryTooltipState.kind == FactoryTooltipKind.FailedAi ? surface-failedai.width :
+            FactoryTooltipState.kind == FactoryTooltipKind.Invisible ? surface-invisible.width :
+            FactoryTooltipState.kind == FactoryTooltipKind.Bordered ? surface-bordered.width :
+            FactoryTooltipState.kind == FactoryTooltipKind.Danger ? surface-danger.width :
+            FactoryTooltipState.kind == FactoryTooltipKind.Loading ? surface-loading.width :
+            FactoryTooltipState.kind == FactoryTooltipKind.Disabled ? surface-disabled.width :
+            FactoryTooltipState.kind == FactoryTooltipKind.Review ? surface-review.width :
+            FactoryTooltipState.kind == FactoryTooltipKind.CloseReview ? surface-closereview.width :
+            FactoryTooltipState.kind == FactoryTooltipKind.ReviewRunning ? surface-reviewrunning.width :
+            FactoryTooltipState.kind == FactoryTooltipKind.Copy ? surface-copy.width :
+            FactoryTooltipState.kind == FactoryTooltipKind.Copied ? surface-copied.width :
+            FactoryTooltipState.kind == FactoryTooltipKind.MoreFilters ? surface-morefilters.width :
+            FactoryTooltipState.kind == FactoryTooltipKind.CancelReview ? surface-cancelreview.width :
+            0px;
+        floating-height:
+            FactoryTooltipState.kind == FactoryTooltipKind.OpenConversation ? surface-openconversation.height :
+            FactoryTooltipState.kind == FactoryTooltipKind.ReviewWithAi ? surface-reviewwithai.height :
+            FactoryTooltipState.kind == FactoryTooltipKind.QueuedAi ? surface-queuedai.height :
+            FactoryTooltipState.kind == FactoryTooltipKind.RunningAi ? surface-runningai.height :
+            FactoryTooltipState.kind == FactoryTooltipKind.FailedAi ? surface-failedai.height :
+            FactoryTooltipState.kind == FactoryTooltipKind.Invisible ? surface-invisible.height :
+            FactoryTooltipState.kind == FactoryTooltipKind.Bordered ? surface-bordered.height :
+            FactoryTooltipState.kind == FactoryTooltipKind.Danger ? surface-danger.height :
+            FactoryTooltipState.kind == FactoryTooltipKind.Loading ? surface-loading.height :
+            FactoryTooltipState.kind == FactoryTooltipKind.Disabled ? surface-disabled.height :
+            FactoryTooltipState.kind == FactoryTooltipKind.Review ? surface-review.height :
+            FactoryTooltipState.kind == FactoryTooltipKind.CloseReview ? surface-closereview.height :
+            FactoryTooltipState.kind == FactoryTooltipKind.ReviewRunning ? surface-reviewrunning.height :
+            FactoryTooltipState.kind == FactoryTooltipKind.Copy ? surface-copy.height :
+            FactoryTooltipState.kind == FactoryTooltipKind.Copied ? surface-copied.height :
+            FactoryTooltipState.kind == FactoryTooltipKind.MoreFilters ? surface-morefilters.height :
+            FactoryTooltipState.kind == FactoryTooltipKind.CancelReview ? surface-cancelreview.height :
+            0px;
+        surface-openconversation := GitHubTooltipSurface {
+            visible: FactoryTooltipState.kind == FactoryTooltipKind.OpenConversation;
+            text: I18n.pr-list-open-conversation;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-reviewwithai := GitHubTooltipSurface {
+            visible: FactoryTooltipState.kind == FactoryTooltipKind.ReviewWithAi;
+            text: I18n.pr-list-review-with-ai;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-queuedai := GitHubTooltipSurface {
+            visible: FactoryTooltipState.kind == FactoryTooltipKind.QueuedAi;
+            text: I18n.pr-list-ai-review-queued;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-runningai := GitHubTooltipSurface {
+            visible: FactoryTooltipState.kind == FactoryTooltipKind.RunningAi;
+            text: I18n.pr-list-ai-review-in-progress;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-failedai := GitHubTooltipSurface {
+            visible: FactoryTooltipState.kind == FactoryTooltipKind.FailedAi;
+            text: I18n.pr-list-ai-review-failed;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-invisible := GitHubTooltipSurface {
+            visible: FactoryTooltipState.kind == FactoryTooltipKind.Invisible;
+            text: I18n.ui-components-demo-invisible-icon-button;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-bordered := GitHubTooltipSurface {
+            visible: FactoryTooltipState.kind == FactoryTooltipKind.Bordered;
+            text: I18n.ui-components-demo-bordered-icon-button;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-danger := GitHubTooltipSurface {
+            visible: FactoryTooltipState.kind == FactoryTooltipKind.Danger;
+            text: I18n.ui-components-demo-danger-icon-button;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-loading := GitHubTooltipSurface {
+            visible: FactoryTooltipState.kind == FactoryTooltipKind.Loading;
+            text: I18n.common-loading;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-disabled := GitHubTooltipSurface {
+            visible: FactoryTooltipState.kind == FactoryTooltipKind.Disabled;
+            text: I18n.ui-components-demo-disabled;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-review := GitHubTooltipSurface {
+            visible: FactoryTooltipState.kind == FactoryTooltipKind.Review;
+            text: I18n.ui-components-demo-review-this-pull-request-with-ai;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-closereview := GitHubTooltipSurface {
+            visible: FactoryTooltipState.kind == FactoryTooltipKind.CloseReview;
+            text: I18n.ui-components-demo-close-ai-code-review;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-reviewrunning := GitHubTooltipSurface {
+            visible: FactoryTooltipState.kind == FactoryTooltipKind.ReviewRunning;
+            text: I18n.ui-components-demo-ai-code-review-is-running;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-copy := GitHubTooltipSurface {
+            visible: FactoryTooltipState.kind == FactoryTooltipKind.Copy;
+            text: I18n.common-copy-to-clipboard;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-copied := GitHubTooltipSurface {
+            visible: FactoryTooltipState.kind == FactoryTooltipKind.Copied;
+            text: I18n.common-copied;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-morefilters := GitHubTooltipSurface {
+            visible: FactoryTooltipState.kind == FactoryTooltipKind.MoreFilters;
+            text: I18n.pr-list-more-filters;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-cancelreview := GitHubTooltipSurface {
+            visible: FactoryTooltipState.kind == FactoryTooltipKind.CancelReview;
+            text: I18n.pr-list-cancel-review;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+    }
+    Timer {
+        interval: 48ms; running: FactoryTooltipState.kind != FactoryTooltipKind.None;
+        triggered => {
+            if FactoryTooltipState.lease == root.observed-lease { FactoryTooltipState.dismiss-all(); }
+            else { root.observed-lease = FactoryTooltipState.lease; }
+        }
+    }
+}

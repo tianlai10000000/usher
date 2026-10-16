@@ -1,0 +1,80 @@
+import { AppState, AiAgentListItem } from "../../state/app_state.slint";
+import { I18n } from "@i18n";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { FloatingOverlayRect } from "../../state/floating_overlay_bridge.slint";
+import { AgentTooltipState, GitHubAiAgentAddAction } from "./github_ai_agent_tooltip.slint";
+import { GitHubAiAgentListRow } from "./github_ai_agent_list_row.slint";
+import { GitHubCompactTextField } from "../input/compact_text_field.slint";
+import { GitHubPagination } from "../navigation/github_pagination.slint";
+
+// Ten fixed leaves preserve paint identity across filtering and Settings reuse.
+export component GitHubAiAgentList inherits VerticalLayout {
+    width: 100%; min-width: 0px; spacing: 12px; alignment: start;
+    private property <string> query: AppState.ai-agent-query;
+    private property <int> page: AppState.ai-agent-page;
+    private property <[AiAgentListItem]> rows: AppState.ai-agent-list;
+    private property <FloatingOverlayRect> tooltip-viewport: {
+        x: max(root.absolute-position.x, AgentTooltipState.viewport.x),
+        y: max(root.absolute-position.y, AgentTooltipState.viewport.y),
+        width: max(0px, min(root.absolute-position.x + root.width,
+            AgentTooltipState.viewport.x + AgentTooltipState.viewport.width)
+            - max(root.absolute-position.x, AgentTooltipState.viewport.x)),
+        height: max(0px, min(root.absolute-position.y + root.height,
+            AgentTooltipState.viewport.y + AgentTooltipState.viewport.height)
+            - max(root.absolute-position.y, AgentTooltipState.viewport.y)),
+    };
+    changed query => { AgentTooltipState.dismiss(); }
+    changed page => { AgentTooltipState.dismiss(); }
+    changed rows => { AgentTooltipState.dismiss(); }
+    changed absolute-position => { AgentTooltipState.dismiss(); }
+    changed width => { AgentTooltipState.dismiss(); }
+    changed height => { AgentTooltipState.dismiss(); }
+    HorizontalLayout {
+        width: parent.width; height: 32px; spacing: 12px;
+        GitHubCompactTextField {
+            min-width: 0px; horizontal-stretch: 1;
+            text <=> AppState.ai-agent-query;
+            placeholder: I18n.settings-ai-agent-search;
+            edited(value) => { AppState.query-ai-agents(value); }
+        }
+        GitHubAiAgentAddAction {
+            tooltip-viewport: root.tooltip-viewport;
+            activated => { AppState.open-new-ai-agent(); }
+        }
+    }
+    Text {
+        width: parent.width;
+        visible: AppState.ai-agent-list.length == 0;
+        height: self.visible ? 56px : 0px;
+        text: I18n.settings-ai-agent-empty;
+        font-size: 14px; color: GitHubTheme.fg-muted; vertical-alignment: center;
+    }
+    group-frame := Rectangle {
+        width: parent.width;
+        height: AppState.ai-agent-list.length > 0 ? min(10, AppState.ai-agent-list.length) * 72px + 2px : 0px;
+        visible: AppState.ai-agent-list.length > 0;
+        border-width: 1px; border-radius: GitHubMetrics.radius-medium;
+        border-color: GitHubTheme.border-default; background: GitHubTheme.canvas-default;
+        rows := VerticalLayout {
+            x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px;
+            spacing: 0px; alignment: start;
+            GitHubAiAgentListRow { slot: 0; tooltip-viewport: root.tooltip-viewport; }
+            GitHubAiAgentListRow { slot: 1; tooltip-viewport: root.tooltip-viewport; }
+            GitHubAiAgentListRow { slot: 2; tooltip-viewport: root.tooltip-viewport; }
+            GitHubAiAgentListRow { slot: 3; tooltip-viewport: root.tooltip-viewport; }
+            GitHubAiAgentListRow { slot: 4; tooltip-viewport: root.tooltip-viewport; }
+            GitHubAiAgentListRow { slot: 5; tooltip-viewport: root.tooltip-viewport; }
+            GitHubAiAgentListRow { slot: 6; tooltip-viewport: root.tooltip-viewport; }
+            GitHubAiAgentListRow { slot: 7; tooltip-viewport: root.tooltip-viewport; }
+            GitHubAiAgentListRow { slot: 8; tooltip-viewport: root.tooltip-viewport; }
+            GitHubAiAgentListRow { slot: 9; tooltip-viewport: root.tooltip-viewport; }
+        }
+    }
+    GitHubPagination {
+        width: parent.width;
+        current-page: AppState.ai-agent-page;
+        page-count: AppState.ai-agent-total-pages;
+        pages: AppState.ai-agent-pages;
+        page-selected(page) => { AppState.select-ai-agents-page(page); }
+    }
+}

@@ -1,3 +1,4 @@
+import { FactoryTooltipState } from "../../state/factory_tooltip_state.slint";
 import { GitHubPullRequestFlow } from "../workflow/github_pr_flow.slint";
 import { AiReviewRuleChoice } from "@ai-review";
 import { GitHubButton } from "../settings/github_settings_controls.slint";
@@ -51,6 +52,7 @@ export component GitHubPrMenuShowcase inherits Rectangle {
     }
 
     flow := GitHubPullRequestFlow {
+        fixed-tooltips: FactoryTooltipState.enabled;
         y: 48px;
         width: root.width;
         viewport-global-x: root.viewport-global-x;

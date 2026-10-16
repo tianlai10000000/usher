@@ -1,0 +1,155 @@
+import { I18n } from "@i18n";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { GitHubResizeHandle } from "../github_resize_handle.slint";
+import { GitHubButton } from "../settings/github_settings_controls.slint";
+import { GitHubCheckbox } from "../input/github_checkbox.slint";
+
+component GitHubResizeDemoPane inherits Rectangle {
+    in property <string> label;
+
+    Text {
+        x: GitHubMetrics.size-8;
+        width: max(0px, parent.width - 2 * GitHubMetrics.size-8);
+        height: parent.height;
+        text: root.label;
+        font-size: GitHubMetrics.text-small;
+        color: GitHubTheme.fg-muted;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+component GitHubResizePaneExample inherits Rectangle {
+    in property <bool> horizontal: false;
+    in property <bool> resize-enabled: true;
+    out property <bool> dragging: handle.dragging;
+    private property <float> split-ratio: 0.5;
+    private property <float> saved-ratio: 0.5;
+
+    public function reset() { root.split-ratio = 0.5; }
+
+    height: 224px;
+    background: transparent;
+
+    Text {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: GitHubMetrics.size-24;
+        text: root.horizontal
+            ? I18n.ui-components-resize-height
+            : I18n.ui-components-resize-width;
+        font-size: GitHubMetrics.text-small;
+        font-weight: 600;
+        color: GitHubTheme.fg-default;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    frame := Rectangle {
+        private property <length> extent: max(0px,
+            (root.horizontal ? self.height : self.width) - 2px);
+        private property <length> minimum-pane: min(GitHubMetrics.size-64,
+            self.extent / 3);
+        private property <length> first-size: max(self.minimum-pane,
+            min(self.extent - self.minimum-pane, self.extent * root.split-ratio));
+
+        y: GitHubMetrics.size-32;
+        width: parent.width;
+        height: parent.height - self.y;
+        border-radius: GitHubMetrics.radius-medium;
+        border-width: GitHubMetrics.border-thin;
+        border-color: GitHubTheme.border-default;
+        background: GitHubTheme.canvas-default;
+
+        GitHubResizeDemoPane {
+            x: 1px;
+            y: 1px;
+            width: root.horizontal ? parent.width - 2px : frame.first-size;
+            height: root.horizontal ? frame.first-size : parent.height - 2px;
+            label: root.horizontal
+                ? I18n.ui-components-resize-top-pane
+                : I18n.ui-components-resize-left-pane;
+            background: transparent;
+        }
+
+        GitHubResizeDemoPane {
+            x: root.horizontal ? 1px : 1px + frame.first-size;
+            y: root.horizontal ? 1px + frame.first-size : 1px;
+            width: root.horizontal ? parent.width - 2px : frame.extent - frame.first-size;
+            height: root.horizontal ? frame.extent - frame.first-size : parent.height - 2px;
+            label: root.horizontal
+                ? I18n.ui-components-resize-bottom-pane
+                : I18n.ui-components-resize-right-pane;
+            background: transparent;
+        }
+
+        handle := GitHubResizeHandle {
+            x: root.horizontal ? 1px : 1px + frame.first-size - 4px;
+            y: root.horizontal ? 1px + frame.first-size - 4px : 1px;
+            width: root.horizontal ? parent.width - 2px : 9px;
+            height: root.horizontal ? 9px : parent.height - 2px;
+            horizontal: root.horizontal;
+            resize-enabled: root.resize-enabled;
+            drag-started => { root.saved-ratio = root.split-ratio; }
+            drag-delta(delta) => {
+                if frame.extent > 0px {
+                    root.split-ratio = max(0, min(1,
+                        (frame.first-size + delta) / frame.extent));
+                }
+            }
+            drag-finished(cancelled) => {
+                if cancelled { root.split-ratio = root.saved-ratio; }
+            }
+        }
+    }
+}
+
+// Only presentation geometry belongs to this fixture. Both handles use the
+// production component, including cursor, hover/drag paint and cancellation.
+export component GitHubResizeHandleShowcase inherits Rectangle {
+    private property <bool> resize-enabled: true;
+    private property <bool> stacked: root.width < GitHubMetrics.breakpoint-medium;
+
+    height: GitHubMetrics.size-48 + width-example.height
+        + (root.stacked ? GitHubMetrics.size-16 + height-example.height : 0px);
+    background: transparent;
+
+    controls := HorizontalLayout {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: GitHubMetrics.size-32;
+        spacing: GitHubMetrics.size-16;
+        alignment: start;
+
+        GitHubCheckbox {
+            text: I18n.ui-components-resize-enabled;
+            checked: root.resize-enabled;
+            width: max(0px, controls.width - reset-button.width - GitHubMetrics.size-16);
+            toggled(checked) => { root.resize-enabled = checked; }
+        }
+        reset-button := GitHubButton {
+            text: I18n.ui-components-resize-reset;
+            disabled: width-example.dragging || height-example.dragging;
+            clicked => { width-example.reset(); height-example.reset(); }
+        }
+    }
+
+    width-example := GitHubResizePaneExample {
+        x: 0px;
+        y: GitHubMetrics.size-48;
+        width: root.stacked ? root.width : (root.width - GitHubMetrics.size-16) / 2;
+        resize-enabled: root.resize-enabled;
+    }
+
+    height-example := GitHubResizePaneExample {
+        x: root.stacked ? 0px : width-example.width + GitHubMetrics.size-16;
+        y: root.stacked ? width-example.y + width-example.height + GitHubMetrics.size-16
+            : width-example.y;
+        width: width-example.width;
+        horizontal: true;
+        resize-enabled: root.resize-enabled;
+    }
+}

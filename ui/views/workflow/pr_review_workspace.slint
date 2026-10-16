@@ -1,3 +1,4 @@
+import { GitHubResizeHandle } from "../../components/github_resize_handle.slint";
 import { ScrollView } from "@material";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { AppState } from "../../state/app_state.slint";
@@ -40,7 +41,6 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
     // Preserve the session preference while clamping the rendered width when
     // the window becomes narrower.
     private property <length> file-list-width: max(root.file-list-min-width, min(root.file-list-max-width, root.file-list-preferred-width));
-    private property <bool> file-list-resizing: false;
     private property <length> file-list-drag-start-width: root.file-list-width;
     // Session show/hide preference. Width-threshold crossings auto-set this;
     // the toolbar toggle always flips it, including while below the breakpoint.
@@ -983,7 +983,6 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                         GitHubFileTreeToggleButton {
                             file-tree-visible: root.file-list-visible;
                             clicked => {
-                                root.file-list-resizing = false;
                                 root.file-list-user-visible = !root.file-list-user-visible;
                             }
                         }
@@ -3799,49 +3798,25 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
 
                 }
 
-                file-list-resize-handle := TouchArea {
+                file-list-resize-handle := GitHubResizeHandle {
                     x: root.file-list-visible ? root.file-list-width - 4px : -10px;
                     y: 0px;
-                    width: root.file-list-visible ? 9px : 0px;
                     height: parent.height;
                     z: 100;
-                    mouse-cursor: col-resize;
-                    moved => {
-                        if root.file-list-resizing {
-                            // The handle moves with the divider, so its local
-                            // pointer delta is the distance still left to
-                            // follow, not the distance from the original
-                            // press. Applying it to the current width keeps
-                            // the divider locked to the pointer.
-                            root.file-list-preferred-width = max(
-                                root.file-list-min-width,
-                                min(
-                                    root.file-list-max-width,
-                                    root.file-list-width + (self.mouse-x - self.pressed-x)
-                                )
-                            );
-                        }
+                    visible: root.file-list-visible;
+                    resize-enabled: root.file-list-visible;
+                    drag-started => {
+                        root.file-list-drag-start-width = root.file-list-width;
                     }
-                    pointer-event(event) => {
-                        if event.kind == PointerEventKind.down {
-                            root.file-list-resizing = true;
-                            root.file-list-drag-start-width = root.file-list-width;
-                        } else if event.kind == PointerEventKind.up {
-                            root.file-list-resizing = false;
-                        } else if event.kind == PointerEventKind.cancel {
+                    drag-delta(delta) => {
+                        root.file-list-preferred-width = max(root.file-list-min-width,
+                            min(root.file-list-max-width, root.file-list-width + delta));
+                    }
+                    drag-finished(cancelled) => {
+                        if cancelled {
                             root.file-list-preferred-width = root.file-list-drag-start-width;
-                            root.file-list-resizing = false;
                         }
                     }
-                }
-                Rectangle {
-                    x: root.file-list-width - 1px;
-                    y: 0px;
-                    width: 3px;
-                    height: parent.height;
-                    z: 101;
-                    background: GitHubTheme.fg-muted;
-                    opacity: root.file-list-visible && (root.file-list-resizing || file-list-resize-handle.has-hover) ? 0.8 : 0;
                 }
 
                 // Sync the filter IconButton position to the workspace-root

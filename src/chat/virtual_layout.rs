@@ -432,6 +432,7 @@ mod tests {
 
     fn message(id: i64, content: impl Into<String>) -> StoredChatMessage {
         StoredChatMessage {
+            agent: None,
             id,
             role: StoredMessageRole::Assistant,
             status: StoredMessageStatus::Normal,

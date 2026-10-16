@@ -9,6 +9,7 @@ use usher_lib::{ChatMessage, MainWindow, MessageRole, MessageStatus, Route};
 
 fn message() -> ChatMessage {
     ChatMessage {
+        agent_label: "".into(),
         id: 31,
         role: MessageRole::User,
         status: MessageStatus::Normal,

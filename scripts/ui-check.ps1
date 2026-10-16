@@ -13,7 +13,7 @@ try {
         throw "ui-check requires slint-viewer 1.18.1; found: $viewerVersion"
     }
 
-    & cargo run --quiet --locked -p usher-i18n --example prepare-slint -- target/i18n-dev usher-ui | Out-Null
+    & cargo run --quiet --locked -p usher-i18n-build --example prepare-slint -- target/i18n-dev usher-ui | Out-Null
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }
@@ -25,6 +25,14 @@ try {
         -L "ai-review=ui/features/ai_review/full.slint" `
         -L "i18n=target/i18n-dev/usher-i18n/i18n.slint" `
         "ui/main.slint"
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+    & slint-viewer --check `
+        -L "material=material-1.18.1/material.slint" `
+        -L "ai-review=ui/features/ai_review/full.slint" `
+        -L "i18n=target/i18n-dev/usher-i18n/i18n.slint" `
+        "ui/views/ui_components_factory.slint"
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }

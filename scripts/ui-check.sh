@@ -22,10 +22,10 @@ case "$viewer_version" in
         ;;
 esac
 
-cargo run --quiet --locked -p usher-i18n --example prepare-slint -- \
+cargo run --quiet --locked -p usher-i18n-build --example prepare-slint -- \
     target/i18n-dev usher-ui >/dev/null
 
-exec slint-viewer \
+slint-viewer \
     --check \
     -L material=material-1.18.1/material.slint \
     -L ui-components=ui/features/ui_components_enabled.slint \
@@ -33,3 +33,10 @@ exec slint-viewer \
     -L ai-review=ui/features/ai_review/full.slint \
     -L i18n=target/i18n-dev/usher-i18n/i18n.slint \
     ui/main.slint
+
+exec slint-viewer \
+    --check \
+    -L material=material-1.18.1/material.slint \
+    -L ai-review=ui/features/ai_review/full.slint \
+    -L i18n=target/i18n-dev/usher-i18n/i18n.slint \
+    ui/views/ui_components_factory.slint
