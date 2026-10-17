@@ -1,0 +1,54 @@
+import { GitHubPrReviewTooltipOverlay } from "../../components/pr_review/tooltip_overlay.slint";
+import { PrReviewTooltipState } from "../../components/pr_review/tooltip_state.slint";
+import { TransientOverlayState } from "../../state/transient_overlay_state.slint";
+export { PrReviewTooltipState, PrReviewTooltipKind } from "../../components/pr_review/tooltip_state.slint";
+import { PrReviewSurface } from "surface.slint";
+import { PrReviewHostBridge } from "host_bridge.slint";
+import { GitHubTooltipOverlayHost } from "../../components/github_tooltip_overlay.slint";
+export { PrReviewBridge } from "bridge.slint";
+export { PrReviewHostBridge, PrReviewHostContext } from "host_bridge.slint";
+export { PrDiffBridge } from "diff_bridge.slint";
+export { PrConflictsBridge } from "conflicts_bridge.slint";
+export { AppState } from "../../state/app_state.slint";
+export { TransientOverlayState } from "../../state/transient_overlay_state.slint";
+export { TooltipOverlayState } from "../../state/tooltip_overlay_state.slint";
+export { FloatingOverlayBridge, FloatingOverlayRect } from "../../state/floating_overlay_bridge.slint";
+export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffRowMetric, WorkflowPrDiffVirtualRow, WorkflowPrDiffVirtualWindow, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffGlyphRange, WorkflowPrDiffGlyphRect, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit } from "../../components/pr_review/shell.slint";
+export { PrConflictFile, PrConflictRow, PrConflictWindow } from "conflicts_bridge.slint";
+
+export component PrReviewFactory inherits Window {
+    width: PrReviewHostBridge.context.width;
+    height: PrReviewHostBridge.context.height;
+    background: transparent;
+    default-font-family: PrReviewHostBridge.context.font-family;
+    default-font-weight: 445;
+    callback host-key-pressed(string, bool, bool, bool, bool) -> bool;
+    callback claim-host-exclusive();
+    private property <int> local-exclusive-generation: TransientOverlayState.exclusive-generation;
+    private property <bool> modal-visible: PrReviewHostBridge.modal-visible;
+    changed local-exclusive-generation => { root.claim-host-exclusive(); }
+    changed modal-visible => { PrReviewTooltipState.dismiss(); }
+    FocusScope {
+        width: parent.width; height: parent.height;
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+        PrReviewSurface { width: parent.width; height: parent.height; }
+        capture-key-pressed(event) => {
+            if event.text != Key.Tab && event.text != Key.Backtab
+                    && root.host-key-pressed(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift, event.modifiers.meta) { return accept; }
+            return reject;
+        }
+        key-pressed(event) => {
+            if (event.text == Key.Tab || event.text == Key.Backtab)
+                    && root.host-key-pressed(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift, event.modifiers.meta) { return accept; }
+            return reject;
+        }
+    }
+    // Dynamic PR metadata keeps the shared two-slot portal. Fixed actions use literal leaves.
+    GitHubTooltipOverlayHost { width: parent.width; height: parent.height; }
+    GitHubPrReviewTooltipOverlay {
+        width: parent.width; height: parent.height; z: 20001;
+        tooltip-enabled: PrReviewHostBridge.context.active;
+        anchor-viewport: { x: 0px, y: 0px, width: root.width, height: root.height };
+    }
+}

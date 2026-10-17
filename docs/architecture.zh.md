@@ -60,36 +60,84 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 
 生产构建在编译期固定选择 Winit + FemtoVG/OpenGL。Skia 和 FemtoVG/WGPU 作为显式启用的 Cargo feature，仅用于渲染器诊断和 A/B 对比，避免常规构建因同时链接多个实现而静默切换渲染器。Slint 应用内实时预览和 UI Components 演练场分别由显式的 `live-preview`、`ui-components` 开发 feature 控制，默认构建和生产构建都不会编译它们。当前 macOS 测试中 WGPU 虽降低 physical footprint，但会增加 RSS，因此不作为生产默认配置。
 
-PR Review 通过稳定的 Slint `@pr-review` feature package 入口暴露，与打开它的
-路由解耦。默认和 Release 构建把该入口映射到完整页面；显式、非默认的
-`dev-shell` feature 会把整个包映射到协议兼容的空实现，并把 `PrReview` 导航
-回退到 Workflow，使无关 Shell 修改不编译大型审核渲染树。这不是跨 crate 拆页；
-完整页面的状态、浮层和交互仍作为一个整体保留。
+PR Review 的完整视觉图由 `usher-ui-pr-review` 独立生成。主窗口的 `@pr-review`
+入口只导入小型静态 factory host，功能的 `@pr-review-page` 选择完整工作区。
+`PrReviewBridge`、Diff/Find 和 Conflicts API 直接绑定实际功能 root，不复制 MainWindow
+model 或逐命令增加根代理。显式 `live-preview` 使用主窗口集成图并跳过独立静态产品；
+`dev-shell` 在两个包中选择协议兼容的空页面，并把 PrReview 导航回退到 Workflow。
+稳定职责和生命周期见 [PR Review UI](specs/pr-review-ui.md)；构建 A/B 与原生验收另记。
+B3 的运行时验收失败，拆分仍未采用；保留原始 A 对照，不能将 B3 升级为新的
+性能基线。
+B5 有界高亮修复仍是未采用候选：此前短 Release A/B 与限定 macOS 原生检查的候选
+门槛通过，联合 strict 仍保留原 A 失败；后续
+[完整 P6](archive/maintenance/b5-full-p6-20261017.md) 已完成，六组短对照及另外三组
+长时检查通过，但 15 分钟 PR soak 因 RSS 增长及斜率失败。B5 和整批拆分均不晋升
+基线；短对照成功与长时
+失败分别保留，不混合不同显示 scale 的绝对数字。已拒绝的 B4
+原生 Canvas 提案不在当前实现中。B5 不能覆盖 B3 已失败的运行时结果，也不放宽
+既有 RSS、footprint、增长、心跳或周期门槛。
 
-在 macOS 上，进入或退出全屏后会在 AppKit 最终标题栏布局完成时重新对齐原生控件，并把原生全屏状态发布给 Slint。普通窗口通过交通灯右侧的原生附件提供 Back、Forward、Sidebar；全屏时隐藏这些原生操作，并在内容左上角常驻同一组控件。顶部 Hover 由 AppKit 揭示交通灯与左对齐的 `Usher` 标题。侧栏收起时，面包屑为全屏常驻控件预留左侧 112px。交通灯簇整体右移 8pt 以对齐侧栏图标中线。
+在 macOS 上，进入或退出全屏后会在 AppKit 最终标题栏布局完成时重新对齐原生控件，并把原生全屏状态发布给 Slint。普通窗口通过交通灯右侧的原生附件提供 Back、Forward、Sidebar；全屏时隐藏这些原生操作，并在内容左上角常驻同一组控件。顶部 Hover 由 AppKit 揭示交通灯与左对齐的 `Usher` 标题。侧栏收起时，面包屑为全屏常驻控件预留左侧 112px。交通灯簇整体右移 8pt 以对齐侧栏图标中线。原生附件为该水平对齐偏移预留空间，确保整个 92×28pt 操作条始终位于 100pt 宽的父容器内。
 
 ## 系统上下文
 
 PR Diff/全文高亮完成回调共用 `controller/highlight_completion.rs`，先检查
-请求代次、索引、路径和显示模式，再回写 loading/model；Worker 调度保持不变。
+请求代次、索引、路径和显示模式，再回写 loading/model。保留的 B5 工作区修复候选
+由 `controller/highlighting.rs` 统一调度 Diff/全文 token 化：每个控制器最多一个执行中
+计算和一个可被最新输入替换的待执行请求，复用 `app_runtime::latest_compute` 与共享
+blocking pool。入队前捕获请求代次、不可变文件、所选索引、模式、滚动决策和会话
+资源 lease。替换选择、缓存命中、延迟加载文件选择及显式重置都会取消旧计算/输出；
+资源初始化前和每条逻辑源码行之间检查取消。资源初始化及单次 Syntect 行解析仍不可
+中断。完成时通过 weak window 回到 event loop，并继续经过领域身份校验；仅有
+mailbox 取消校验不能准许 loading/model 回写。
 
-PR 语法 Worker 入队前通过 `controller/highlight_session.rs` 取得会话局部的
-惰性资源槽；重置时分离整个槽，避免旧 Worker 再填入新会话。源码/展开回调也必须
-先检查代次与文件索引，再清 loading。`controller/lifecycle.rs` 中显式离线
+PR 语法 Worker 入队前通过 `controller/highlight_session.rs` 捕获会话局部惰性
+资源 lease。尚未采用的 B7 工作区候选由 `controller/highlight_cache.rs` 持有
+当前内置资源槽、审核意图和合并后的空闲/释放状态。正常 open 在异步读取前同步
+`activate()`，只声明使用而不加载语法；高亮任务还会捕获缓存槽 `lease()`，
+不持有可重新取槽的可变缓存 owner。重置先取消待执行/已完成高亮输出，在锁外
+分离会话槽，再申请空闲确认；同次重开/重载可在确认前重新使用现有图。
+真正关闭审核和项目重置走此路径。
+
+`lifecycle.rs` 将 `request_idle_check(None)` 合并为最多一个 weak event-loop
+回调。异步读取错误先经过 Diff 强类型代次守卫，再提交其意图 ticket；新 open 或
+lease 会使旧 ticket 失去释放权限。`confirm_idle()` 读取最新意图，包含
+reset → claim → reset。只有已确认空闲的槽才交给共享
+`app_runtime::release_resources` blocking drain；每个缓存最多一个 drain，
+后续槽也须再次经 UI 确认，不会抢取尚待确认的 reset。正常空闲资源在 Worker 及
+两种槽锁之外析构。旧任务可预热其捕获的旧缓存/会话 lease，但不能初始化替换槽或
+发布过期结果。最终控制器销毁沿用既有 CPU 清理路径，不引入全局延迟析构服务。
+源码/展开回调仍先检查代次和文件索引，再清 loading。`controller/lifecycle.rs` 中显式离线
 `test-fixtures` 候选在离页时释放 Diff/Find 派生展示，返回时重建；保留领域详情、
 范围/展开上下文、源码缓存与懒加载 Tab 状态。候选不是生产默认，尚未通过原生
 Release 性能验收。挂起状态通过现有 PR State Store 的强类型 Action 更新，
 不使远端 mutation 失效。
 
-正常隐藏路由时保留当前审核的语法资源、token/源码缓存和根 model。未采用的
-仅后台释放语法资源实验已从应用代码移除；源码快照和测量证据保存在内存诊断历史中，
-不再是可启用的运行时模式。控制器仅拥有当前 PR 的缓存，不为每个访问过的 PR
+正常隐藏路由时保留当前审核的语法资源、token/源码缓存和功能自有审核 model。
+早期仅释放语法资源实验没有可启用的运行时选项，源码快照和测量证据保留为历史。
+控制器仅拥有当前 PR 的缓存，不为每个访问过的 PR
 保存一份；更换 PR 会使请求代次失效、分离资源槽、清空请求级缓存，新结果就绪时
-替换根 model。已有 Worker 可在旧 lease 上完成，但不能重新填入替换后的资源槽。
-对象生命周期单测不等于 allocator 驻留页或 RSS 已达到稳定平台的证据。
+替换审核 model。已有 Worker 可在旧 lease 上完成，但不能重新填入替换后的资源槽。
+B7 保留一个当前的惰性内置 `SyntaxSet`/`Theme` 槽，执行中的旧 lease 可暂时保留
+旧图。线程安全的惰性语法/正则内部缓存可变、可增长，图数量不是字节上限。每个
+文件仍创建新的 `ParseState`/`HighlightState` 和结果；缓存不加入文件正文、所选
+路径、token 或逐文件解析历史。会话 `is_loaded` 与
+`highlight_controller_grammar_cache_entries` 描述不同的当前 owner，不涵盖所有
+旧 lease，也不代表 allocator 驻留页/RSS 平台。对象生命周期单测不能证明关闭后
+成本已通过验收。
+
+[已封存的 B6 结果](archive/maintenance/b6-pr-soak-20261017.md) 为拒绝：PR 长时
+RSS 增长/斜率通过，但原 A/B6 短对照最终 footprint 增加 8.73 MiB，超过保持
+不变的 8 MiB 额度；B6 未执行完整 P6。
+[B7 完整验证](archive/maintenance/b7-pr-idle-cache-20261017.md) 已完成全部 40 次
+请求运行：通用/相对短对照及候选 PR 门槛通过，但 Hook soak 69 的 footprint 斜率
+失败，B7 与编译拆分仍未采用，正式基线仍为原始 A。raw 证据完整性通过；未改动的
+联合 strict 失败保留为原 A 12、B7 0、global 0，与尚未归因的 Hook 通用失败分开。
+保留全部 B5/B6 证据、Release 参数和门槛；当前 2× 显示批次不得与早期 1× 绝对
+结果混合。
 
 侧栏切到 Home 不等于显式关闭审核：Router 历史可使 Workflow 域继续可达，控制器和
-根 model 因而保留。Shell Back 先消费 commit-tab 返回点，真正关闭时才清审核会话；
+审核 model 因而保留。Shell Back 先消费 commit-tab 返回点，真正关闭时才清审核会话；
 生命周期域不可达和切项目另有重置边界。不能因条件 Slint 页面卸载就推断整个会话已清空。
 
 P6 验证由 `scripts/benchmark-p6-regression.py` 及各功能显式启用的夹具负责，
@@ -190,8 +238,8 @@ Hook UI bridge 统一负责开始/结束通知、
 ```text
 用户
   -> Slint 主窗口和复用组件
-     -> ui/main.slint 导出的 callback
-        -> crates/usher-ui 负责的生成 API
+     -> 实际 root 或功能 global 上的 callback
+        -> 对应 UI crate 负责的生成 API
            -> 由 src/lib.rs 绑定的 Rust 功能模块
               -> 本地 Git / PTY / 文件系统
               -> 统一 reqwest HTTP 管线
@@ -214,8 +262,9 @@ i18n catalog 构建脚本从当前 Cargo 调用定位仓库输入；共享 targe
 | --- | --- |
 | `src/main.rs` | 最小二进制入口，转发到库入口。 |
 | `src/lib.rs` | 导入并重新导出生成的 UI API，创建 `MainWindow`、初始化模块、绑定跨模块 callback，并管理窗口和关闭流程。 |
-| `crates/usher-ui/` | 负责 Slint build script 和生成的 Rust API；编译仓库根目录的 `ui/main.slint` 树，并导出窗口、global、model、struct 和 enum；`crates/usher-ui/src/pagination.rs` 负责共享的有界 Primer 页码链接投影。 |
-| `crates/usher-ui-build/` | 四个静态 Slint 根共享的 Cargo 编译集成；使用公开编译 API，保留源/资源/环境输入及 library metadata，排除当前 `OUT_DIR` 输出的重编触发。 |
+| `crates/usher-ui/` | 负责 Slint build script 和生成的 Rust API；编译主壳与普通路由所在的仓库根目录 `ui/main.slint` 树，并导出窗口、global、model、struct 和 enum；`crates/usher-ui/src/pagination.rs` 负责共享的有界 Primer 页码链接投影。 |
+| `crates/usher-ui-pr-review/` | 完整静态 PR Review 编译单元：工作区、Diff/Find、Conflicts 及所属弹窗。复用共享 build/i18n helper 和选定渲染器；实时预览跳过该静态产品。 |
+| `crates/usher-ui-build/` | 五个静态 Slint 根（含可选演练场）共享的 Cargo 编译集成；使用公开编译 API，保留源/资源/环境输入及 library metadata，排除当前 `OUT_DIR` 输出的重编触发。 |
 | `crates/usher-ui-components/` | 可选的静态演练场编译单元；透明全窗口 factory 共同持有页面、滚动和浮层。实时预览组合使用原集成图，此包不编译静态产品。 |
 | `src/ui_components/`, `ui/features/ui_components_bridge.slint` | Event-loop 宿主桥接与懒加载生命周期；同步几何/主题/字体，转发既有反馈控制器，不创建第二套 Inbox 或持久化。 |
 | `crates/usher-i18n-build/` | 无内嵌 catalog、无自身 build script 的编译与构建 helper。从调用方当前工作区校验根 `i18n/` 输入、生成合并后的 Rust catalog，以及强类型 Slint `I18n` global 和语言顺序一致的完整 Slint 可见输入；向 Settings picker 生成器提供已校验的语言元数据。 |
@@ -247,6 +296,7 @@ i18n catalog 构建脚本从当前 Cargo 调用定位仓库输入；共享 targe
 | `src/git/` | Provider-neutral façade，以及独立的领域模型、remote 定位、unified-diff 解析、PR 概览计数和 Provider adapter。Gitee 的传输、解码、Conversation/Commit 归一化、readiness 与 revert 语义位于专用子模块。 |
 | `src/jobs/` | 应用级 Job 生命周期 model、来源无关运行描述符/UI 投影，以及按 source key 的动作分发；不拥有任何 Feature 进程。 |
 | `src/workflow/` | 按项目隔离的 Branch、Tag、PR、CD 状态和命令执行；Tag 与 PR Review 通过稳定文件 façade 暴露内部 controller 和纯逻辑模块。 |
+| `src/workflow/pr_review/ui.rs`, `src/workflow/pr_review/ui/` | 实际 PR UI root 访问、共享 WindowAdapter 构造后立即恢复 shell、小型上下文/摘要及输入适配；大型 model 和 callback 直接绑定功能 global。 |
 | `src/terminal/` | PTY 生命周期、viewport 同步、渲染、选择和项目切换；纯输入映射、诊断与刷新节流使用独立模块。 |
 | `src/chat/` | AI/RAG 共用 Chat 展示和交互、按模式隔离的 Session/JSONL 历史、请求耗时管理、transport、宽度无关纯文本/Artifact 投影、有界渲染缓存、分页和纯有界虚拟布局；完整 Artifact 渲染归通用预览 Feature。 |
 | `src/agent_response/` | Agent Markdown 的宽度无关投影；负责 16 KiB/48 block 行内预算、128 项/近似记账 2 MiB 的内容身份缓存，以及不透明仓库 Markdown action token；不执行文件 I/O，也不拥有 Preview Host。 |
@@ -265,8 +315,8 @@ i18n catalog 构建脚本从当前 Cargo 调用定位仓库输入；共享 targe
 | `src/toast.rs` | 单条短时 Toast 管理器绑定。 |
 | `src/notification.rs` | 通知队列、计时器、Hover 暂停、操作按钮和图标。 |
 | `src/message_center.rs` | 主窗口与 `usher-messages` 之间的薄桥接层；同步主题/视口、下发 All/Unread/Read 计数，并把不可变快照转换为独立页面 Slint model。 |
-| `src/message_center/focus.rs`、`src/ui_components/keyboard.rs` | Inbox 与演练场的 event-loop 键盘适配器；Inbox 将中立鼠标焦点交给实际宿主，两者转发既有应用快捷键。演练场捕获普通快捷键，但让 Tab 先到达局部 Select 执行关闭并请求恢复触发器，再进入宿主遍历。 |
-| `src/focus_navigation.rs` | Inbox 与演练场共用的 mounted-host Tab/Backtab 遍历，读取当前焦点前先完成排队的关闭/焦点变更，跨 static factory 选择可用目标，赋予焦点前按真实滚动视口精确显示。不得承担持久化、reducer 或 Worker 工作。 |
+| `src/message_center/focus.rs`、`src/ui_components/keyboard.rs`、`src/workflow/pr_review/ui/input.rs` | Inbox、演练场和 PR Review 的 event-loop 键盘适配；Inbox 将中立鼠标焦点交给实际宿主。三者均转发应用快捷键；演练场与 PR Review capture 普通快捷键，Tab 先经过局部控件，再进入宿主遍历。 |
+| `src/focus_navigation.rs` | Inbox、演练场与 PR Review 共用的 mounted-host Tab/Backtab 遍历，读取当前焦点前先完成排队的关闭/焦点变更，跨 static factory 选择可用目标，赋予焦点前按真实滚动视口精确显示。不得承担持久化、reducer 或 Worker 工作。 |
 | `src/message_center/commands.rs`、`src/notification/ingress.rs` | UI 消息的有序有界命令与 ticket 完成；领域 reduction 留在命令 Worker，非 Send Banner payload 在 event loop 以独立预算持有。 |
 | `src/dialog.rs` | 命令式 `DialogManager` 绑定与操作分发；不再拥有独立视觉变体。 |
 
@@ -284,8 +334,10 @@ Provider 成功后先发布共享 PR 状态，再发 Hook，最后投递 UI。
 `controller/diff_bindings.rs` 负责 event-loop 上的几何、选择、虚拟列表与 Find
 绑定，`controller/diagnostics.rs` 负责显式开启的滚动/定位诊断。
 `ui/features/pr_review/diff_bridge.slint` 中无状态的 `PrDiffBridge` global
-声明 Feature 的 Diff callback API；`ui/main.slint` 经它转发页面事件，并导出
-生成的 Rust API。该 global 不拥有共享领域状态或持久化。
+声明 Feature 的 Diff callback API；`controller/diff_bindings.rs` 通过
+`PrReviewUiExt::pr_review()` 直接绑定实际 owner 的 `PrDiffBridge`。静态构建由
+`usher-ui-pr-review` 生成 API，集成 live preview 才使用 MainWindow 图。该 global
+不拥有共享领域状态或持久化。
 
 Chat 的 `interactive.rs` 保留路由/请求编排和计时器；`viewport_policy.rs`
 负责覆盖、窗口移动和锚点收敛策略，`message_model.rs` 负责稳定增量 Slint 行
@@ -352,7 +404,7 @@ bridge；它不是另一份领域 Store。列表行的焦点与指针区域使�
 
 | 路径 | 职责 |
 | --- | --- |
-| `crates/usher-ui/build.rs` | 编译根 Slint 源码树，将内置 Material 映射为 `@material`，并将 `@ui-components` 映射到静态 factory host、实时预览集成演练场或关闭 stub。 |
+| `crates/usher-ui/build.rs` | 编译根 Slint 源码树，将内置 Material 映射为 `@material`，并将 `@ui-components` 映射到静态 factory host、实时预览集成演练场或关闭 stub；把 `@pr-review` 映射到静态 host 或实时预览集成图，把 `@pr-review-page` 映射到完整/dev-shell 页面。 |
 | `crates/usher-ui/src/lib.rs` | 包含并公开导出 Slint 生成模块。 |
 | `ui/main.slint` | 根窗口、路由装配、Rust-facing property/callback、Modal 层和 Terminal Dock。 |
 | `ui/route/routeMap.slint` | 完整 `Route` 枚举；主导航只开放其中一部分。 |
@@ -362,7 +414,7 @@ bridge；它不是另一份领域 Store。列表行的焦点与指针区域使�
 | `ui/views/ui_components.slint` | 交互式 UI Components 演练场的纯路由编排。 |
 | `ui/views/ui_components_factory.slint` | 可选静态演练场的透明全窗口 factory；一个内缩滚动文档与本地 Select、PR、通知、Tab、Tooltip Portal 共同编译。 |
 | `ui/views/workflow/` | Workflow 路由编排和完整的全窗口 PR Review 实现；Flow、Tab、Filter、Field、Panel 组件归 `ui/components/workflow/`。 |
-| `ui/features/pr_review/` | 稳定的 PR Review feature package 入口及公开页面协议；构建配置把 `@pr-review` 映射到完整实现或显式 `dev-shell` 替代实现。路由只是使用方而非所有者，后续入口复用同一个包。 |
+| `ui/features/pr_review/` | PR Review 功能 global、host/上下文协议及完整页面入口；`@pr-review` 选择静态 factory host 或实时预览集成图，`@pr-review-page` 在实际 owner 图内选择完整或 dev-shell 页面。路由复用同一功能 API，静态主窗口不导入完整视觉图。 |
 | `ui/features/ai_review/`、`ui/features/ai_review_settings/` | 可选编译包，提供完整实现和协议兼容 disabled 实现；完整 Review 包只暴露 PR 右侧面板，不拥有独立路由。 |
 | `ui/components/` | 所有应用视觉组件的统一归属目录，包括 Control、Row、Card、Menu、Tab、Panel、Dialog、Field、Feedback 和功能专用视觉积木；GitHub/Primer 实现统一使用 `GitHub*` 符号。 |
 | `ui/components/github_resize_handle.slint` | 共享常驻分割线命中带、宽高轴光标、中性空闲/hover/拖拽线和指针取消生命周期；功能调用方拥有尺寸、clamp 与布局提交，布局演练场展示实际调宽/调高。 |
@@ -578,6 +630,19 @@ factory 产品。历史 Slint 1.17.1 调查曾观察到跨 crate 产品重挂载
 placeholder；在当前固定版本完成新的原生重入验收前，继续保留该 host 契约，离开路由
 只隐藏这些 host；各 Feature bridge 分别负责状态重置生命周期，
 并把 transient host 切为非活动。
+
+PR Review 复用共享 renderer 边界，但状态方向不同：
+`src/workflow/pr_review/ui.rs` 安装一个轻量产品，构造后立即恢复 shell；weak 注册表
+只解析实际 root，host factory closure 保留产品。首次挂载容器后，透明 host 始终可见且
+不拦截交互，仅由 `PrReviewSurface` 的 `context.active` 条件拥有重路由文档。离页释放
+视觉子树，保留同一个功能 global/model 及控制器原有的审核会话生命周期。
+`PrReviewHostBridge` 只交换几何、主题/avatar、审核身份、modal 和小型页头摘要，
+不镜像 PR 行 model；PR DTO 从实际生成 owner 重新导出，包括嵌套虚拟行类型。
+30 种 literal Tooltip 身份共用一个 factory 根 transient Portal，各自保留独立的 I18n
+测量/绘制 Surface，动态 metadata 保留通用双槽例外。factory capture 普通快捷键，
+Tab 等局部控件处理后再 bubble，通过 `focus_navigation` 跨宿主遍历；根 modal 盾及
+既有 PR/AI/侧栏层级保持。详见 [PR Review UI](specs/pr-review-ui.md)，编译和 testing
+backend 证据不能代替原生绘制或构建性能验收。
 
 普通静态 `ui-components` 构建通过 `usher-ui-components` 另行生成 library-module
 产品。MainWindow 只导入 feature host 与协议 stub，其传递输入不得包含 showcase
@@ -914,14 +979,14 @@ workspace 根 `Cargo.toml` 中的 profile 统一负责构建产物策略。日�
 这会覆盖 macOS 上 Cargo 默认的 full/unpacked 调试策略：panic backtrace
 仍有文件名和行号，但 `target/debug/deps` 不再积累松散 `.rcgu.o`。
 
-`crates/usher-ui-build` 统一负责四个静态 Slint 根的 Cargo 编译集成，使用公开
+`crates/usher-ui-build` 统一负责五个静态 Slint 根（含可选演练场）的 Cargo 编译集成，使用公开
 output-path API，保留现有 compiler 配置、translation domain、生成 include 与
 library metadata。catalog helper 继续登记原始 catalog 输入；此 owner 监听真实
 Slint/资源与 Slint 环境输入，过滤当前 `OUT_DIR` 中的生成输出，避免翻译输出使
 下一次无修改构建再次失效。无内嵌 catalog 的 i18n helper 保持独立依赖边界。
 
 `dev` profile 对非 workspace 依赖使用 opt-level 1；生成的 `usher-ui`、
-`usher-ui-components` 与 `usher-messages` workspace crate 同样使用 opt-level 1，且不生成
+`usher-ui-pr-review`、`usher-ui-components` 与 `usher-messages` workspace crate 同样使用 opt-level 1，且不生成
 调试元数据。独立生成的 `usher-ui-settings` 使用 dev opt0，减少 Settings 重建时的
 LLVM 优化/codegen 工作，codegen-unit 数量保留默认值。应用自有 Rust crate 保持 opt0
 与行表，因此普通 `cargo run` 仍可使用源码断点并定位应用 panic。test 按 Cargo 的 dev
@@ -953,6 +1018,10 @@ Cargo 校验已跟踪输入。fingerprint 未覆盖的 SDK/native 变化需提�
 负例验证这些边界，不证明托管缓存命中率或耗时收益。详见 [Release CI 契约](specs/release-ci.md)、
 [构建策略](build-performance.md#production-ci-cache-and-timings--生产-ci-缓存与计时)
 及[本地验证（归档：docs/validation/release-ci-reliability-20261016/README.md）](local-archives.md#validation-experiments-20261016)。
+
+Actions 产品 artifact 是保留 7 天的发布中转产物，诊断保留 3 天；已经发布的
+Release 附件独立保留。产品上传遇到 artifact 配额错误仍阻断发布，cache 存储使用
+另一套额度。保留期只影响新上传，已有存储须另行授权清理。
 
 未使用的 Rust 模块、未挂载的旧 Slint 标题栏及其图标例外已移除。Project
 Provider 身份使用现有 ribbon 资源，侧栏与 Terminal 控件保留当前实现。
@@ -1100,7 +1169,7 @@ registry 及非源语言的 `usher.po`。因此仅 Rust 文案修改更新应用
 MainWindow、Settings、Messages 与静态演练场 root 在同一个 event-loop turn 重新绘制既有 `@tr` binding。
 `src/i18n.rs` 在 Slint event loop 上、创建独立 Factory 页面前应用语言。Slint 在同一
 运行时上下文共享语言列表与当前语言索引；消息数组与引用属于各生成模块，编译器可剪除
-未使用项。MainWindow、Settings、Messages 和静态演练场接收相同的完整 Slint 可见源
+未使用项。MainWindow、Settings、Messages、PR Review 和静态演练场接收相同的完整 Slint 可见源
 catalog 与 locale 输入，并保持语言顺序一致。Rust 动态状态在构建 UI 投影
 之前始终保留语义 key、结构化类型或 `LocalizedText`；因此切换 locale 时可以重新投影
 已经挂载的 Preview、Terminal、Project、Chat、Workflow、Hook 和 AI Review 状态，无需匹配

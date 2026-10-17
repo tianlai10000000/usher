@@ -1,3 +1,4 @@
+use crate::pr_review_ui::PrReviewUiExt;
 #[cfg(any(test, feature = "test-fixtures"))]
 mod fixture;
 mod projection;
@@ -54,14 +55,17 @@ impl ConflictController {
         });
         let controller = self.clone();
         let weak = ui.as_weak();
-        ui.global::<PrConflictsBridge>().on_refresh(move || {
-            if let Some(ui) = weak.upgrade() {
-                controller.load(&ui);
-            }
-        });
+        ui.pr_review()
+            .global::<PrConflictsBridge>()
+            .on_refresh(move || {
+                if let Some(ui) = weak.upgrade() {
+                    controller.load(&ui);
+                }
+            });
         let controller = self.clone();
         let weak = ui.as_weak();
-        ui.global::<PrConflictsBridge>()
+        ui.pr_review()
+            .global::<PrConflictsBridge>()
             .on_select_file(move |index| {
                 if let Some(ui) = weak.upgrade() {
                     controller.select_file(&ui, index);
@@ -69,10 +73,12 @@ impl ConflictController {
             });
         let controller = self.clone();
         let weak = ui.as_weak();
-        ui.global::<PrConflictsBridge>()
+        ui.pr_review()
+            .global::<PrConflictsBridge>()
             .on_step_block(move |delta| {
                 let Some(ui) = weak.upgrade() else { return };
-                let b = ui.global::<PrConflictsBridge>();
+                let pr_review_view = ui.pr_review();
+                let b = pr_review_view.global::<PrConflictsBridge>();
                 let Some(snapshot) = controller.state.snapshot().snapshot else {
                     return;
                 };
@@ -89,46 +95,58 @@ impl ConflictController {
             });
         let controller = self.clone();
         let weak = ui.as_weak();
-        ui.global::<PrConflictsBridge>().on_copy(move || {
-            let Some(ui) = weak.upgrade() else { return };
-            let b = ui.global::<PrConflictsBridge>();
-            if !b.get_active() || b.get_loading() || b.get_copy_busy() {
-                return;
-            }
-            let Some(snapshot) = controller.state.snapshot().snapshot else {
-                return;
-            };
-            if let Some(text) = snapshot
-                .files
-                .get(ui.global::<PrConflictsBridge>().get_selected_file() as usize)
-                .and_then(|f| f.content.clone())
-            {
-                b.set_copy_busy(true);
-                let generation = controller.generation.load(Ordering::SeqCst);
-                let selection = controller.selection.load(Ordering::SeqCst);
-                let controller = controller.clone();
-                let weak = ui.as_weak();
-                crate::app_runtime::shared_runtime().spawn_blocking(move || {
-                    let success = copy_text(text.to_string());
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(ui) = weak.upgrade() {
-                            controller.finish_copy(&ui, generation, selection, success);
-                        }
+        ui.pr_review()
+            .global::<PrConflictsBridge>()
+            .on_copy(move || {
+                let Some(ui) = weak.upgrade() else { return };
+                let pr_review_view = ui.pr_review();
+                let b = pr_review_view.global::<PrConflictsBridge>();
+                if !b.get_active() || b.get_loading() || b.get_copy_busy() {
+                    return;
+                }
+                let Some(snapshot) = controller.state.snapshot().snapshot else {
+                    return;
+                };
+                if let Some(text) = snapshot
+                    .files
+                    .get(
+                        ui.pr_review()
+                            .global::<PrConflictsBridge>()
+                            .get_selected_file() as usize,
+                    )
+                    .and_then(|f| f.content.clone())
+                {
+                    b.set_copy_busy(true);
+                    let generation = controller.generation.load(Ordering::SeqCst);
+                    let selection = controller.selection.load(Ordering::SeqCst);
+                    let controller = controller.clone();
+                    let weak = ui.as_weak();
+                    crate::app_runtime::shared_runtime().spawn_blocking(move || {
+                        let success = copy_text(text.to_string());
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = weak.upgrade() {
+                                controller.finish_copy(&ui, generation, selection, success);
+                            }
+                        });
                     });
-                });
-            }
-        });
+                }
+            });
         let controller = self.clone();
         let weak = ui.as_weak();
-        ui.global::<PrConflictsBridge>().on_copy_selection(
-            move |start_line, start_col, end_line, end_col| {
+        ui.pr_review()
+            .global::<PrConflictsBridge>()
+            .on_copy_selection(move |start_line, start_col, end_line, end_col| {
                 let Some(ui) = weak.upgrade() else { return };
                 let Some(snapshot) = controller.state.snapshot().snapshot else {
                     return;
                 };
                 let Some(content) = snapshot
                     .files
-                    .get(ui.global::<PrConflictsBridge>().get_selected_file() as usize)
+                    .get(
+                        ui.pr_review()
+                            .global::<PrConflictsBridge>()
+                            .get_selected_file() as usize,
+                    )
                     .and_then(|f| f.content.clone())
                 else {
                     return;
@@ -162,11 +180,11 @@ impl ConflictController {
                     }
                     copy_text(parts.join("\n"));
                 });
-            },
-        );
+            });
     }
     fn finish_copy(&self, ui: &MainWindow, generation: u64, selection: u64, success: bool) {
-        let b = ui.global::<PrConflictsBridge>();
+        let pr_review_view = ui.pr_review();
+        let b = pr_review_view.global::<PrConflictsBridge>();
         if !b.get_active()
             || self.generation.load(Ordering::SeqCst) != generation
             || self.selection.load(Ordering::SeqCst) != selection
@@ -194,7 +212,8 @@ impl ConflictController {
             source,
             target,
         };
-        let b = ui.global::<PrConflictsBridge>();
+        let pr_review_view = ui.pr_review();
+        let b = pr_review_view.global::<PrConflictsBridge>();
         if self.context.lock().unwrap().as_ref() == Some(&context) {
             if b.get_active() {
                 return;
@@ -220,7 +239,8 @@ impl ConflictController {
         source: String,
         target: String,
     ) {
-        let b = ui.global::<PrConflictsBridge>();
+        let pr_review_view = ui.pr_review();
+        let b = pr_review_view.global::<PrConflictsBridge>();
         let context = Context {
             alias,
             number,
@@ -238,7 +258,9 @@ impl ConflictController {
     }
     pub(super) fn close(&self, ui: &MainWindow) {
         self.leave_workspace(ui);
-        ui.global::<PrConflictsBridge>().set_file_count(-1);
+        ui.pr_review()
+            .global::<PrConflictsBridge>()
+            .set_file_count(-1);
     }
     pub(super) fn leave_workspace(&self, ui: &MainWindow) {
         self.cancel_loads();
@@ -253,7 +275,8 @@ impl ConflictController {
         let state = self.state.clone();
         crate::app_runtime::shared_runtime()
             .spawn_blocking(move || state.dispatch(Action::Reset(generation)));
-        let b = ui.global::<PrConflictsBridge>();
+        let pr_review_view = ui.pr_review();
+        let b = pr_review_view.global::<PrConflictsBridge>();
         b.set_active(false);
         b.set_copy_busy(false);
         b.set_copy_completed(0);
@@ -277,7 +300,8 @@ impl ConflictController {
         }
         let cancel = Arc::new(AtomicBool::new(false));
         *self.cancellation.lock().unwrap() = Some(cancel.clone());
-        let b = ui.global::<PrConflictsBridge>();
+        let pr_review_view = ui.pr_review();
+        let b = pr_review_view.global::<PrConflictsBridge>();
         b.set_loading(true);
         b.set_file_count(-1);
         b.set_copy_busy(false);
@@ -352,7 +376,8 @@ impl ConflictController {
                     return;
                 }
                 let Some(ui) = weak.upgrade() else { return };
-                let b = ui.global::<PrConflictsBridge>();
+                let pr_review_view = ui.pr_review();
+                let b = pr_review_view.global::<PrConflictsBridge>();
                 b.set_loading(false);
                 if let Some(meta) = metadata {
                     b.set_repository(Key::new(&meta, &context.number).repository.into());
@@ -377,7 +402,8 @@ impl ConflictController {
         if self.generation.load(Ordering::SeqCst) != generation {
             return;
         }
-        let b = ui.global::<PrConflictsBridge>();
+        let pr_review_view = ui.pr_review();
+        let b = pr_review_view.global::<PrConflictsBridge>();
         b.set_loading(false);
         match result {
             Ok(snapshot) => {
@@ -394,7 +420,8 @@ impl ConflictController {
         }
     }
     fn present(&self, ui: &MainWindow, snapshot: &ConflictSnapshot) {
-        let b = ui.global::<PrConflictsBridge>();
+        let pr_review_view = ui.pr_review();
+        let b = pr_review_view.global::<PrConflictsBridge>();
         b.set_file_count(snapshot.files.len() as i32);
         b.set_status(snapshot.status.as_str().into());
         b.set_local(snapshot.local);
@@ -424,7 +451,8 @@ impl ConflictController {
         let Some(file) = snapshot.files.get(index as usize).cloned() else {
             return;
         };
-        let b = ui.global::<PrConflictsBridge>();
+        let pr_review_view = ui.pr_review();
+        let b = pr_review_view.global::<PrConflictsBridge>();
         b.set_selected_file(index);
         b.set_copy_busy(false);
         b.set_rows(ModelRc::default());
@@ -462,7 +490,8 @@ impl ConflictController {
                         return;
                     }
                     let Some(ui) = weak.upgrade() else { return };
-                    let b = ui.global::<PrConflictsBridge>();
+                    let pr_review_view = ui.pr_review();
+                    let b = pr_review_view.global::<PrConflictsBridge>();
                     if !b.get_active() || b.get_selected_file() != index {
                         return;
                     }
@@ -492,7 +521,8 @@ fn bind_geometry(ui: &MainWindow) {
     use std::cell::RefCell;
     use usher_virtual_list::{VirtualList, VirtualWindow};
     let layout = RefCell::new((0usize, VirtualList::new(&[], 4), VirtualWindow::default()));
-    ui.global::<PrConflictsBridge>()
+    ui.pr_review()
+        .global::<PrConflictsBridge>()
         .on_layout(move |count, offset, height| {
             let count = count.max(0) as usize;
             let mut state = layout.borrow_mut();
@@ -510,12 +540,12 @@ fn bind_geometry(ui: &MainWindow) {
             }
         });
     let weak = ui.as_weak();
-    ui.global::<PrConflictsBridge>()
-        .on_resolve_hit(move |start, x, y, family, size| {
+    ui.pr_review().global::<PrConflictsBridge>().on_resolve_hit(
+        move |start, x, y, family, size| {
             let Some(ui) = weak.upgrade() else {
                 return crate::WorkflowPrDiffSelectionHit::default();
             };
-            let rows = ui.global::<PrConflictsBridge>().get_rows();
+            let rows = ui.pr_review().global::<PrConflictsBridge>().get_rows();
             let index = (start + (y / 28.0).floor() as i32)
                 .clamp(0, rows.row_count().saturating_sub(1) as i32);
             let column = rows.row_data(index as usize).map_or(0, |row| {
@@ -535,5 +565,6 @@ fn bind_geometry(ui: &MainWindow) {
                 line: index,
                 column,
             }
-        });
+        },
+    );
 }

@@ -1,3 +1,4 @@
+import { GitHubPrConflictsBackButton, GitHubPrConflictsFilesButton, GitHubPrConflictsRefreshButton, GitHubPrConflictsPreviousButton, GitHubPrConflictsNextButton, GitHubPrConflictsCopyButton } from "../../components/pr_review/tooltip_buttons.slint";
 import { GitHubResizeHandle } from "../../components/github_resize_handle.slint";
 import { PrConflictsBridge, PrConflictRow, PrConflictWindow } from "../../features/pr_review/conflicts_bridge.slint";
 import { PrDiffBridge } from "../../features/pr_review/diff_bridge.slint";
@@ -67,12 +68,12 @@ export component PrReviewConflicts inherits FocusScope {
         spacing: 0px;
         Rectangle {
             height: 48px;
-            back-button := GitHubIconButton {x: 12px;y: 8px;width: 32px;height: 32px;icon: @image-url("../../assets/icons/octicon-arrow-left-16.svg");tooltip-text: I18n.conflicts-back;clicked => {PrConflictsBridge.back();}}
-            files-button := GitHubIconButton {x: 52px;y: 8px;width: 32px;height: 32px;icon: @image-url("../../assets/icons/octicon-sidebar-collapse-16.svg");tooltip-text: I18n.conflicts-toggle-files;selected: root.files-open;clicked => {root.files-open = !root.files-open;}}
+            back-button := GitHubPrConflictsBackButton {x: 12px;y: 8px;width: 32px;height: 32px;icon: @image-url("../../assets/icons/octicon-arrow-left-16.svg");tooltip-text: I18n.conflicts-back;clicked => {PrConflictsBridge.back();}}
+            files-button := GitHubPrConflictsFilesButton {x: 52px;y: 8px;width: 32px;height: 32px;icon: @image-url("../../assets/icons/octicon-sidebar-collapse-16.svg");tooltip-text: I18n.conflicts-toggle-files;selected: root.files-open;clicked => {root.files-open = !root.files-open;}}
             title := Text {x: 92px;y: 0px;width: min(self.preferred-width, max(0px, status.x - self.x - 12px));height: 48px;text: I18n.conflicts-title;font-size: 16px;font-weight: 600;color: GitHubTheme.fg-default;vertical-alignment: center;overflow: elide;}
             if PrConflictsBridge.local: Text {x: title.x + title.width + 12px;y: 0px;width: max(0px, status.x - self.x - 12px);height: 48px;text: I18n.conflicts-local;font-size: 12px;color: GitHubTheme.fg-muted;vertical-alignment: center;overflow: elide;}
             status := GitHubConflictStatus {x: refresh-button.x - self.width - 12px;y: 12px;width: min(self.preferred-width, max(24px, parent.width - 220px));status: PrConflictsBridge.loading ? "checking" : PrConflictsBridge.status;interactive: false;}
-            refresh-button := GitHubIconButton {x: parent.width - 48px;y: 8px;width: 32px;height: 32px;icon: @image-url("../../assets/icons/octicon-sync-16.svg");tooltip-text: I18n.conflicts-refresh;clicked => {PrConflictsBridge.refresh();}}
+            refresh-button := GitHubPrConflictsRefreshButton {x: parent.width - 48px;y: 8px;width: 32px;height: 32px;icon: @image-url("../../assets/icons/octicon-sync-16.svg");tooltip-text: I18n.conflicts-refresh;clicked => {PrConflictsBridge.refresh();}}
             Rectangle {x: 0px;y: parent.height - 1px;height: 1px;width: parent.width;background: GitHubTheme.border-default;}
         }
         conflict-body := Rectangle {
@@ -121,9 +122,9 @@ export component PrReviewConflicts inherits FocusScope {
                         Text {x: 12px;y: 0px;width: max(0px, block-count.x - self.x - 8px - read-only.width);height: 44px;text: PrConflictsBridge.selected-file >= 0 ? PrConflictsBridge.files[PrConflictsBridge.selected-file].path : "";font-size: 13px;font-weight: 600;color: GitHubTheme.fg-default;vertical-alignment: center;overflow: elide;}
                         read-only := Text {x: block-count.x - self.width;y: 0px;width: parent.width >= 600px ? self.preferred-width + 12px : 0px;height: 44px;visible: parent.width >= 600px;text: I18n.conflicts-read-only;font-size: 12px;color: GitHubTheme.fg-muted;vertical-alignment: center;}
                         block-count := Text {x: previous-button.x - 64px;y: 0px;width: 56px;height: 44px;text: (PrConflictsBridge.selected-block + 1) + " / " + PrConflictsBridge.block-count;font-size: 12px;color: GitHubTheme.fg-muted;vertical-alignment: center;horizontal-alignment: center;}
-                        previous-button := GitHubIconButton {x: next-button.x - 40px;y: 6px;width: 32px;height: 32px;icon: @image-url("../../assets/icons/octicon-chevron-up-16.svg");tooltip-text: I18n.conflicts-previous;button-enabled: !PrConflictsBridge.loading && PrConflictsBridge.selected-block > 0;clicked => {PrConflictsBridge.step-block(-1);}}
-                        next-button := GitHubIconButton {x: copy-button.x - 40px;y: 6px;width: 32px;height: 32px;icon: @image-url("../../assets/icons/octicon-chevron-down-16.svg");tooltip-text: I18n.conflicts-next;button-enabled: !PrConflictsBridge.loading && PrConflictsBridge.selected-block + 1 < PrConflictsBridge.block-count;clicked => {PrConflictsBridge.step-block(1);}}
-                        copy-button := GitHubCopyButton {
+                        previous-button := GitHubPrConflictsPreviousButton {x: next-button.x - 40px;y: 6px;width: 32px;height: 32px;icon: @image-url("../../assets/icons/octicon-chevron-up-16.svg");tooltip-text: I18n.conflicts-previous;button-enabled: !PrConflictsBridge.loading && PrConflictsBridge.selected-block > 0;clicked => {PrConflictsBridge.step-block(-1);}}
+                        next-button := GitHubPrConflictsNextButton {x: copy-button.x - 40px;y: 6px;width: 32px;height: 32px;icon: @image-url("../../assets/icons/octicon-chevron-down-16.svg");tooltip-text: I18n.conflicts-next;button-enabled: !PrConflictsBridge.loading && PrConflictsBridge.selected-block + 1 < PrConflictsBridge.block-count;clicked => {PrConflictsBridge.step-block(1);}}
+                        copy-button := GitHubPrConflictsCopyButton {
                             x: parent.width - 44px; y: 6px;
                             tooltip-text: I18n.conflicts-copy;
                             button-enabled: !PrConflictsBridge.loading && PrConflictsBridge.text-available && !PrConflictsBridge.copy-busy;

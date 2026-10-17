@@ -1,0 +1,283 @@
+import { GitHubTooltipSurface } from "../github_tooltip.slint";
+import { GitHubTransientFloatingOverlayHost } from "../github_floating_overlay.slint";
+import { FloatingOverlayRect } from "../../state/floating_overlay_bridge.slint";
+import { TooltipOverlayState } from "../../state/tooltip_overlay_state.slint";
+import { TransientOverlayState } from "../../state/transient_overlay_state.slint";
+import { PrReviewTooltipState, PrReviewTooltipKind } from "tooltip_state.slint";
+import { I18n } from "@i18n";
+
+// One transient full-window locator; each fixed label owns its measure and paint nodes.
+export component GitHubPrReviewTooltipOverlay inherits Rectangle {
+    in property <bool> tooltip-enabled: false;
+    in property <FloatingOverlayRect> anchor-viewport;
+    out property <bool> active: root.tooltip-enabled && PrReviewTooltipState.kind != PrReviewTooltipKind.None;
+    private property <int> observed-lease: 0;
+    private property <bool> generic-open: TooltipOverlayState.open;
+    private property <int> dismiss-revision: TransientOverlayState.dismiss-revision;
+    private property <int> popover-revision: TransientOverlayState.popover-dismiss-revision;
+    width: 100%; height: 100%; background: transparent; clip: false;
+    init => { PrReviewTooltipState.enabled = root.tooltip-enabled; PrReviewTooltipState.viewport = root.anchor-viewport; }
+    changed tooltip-enabled => { PrReviewTooltipState.enabled = root.tooltip-enabled; if !root.tooltip-enabled { PrReviewTooltipState.dismiss(); } }
+    changed anchor-viewport => { PrReviewTooltipState.viewport = root.anchor-viewport; PrReviewTooltipState.dismiss(); }
+    changed generic-open => { if root.generic-open { PrReviewTooltipState.dismiss(); } }
+    changed dismiss-revision => { PrReviewTooltipState.dismiss(); }
+    changed popover-revision => { PrReviewTooltipState.dismiss(); }
+    floating := GitHubTransientFloatingOverlayHost {
+        active: root.active;
+        anchor-x: PrReviewTooltipState.anchor-x; anchor-y: PrReviewTooltipState.anchor-y;
+        anchor-width: PrReviewTooltipState.anchor-width; anchor-height: PrReviewTooltipState.anchor-height;
+        preferred-placement: PrReviewTooltipState.placement;
+        alignment: PrReviewTooltipState.alignment;
+        floating-width:
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ShowCommitDescription ? surface-showcommitdescription.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.HideCommitDescription ? surface-hidecommitdescription.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.OpenDiffSettings ? surface-opendiffsettings.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.CopyFullSha ? surface-copyfullsha.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.Copied ? surface-copied.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.CloseAiReview ? surface-closeaireview.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ReviewWithAi ? surface-reviewwithai.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.WriteComment ? surface-writecomment.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.AddComment ? surface-addcomment.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ConfigureToComment ? surface-configuretocomment.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ViewCommitDetails ? surface-viewcommitdetails.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.CopyFilePath ? surface-copyfilepath.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.CollapseNonDiff ? surface-collapsenondiff.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ExpandAllLines ? surface-expandalllines.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.PreviousFile ? surface-previousfile.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.NextFile ? surface-nextfile.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.HideFileTree ? surface-hidefiletree.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ShowFileTree ? surface-showfiletree.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.MoreFileActions ? surface-morefileactions.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.CopySourceBranch ? surface-copysourcebranch.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ConflictsBack ? surface-conflictsback.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ConflictsToggleFiles ? surface-conflictstogglefiles.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ConflictsRefresh ? surface-conflictsrefresh.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ConflictsPrevious ? surface-conflictsprevious.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ConflictsNext ? surface-conflictsnext.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ConflictsCopy ? surface-conflictscopy.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ReviewChanges ? surface-reviewchanges.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ConfigureToReview ? surface-configuretoreview.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ChooseMergeMethod ? surface-choosemergemethod.width :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ReverseChanges ? surface-reversechanges.width :
+            0px;
+        floating-height:
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ShowCommitDescription ? surface-showcommitdescription.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.HideCommitDescription ? surface-hidecommitdescription.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.OpenDiffSettings ? surface-opendiffsettings.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.CopyFullSha ? surface-copyfullsha.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.Copied ? surface-copied.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.CloseAiReview ? surface-closeaireview.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ReviewWithAi ? surface-reviewwithai.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.WriteComment ? surface-writecomment.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.AddComment ? surface-addcomment.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ConfigureToComment ? surface-configuretocomment.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ViewCommitDetails ? surface-viewcommitdetails.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.CopyFilePath ? surface-copyfilepath.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.CollapseNonDiff ? surface-collapsenondiff.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ExpandAllLines ? surface-expandalllines.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.PreviousFile ? surface-previousfile.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.NextFile ? surface-nextfile.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.HideFileTree ? surface-hidefiletree.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ShowFileTree ? surface-showfiletree.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.MoreFileActions ? surface-morefileactions.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.CopySourceBranch ? surface-copysourcebranch.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ConflictsBack ? surface-conflictsback.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ConflictsToggleFiles ? surface-conflictstogglefiles.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ConflictsRefresh ? surface-conflictsrefresh.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ConflictsPrevious ? surface-conflictsprevious.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ConflictsNext ? surface-conflictsnext.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ConflictsCopy ? surface-conflictscopy.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ReviewChanges ? surface-reviewchanges.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ConfigureToReview ? surface-configuretoreview.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ChooseMergeMethod ? surface-choosemergemethod.height :
+            PrReviewTooltipState.kind == PrReviewTooltipKind.ReverseChanges ? surface-reversechanges.height :
+            0px;
+        surface-showcommitdescription := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.ShowCommitDescription;
+            text: I18n.diff-show-commit-description;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-hidecommitdescription := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.HideCommitDescription;
+            text: I18n.diff-hide-commit-description;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-opendiffsettings := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.OpenDiffSettings;
+            text: I18n.pr-review-open-diff-settings;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-copyfullsha := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.CopyFullSha;
+            text: I18n.pr-review-copy-full-sha;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-copied := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.Copied;
+            text: I18n.common-copied;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-closeaireview := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.CloseAiReview;
+            text: I18n.ai-review-close;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-reviewwithai := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.ReviewWithAi;
+            text: I18n.pr-list-review-with-ai;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-writecomment := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.WriteComment;
+            text: I18n.pr-review-write-comment;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-addcomment := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.AddComment;
+            text: I18n.pr-review-add-comment;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-configuretocomment := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.ConfigureToComment;
+            text: I18n.pr-review-configure-to-comment;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-viewcommitdetails := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.ViewCommitDetails;
+            text: I18n.pr-review-view-commit-details;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-copyfilepath := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.CopyFilePath;
+            text: I18n.pr-review-copy-file-path;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-collapsenondiff := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.CollapseNonDiff;
+            text: I18n.pr-review-collapse-non-diff;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-expandalllines := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.ExpandAllLines;
+            text: I18n.pr-review-expand-all-lines;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-previousfile := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.PreviousFile;
+            text: I18n.pr-review-previous-file;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-nextfile := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.NextFile;
+            text: I18n.pr-review-next-file;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-hidefiletree := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.HideFileTree;
+            text: I18n.diff-hide-file-tree;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-showfiletree := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.ShowFileTree;
+            text: I18n.diff-show-file-tree;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-morefileactions := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.MoreFileActions;
+            text: I18n.diff-more-file-actions;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-copysourcebranch := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.CopySourceBranch;
+            text: I18n.pr-review-copy-source-branch;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-conflictsback := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.ConflictsBack;
+            text: I18n.conflicts-back;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-conflictstogglefiles := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.ConflictsToggleFiles;
+            text: I18n.conflicts-toggle-files;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-conflictsrefresh := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.ConflictsRefresh;
+            text: I18n.conflicts-refresh;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-conflictsprevious := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.ConflictsPrevious;
+            text: I18n.conflicts-previous;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-conflictsnext := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.ConflictsNext;
+            text: I18n.conflicts-next;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-conflictscopy := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.ConflictsCopy;
+            text: I18n.conflicts-copy;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-reviewchanges := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.ReviewChanges;
+            text: I18n.pr-review-comment-approve-request;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-configuretoreview := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.ConfigureToReview;
+            text: I18n.pr-review-configure-provider;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-choosemergemethod := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.ChooseMergeMethod;
+            text: I18n.pr-review-choose-merge-method;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+        surface-reversechanges := GitHubTooltipSurface {
+            visible: PrReviewTooltipState.kind == PrReviewTooltipKind.ReverseChanges;
+            text: I18n.pr-review-reverse-changes;
+            viewport-max-width: max(0px, root.width - 16px);
+            viewport-max-height: max(0px, root.height - 16px);
+        }
+    }
+    Timer {
+        interval: 48ms; running: root.active;
+        triggered => {
+            if PrReviewTooltipState.lease == root.observed-lease { PrReviewTooltipState.dismiss(); }
+            else { root.observed-lease = PrReviewTooltipState.lease; }
+        }
+    }
+}

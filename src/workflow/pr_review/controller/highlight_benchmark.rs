@@ -1,6 +1,7 @@
 //! Offline fixture through the production selection and full-file paths.
 use super::*;
 use crate::git::PullRequestDiffLine;
+use crate::pr_review_ui::PrReviewUiExt;
 use std::time::{Duration, Instant};
 
 pub(super) fn setup(ui: &MainWindow, controller: WorkflowPrReviewController) {
@@ -89,10 +90,18 @@ fn install(ui: &MainWindow, controller: &WorkflowPrReviewController) {
         loaded_large_diffs: (0..8).collect(),
     });
     apply_review_header(ui, &request);
-    ui.set_workflow_pr_review_diff_view("unified".into());
-    ui.set_workflow_pr_review_loading(false);
-    ui.set_workflow_pr_review_visible(true);
-    ui.set_workflow_pr_review_tab(2);
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .set_workflow_pr_review_diff_view("unified".into());
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .set_workflow_pr_review_loading(false);
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .set_workflow_pr_review_visible(true);
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .set_workflow_pr_review_tab(2);
     ui.set_current_route(Route::PrReview);
 }
 
@@ -139,11 +148,34 @@ fn await_result(
     slint::Timer::single_shot(Duration::from_millis(50), move || {
         let Some(ui) = weak.upgrade() else { return };
         let expected = if index % 3 == 1 { 3001 } else { 3000 };
-        let current = ui.get_workflow_pr_review_selected_file_path() == "fixture-7.rs"
-            && ui.get_workflow_pr_review_lines().row_count() == expected
-            && ui.get_workflow_pr_review_viewing_file() == (index % 3 == 1);
-        if !current || ui.get_workflow_pr_review_code_loading() {
-            if !current && !ui.get_workflow_pr_review_code_loading() {
+        let current = ui
+            .pr_review()
+            .global::<crate::PrReviewBridge>()
+            .get_workflow_pr_review_selected_file_path()
+            == "fixture-7.rs"
+            && ui
+                .pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_lines()
+                .row_count()
+                == expected
+            && ui
+                .pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_viewing_file()
+                == (index % 3 == 1);
+        if !current
+            || ui
+                .pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_code_loading()
+        {
+            if !current
+                && !ui
+                    .pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .get_workflow_pr_review_code_loading()
+            {
                 log::warn!("[P6][66] premature_loading_clear cycle={index}");
             }
             if started.elapsed() < Duration::from_secs(20) {

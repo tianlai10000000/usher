@@ -15,6 +15,12 @@ manual-only. Run on an unlocked macOS desktop with consistent display/renderer,
 power and window conditions; do not compile or run unit tests during measurement.
 Other operating systems have not been validated by this protocol.
 
+`--baseline` applies to the paired comparisons; sustained runs use the candidate
+`--binary` only. The default sustained selection remains `65 69 70`. For a PR
+highlighting change, `--soak-batches 65 66 69 70` additionally runs the existing
+PR fixture continuously for the same default 900 seconds; it does not create an
+A soak or alter the defaults, workload or thresholds.
+
 `benchmark-p6-terminal.py --mode migration` preserves historical old/new tests.
 `--mode regression` checks both sides against today's correctness invariants;
 it does not require old-A Hook snapshot copies, output-only writes, or copied
@@ -27,6 +33,10 @@ Release and FemtoVG at 1100x700 logical pixels. Pair gates retain the establishe
 Absolute regression ceilings are 512 MiB RSS/footprint, 100 ms heartbeat p95,
 8 MiB RSS growth and shutdown under 8 seconds. These are conservative detection
 ceilings, not claims about idle product memory usage.
+The generic 512 MiB ceiling does not replace a stricter feature contract:
+[PR Review](specs/pr-review.md) requires RSS strictly below 300 MiB. That RSS
+ceiling and all growth/slope gates apply independently; passing one does not
+waive another.
 
 Continuous mode (`--soak`) repeats the actual workload until its requested
 duration, finishing on a complete cycle boundary. It must complete at least

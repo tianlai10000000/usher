@@ -78,6 +78,12 @@ Command/Ctrl+, 打开设置。
    the active input method or keyboard layout.
 5. A modal overlay owns input. Application shortcuts reject while one is
    visible, allowing the focused dialog to handle Escape and editing keys.
+   A native monitor can call the Rust handler before Slint's queued `changed`
+   handlers publish an independent PR factory's scalar summary. The shared
+   handler calls the feature-owned `synchronize_modal_input` first; it reads
+   current PR modal flags and updates only that critical boolean. Opening and
+   closing take effect immediately without clearing other features' modal state,
+   materializing the UI tree or waiting for a timer.
    Hook Add/Edit opts into shared Dialog Cmd+Enter (macOS) / Ctrl+Enter saving;
    plain Enter remains a source newline, and busy or destructive dialogs reject submission.
    Modal keys are forwarded through the root callback to `SettingsPageBridge`
@@ -192,3 +198,13 @@ and focused-control acceptance above.
 
 从注册表、resolver、dispatcher 与根 Slint callback 两端开始修改；macOS 物理键
 入口另需核对。单测锁定 Terminal 的两个项目路由作用域，原生输入法与焦点验收仍须执行。
+
+The deterministic `shortcuts::pr_review_modal_tests` regression calls the same
+handler as the macOS native monitor without advancing a Slint turn. It retains
+the old stale-summary admission as a before-case control, checks all five PR
+dialog flags, immediately checks valid input after closing, and keeps another
+feature's modal blocking. This does not replace native key/chrome acceptance.
+
+`shortcuts::pr_review_modal_tests` 在不推进 Slint turn 时调用与 macOS 原生监视器相同的
+入口，保留旧摘要错误准入作为前例，覆盖五种 PR 弹窗、立即关闭后的合法输入及其他
+功能 modal 不被清除；此确定性回归不替代原生按键与 chrome 验收。

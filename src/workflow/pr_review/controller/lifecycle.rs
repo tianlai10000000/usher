@@ -1,6 +1,7 @@
 //! Derived presentation can be rebuilt without discarding review navigation.
 //! Kept opt-in until controlled native Release A/B acceptance is complete.
 use super::*;
+use crate::pr_review_ui::PrReviewUiExt;
 
 pub(crate) fn candidate_enabled() -> bool {
     cfg!(feature = "test-fixtures")
@@ -10,6 +11,28 @@ pub(crate) fn candidate_enabled() -> bool {
 }
 
 impl WorkflowPrReviewController {
+    pub(super) fn release_idle_highlight_resources(&self, expected_intent: Option<u64>) {
+        let cache = self.highlighting.resource_cache();
+        if !cache.request_idle_check(expected_intent) {
+            return;
+        }
+        let weak = Arc::downgrade(cache);
+        if slint::invoke_from_event_loop(move || {
+            let Some(cache) = weak.upgrade() else { return };
+            let Some(slot) = cache.confirm_idle() else {
+                return;
+            };
+            let weak = Arc::downgrade(&cache);
+            crate::app_runtime::release_resources(slot, move || {
+                weak.upgrade().and_then(|cache| cache.next_release())
+            });
+        })
+        .is_err()
+        {
+            cache.check_failed();
+        }
+    }
+
     pub(crate) fn route_changed(&self, ui: &MainWindow, previous: Route, current: Route) {
         if previous == Route::PrReview && current != Route::PrReview {
             self.conflicts.close(ui);
@@ -41,6 +64,7 @@ impl WorkflowPrReviewController {
         }
         // Invalidates only derived work. Provider reads, remote mutations and
         // their Hook/notification delivery must not be cancelled by hiding UI.
+        self.highlighting.cancel();
         self.state.set_presentation_suspended(true);
         super::super::find_bridge::cancel();
         self.highlight_resources.detach();
@@ -48,10 +72,18 @@ impl WorkflowPrReviewController {
             highlighted.clear();
         }
         set_empty_line_model(ui);
-        ui.set_workflow_pr_review_max_code_columns(0);
-        ui.set_workflow_pr_review_longest_code_line("".into());
-        ui.set_workflow_pr_review_code_loading(false);
-        ui.set_workflow_pr_review_large_diff_loading(false);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_max_code_columns(0);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_longest_code_line("".into());
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_code_loading(false);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_large_diff_loading(false);
         self.log_memory_diagnostics("presentation.suspended");
     }
 
@@ -60,14 +92,23 @@ impl WorkflowPrReviewController {
             return;
         }
         self.state.set_presentation_suspended(false);
-        let index = ui.get_workflow_pr_review_selected_file_index();
+        let index = ui
+            .pr_review()
+            .global::<crate::PrReviewBridge>()
+            .get_workflow_pr_review_selected_file_index();
         if index < 0 {
             return;
         }
         // Detail, range, expanded context, filters and selected path stay in
         // their existing owners; do not call apply_detail/reset_review_ui here.
-        if ui.get_workflow_pr_review_viewing_file() {
-            ui.set_workflow_pr_review_viewing_file(false);
+        if ui
+            .pr_review()
+            .global::<crate::PrReviewBridge>()
+            .get_workflow_pr_review_viewing_file()
+        {
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_viewing_file(false);
             self.toggle_view_file(ui);
         } else {
             self.select_file(ui, index);
@@ -113,8 +154,12 @@ mod tests {
             expanded_files: HashMap::new(),
             loaded_large_diffs: HashSet::new(),
         });
-        ui.set_workflow_pr_review_selected_file_index(0);
-        ui.set_workflow_pr_review_selected_file_path(file.path.clone().into());
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_selected_file_index(0);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_selected_file_path(file.path.clone().into());
         (controller, file)
     }
 
@@ -147,11 +192,31 @@ mod tests {
         detail.removed_lines = 3;
         let range = Arc::new(SharedDiffDetail::from(detail));
         controller.activate_commit_range(&ui, range);
-        assert_eq!(ui.get_workflow_pr_review_added_lines(), 32842);
-        assert_eq!(ui.get_workflow_pr_review_removed_lines(), 2277);
+        assert_eq!(
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_added_lines(),
+            32842
+        );
+        assert_eq!(
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_removed_lines(),
+            2277
+        );
         controller.activate_commit_range(&ui, all);
-        assert_eq!(ui.get_workflow_pr_review_added_lines(), 32842);
-        assert_eq!(ui.get_workflow_pr_review_removed_lines(), 2277);
+        assert_eq!(
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_added_lines(),
+            32842
+        );
+        assert_eq!(
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_removed_lines(),
+            2277
+        );
     }
 
     #[test]
@@ -162,7 +227,8 @@ mod tests {
         let (controller, _) = fixture(&ui);
         let request = controller.active_request.lock().unwrap().clone().unwrap();
         controller.open(&ui, request, false);
-        let b = ui.global::<crate::PrConflictsBridge>();
+        let pr_review_view = ui.pr_review();
+        let b = pr_review_view.global::<crate::PrConflictsBridge>();
         assert!(b.get_loading());
         assert!(!b.get_active());
         assert_eq!(b.get_file_count(), -1);
@@ -241,9 +307,18 @@ mod tests {
             old_details.push(Arc::downgrade(&detail));
             apply_highlighted_file(&ui, file, highlighted, true);
             drop(detail);
-            let lines = ui.get_workflow_pr_review_lines();
+            let lines = ui
+                .pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_lines();
             controller.route_changed(&ui, Route::PrReview, Route::Home);
-            assert!(lines == ui.get_workflow_pr_review_lines());
+            assert!(
+                lines
+                    == ui
+                        .pr_review()
+                        .global::<crate::PrReviewBridge>()
+                        .get_workflow_pr_review_lines()
+            );
             assert_eq!(lines.row_count(), count);
             assert_eq!(controller.source_files.lock().unwrap().entries.len(), 1);
             assert_eq!(
@@ -288,12 +363,27 @@ mod tests {
                 .unwrap()
                 .insert(file.path.clone(), highlighted.clone());
             apply_highlighted_file(&ui, file.clone(), highlighted, false);
-            ui.set_workflow_pr_review_viewing_file(full_file);
-            ui.set_workflow_pr_review_commit_range_start(2);
-            ui.set_workflow_pr_review_commit_range_end(4);
-            let lines = ui.get_workflow_pr_review_lines();
-            let metrics = ui.get_workflow_pr_review_line_metrics();
-            let revision = ui.get_workflow_pr_review_line_content_revision();
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_viewing_file(full_file);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_commit_range_start(2);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_commit_range_end(4);
+            let lines = ui
+                .pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_lines();
+            let metrics = ui
+                .pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_line_metrics();
+            let revision = ui
+                .pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_line_content_revision();
             let kinds = [
                 ReviewRequestKind::Highlight,
                 ReviewRequestKind::Expand,
@@ -301,25 +391,70 @@ mod tests {
             ];
             let generations = kinds.map(|kind| controller.state.begin(kind));
             let lease = controller.highlight_resources.lease();
-            let weak = Arc::downgrade(lease.get_or_init(|| Arc::new(HighlightResources::load())));
+            let weak = Arc::downgrade(lease.get_or_init(|| {
+                controller
+                    .highlighting
+                    .resource_cache()
+                    .lease()
+                    .get_or_init(|| Arc::new(HighlightResources::load()))
+                    .clone()
+            }));
             drop(lease);
 
             controller.route_changed(&ui, Route::PrReview, Route::Home);
             assert!(weak.upgrade().is_some());
             assert!(controller.highlight_resources.is_loaded());
             assert!(token_weak.upgrade().is_some());
-            assert!(lines == ui.get_workflow_pr_review_lines());
-            assert!(metrics == ui.get_workflow_pr_review_line_metrics());
-            assert_eq!(revision, ui.get_workflow_pr_review_line_content_revision());
-            assert_eq!(full_file, ui.get_workflow_pr_review_viewing_file());
-            assert_eq!(ui.get_workflow_pr_review_commit_range_start(), 2);
-            assert_eq!(ui.get_workflow_pr_review_commit_range_end(), 4);
+            assert!(
+                lines
+                    == ui
+                        .pr_review()
+                        .global::<crate::PrReviewBridge>()
+                        .get_workflow_pr_review_lines()
+            );
+            assert!(
+                metrics
+                    == ui
+                        .pr_review()
+                        .global::<crate::PrReviewBridge>()
+                        .get_workflow_pr_review_line_metrics()
+            );
+            assert_eq!(
+                revision,
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .get_workflow_pr_review_line_content_revision()
+            );
+            assert_eq!(
+                full_file,
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .get_workflow_pr_review_viewing_file()
+            );
+            assert_eq!(
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .get_workflow_pr_review_commit_range_start(),
+                2
+            );
+            assert_eq!(
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .get_workflow_pr_review_commit_range_end(),
+                4
+            );
             assert!(!controller.state.presentation_suspended());
             for (kind, generation) in kinds.into_iter().zip(generations) {
                 assert!(controller.state.is_current(kind, generation));
             }
             controller.route_changed(&ui, Route::Home, Route::PrReview);
-            assert!(lines == ui.get_workflow_pr_review_lines());
+            assert!(
+                lines
+                    == ui
+                        .pr_review()
+                        .global::<crate::PrReviewBridge>()
+                        .get_workflow_pr_review_lines()
+            );
             assert!(controller.highlight_resources.is_loaded());
             assert!(Arc::ptr_eq(
                 &controller
@@ -333,22 +468,30 @@ mod tests {
                 &file
             ));
             controller.clear_owned_state(&ui);
-            assert!(weak.upgrade().is_none());
+            assert!(!controller.highlight_resources.is_loaded());
+            assert!(weak.upgrade().is_some()); // Worker retains exactly one builtin graph.
+            assert!(controller.highlighting.resource_cache().is_loaded());
         }
         crate::i18n::apply_preference(usher_i18n::source_locale().id).unwrap();
     }
 
     #[test]
-    fn leave_releases_derived_owners_and_reentry_preserves_review_context() {
+    fn leave_releases_review_models_but_retains_controller_grammar_for_reentry() {
         let _locale = crate::i18n::test_locale_guard();
         i_slint_backend_testing::init_no_event_loop();
         for locale in ["en", "zh-CN"] {
             let ui = MainWindow::new().unwrap();
             crate::i18n::apply_preference(locale).unwrap();
             let (controller, file) = fixture(&ui);
-            ui.set_workflow_pr_review_tab(1);
-            ui.set_workflow_pr_review_commit_range_start(2);
-            ui.set_workflow_pr_review_commit_range_end(4);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_tab(1);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_commit_range_start(2);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_commit_range_end(4);
             *controller.file_filter.lock().unwrap() = "fixture".into();
             controller
                 .collapsed_folders
@@ -358,8 +501,14 @@ mod tests {
             let highlighted = tokens();
             let weak = Arc::downgrade(&highlighted);
             let grammar = controller.highlight_resources.lease();
-            let grammar_weak =
-                Arc::downgrade(grammar.get_or_init(|| Arc::new(HighlightResources::load())));
+            let grammar_weak = Arc::downgrade(grammar.get_or_init(|| {
+                controller
+                    .highlighting
+                    .resource_cache()
+                    .lease()
+                    .get_or_init(|| Arc::new(HighlightResources::load()))
+                    .clone()
+            }));
             drop(grammar);
             controller
                 .highlighted_files
@@ -368,12 +517,30 @@ mod tests {
                 .insert(file.path.clone(), highlighted.clone());
             apply_highlighted_file(&ui, file.clone(), highlighted, false);
             assert!(weak.upgrade().is_some()); // baseline retains actual lazy-model/cache owners
-            assert_eq!(ui.get_workflow_pr_review_lines().row_count(), 1);
+            assert_eq!(
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .get_workflow_pr_review_lines()
+                    .row_count(),
+                1
+            );
             controller.suspend_presentation(&ui);
             assert!(weak.upgrade().is_none()); // candidate releases final token owner
-            assert!(grammar_weak.upgrade().is_none());
-            assert_eq!(ui.get_workflow_pr_review_lines().row_count(), 0);
-            assert_eq!(ui.get_workflow_pr_review_line_metrics().row_count(), 0);
+            assert!(grammar_weak.upgrade().is_some()); // Separate controller cache survives.
+            assert_eq!(
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .get_workflow_pr_review_lines()
+                    .row_count(),
+                0
+            );
+            assert_eq!(
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .get_workflow_pr_review_line_metrics()
+                    .row_count(),
+                0
+            );
             assert!(!controller.highlight_resources.is_loaded());
             assert!(
                 controller
@@ -394,9 +561,24 @@ mod tests {
                     .files[0],
                 &file
             ));
-            assert_eq!(ui.get_workflow_pr_review_tab(), 1);
-            assert_eq!(ui.get_workflow_pr_review_commit_range_start(), 2);
-            assert_eq!(ui.get_workflow_pr_review_commit_range_end(), 4);
+            assert_eq!(
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .get_workflow_pr_review_tab(),
+                1
+            );
+            assert_eq!(
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .get_workflow_pr_review_commit_range_start(),
+                2
+            );
+            assert_eq!(
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .get_workflow_pr_review_commit_range_end(),
+                4
+            );
             assert_eq!(*controller.file_filter.lock().unwrap(), "fixture");
             assert!(controller.collapsed_folders.lock().unwrap().contains("src"));
             // Deterministic completion fixture avoids network/native rendering.
@@ -407,13 +589,32 @@ mod tests {
                 .insert(file.path.clone(), tokens());
             controller.resume_presentation(&ui);
             assert!(!controller.state.presentation_suspended());
-            assert_eq!(ui.get_workflow_pr_review_lines().row_count(), 1);
             assert_eq!(
-                ui.get_workflow_pr_review_selected_file_path().as_str(),
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .get_workflow_pr_review_lines()
+                    .row_count(),
+                1
+            );
+            assert_eq!(
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .get_workflow_pr_review_selected_file_path()
+                    .as_str(),
                 file.path
             );
-            assert_eq!(ui.get_workflow_pr_review_tab(), 1);
-            assert_eq!(ui.get_workflow_pr_review_commit_range_start(), 2);
+            assert_eq!(
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .get_workflow_pr_review_tab(),
+                1
+            );
+            assert_eq!(
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .get_workflow_pr_review_commit_range_start(),
+                2
+            );
             controller.suspend_presentation(&ui);
             controller.clear_owned_state(&ui);
             assert!(controller.active_request.lock().unwrap().is_none());
@@ -424,6 +625,34 @@ mod tests {
     }
 
     #[test]
+    fn grammar_cache_drops_with_last_controller_owner_after_window_release() {
+        let _locale = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().unwrap();
+        let (controller, _) = fixture(&ui);
+        let last_owner = controller.clone();
+        let grammar = Arc::downgrade(
+            &controller
+                .highlighting
+                .resource_cache()
+                .lease()
+                .get_or_init(|| Arc::new(HighlightResources::load()))
+                .clone(),
+        );
+        controller.clear_owned_state(&ui);
+        assert!(!controller.highlight_resources.is_loaded());
+        assert!(controller.highlighting.resource_cache().is_loaded());
+        // Bound UI callbacks are owners too; release them before the two
+        // explicit clones. Without pumping the queued check, final teardown
+        // still releases the CPU-only graph after the window has gone.
+        drop(ui);
+        drop(controller);
+        assert!(grammar.upgrade().is_some());
+        drop(last_owner);
+        assert!(grammar.upgrade().is_none());
+    }
+
+    #[test]
     fn late_diff_selection_does_not_rebuild_hidden_highlighting() {
         let _locale = crate::i18n::test_locale_guard();
         i_slint_backend_testing::init_no_event_loop();
@@ -431,8 +660,22 @@ mod tests {
         let (controller, _) = fixture(&ui);
         controller.suspend_presentation(&ui);
         controller.select_file(&ui, 0);
-        assert_eq!(ui.get_workflow_pr_review_lines().row_count(), 0);
-        assert!(!ui.get_workflow_pr_review_code_loading());
+        assert_eq!(
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_lines()
+                .row_count(),
+            0
+        );
+        assert!(
+            !ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_code_loading()
+        );
         assert!(!controller.highlight_resources.is_loaded());
     }
 }
+
+#[cfg(test)]
+#[path = "async_ui_tests.rs"]
+mod async_ui_tests;

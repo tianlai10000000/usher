@@ -1,6 +1,7 @@
 //! Offline real callback fixture, identical on both sides of the Find A/B.
 use super::diff_model::LazyPrDiffLineModel;
 use crate::git::{PullRequestDiffFile, PullRequestDiffLine};
+use crate::pr_review_ui::PrReviewUiExt;
 use crate::workflow::syntax_highlight::HighlightedLine;
 use crate::{MainWindow, Route, WorkflowPrDiffFindMatch};
 use slint::{ComponentHandle, Model, ModelRc};
@@ -56,21 +57,43 @@ fn install(ui: &MainWindow, split: bool, count: usize) {
         lines,
     });
     let model = Rc::new(LazyPrDiffLineModel::new(file, highlighted, split));
-    ui.set_workflow_pr_review_line_metrics(ModelRc::new(slint::VecModel::from(
-        model.row_metrics(),
-    )));
-    ui.set_workflow_pr_review_lines(model.into());
-    ui.set_workflow_pr_review_line_content_revision(
-        ui.get_workflow_pr_review_line_content_revision()
-            .wrapping_add(1),
-    );
-    ui.set_workflow_pr_review_selected_file_path("p5-find.txt".into());
-    ui.set_workflow_pr_review_selected_file_index(0);
-    ui.set_workflow_pr_review_diff_view(if split { "split" } else { "unified" }.into());
-    ui.set_workflow_pr_review_loading(false);
-    ui.set_workflow_pr_review_code_loading(false);
-    ui.set_workflow_pr_review_visible(true);
-    ui.set_workflow_pr_review_tab(2);
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .set_workflow_pr_review_line_metrics(ModelRc::new(slint::VecModel::from(
+            model.row_metrics(),
+        )));
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .set_workflow_pr_review_lines(model.into());
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .set_workflow_pr_review_line_content_revision(
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_line_content_revision()
+                .wrapping_add(1),
+        );
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .set_workflow_pr_review_selected_file_path("p5-find.txt".into());
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .set_workflow_pr_review_selected_file_index(0);
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .set_workflow_pr_review_diff_view(if split { "split" } else { "unified" }.into());
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .set_workflow_pr_review_loading(false);
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .set_workflow_pr_review_code_loading(false);
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .set_workflow_pr_review_visible(true);
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .set_workflow_pr_review_tab(2);
     ui.invoke_navigate(Route::PrReview);
 }
 fn round(weak: slint::Weak<MainWindow>, index: usize) {
@@ -88,10 +111,12 @@ fn round(weak: slint::Weak<MainWindow>, index: usize) {
         let started = Instant::now();
         for query in ["a", "alpha", "İ", "中文", "none", "end"] {
             let _ = ui
+                .pr_review()
                 .global::<crate::PrDiffBridge>()
                 .invoke_workflow_pr_review_find_diff_matches(query.into(), split);
         }
         let model = ui
+            .pr_review()
             .global::<crate::PrDiffBridge>()
             .invoke_workflow_pr_review_find_diff_matches("中文".into(), split);
         log::info!(

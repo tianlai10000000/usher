@@ -48,6 +48,21 @@ pub(super) fn highlight_diff_lines(
     path: &str,
     lines: &[PullRequestDiffLine],
 ) -> Vec<HighlightedLine> {
+    highlight_diff_lines_cancellable(resources, path, lines, || false)
+        .expect("an uncancelled highlighter always completes")
+}
+
+/// A cancelled request never publishes a partial highlighted model.
+/// Poll once per logical line; one Syntect line remains indivisible.
+pub(super) fn highlight_diff_lines_cancellable(
+    resources: &HighlightResources,
+    path: &str,
+    lines: &[PullRequestDiffLine],
+    mut cancelled: impl FnMut() -> bool,
+) -> Option<Vec<HighlightedLine>> {
+    if cancelled() {
+        return None;
+    }
     let syntax_set = &resources.syntax_set;
     let github_theme = &resources.github_theme;
     let extension = path_extension(path);
@@ -56,6 +71,9 @@ pub(super) fn highlight_diff_lines(
     let mut highlighter = HighlightLines::new(syntax, github_theme);
     let mut highlighted = Vec::with_capacity(lines.len());
     for (index, line) in lines.iter().enumerate() {
+        if cancelled() {
+            return None;
+        }
         let expanded = expand_tabs(line.content.as_str(), 4);
         if matches!(line.kind.as_str(), "hunk" | "meta") {
             syntax = if extension == "vue" {
@@ -100,7 +118,7 @@ pub(super) fn highlight_diff_lines(
             },
         );
     }
-    highlighted
+    (!cancelled()).then_some(highlighted)
 }
 
 fn syntax_for_path<'a>(syntax_set: &'a SyntaxSet, path: &str) -> &'a SyntaxReference {

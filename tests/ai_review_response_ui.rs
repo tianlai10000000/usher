@@ -3,6 +3,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
+use usher_lib::PrReviewUiExt;
 
 use i_slint_backend_testing::{AccessibleRole, ElementHandle};
 use slint::platform::{PointerEventButton, WindowEvent};
@@ -840,7 +841,10 @@ fn ai_review_content_click_dismisses_the_adjacent_diff_settings_popover() {
     i_slint_backend_testing::init_no_event_loop();
     let window = configure_pr_review_window(1300.0);
     install_transient_input_bridge(&window).expect("transient input bridge");
-    window.set_workflow_pr_review_tab(2);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_tab(2);
     let target = "https://example.com/review-details";
     window.set_ai_review_conversation(ModelRc::new(Rc::new(VecModel::from(vec![
         AiReviewConversationItem {
@@ -962,31 +966,43 @@ fn ai_review_content_click_dismisses_the_adjacent_diff_settings_popover() {
     );
 
     window.set_ai_review_panel_visible(false);
-    window.set_workflow_pr_review_tab(0);
-    window.set_workflow_pr_can_comment(true);
-    window.set_workflow_pr_review_conversation_content_height(48);
-    window.set_workflow_pr_review_conversation_items(ModelRc::new(Rc::new(VecModel::from(vec![
-        WorkflowPrConversationItem {
-            id: "review-summary".into(),
-            kind: "review_summary".into(),
-            author: "Reviewer".into(),
-            avatar: slint::Image::default(),
-            avatar_label: "R".into(),
-            author_association: "MEMBER".into(),
-            body: "requested changes".into(),
-            message_body: "".into(),
-            message_body_height: 0,
-            message_expanded: false,
-            created_at: "now".into(),
-            created_at_tooltip: "now".into(),
-            state: "".into(),
-            review_id: "review-1".into(),
-            can_dismiss: true,
-            connect_before: false,
-            connect_after: false,
-            row_height: 48,
-        },
-    ]))));
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_tab(0);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_can_comment(true);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_conversation_content_height(48);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_conversation_items(ModelRc::new(Rc::new(VecModel::from(vec![
+            WorkflowPrConversationItem {
+                id: "review-summary".into(),
+                kind: "review_summary".into(),
+                author: "Reviewer".into(),
+                avatar: slint::Image::default(),
+                avatar_label: "R".into(),
+                author_association: "MEMBER".into(),
+                body: "requested changes".into(),
+                message_body: "".into(),
+                message_body_height: 0,
+                message_expanded: false,
+                created_at: "now".into(),
+                created_at_tooltip: "now".into(),
+                state: "".into(),
+                review_id: "review-1".into(),
+                can_dismiss: true,
+                connect_before: false,
+                connect_after: false,
+                row_height: 48,
+            },
+        ]))));
     i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
 
     ElementHandle::find_by_accessible_label(&window, "Review actions")

@@ -1,0 +1,12 @@
+import { PrReviewHostAdapter } from "host_bridge.slint";
+import { PrReviewSurface } from "surface.slint";
+export { PrReviewHostBridge, PrReviewHostContext } from "host_bridge.slint";
+export { PrReviewBridge } from "bridge.slint";
+export { PrDiffBridge } from "diff_bridge.slint";
+export { PrConflictsBridge } from "conflicts_bridge.slint";
+export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffRowMetric, WorkflowPrDiffVirtualRow, WorkflowPrDiffVirtualWindow, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffGlyphRange, WorkflowPrDiffGlyphRect, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit } from "../../components/pr_review/shell.slint";
+export { PrConflictFile, PrConflictRow, PrConflictWindow } from "conflicts_bridge.slint";
+
+export component PrReviewHost inherits PrReviewHostAdapter {
+    PrReviewSurface { width: parent.width; height: parent.height; }
+}

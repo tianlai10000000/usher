@@ -1,4 +1,5 @@
 //! Latest-only list enrichment and epoch-fenced ephemeral observations.
+use crate::pr_review_ui::PrReviewUiExt;
 #[path = "pr_conflict_status_owner.rs"]
 mod owner;
 #[cfg(test)]
@@ -274,7 +275,8 @@ fn list_visible(ui: &MainWindow) -> bool {
 }
 
 fn apply_observations(ui: &MainWindow, observations: &[Observation]) {
-    let bridge = ui.global::<PrConflictsBridge>();
+    let pr_review_view = ui.pr_review();
+    let bridge = pr_review_view.global::<PrConflictsBridge>();
     if list_visible(ui) {
         let repo = bridge.get_list_repository();
         let rows = ui.get_workflow_pr_list_items();
@@ -372,7 +374,8 @@ pub(super) fn enrich(ui: &MainWindow, metadata: ProjectRepositoryMetadata) {
     {
         return;
     }
-    ui.global::<PrConflictsBridge>()
+    ui.pr_review()
+        .global::<PrConflictsBridge>()
         .set_list_repository(repository.into());
     if !list_visible(ui) {
         return;
@@ -387,7 +390,8 @@ pub(super) fn enrich(ui: &MainWindow, metadata: ProjectRepositoryMetadata) {
     }
 }
 fn reset_projection(ui: &MainWindow) {
-    let b = ui.global::<PrConflictsBridge>();
+    let pr_review_view = ui.pr_review();
+    let b = pr_review_view.global::<PrConflictsBridge>();
     b.set_file_count(-1);
     b.set_list_repository("".into());
     b.set_repository("".into());
@@ -427,7 +431,8 @@ mod projection_tests {
             ..Default::default()
         }]));
         ui.set_workflow_pr_list_items(rows.clone());
-        let bridge = ui.global::<PrConflictsBridge>();
+        let pr_review_view = ui.pr_review();
+        let bridge = pr_review_view.global::<PrConflictsBridge>();
         bridge.set_list_repository("fixture-repository".into());
         bridge.set_repository("fixture-repository".into());
         bridge.set_number("42".into());

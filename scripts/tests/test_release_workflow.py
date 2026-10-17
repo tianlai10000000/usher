@@ -14,11 +14,19 @@ CACHE_VERSION = "v6.1.0"
 BUILD_JOBS = ("build-macos", "build-windows")
 HASH_INPUTS = ("Cargo.lock", "**/Cargo.toml", ".cargo/config.toml", ".github/workflows/release.yml")
 BUILD_PATHS = {"target/release", "target/${{ matrix.target }}/release", "target/.rustc_info.json"}
+PRODUCT_RETENTION_DAYS = 7
+DIAGNOSTIC_RETENTION_DAYS = 3
 COARSE_BUILD_PREFIX = "release-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ steps.rust.outputs.cachekey }}-release-default-"
 PREWARM_GUARD = "github.event_name == 'workflow_dispatch' && inputs.cache_only"
 PREWARM_SCRIPT = ('if [[ "$GITHUB_REF" != "refs/heads/$RELEASE_DEFAULT_BRANCH" ]]; then\n'
                   'echo "::error::Cache-only prewarming must run on the repository default branch."\n'
                   'exit 1\nfi')
+PROBE_INPUT_SCRIPT = '''case "$RELEASE_PROBE_MODE" in
+  normal) [[ -z "$RELEASE_PROBE_ID" ]] ;;
+  cold) [[ "$RELEASE_CACHE_ONLY" == "true" && -z "$RELEASE_PROBE_ID" ]] ;;
+  warm) [[ "$RELEASE_CACHE_ONLY" == "true" && "$RELEASE_PROBE_ID" =~ ^[1-9][0-9]{0,19}-[1-9][0-9]{0,3}$ ]] ;;
+  *) false ;;
+esac || { echo "::error::Invalid cache probe inputs; use cache-only cold or warm with a prior cold run-attempt ID."; exit 1; }'''
 PRODUCT_STEPS = {
     "build-macos": {"Install cargo-bundle", "Install create-dmg", "Create App Bundle",
                     "Install Apple signing certificate", "Sign macOS executable and app bundle",
@@ -92,6 +100,11 @@ def _restore_prefixes(step):
     return [line.strip() for line in match[1].splitlines()] if match else []
 
 
+def _retention_within(step, maximum):
+    value = _field(step, "retention-days", 10)
+    return bool(re.fullmatch(r"[1-9][0-9]*", value or "")) and int(value) <= maximum
+
+
 def _expanded_script(step):
     env = {"GITHUB_REPOSITORY": "${{ github.repository }}", "GITHUB_RUN_ID": "${{ github.run_id }}",
            "GITHUB_RUN_ATTEMPT": "${{ github.run_attempt }}", **_mapping(step, "env", 8)}
@@ -100,6 +113,36 @@ def _expanded_script(step):
         if value.startswith("${{"):
             text = re.sub(r"\$\{" + re.escape(name) + r"\}|\$" + re.escape(name) + r"\b", lambda _: value, text)
     return _compact(text.replace("\\\n", "").replace('"', "").replace("'", ""))
+
+
+def _script(step):
+    match = re.search(r"^        run: \|\n((?: {10}.*(?:\n|$))*)", step, re.M)
+    return "\n".join(line[10:] for line in match[1].splitlines()) if match else _field(step, "run", 8)
+
+
+def _normal_key(value):
+    for kind in ("registry", "build"):
+        value = value.replace("${{ steps.cache-plan.outputs.namespace || 'release-" + kind + "-v1' }}", "release-" + kind + "-v1")
+    return value
+
+
+def _normal_restore_prefixes(step):
+    """Evaluate only the three fixed normal-mode templates, never expressions."""
+    registry = "${{ steps.cache-plan.outputs.namespace == '' && format('release-registry-v1-{0}-{1}-{2}-', runner.os, runner.arch, steps.rust.outputs.cachekey) || '' }}"
+    coarse = "${{ steps.cache-plan.outputs.namespace == '' && format('release-build-v1-{0}-{1}-{2}-{3}-release-default-', runner.os, runner.arch, matrix.target, steps.rust.outputs.cachekey) || '' }}"
+    strict = "${{ steps.cache-plan.outputs.namespace == '' && format('release-build-v1-{0}-{1}-{2}-{3}-release-default-{4}-', runner.os, runner.arch, matrix.target, steps.rust.outputs.cachekey, hashFiles('Cargo.lock', '**/Cargo.toml', '.cargo/config.toml', '.github/workflows/release.yml')) || '' }}"
+    normal_strict = COARSE_BUILD_PREFIX + "${{ hashFiles('Cargo.lock', '**/Cargo.toml', '.cargo/config.toml', '.github/workflows/release.yml') }}-"
+    fixed = {registry: "release-registry-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}-",
+             coarse: COARSE_BUILD_PREFIX, strict: normal_strict}
+    return [fixed.get(value, value) for value in _restore_prefixes(step)]
+
+
+def _build_script(job):
+    jobs = ' --jobs "$(sysctl -n hw.ncpu)"' if job == "build-macos" else ""
+    direct_jobs = " --jobs $(sysctl -n hw.ncpu)" if job == "build-macos" else ""
+    return ('if [[ "$RELEASE_FINGERPRINT" == "true" ]]; then\n'
+            '  python scripts/ci_release_build.py --target "$RELEASE_TARGET"' + jobs + ' --output "release-diagnostics/$RELEASE_TARGET/fingerprints.json"\n'
+            'else\n  cargo build --release --target "${RELEASE_TARGET}"' + direct_jobs + ' --timings --locked\nfi')
 
 
 def validate_contract(workflow_text):
@@ -114,10 +157,21 @@ def validate_contract(workflow_text):
     require(set(re.findall(r"^  ([a-z_]+):", triggers, re.M)) == {"push", "workflow_dispatch"}, "release triggers changed")
     require([line.strip() for line in _section(triggers, "push", 2).splitlines()] == ["tags:", "- 'v*'"], "release tag trigger changed")
     inputs = _section(_section(triggers, "workflow_dispatch", 2), "inputs", 4)
-    require(re.findall(r"^      ([a-z_]+):", inputs, re.M) == ["cache_only"], "manual input contract changed")
+    require(re.findall(r"^      ([a-z_]+):", inputs, re.M) == ["cache_only", "cache_diagnostics", "cache_probe", "probe_id"], "manual input contract changed")
     cache_only = _section(inputs, "cache_only", 6)
     require(_field(cache_only, "type", 8) == "boolean" and _field(cache_only, "default", 8) == "false"
             and _field(cache_only, "required", 8) == "false", "cache_only must be an optional boolean default false")
+    diagnostics = _section(inputs, "cache_diagnostics", 6)
+    require(_field(diagnostics, "type", 8) == "boolean" and _field(diagnostics, "default", 8) == "false"
+            and _field(diagnostics, "required", 8) == "false", "cache diagnostics must be optional boolean default false")
+    mode = _section(inputs, "cache_probe", 6)
+    require(_field(mode, "type", 8) == "choice" and _field(mode, "default", 8) == "normal"
+            and _field(mode, "required", 8) == "false"
+            and [line.strip() for line in _section(mode, "options", 8).splitlines()] == ["- normal", "- cold", "- warm"],
+            "cache probe must be optional normal/cold/warm choice default normal")
+    probe_id = _section(inputs, "probe_id", 6)
+    require(_field(probe_id, "type", 8) == "string" and _field(probe_id, "default", 8) == ""
+            and _field(probe_id, "required", 8) == "false", "probe id must be optional string default empty")
     jobs = _jobs(text)
     require(set(jobs) == {*BUILD_JOBS, "release", "report-timings"}, "expected only build, release and timing-report jobs")
     require(not re.search(r"permissions:\s*write-all", text), "write-all permissions forbidden")
@@ -151,15 +205,49 @@ def validate_contract(workflow_text):
         by_id = {_field(step, "id", 8): step for step in steps if _field(step, "id", 8)}
         require(len(by_id) == sum(bool(_field(step, "id", 8)) for step in steps), name + ": duplicate step ids")
         require("rust" in by_id and "dtolnay/rust-toolchain@" in (by_id.get("rust") or ""), name + ": rust step id missing")
+        guards = [step for step in steps if _field(step, "name", 8) == "Validate release probe inputs"]
+        require(len(guards) == 1 and steps[1] == guards[0], name + ": probe inputs must be checked before checkout")
+        for guard in guards:
+            require(_script(guard) == PROBE_INPUT_SCRIPT and _field(guard, "shell", 8) == "bash"
+                    and _expression(_field(guard, "if", 8)) == "github.event_name=='workflow_dispatch'"
+                    and _mapping(guard, "env", 8) == {
+                        "RELEASE_PROBE_MODE": "${{ inputs.cache_probe || 'normal' }}",
+                        "RELEASE_PROBE_ID": "${{ inputs.probe_id }}", "RELEASE_CACHE_ONLY": "${{ inputs.cache_only }}"},
+                    name + ": probe input validation must use fixed quoted Bash data")
+        plan = by_id.get("cache-plan", "")
+        require(_expression(_field(plan, "if", 8)) == "github.event_name=='workflow_dispatch'&&(inputs.cache_diagnostics||inputs.cache_probe!='normal')"
+                and _expression(_field(plan, "continue-on-error", 8)) == "inputs.cache_probe=='normal'",
+                name + ": normal diagnostics must be optional but probe planning strict")
+        require(_field(plan, "run", 8) == 'python scripts/ci_release_probe.py plan --output "release-diagnostics/${{ matrix.target }}/probe.json"'
+                and _field(plan, "shell", 8) == "bash", name + ": probe planner command changed")
+        env = {
+            "RELEASE_DIAGNOSTICS": "inputs.cache_diagnostics", "RELEASE_PROBE_MODE": "inputs.cache_probe",
+            "RELEASE_PROBE_ID": "inputs.probe_id", "RELEASE_CACHE_ONLY": "inputs.cache_only",
+            "RELEASE_EVENT": "github.event_name", "RELEASE_REF": "github.ref",
+            "RELEASE_DEFAULT_BRANCH": "github.event.repository.default_branch", "RELEASE_RUN_ID": "github.run_id",
+            "RELEASE_RUN_ATTEMPT": "github.run_attempt", "RELEASE_TARGET": "matrix.target",
+            "RELEASE_RUNNER_OS": "runner.os", "RELEASE_RUNNER_ARCH": "runner.arch",
+            "RELEASE_RUST_KEY": "steps.rust.outputs.cachekey", "RELEASE_SOURCE_SHA": "github.sha",
+            "RELEASE_CONFIGURATION_HASH": "hashFiles('Cargo.lock', '**/Cargo.toml', '.cargo/config.toml', '.github/workflows/release.yml')",
+            "RELEASE_REGISTRY_HASH": "hashFiles('Cargo.lock', '**/Cargo.toml', '.github/workflows/release.yml')",
+        }
+        require(_mapping(plan, "env", 8) == {key: "${{ " + value + " }}" for key, value in env.items()},
+                name + ": probe planner identity allowlist changed")
         python = [step for step in steps if _field(step, "uses", 8) == "actions/setup-python@v6"]
         require(len(python) == 1 and _field(python[0], "python-version", 10) == "3.12", name + ": Python 3.12 setup missing")
         require(len(python) == 1 and _field(python[0], "continue-on-error", 8) == "true", name + ": diagnostic Python setup must be non-blocking")
         for cache_id in ("registry-cache", "build-cache"):
             restore = by_id.get(cache_id, "")
             require(_field(restore, "uses", 8) == "actions/cache/restore@" + CACHE_VERSION, name + ": " + cache_id + " restore missing")
-            require(_field(restore, "if", 8) is None, name + ": " + cache_id + " restore must not be skipped")
+            require(_expression(_field(restore, "if", 8)) == "inputs.cache_probe!='cold'", name + ": only cold probes may skip restore")
+            require(_compact(_field(restore, "key", 10)).startswith("${{steps.cache-plan.outputs.namespace||'release-" + cache_id.removesuffix("-cache") + "-v1'}}-"),
+                    name + ": probe cache namespace must be isolated from normal caches")
+            require(bool(_restore_prefixes(restore)) and all(_compact(value).startswith("${{steps.cache-plan.outputs.namespace==''&&format(")
+                    for value in _restore_prefixes(restore)), name + ": probes must not use normal fallback prefixes")
+            require(restore in steps and plan in steps and by_id.get("rust") in steps
+                    and steps.index(by_id["rust"]) < steps.index(plan) < steps.index(restore), name + ": probe plan must precede restores")
         build_restore = by_id.get("build-cache", "")
-        key = _field(build_restore, "key", 10) or ""
+        key = _normal_key(_field(build_restore, "key", 10) or "")
         compact_key = _compact(key)
         for value in ("${{ runner.os }}", "${{ runner.arch }}", "${{ matrix.target }}", "${{ steps.rust.outputs.cachekey }}", "${{ github.sha }}", "release-default"):
             require(_compact(value) in compact_key, name + ": compiled key missing " + value)
@@ -168,7 +256,7 @@ def validate_contract(workflow_text):
         require(len(hashes) == 1 and files == set(HASH_INPUTS), name + ": compiled key configuration hash inputs differ")
         suffix = "-${{github.sha}}"
         require(compact_key.endswith(suffix), name + ": compiled key must rotate by commit SHA")
-        prefixes = [_compact(value) for value in _restore_prefixes(build_restore)]
+        prefixes = [_compact(value) for value in _normal_restore_prefixes(build_restore)]
         require(prefixes == [compact_key[:-len(suffix)] + "-", _compact(COARSE_BUILD_PREFIX)] and bool(key),
                 name + ": compiled fallback must retain strict then compatible platform/toolchain/profile/feature identity")
         require({_compact(value) for value in _paths(build_restore)} == {_compact(value) for value in BUILD_PATHS}, name + ": compiled cache paths changed")
@@ -177,35 +265,49 @@ def validate_contract(workflow_text):
                 name + ": registry download cache paths missing")
         require(not any(value in ("~/.cargo", "~/.cargo/credentials", "~/.cargo/credentials.toml") for value in registry_paths), name + ": registry cache includes credentials/root")
         registry = by_id.get("registry-cache", "")
-        registry_key = _field(registry, "key", 10) or ""
+        registry_key = _normal_key(_field(registry, "key", 10) or "")
         for value in ("${{ runner.os }}", "${{ runner.arch }}", "${{ steps.rust.outputs.cachekey }}"):
             require(_compact(value) in _compact(registry_key), name + ": registry key missing toolchain/platform boundary")
         registry_hash = re.search(r"-\$\{\{\s*hashFiles\(([^)]*)\)\s*\}\}$", registry_key)
         registry_files = set(re.findall(r"['\"]([^'\"]+)['\"]", registry_hash[1])) if registry_hash else set()
         require(registry_files == {"Cargo.lock", "**/Cargo.toml", ".github/workflows/release.yml"}, name + ": registry key hash inputs differ")
         expected_registry_prefix = registry_key[:registry_hash.start()] + "-" if registry_hash else None
-        require(_restore_prefixes(registry) == [expected_registry_prefix], name + ": registry fallback crosses toolchain/platform")
+        require(_normal_restore_prefixes(registry) == [expected_registry_prefix], name + ": registry fallback crosses toolchain/platform")
         builds = [step for step in steps if _field(step, "name", 8) == "Build Release"]
         require(len(builds) == 1, name + ": expected one Build Release")
         build = builds[0] if builds else ""
         build_id = _field(build, "id", 8)
         require(bool(build_id), name + ": Build Release id missing")
         require(_field(build, "if", 8) is None, name + ": cache hit must not skip Cargo build")
-        expected = "cargo build --release --target ${{ matrix.target }}"
-        if name == "build-macos":
-            expected += " --jobs $(sysctl -n hw.ncpu)"
-        command = _field(build, "run", 8) or ""
-        require(command.count(" --timings") == 1 and command.count(" --locked") == 1
-                and command.replace(" --timings", "").replace(" --locked", "") == expected,
+        require(_script(build) == _build_script(name),
                 name + ": release command/features/profile changed or --timings/--locked missing")
-        require(_mapping(build, "env", 8).get("CARGO_INCREMENTAL") == "0", name + ": release incremental policy changed")
+        build_env = _mapping(build, "env", 8)
+        require(build_env.get("CARGO_INCREMENTAL") == "0", name + ": release incremental policy changed")
+        require(set(build_env) == {"CARGO_INCREMENTAL", "CARGO_NET_GIT_FETCH_WITH_CLI", "RELEASE_TARGET", "RELEASE_FINGERPRINT"}
+                and build_env.get("CARGO_NET_GIT_FETCH_WITH_CLI") == "true", name + ": unexpected release environment override")
+        require(_compact(_mapping(build, "env", 8).get("RELEASE_TARGET")) == "${{matrix.target}}"
+                and _compact(_mapping(build, "env", 8).get("RELEASE_FINGERPRINT")) == "${{steps.cache-plan.outputs.fingerprint||'false'}}",
+                name + ": fixed build diagnostic inputs differ")
         build_index = steps.index(build) if build else -1
+        verifiers = [step for step in steps if _field(step, "name", 8) == "Verify warm cache exact"]
+        require(len(verifiers) == 1, name + ": strict warm verification missing")
+        for verify in verifiers:
+            require(_expression(_field(verify, "if", 8)) == "inputs.cache_probe=='warm'"
+                    and _field(verify, "run", 8) == "python scripts/ci_release_probe.py verify-warm"
+                    and _field(verify, "continue-on-error", 8) in (None, "false")
+                    and by_id.get("build-cache") in steps and steps.index(by_id["build-cache"]) < steps.index(verify) < build_index,
+                    name + ": warm miss/fallback must fail before building")
+            require(_mapping(verify, "env", 8) == {
+                "REGISTRY_CACHE_HIT": "${{ steps.registry-cache.outputs.cache-hit }}",
+                "REGISTRY_CACHE_OUTCOME": "${{ steps.registry-cache.outcome }}",
+                "BUILD_CACHE_HIT": "${{ steps.build-cache.outputs.cache-hit }}",
+                "BUILD_CACHE_OUTCOME": "${{ steps.build-cache.outcome }}"}, name + ": warm verifier needs actual restore outcomes")
         packaging = [i for i, step in enumerate(steps) if i > build_index and re.search(r"cargo bundle|codesign |tar -cz|Compress-Archive|create-dmg \\", step)]
         boundary = min(packaging) if packaging else len(steps)
         saves = [step for step in steps if _field(step, "uses", 8) == "actions/cache/save@" + CACHE_VERSION]
         require(len(saves) == 2, name + ": expected registry/build save steps")
         for cache_id in ("registry-cache", "build-cache"):
-            matching = [step for step in saves if _compact(_field(step, "key", 10)) == "${{steps." + cache_id + ".outputs.cache-primary-key}}"]
+            matching = [step for step in saves if _compact(_field(step, "key", 10)) == "${{steps.cache-plan.outputs." + cache_id.removesuffix("-cache") + "-key||steps." + cache_id + ".outputs.cache-primary-key}}"]
             require(len(matching) == 1, name + ": " + cache_id + " save must use restore primary key")
             for save in matching:
                 condition = _expression(_field(save, "if", 8))
@@ -228,7 +330,7 @@ def validate_contract(workflow_text):
                     require(_compact(env.get(variable)) == "${{steps." + cache_id + "." + output + "}}", name + ": metadata mapping differs for " + variable)
             require(set(env) == expected_env, name + ": metadata must use exactly eight explicit fields")
             require(_compact(env.get("RELEASE_TARGET")) == "${{matrix.target}}", name + ": metadata target missing")
-            require(_compact(env.get("CACHE_IDENTITY")) == "${{steps.build-cache.outputs.cache-primary-key}}", name + ": metadata identity differs")
+            require(_compact(env.get("CACHE_IDENTITY")) == "${{steps.cache-plan.outputs.build-key||steps.build-cache.outputs.cache-primary-key}}", name + ": metadata identity differs")
             require(_expression(_field(step, "if", 8)) == "always()", name + ": cache metadata must survive failed builds")
         uploads = [step for step in steps if (_field(step, "uses", 8) or "").startswith("actions/upload-artifact@") and _compact(_field(step, "name", 10)) == "release-diagnostics-${{matrix.target}}-attempt-${{github.run_attempt}}"]
         require(len(uploads) == 1, name + ": isolated release diagnostics upload missing")
@@ -237,15 +339,25 @@ def validate_contract(workflow_text):
             require(_expression(_field(upload, "if", 8)) == "always()", name + ": diagnostics upload must run always")
             paths = " ".join(_paths(upload))
             require("cache.json" in paths and ("cargo-timings" in paths or ".html" in paths), name + ": diagnostics must contain cache JSON and Cargo HTML")
+            require("probe.json" in paths and "fingerprints.json" in paths, name + ": bounded probe/fingerprint reports missing")
+            require(_paths(upload) == {"release-diagnostics/${{ matrix.target }}/" + filename for filename in ("cache.json", "probe.json", "fingerprints.json")}
+                    | {"target/cargo-timings/*.html"}, name + ": diagnostic artifact must contain only bounded reports and Cargo HTML")
+            require(_retention_within(upload, DIAGNOSTIC_RETENTION_DAYS),
+                    name + ": diagnostic artifact retention must be explicit 1-3 days")
+        products = []
         for upload in steps:
             if not (_field(upload, "uses", 8) or "").startswith("actions/upload-artifact@"):
                 continue
             artifact_name = _compact(_field(upload, "name", 10))
             if artifact_name.startswith(("Usher-", "${{env.APP_NAME}}-")):
+                products.append(upload)
                 paths = _paths(upload)
                 require(bool(paths) and all(not value.startswith(("release-diagnostics", "release-timings", "target/"))
                         and value.endswith((".tar.gz", ".zip", ".dmg")) for value in paths), name + ": product artifact contains diagnostic/non-package paths")
-        diagnostic_steps = python + metadata + uploads
+                require(_retention_within(upload, PRODUCT_RETENTION_DAYS),
+                        name + ": product artifact retention must be explicit 1-7 days")
+        require(len(products) == 1, name + ": expected one product artifact upload")
+        diagnostic_steps = python + metadata + uploads + [step for step in steps if _field(step, "id", 8) == "cache-plan"]
         for step in steps:
             if step not in diagnostic_steps:
                 require(_field(step, "continue-on-error", 8) in (None, "false"), name + ": non-diagnostic step must remain blocking")
@@ -281,82 +393,14 @@ def validate_contract(workflow_text):
     require(bool(report_uploads) and all(_expression(_field(step, "if", 8)) == "always()" for step in report_uploads), "timing JSON artifact must upload always")
     require(len(report_uploads) == 1 and _paths(report_uploads[0]) == {"release-timings"}
             and _compact(_field(report_uploads[0], "name", 10)) == "release-stage-timings-attempt-${{github.run_attempt}}", "timing JSON artifact must remain isolated")
+    require(all(_retention_within(upload, DIAGNOSTIC_RETENTION_DAYS) for upload in report_uploads),
+            "timing artifact retention must be explicit 1-3 days")
     return errors
 
 
-# Small complete structure fixture; no private repository evidence is required.
+# Mutate the real, tracked workflow; no dated/private evidence is required.
 def candidate_fixture():
-    key = "release-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ steps.rust.outputs.cachekey }}-release-default-${{ hashFiles('Cargo.lock', '**/Cargo.toml', '.cargo/config.toml', '.github/workflows/release.yml') }}"
-    jobs = []
-    for job in BUILD_JOBS:
-        registry = "            ~/.cargo/registry/index/\n            ~/.cargo/registry/cache/\n            ~/.cargo/git/db/"
-        paths = "            target/release/\n            target/${{ matrix.target }}/release/\n            target/.rustc_info.json"
-        body = f"  {job}:\n    steps:\n      - name: Validate cache prewarm ref\n        if: {PREWARM_GUARD}\n        shell: bash\n        env:\n          RELEASE_DEFAULT_BRANCH: ${{{{ github.event.repository.default_branch }}}}\n        run: |\n" + "\n".join("          " + line for line in PREWARM_SCRIPT.splitlines()) + "\n      - uses: actions/setup-python@v6\n        continue-on-error: true\n        with:\n          python-version: '3.12'\n      - uses: dtolnay/rust-toolchain@1.98.1\n        id: rust\n"
-        registry_base = "release-registry-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}"
-        registry_key = registry_base + "-${{ hashFiles('Cargo.lock', '**/Cargo.toml', '.github/workflows/release.yml') }}"
-        for identity, path, cache_key, restore in (("registry-cache", registry, registry_key, registry_base + "-"),
-                                                   ("build-cache", paths, key + "-${{ github.sha }}", key + "-")):
-            body += f"      - uses: actions/cache/restore@v6.1.0\n        id: {identity}\n        with:\n          path: |\n{path}\n          key: {cache_key}\n          restore-keys: |\n            {restore}\n"
-            if identity == "build-cache":
-                body += f"            {COARSE_BUILD_PREFIX}\n"
-        command = "cargo build --release --target ${{ matrix.target }} --timings --locked"
-        if job == "build-macos":
-            command += " --jobs $(sysctl -n hw.ncpu)"
-        body += f"      - name: Build Release\n        id: build\n        run: {command}\n        env:\n          CARGO_INCREMENTAL: 0\n"
-        for identity, path in (("registry-cache", registry), ("build-cache", paths)):
-            body += f"      - uses: actions/cache/save@v6.1.0\n        if: steps.build.outcome == 'success'\n        with:\n          path: |\n{path}\n          key: ${{{{ steps.{identity}.outputs.cache-primary-key }}}}\n"
-        body += "      - name: Record cache metadata\n        if: always()\n        continue-on-error: true\n        run: python3 scripts/ci_release_metrics.py cache --output release-diagnostics/cache.json\n        env:\n          RELEASE_TARGET: ${{ matrix.target }}\n          CACHE_IDENTITY: ${{ steps.build-cache.outputs.cache-primary-key }}\n"
-        for prefix, identity in (("REGISTRY", "registry-cache"), ("BUILD", "build-cache")):
-            for field, output in (("CACHE_HIT", "outputs.cache-hit"), ("CACHE_MATCHED_KEY", "outputs.cache-matched-key"), ("CACHE_OUTCOME", "outcome")):
-                body += f"          {prefix}_{field}: ${{{{ steps.{identity}.{output} }}}}\n"
-        body += "      - name: Package\n        if: ${{ !inputs.cache_only }}\n        run: cargo bundle --release\n"
-        body += "      - uses: actions/upload-artifact@v7.0.1\n        if: always()\n        continue-on-error: true\n        with:\n          name: release-diagnostics-${{ matrix.target }}-attempt-${{ github.run_attempt }}\n          path: |\n            release-diagnostics/cache.json\n            target/cargo-timings/*.html\n"
-        jobs.append(body)
-    return """name: Release
-on:
-  push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
-    inputs:
-      cache_only:
-        description: Build caches only
-        type: boolean
-        required: false
-        default: false
-jobs:
-""" + "".join(jobs) + """  release:
-    needs: [build-macos, build-windows]
-    if: ${{ !inputs.cache_only && startsWith(github.ref, 'refs/tags/') }}
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v8.0.1
-        with:
-          pattern: Usher-*
-  report-timings:
-    name: Release timing report
-    continue-on-error: true
-    needs: [build-macos, build-windows, release]
-    if: always()
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-      - name: Fetch jobs
-        run: |
-          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" > jobs.json
-          python3 scripts/ci_release_metrics.py jobs --input jobs.json --output-dir timings --attempt "$GITHUB_RUN_ATTEMPT"
-          cat timings/summary.md >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v7.0.1
-        if: always()
-        with:
-          name: release-stage-timings-attempt-${{ github.run_attempt }}
-          path: release-timings/
-"""
+    return (ROOT / ".github/workflows/release.yml").read_text()
 
 
 class ContractFixtures(unittest.TestCase):
@@ -364,11 +408,33 @@ class ContractFixtures(unittest.TestCase):
         self.candidate = candidate_fixture()
 
     def reject(self, before, after):
-        self.assertIn(before, self.candidate)
+        self.assertTrue(before in self.candidate, "mutation pattern must exist in workflow fixture")
         self.assertTrue(validate_contract(self.candidate.replace(before, after, 1)))
 
     def test_candidate_passes(self):
         self.assertEqual(validate_contract(self.candidate), [])
+
+    def test_artifact_retention_requires_explicit_positive_bounded_days(self):
+        jobs = _jobs(self.candidate)
+        for job_name, job in jobs.items():
+            for step in _steps(job):
+                if not (_field(step, "uses", 8) or "").startswith("actions/upload-artifact@"):
+                    continue
+                original = _field(step, "retention-days", 10)
+                maximum = PRODUCT_RETENTION_DAYS if _compact(_field(step, "name", 10)).startswith(("Usher-", "${{env.APP_NAME}}-")) else DIAGNOSTIC_RETENTION_DAYS
+                retention = "          retention-days: " + original
+                for value in (None, "0", "-1", "1.5", "true", "abc", "${{ inputs.days }}", str(maximum + 1), "90"):
+                    with self.subTest(job=job_name, artifact=_field(step, "name", 10), days=value):
+                        changed = step.replace(retention, "" if value is None else "          retention-days: " + value)
+                        self.assertTrue(any("retention" in error for error in validate_contract(self.candidate.replace(step, changed, 1))))
+
+    def test_shorter_positive_artifact_retention_remains_valid(self):
+        shorter = self.candidate.replace("retention-days: 7", "retention-days: 1").replace("retention-days: 3", "retention-days: 1")
+        self.assertEqual(validate_contract(shorter), [])
+
+    def test_product_upload_cannot_be_removed_to_bypass_retention(self):
+        upload = next(step for step in _steps(_jobs(self.candidate)["build-macos"]) if _field(step, "name", 8) == "Upload Artifacts")
+        self.assertTrue(any("product artifact upload" in error for error in validate_contract(self.candidate.replace(upload, "", 1))))
 
     def test_missing_windows_cache_rejected(self):
         start = self.candidate.index("  build-windows:\n")
@@ -391,19 +457,21 @@ class ContractFixtures(unittest.TestCase):
         self.reject("'.cargo/config.toml', '.github/workflows/release.yml')", "'.cargo/config.toml', '.github/workflows/release.yml', '!**')")
 
     def test_cross_configuration_fallback_rejected(self):
-        self.reject("          restore-keys: |\n            release-build-v1-", "          restore-keys: |\n            broad-\n            release-build-v1-")
+        restore = next(step for step in _steps(_jobs(self.candidate)["build-macos"]) if _field(step, "id", 8) == "build-cache")
+        self.reject(restore, restore.replace("          restore-keys: |\n", "          restore-keys: |\n            broad-\n"))
 
     def test_compatible_coarse_fallback_is_required_and_ordered_after_strict(self):
-        self.reject("            " + COARSE_BUILD_PREFIX + "\n", "")
-        coarse = "            " + COARSE_BUILD_PREFIX + "\n"
         restore = next(step for step in _steps(_jobs(self.candidate)["build-macos"]) if _field(step, "id", 8) == "build-cache")
-        strict = "            " + _restore_prefixes(restore)[0] + "\n"
+        strict, coarse = ("            " + value + "\n" for value in _restore_prefixes(restore))
+        self.reject(coarse, "")
         self.reject(strict + coarse, coarse + strict)
 
     def test_coarse_fallback_must_not_drop_platform_toolchain_or_explicit_profile_feature(self):
-        for token in ("${{ runner.os }}-", "${{ runner.arch }}-", "${{ matrix.target }}-", "${{ steps.rust.outputs.cachekey }}-", "release-default-"):
+        restore = next(step for step in _steps(_jobs(self.candidate)["build-macos"]) if _field(step, "id", 8) == "build-cache")
+        coarse = "            " + _restore_prefixes(restore)[1] + "\n"
+        for token in ("runner.os, ", "runner.arch, ", "matrix.target, ", ", steps.rust.outputs.cachekey", "release-default-"):
             with self.subTest(token=token):
-                self.reject("            " + COARSE_BUILD_PREFIX + "\n", "            " + COARSE_BUILD_PREFIX.replace(token, "") + "\n")
+                self.reject(coarse, coarse.replace(token, ""))
 
     def test_prewarm_input_requires_boolean_false_default(self):
         self.reject("type: boolean", "type: string")
@@ -424,32 +492,33 @@ class ContractFixtures(unittest.TestCase):
         self.reject("exit 1", "exit 0")
 
     def test_diagnostic_failures_cannot_block_build_or_workflow(self):
-        self.reject("      - uses: actions/setup-python@v6\n        continue-on-error: true", "      - uses: actions/setup-python@v6")
+        self.reject("      - name: Install Python for diagnostics\n        continue-on-error: true", "      - name: Install Python for diagnostics")
         self.reject("        if: always()\n        continue-on-error: true", "        if: always()")
-        self.reject("    name: Release timing report\n    continue-on-error: true", "    name: Release timing report")
+        report = _jobs(self.candidate)["report-timings"]
+        self.reject(report, report.replace("    continue-on-error: true\n", "", 1))
 
     def test_production_failures_cannot_be_silenced(self):
-        self.reject("        id: build\n", "        id: build\n        continue-on-error: true\n")
-        self.reject("      - name: Package\n", "      - name: Package\n        continue-on-error: true\n")
+        self.reject("        id: release-build\n", "        id: release-build\n        continue-on-error: true\n")
+        self.reject("      - name: Create App Bundle\n", "      - name: Create App Bundle\n        continue-on-error: true\n")
         self.reject("  release:\n", "  release:\n    continue-on-error: true\n")
         self.reject("  build-windows:\n", "  build-windows:\n    continue-on-error: true\n")
 
     def test_product_and_release_must_be_excluded_from_cache_only(self):
-        self.reject("      - name: Package\n        if: ${{ !inputs.cache_only }}", "      - name: Package")
+        self.reject("      - name: Create App Bundle\n        if: ${{ !inputs.cache_only }}", "      - name: Create App Bundle")
         self.reject("if: ${{ !inputs.cache_only && startsWith(github.ref, 'refs/tags/') }}", "if: startsWith(github.ref, 'refs/tags/')")
 
     def test_locked_build_is_required(self):
-        self.reject(" --locked", "")
+        self.reject(' --timings --locked\n', ' --timings\n')
 
     def test_whole_target_cache_rejected(self):
         self.reject("            target/.rustc_info.json", "            target/")
 
     def test_cache_hit_must_not_skip_build(self):
-        self.reject("        id: build\n", "        id: build\n        if: steps.build-cache.outputs.cache-hit != 'true'\n")
+        self.reject("        id: release-build\n", "        id: release-build\n        if: steps.build-cache.outputs.cache-hit != 'true'\n")
 
     def test_release_command_and_feature_changes_rejected(self):
         for before, after in (("--release", "--profile release-fast"), ("--timings", ""),
-                              ("--target ${{ matrix.target }}", "--features ui-components --target ${{ matrix.target }}")):
+                              ('--target "${RELEASE_TARGET}"', '--features ui-components --target "${RELEASE_TARGET}"')):
             with self.subTest(after=after):
                 self.reject(before, after)
 
@@ -457,24 +526,26 @@ class ContractFixtures(unittest.TestCase):
         self.reject("CARGO_INCREMENTAL: 0", "CARGO_INCREMENTAL: 1")
 
     def test_failed_build_cache_save_rejected(self):
-        self.reject("if: steps.build.outcome == 'success'", "if: always()")
-        self.reject("if: steps.build.outcome == 'success'", "if: failure() || steps.build.outcome == 'success'")
+        self.reject("if: success() && steps.release-build.outcome == 'success'", "if: always()")
+        self.reject("if: success() && steps.release-build.outcome == 'success'", "if: failure() || steps.release-build.outcome == 'success'")
 
     def test_save_after_packaging_rejected(self):
         save = next(step for step in _steps(_jobs(self.candidate)["build-macos"])
                     if _field(step, "uses", 8) == "actions/cache/save@v6.1.0")
         text = self.candidate.replace(save, "", 1)
-        package = "      - name: Package\n        if: ${{ !inputs.cache_only }}\n        run: cargo bundle --release\n"
+        package = next(step for step in _steps(_jobs(text)["build-macos"]) if _field(step, "name", 8) == "Create App Bundle")
         self.assertTrue(validate_contract(text.replace(package, package + save, 1)))
 
     def test_registry_restore_must_keep_toolchain_boundary(self):
-        self.reject("            release-registry-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}-\n", "            release-registry-v1-${{ runner.os }}-\n")
+        restore = next(step for step in _steps(_jobs(self.candidate)["build-macos"]) if _field(step, "id", 8) == "registry-cache")
+        self.reject(restore, restore.replace("runner.arch, ", ""))
 
     def test_failure_diagnostics_must_survive(self):
-        self.reject("        if: always()\n        continue-on-error: true\n        with:\n          name: release-diagnostics-", "        if: success()\n        continue-on-error: true\n        with:\n          name: release-diagnostics-")
+        upload = next(step for step in _steps(_jobs(self.candidate)["build-macos"]) if _field(step, "name", 8) == "Upload build diagnostics")
+        self.reject(upload, upload.replace("if: always()", "if: success()"))
 
     def test_release_download_cannot_include_diagnostics(self):
-        self.reject("pattern: Usher-*", "pattern: '*'")
+        self.reject("pattern: ${{ env.APP_NAME }}-*", "pattern: '*'")
 
     def test_permissions_cannot_expand(self):
         for before, after in (("actions: read", "actions: write"), ("contents: write", "contents: read")):
@@ -513,7 +584,30 @@ class ContractFixtures(unittest.TestCase):
 
     def test_cache_metadata_cannot_dump_arbitrary_environment(self):
         self.reject("REGISTRY_CACHE_HIT:", "UNBOUNDED_ENV:")
-        self.reject("CACHE_IDENTITY: ${{ steps.build-cache.outputs.cache-primary-key }}", "CACHE_IDENTITY: arbitrary")
+        self.reject("CACHE_IDENTITY: ${{ steps.cache-plan.outputs.build-key || steps.build-cache.outputs.cache-primary-key }}", "CACHE_IDENTITY: arbitrary")
+
+    def test_probe_input_modes_guard_and_strict_planning_cannot_be_relaxed(self):
+        self.reject("default: normal", "default: cold")
+        self.reject("type: choice", "type: string")
+        self.reject(PROBE_INPUT_SCRIPT.splitlines()[-1], "true")
+        self.reject("continue-on-error: ${{ inputs.cache_probe == 'normal' }}", "continue-on-error: true")
+        self.reject("RELEASE_SOURCE_SHA: ${{ github.sha }}", "RELEASE_SOURCE_SHA: fixed")
+
+    def test_warm_verification_cannot_be_skipped_or_tolerated(self):
+        self.reject("if: inputs.cache_probe == 'warm'", "if: false")
+        self.reject("      - name: Verify warm cache exact\n", "      - name: Verify warm cache exact\n        continue-on-error: true\n")
+        self.reject("run: python scripts/ci_release_probe.py verify-warm", "run: python scripts/ci_release_probe.py verify-warm || true")
+
+    def test_probes_cannot_consume_normal_namespace_or_fallback(self):
+        self.reject("${{ steps.cache-plan.outputs.namespace || 'release-build-v1' }}", "release-build-v1")
+        restore = next(step for step in _steps(_jobs(self.candidate)["build-macos"]) if _field(step, "id", 8) == "build-cache")
+        self.reject(_restore_prefixes(restore)[1], COARSE_BUILD_PREFIX)
+        self.reject("if: inputs.cache_probe != 'cold'", "if: always()")
+
+    def test_diagnostic_export_cannot_add_raw_logs_or_unbounded_directories(self):
+        self.reject("            target/cargo-timings/*.html", "            target/cargo-timings/*.html\n            release-diagnostics/raw.log")
+        self.reject("CARGO_INCREMENTAL: 0", "CARGO_INCREMENTAL: 0\n          CARGO_LOG: trace")
+        self.reject(' --timings --locked\n', ' --timings --locked || true\n')
 
     def test_import_has_no_execution_side_effects(self):
         self.assertTrue(callable(validate_contract))

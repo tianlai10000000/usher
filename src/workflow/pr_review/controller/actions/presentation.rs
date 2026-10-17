@@ -7,26 +7,30 @@ use crate::git::{
     PullRequestActionState, PullRequestMergeBlockKind, PullRequestMergeMethod,
     PullRequestReadinessKind, PullRequestRevertStrategy, PullRequestReviewAction,
 };
+use crate::pr_review_ui::PrReviewUiExt;
+use slint::ComponentHandle;
 
 pub(in crate::workflow::pr_review::controller) fn apply_submitted_review(
     ui: &MainWindow,
     action: PullRequestReviewAction,
 ) {
-    ui.set_workflow_pr_review_dialog_open(false);
+    let page = ui.pr_review();
+    let pr_state = page.global::<crate::PrReviewBridge>();
+    pr_state.set_workflow_pr_review_dialog_open(false);
     match action {
         PullRequestReviewAction::Comment => {
-            let count = ui.get_workflow_pr_review_conversation_count();
-            ui.set_workflow_pr_review_conversation_count(count.saturating_add(1));
+            let count = pr_state.get_workflow_pr_review_conversation_count();
+            pr_state.set_workflow_pr_review_conversation_count(count.saturating_add(1));
             // Comment completion belongs to the composer, not the aggregate
             // review decision. Repeated comments must each clear the composer.
-            let revision = ui.get_workflow_pr_comment_submission_revision();
-            ui.set_workflow_pr_comment_submission_revision(revision.wrapping_add(1));
+            let revision = pr_state.get_workflow_pr_comment_submission_revision();
+            pr_state.set_workflow_pr_comment_submission_revision(revision.wrapping_add(1));
         }
         PullRequestReviewAction::Approve => {
-            ui.set_workflow_pr_remote_review_state("approved".into());
+            pr_state.set_workflow_pr_remote_review_state("approved".into());
         }
         PullRequestReviewAction::RequestChanges => {
-            ui.set_workflow_pr_remote_review_state("rejected".into());
+            pr_state.set_workflow_pr_remote_review_state("rejected".into());
         }
     }
 }
@@ -54,22 +58,24 @@ fn select_merge_method(
 pub(in crate::workflow::pr_review::controller) fn default_merge_method(
     ui: &MainWindow,
 ) -> slint::SharedString {
+    let page = ui.pr_review();
+    let pr_state = page.global::<crate::PrReviewBridge>();
     let allowed = [
         (
             PullRequestMergeMethod::Merge,
-            ui.get_workflow_pr_merge_method_merge(),
+            pr_state.get_workflow_pr_merge_method_merge(),
         ),
         (
             PullRequestMergeMethod::Squash,
-            ui.get_workflow_pr_merge_method_squash(),
+            pr_state.get_workflow_pr_merge_method_squash(),
         ),
         (
             PullRequestMergeMethod::Rebase,
-            ui.get_workflow_pr_merge_method_rebase(),
+            pr_state.get_workflow_pr_merge_method_rebase(),
         ),
         (
             PullRequestMergeMethod::FastForward,
-            ui.get_workflow_pr_merge_method_fast_forward(),
+            pr_state.get_workflow_pr_merge_method_fast_forward(),
         ),
     ]
     .into_iter()
@@ -88,46 +94,50 @@ pub(in crate::workflow::pr_review::controller) fn apply_action_state(
     ui: &MainWindow,
     state: &PullRequestActionState,
 ) {
-    ui.set_workflow_pr_can_comment(state.can_comment);
-    ui.set_workflow_pr_can_approve(state.can_approve);
-    ui.set_workflow_pr_can_request_changes(state.can_request_changes);
-    ui.set_workflow_pr_can_merge(state.can_merge);
-    ui.set_workflow_pr_can_revert(state.can_revert);
+    let page = ui.pr_review();
+    let pr_state = page.global::<crate::PrReviewBridge>();
+    pr_state.set_workflow_pr_can_comment(state.can_comment);
+    pr_state.set_workflow_pr_can_approve(state.can_approve);
+    pr_state.set_workflow_pr_can_request_changes(state.can_request_changes);
+    pr_state.set_workflow_pr_can_merge(state.can_merge);
+    pr_state.set_workflow_pr_can_revert(state.can_revert);
     // An empty authoritative decision clears a withdrawn or dismissed review.
-    ui.set_workflow_pr_remote_review_state(state.review_state.clone().into());
-    ui.set_workflow_pr_merge_readiness_kind(state.readiness.kind.as_str().into());
-    ui.set_workflow_pr_merge_method_merge(
+    pr_state.set_workflow_pr_remote_review_state(state.review_state.clone().into());
+    pr_state.set_workflow_pr_merge_readiness_kind(state.readiness.kind.as_str().into());
+    pr_state.set_workflow_pr_merge_method_merge(
         state
             .allowed_merge_methods
             .contains(&PullRequestMergeMethod::Merge),
     );
-    ui.set_workflow_pr_merge_method_squash(
+    pr_state.set_workflow_pr_merge_method_squash(
         state
             .allowed_merge_methods
             .contains(&PullRequestMergeMethod::Squash),
     );
-    ui.set_workflow_pr_merge_method_rebase(
+    pr_state.set_workflow_pr_merge_method_rebase(
         state
             .allowed_merge_methods
             .contains(&PullRequestMergeMethod::Rebase),
     );
-    ui.set_workflow_pr_merge_method_fast_forward(
+    pr_state.set_workflow_pr_merge_method_fast_forward(
         state
             .allowed_merge_methods
             .contains(&PullRequestMergeMethod::FastForward),
     );
     // Capability refresh must not overwrite a supported explicit dialog choice.
     // A new dialog reads the current Settings preference through its callback.
-    let current = ui
+    let current = pr_state
         .get_workflow_pr_merge_dialog_open()
-        .then(|| PullRequestMergeMethod::parse(ui.get_workflow_pr_selected_merge_method().as_str()))
+        .then(|| {
+            PullRequestMergeMethod::parse(pr_state.get_workflow_pr_selected_merge_method().as_str())
+        })
         .flatten();
     let selected = select_merge_method(
         &state.allowed_merge_methods,
         crate::settings::load_default_pr_merge_method(),
         current,
     );
-    ui.set_workflow_pr_selected_merge_method(
+    pr_state.set_workflow_pr_selected_merge_method(
         selected.map_or("", PullRequestMergeMethod::as_str).into(),
     );
     retranslate_action_state(ui, state);
@@ -137,15 +147,18 @@ pub(in crate::workflow::pr_review::controller) fn retranslate_action_state(
     ui: &MainWindow,
     state: &PullRequestActionState,
 ) {
+    let page = ui.pr_review();
+    let pr_state = page.global::<crate::PrReviewBridge>();
     // The cached provider snapshot can predate a successful local mutation.
     // Language refresh changes copy without restoring stale decisions/capabilities.
-    let readiness = projected_readiness_kind(ui.get_workflow_pr_merge_readiness_kind().as_str());
-    ui.set_workflow_pr_merge_readiness_label(
+    let readiness =
+        projected_readiness_kind(pr_state.get_workflow_pr_merge_readiness_kind().as_str());
+    pr_state.set_workflow_pr_merge_readiness_label(
         crate::i18n::tr(readiness.label_key()).into_owned().into(),
     );
     let readiness_detail = crate::i18n::tr(readiness.detail_key()).into_owned();
-    ui.set_workflow_pr_merge_readiness_detail(readiness_detail.clone().into());
-    let merge_block_kind = if ui.get_workflow_pr_can_merge() {
+    pr_state.set_workflow_pr_merge_readiness_detail(readiness_detail.clone().into());
+    let merge_block_kind = if pr_state.get_workflow_pr_can_merge() {
         PullRequestMergeBlockKind::None
     } else if readiness != state.readiness.kind {
         PullRequestMergeBlockKind::Readiness
@@ -162,9 +175,9 @@ pub(in crate::workflow::pr_review::controller) fn retranslate_action_state(
             crate::i18n::tr("pr_review.merge_permission_required").into_owned()
         }
     };
-    ui.set_workflow_pr_merge_block_reason(merge_block_reason.into());
-    ui.set_workflow_pr_revert_block_reason(
-        if ui.get_workflow_pr_can_revert() {
+    pr_state.set_workflow_pr_merge_block_reason(merge_block_reason.into());
+    pr_state.set_workflow_pr_revert_block_reason(
+        if pr_state.get_workflow_pr_can_revert() {
             String::new()
         } else {
             crate::i18n::tr("pr_review.revert_not_available").into_owned()
@@ -185,8 +198,10 @@ pub(in crate::workflow::pr_review::controller) fn retranslate_action_state(
             "pr_review.revert_confirmation_unsupported",
         ),
     };
-    ui.set_workflow_pr_revert_action_label(crate::i18n::tr(revert_action_key).into_owned().into());
-    ui.set_workflow_pr_revert_confirmation(
+    pr_state.set_workflow_pr_revert_action_label(
+        crate::i18n::tr(revert_action_key).into_owned().into(),
+    );
+    pr_state.set_workflow_pr_revert_confirmation(
         crate::i18n::tr(revert_confirmation_key).into_owned().into(),
     );
 }
@@ -215,47 +230,51 @@ fn projected_readiness_kind(kind: &str) -> PullRequestReadinessKind {
 }
 
 pub(in crate::workflow::pr_review::controller) fn reset_action_capabilities(ui: &MainWindow) {
-    ui.set_workflow_pr_can_comment(false);
-    ui.set_workflow_pr_can_approve(false);
-    ui.set_workflow_pr_can_request_changes(false);
-    ui.set_workflow_pr_can_merge(false);
-    ui.set_workflow_pr_can_revert(false);
-    ui.set_workflow_pr_merge_method_merge(false);
-    ui.set_workflow_pr_merge_method_squash(false);
-    ui.set_workflow_pr_merge_method_rebase(false);
-    ui.set_workflow_pr_merge_method_fast_forward(false);
-    ui.set_workflow_pr_selected_merge_method("".into());
+    let page = ui.pr_review();
+    let pr_state = page.global::<crate::PrReviewBridge>();
+    pr_state.set_workflow_pr_can_comment(false);
+    pr_state.set_workflow_pr_can_approve(false);
+    pr_state.set_workflow_pr_can_request_changes(false);
+    pr_state.set_workflow_pr_can_merge(false);
+    pr_state.set_workflow_pr_can_revert(false);
+    pr_state.set_workflow_pr_merge_method_merge(false);
+    pr_state.set_workflow_pr_merge_method_squash(false);
+    pr_state.set_workflow_pr_merge_method_rebase(false);
+    pr_state.set_workflow_pr_merge_method_fast_forward(false);
+    pr_state.set_workflow_pr_selected_merge_method("".into());
 }
 
 pub(in crate::workflow::pr_review::controller) fn reset_action_ui(ui: &MainWindow) {
-    ui.set_workflow_pr_review_dialog_open(false);
-    ui.set_workflow_pr_dismiss_review_dialog_open(false);
-    ui.set_workflow_pr_merge_dialog_open(false);
-    ui.set_workflow_pr_revert_dialog_open(false);
-    ui.set_workflow_pr_action_loading(false);
-    ui.set_workflow_pr_remote_review_state("".into());
-    ui.set_workflow_pr_merge_readiness_kind("".into());
-    ui.set_workflow_pr_merge_readiness_label("".into());
-    ui.set_workflow_pr_merge_readiness_detail("".into());
-    ui.set_workflow_pr_merge_block_reason("".into());
-    ui.set_workflow_pr_revert_block_reason("".into());
-    ui.set_workflow_pr_revert_action_label(
+    let page = ui.pr_review();
+    let pr_state = page.global::<crate::PrReviewBridge>();
+    pr_state.set_workflow_pr_review_dialog_open(false);
+    pr_state.set_workflow_pr_dismiss_review_dialog_open(false);
+    pr_state.set_workflow_pr_merge_dialog_open(false);
+    pr_state.set_workflow_pr_revert_dialog_open(false);
+    pr_state.set_workflow_pr_action_loading(false);
+    pr_state.set_workflow_pr_remote_review_state("".into());
+    pr_state.set_workflow_pr_merge_readiness_kind("".into());
+    pr_state.set_workflow_pr_merge_readiness_label("".into());
+    pr_state.set_workflow_pr_merge_readiness_detail("".into());
+    pr_state.set_workflow_pr_merge_block_reason("".into());
+    pr_state.set_workflow_pr_revert_block_reason("".into());
+    pr_state.set_workflow_pr_revert_action_label(
         crate::i18n::tr("pr_review.revert_pull_request")
             .into_owned()
             .into(),
     );
-    ui.set_workflow_pr_revert_confirmation("".into());
+    pr_state.set_workflow_pr_revert_confirmation("".into());
     reset_action_capabilities(ui);
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_action_state, apply_submitted_review, select_merge_method};
-    use crate::MainWindow;
+    use super::{ComponentHandle, apply_action_state, apply_submitted_review, select_merge_method};
     use crate::git::{
         PullRequestActionState, PullRequestMergeBlockKind, PullRequestMergeMethod,
         PullRequestReadinessKind, PullRequestRevertStrategy, PullRequestReviewAction,
     };
+    use crate::{MainWindow, PrReviewUiExt};
 
     #[test]
     fn every_supported_preference_selects_its_method() {
@@ -318,6 +337,8 @@ mod tests {
         let _locale = crate::i18n::test_locale_guard();
         i_slint_backend_testing::init_no_event_loop();
         let ui = MainWindow::new().unwrap();
+        let page = ui.pr_review();
+        let pr_state = page.global::<crate::PrReviewBridge>();
         let mut state = PullRequestActionState {
             can_comment: true,
             can_approve: true,
@@ -337,21 +358,21 @@ mod tests {
             ],
         };
         apply_action_state(&ui, &state);
-        ui.set_workflow_pr_merge_dialog_open(true);
-        ui.set_workflow_pr_selected_merge_method("squash".into());
+        pr_state.set_workflow_pr_merge_dialog_open(true);
+        pr_state.set_workflow_pr_selected_merge_method("squash".into());
 
         for locale in ["en", "zh-CN"] {
             crate::i18n::apply_preference(locale).unwrap();
             apply_action_state(&ui, &state);
-            assert_eq!(ui.get_workflow_pr_selected_merge_method(), "squash");
+            assert_eq!(pr_state.get_workflow_pr_selected_merge_method(), "squash");
         }
 
         state.allowed_merge_methods = vec![PullRequestMergeMethod::Rebase];
         apply_action_state(&ui, &state);
-        assert_eq!(ui.get_workflow_pr_selected_merge_method(), "rebase");
+        assert_eq!(pr_state.get_workflow_pr_selected_merge_method(), "rebase");
         state.allowed_merge_methods.clear();
         apply_action_state(&ui, &state);
-        assert_eq!(ui.get_workflow_pr_selected_merge_method(), "");
+        assert_eq!(pr_state.get_workflow_pr_selected_merge_method(), "");
         crate::i18n::apply_preference(usher_i18n::fallback_locale().id).unwrap();
     }
 
@@ -360,17 +381,19 @@ mod tests {
         let _locale = crate::i18n::test_locale_guard();
         i_slint_backend_testing::init_no_event_loop();
         let ui = MainWindow::new().unwrap();
-        ui.set_workflow_pr_review_dialog_open(true);
-        ui.set_workflow_pr_merge_readiness_kind("conflicts".into());
-        ui.set_workflow_pr_can_merge(false);
+        let page = ui.pr_review();
+        let pr_state = page.global::<crate::PrReviewBridge>();
+        pr_state.set_workflow_pr_review_dialog_open(true);
+        pr_state.set_workflow_pr_merge_readiness_kind("conflicts".into());
+        pr_state.set_workflow_pr_can_merge(false);
 
         apply_submitted_review(&ui, PullRequestReviewAction::Approve);
 
-        assert_eq!(ui.get_workflow_pr_remote_review_state(), "approved");
-        assert_eq!(ui.get_workflow_pr_merge_readiness_kind(), "conflicts");
-        assert!(!ui.get_workflow_pr_can_merge());
-        assert!(!ui.get_workflow_pr_review_dialog_open());
-        assert_eq!(ui.get_workflow_pr_comment_submission_revision(), 0);
+        assert_eq!(pr_state.get_workflow_pr_remote_review_state(), "approved");
+        assert_eq!(pr_state.get_workflow_pr_merge_readiness_kind(), "conflicts");
+        assert!(!pr_state.get_workflow_pr_can_merge());
+        assert!(!pr_state.get_workflow_pr_review_dialog_open());
+        assert_eq!(pr_state.get_workflow_pr_comment_submission_revision(), 0);
     }
 
     #[test]
@@ -378,19 +401,21 @@ mod tests {
         let _locale = crate::i18n::test_locale_guard();
         i_slint_backend_testing::init_no_event_loop();
         let ui = MainWindow::new().unwrap();
+        let page = ui.pr_review();
+        let pr_state = page.global::<crate::PrReviewBridge>();
         for decision in ["approved", "rejected", ""] {
-            ui.set_workflow_pr_remote_review_state(decision.into());
-            let initial_revision = ui.get_workflow_pr_comment_submission_revision();
-            let initial_count = ui.get_workflow_pr_review_conversation_count();
+            pr_state.set_workflow_pr_remote_review_state(decision.into());
+            let initial_revision = pr_state.get_workflow_pr_comment_submission_revision();
+            let initial_count = pr_state.get_workflow_pr_review_conversation_count();
             for submission in 1..=2 {
                 apply_submitted_review(&ui, PullRequestReviewAction::Comment);
-                assert_eq!(ui.get_workflow_pr_remote_review_state(), decision);
+                assert_eq!(pr_state.get_workflow_pr_remote_review_state(), decision);
                 assert_eq!(
-                    ui.get_workflow_pr_comment_submission_revision(),
+                    pr_state.get_workflow_pr_comment_submission_revision(),
                     initial_revision + submission
                 );
                 assert_eq!(
-                    ui.get_workflow_pr_review_conversation_count(),
+                    pr_state.get_workflow_pr_review_conversation_count(),
                     initial_count + submission
                 );
             }
@@ -402,6 +427,8 @@ mod tests {
         let _locale = crate::i18n::test_locale_guard();
         i_slint_backend_testing::init_no_event_loop();
         let ui = MainWindow::new().unwrap();
+        let page = ui.pr_review();
+        let pr_state = page.global::<crate::PrReviewBridge>();
         let mut state = PullRequestActionState {
             can_comment: true,
             can_approve: true,
@@ -418,13 +445,16 @@ mod tests {
             allowed_merge_methods: vec![PullRequestMergeMethod::Merge],
         };
         apply_action_state(&ui, &state);
-        assert_eq!(ui.get_workflow_pr_remote_review_state(), "approved");
+        assert_eq!(pr_state.get_workflow_pr_remote_review_state(), "approved");
 
         state.review_state.clear();
         apply_action_state(&ui, &state);
 
-        assert_eq!(ui.get_workflow_pr_remote_review_state(), "");
-        assert_eq!(ui.get_workflow_pr_merge_readiness_kind(), "review_required");
-        assert!(!ui.get_workflow_pr_can_merge());
+        assert_eq!(pr_state.get_workflow_pr_remote_review_state(), "");
+        assert_eq!(
+            pr_state.get_workflow_pr_merge_readiness_kind(),
+            "review_required"
+        );
+        assert!(!pr_state.get_workflow_pr_can_merge());
     }
 }

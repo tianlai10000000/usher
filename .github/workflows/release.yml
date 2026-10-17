@@ -11,6 +11,25 @@ on:
         required: false
         default: false
         type: boolean
+      cache_diagnostics:
+        description: "Collect bounded, redacted Cargo fingerprint reasons"
+        required: false
+        default: false
+        type: boolean
+      cache_probe:
+        description: "Controlled default-branch cache-only comparison"
+        required: false
+        default: normal
+        type: choice
+        options:
+          - normal
+          - cold
+          - warm
+      probe_id:
+        description: "Warm only: prior cold run ID-attempt; otherwise leave empty"
+        required: false
+        default: ''
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -41,6 +60,21 @@ jobs:
             exit 1
           fi
 
+      - name: Validate release probe inputs
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          RELEASE_PROBE_MODE: ${{ inputs.cache_probe || 'normal' }}
+          RELEASE_PROBE_ID: ${{ inputs.probe_id }}
+          RELEASE_CACHE_ONLY: ${{ inputs.cache_only }}
+        run: |
+          case "$RELEASE_PROBE_MODE" in
+            normal) [[ -z "$RELEASE_PROBE_ID" ]] ;;
+            cold) [[ "$RELEASE_CACHE_ONLY" == "true" && -z "$RELEASE_PROBE_ID" ]] ;;
+            warm) [[ "$RELEASE_CACHE_ONLY" == "true" && "$RELEASE_PROBE_ID" =~ ^[1-9][0-9]{0,19}-[1-9][0-9]{0,3}$ ]] ;;
+            *) false ;;
+          esac || { echo "::error::Invalid cache probe inputs; use cache-only cold or warm with a prior cold run-attempt ID."; exit 1; }
+
       - name: Checkout
         uses: actions/checkout@v7.0.1
 
@@ -56,7 +90,32 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Plan cache diagnostics
+        id: cache-plan
+        if: github.event_name == 'workflow_dispatch' && (inputs.cache_diagnostics || inputs.cache_probe != 'normal')
+        continue-on-error: ${{ inputs.cache_probe == 'normal' }}
+        shell: bash
+        run: python scripts/ci_release_probe.py plan --output "release-diagnostics/${{ matrix.target }}/probe.json"
+        env:
+          RELEASE_DIAGNOSTICS: ${{ inputs.cache_diagnostics }}
+          RELEASE_PROBE_MODE: ${{ inputs.cache_probe }}
+          RELEASE_PROBE_ID: ${{ inputs.probe_id }}
+          RELEASE_CACHE_ONLY: ${{ inputs.cache_only }}
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_REF: ${{ github.ref }}
+          RELEASE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_RUN_ID: ${{ github.run_id }}
+          RELEASE_RUN_ATTEMPT: ${{ github.run_attempt }}
+          RELEASE_TARGET: ${{ matrix.target }}
+          RELEASE_RUNNER_OS: ${{ runner.os }}
+          RELEASE_RUNNER_ARCH: ${{ runner.arch }}
+          RELEASE_RUST_KEY: ${{ steps.rust.outputs.cachekey }}
+          RELEASE_CONFIGURATION_HASH: ${{ hashFiles('Cargo.lock', '**/Cargo.toml', '.cargo/config.toml', '.github/workflows/release.yml') }}
+          RELEASE_REGISTRY_HASH: ${{ hashFiles('Cargo.lock', '**/Cargo.toml', '.github/workflows/release.yml') }}
+          RELEASE_SOURCE_SHA: ${{ github.sha }}
+
       - name: Restore Cargo registry
+        if: inputs.cache_probe != 'cold'
         id: registry-cache
         uses: actions/cache/restore@v6.1.0
         with:
@@ -65,11 +124,12 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: release-registry-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml', '.github/workflows/release.yml') }}
+          key: ${{ steps.cache-plan.outputs.namespace || 'release-registry-v1' }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml', '.github/workflows/release.yml') }}
           restore-keys: |
-            release-registry-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}-
+            ${{ steps.cache-plan.outputs.namespace == '' && format('release-registry-v1-{0}-{1}-{2}-', runner.os, runner.arch, steps.rust.outputs.cachekey) || '' }}
 
       - name: Restore Release build
+        if: inputs.cache_probe != 'cold'
         id: build-cache
         uses: actions/cache/restore@v6.1.0
         with:
@@ -77,10 +137,20 @@ jobs:
             target/.rustc_info.json
             target/release/
             target/${{ matrix.target }}/release/
-          key: release-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ steps.rust.outputs.cachekey }}-release-default-${{ hashFiles('Cargo.lock', '**/Cargo.toml', '.cargo/config.toml', '.github/workflows/release.yml') }}-${{ github.sha }}
+          key: ${{ steps.cache-plan.outputs.namespace || 'release-build-v1' }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ steps.rust.outputs.cachekey }}-release-default-${{ hashFiles('Cargo.lock', '**/Cargo.toml', '.cargo/config.toml', '.github/workflows/release.yml') }}-${{ github.sha }}
           restore-keys: |
-            release-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ steps.rust.outputs.cachekey }}-release-default-${{ hashFiles('Cargo.lock', '**/Cargo.toml', '.cargo/config.toml', '.github/workflows/release.yml') }}-
-            release-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ steps.rust.outputs.cachekey }}-release-default-
+            ${{ steps.cache-plan.outputs.namespace == '' && format('release-build-v1-{0}-{1}-{2}-{3}-release-default-{4}-', runner.os, runner.arch, matrix.target, steps.rust.outputs.cachekey, hashFiles('Cargo.lock', '**/Cargo.toml', '.cargo/config.toml', '.github/workflows/release.yml')) || '' }}
+            ${{ steps.cache-plan.outputs.namespace == '' && format('release-build-v1-{0}-{1}-{2}-{3}-release-default-', runner.os, runner.arch, matrix.target, steps.rust.outputs.cachekey) || '' }}
+
+      - name: Verify warm cache exact
+        if: inputs.cache_probe == 'warm'
+        shell: bash
+        run: python scripts/ci_release_probe.py verify-warm
+        env:
+          REGISTRY_CACHE_HIT: ${{ steps.registry-cache.outputs.cache-hit }}
+          REGISTRY_CACHE_OUTCOME: ${{ steps.registry-cache.outcome }}
+          BUILD_CACHE_HIT: ${{ steps.build-cache.outputs.cache-hit }}
+          BUILD_CACHE_OUTCOME: ${{ steps.build-cache.outcome }}
 
       - name: Record cache identity
         if: always()
@@ -89,7 +159,7 @@ jobs:
         run: python scripts/ci_release_metrics.py cache --output "release-diagnostics/${{ matrix.target }}/cache.json"
         env:
           RELEASE_TARGET: ${{ matrix.target }}
-          CACHE_IDENTITY: ${{ steps.build-cache.outputs.cache-primary-key }}
+          CACHE_IDENTITY: ${{ steps.cache-plan.outputs.build-key || steps.build-cache.outputs.cache-primary-key }}
           REGISTRY_CACHE_HIT: ${{ steps.registry-cache.outputs.cache-hit }}
           REGISTRY_CACHE_MATCHED_KEY: ${{ steps.registry-cache.outputs.cache-matched-key }}
           REGISTRY_CACHE_OUTCOME: ${{ steps.registry-cache.outcome }}
@@ -118,10 +188,17 @@ jobs:
 
       - name: Build Release
         id: release-build
-        run: cargo build --release --target ${{ matrix.target }} --jobs $(sysctl -n hw.ncpu) --timings --locked
+        run: |
+          if [[ "$RELEASE_FINGERPRINT" == "true" ]]; then
+            python scripts/ci_release_build.py --target "$RELEASE_TARGET" --jobs "$(sysctl -n hw.ncpu)" --output "release-diagnostics/$RELEASE_TARGET/fingerprints.json"
+          else
+            cargo build --release --target "${RELEASE_TARGET}" --jobs $(sysctl -n hw.ncpu) --timings --locked
+          fi
         env:
           CARGO_INCREMENTAL: 0
           CARGO_NET_GIT_FETCH_WITH_CLI: true
+          RELEASE_TARGET: ${{ matrix.target }}
+          RELEASE_FINGERPRINT: ${{ steps.cache-plan.outputs.fingerprint || 'false' }}
 
       # Save unsigned compiler output before bundling/signing, with the same restore identity.
       - name: Save Cargo registry
@@ -133,7 +210,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ steps.registry-cache.outputs.cache-primary-key }}
+          key: ${{ steps.cache-plan.outputs.registry-key || steps.registry-cache.outputs.cache-primary-key }}
 
       - name: Save Release build
         if: success() && steps.release-build.outcome == 'success' && steps.build-cache.outputs.cache-hit != 'true'
@@ -143,7 +220,7 @@ jobs:
             target/.rustc_info.json
             target/release/
             target/${{ matrix.target }}/release/
-          key: ${{ steps.build-cache.outputs.cache-primary-key }}
+          key: ${{ steps.cache-plan.outputs.build-key || steps.build-cache.outputs.cache-primary-key }}
 
       - name: Create App Bundle
         if: ${{ !inputs.cache_only }}
@@ -340,6 +417,7 @@ jobs:
             ${{ env.APP_NAME }}-${{ matrix.target }}-debug.tar.gz
             ${{ env.APP_NAME }}-${{ matrix.target }}.dmg
           if-no-files-found: error
+          retention-days: 7
 
       - name: Upload build diagnostics
         if: always()
@@ -349,9 +427,11 @@ jobs:
           name: release-diagnostics-${{ matrix.target }}-attempt-${{ github.run_attempt }}
           path: |
             release-diagnostics/${{ matrix.target }}/cache.json
+            release-diagnostics/${{ matrix.target }}/probe.json
+            release-diagnostics/${{ matrix.target }}/fingerprints.json
             target/cargo-timings/*.html
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 3
 
   build-windows:
     name: Build Windows App (${{ matrix.target }})
@@ -373,6 +453,21 @@ jobs:
             exit 1
           fi
 
+      - name: Validate release probe inputs
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          RELEASE_PROBE_MODE: ${{ inputs.cache_probe || 'normal' }}
+          RELEASE_PROBE_ID: ${{ inputs.probe_id }}
+          RELEASE_CACHE_ONLY: ${{ inputs.cache_only }}
+        run: |
+          case "$RELEASE_PROBE_MODE" in
+            normal) [[ -z "$RELEASE_PROBE_ID" ]] ;;
+            cold) [[ "$RELEASE_CACHE_ONLY" == "true" && -z "$RELEASE_PROBE_ID" ]] ;;
+            warm) [[ "$RELEASE_CACHE_ONLY" == "true" && "$RELEASE_PROBE_ID" =~ ^[1-9][0-9]{0,19}-[1-9][0-9]{0,3}$ ]] ;;
+            *) false ;;
+          esac || { echo "::error::Invalid cache probe inputs; use cache-only cold or warm with a prior cold run-attempt ID."; exit 1; }
+
       - name: Checkout
         uses: actions/checkout@v7.0.1
 
@@ -388,7 +483,32 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Plan cache diagnostics
+        id: cache-plan
+        if: github.event_name == 'workflow_dispatch' && (inputs.cache_diagnostics || inputs.cache_probe != 'normal')
+        continue-on-error: ${{ inputs.cache_probe == 'normal' }}
+        shell: bash
+        run: python scripts/ci_release_probe.py plan --output "release-diagnostics/${{ matrix.target }}/probe.json"
+        env:
+          RELEASE_DIAGNOSTICS: ${{ inputs.cache_diagnostics }}
+          RELEASE_PROBE_MODE: ${{ inputs.cache_probe }}
+          RELEASE_PROBE_ID: ${{ inputs.probe_id }}
+          RELEASE_CACHE_ONLY: ${{ inputs.cache_only }}
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_REF: ${{ github.ref }}
+          RELEASE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_RUN_ID: ${{ github.run_id }}
+          RELEASE_RUN_ATTEMPT: ${{ github.run_attempt }}
+          RELEASE_TARGET: ${{ matrix.target }}
+          RELEASE_RUNNER_OS: ${{ runner.os }}
+          RELEASE_RUNNER_ARCH: ${{ runner.arch }}
+          RELEASE_RUST_KEY: ${{ steps.rust.outputs.cachekey }}
+          RELEASE_CONFIGURATION_HASH: ${{ hashFiles('Cargo.lock', '**/Cargo.toml', '.cargo/config.toml', '.github/workflows/release.yml') }}
+          RELEASE_REGISTRY_HASH: ${{ hashFiles('Cargo.lock', '**/Cargo.toml', '.github/workflows/release.yml') }}
+          RELEASE_SOURCE_SHA: ${{ github.sha }}
+
       - name: Restore Cargo registry
+        if: inputs.cache_probe != 'cold'
         id: registry-cache
         uses: actions/cache/restore@v6.1.0
         with:
@@ -396,11 +516,12 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: release-registry-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml', '.github/workflows/release.yml') }}
+          key: ${{ steps.cache-plan.outputs.namespace || 'release-registry-v1' }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml', '.github/workflows/release.yml') }}
           restore-keys: |
-            release-registry-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}-
+            ${{ steps.cache-plan.outputs.namespace == '' && format('release-registry-v1-{0}-{1}-{2}-', runner.os, runner.arch, steps.rust.outputs.cachekey) || '' }}
 
       - name: Restore Release build
+        if: inputs.cache_probe != 'cold'
         id: build-cache
         uses: actions/cache/restore@v6.1.0
         with:
@@ -408,10 +529,20 @@ jobs:
             target/.rustc_info.json
             target/release/
             target/${{ matrix.target }}/release/
-          key: release-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ steps.rust.outputs.cachekey }}-release-default-${{ hashFiles('Cargo.lock', '**/Cargo.toml', '.cargo/config.toml', '.github/workflows/release.yml') }}-${{ github.sha }}
+          key: ${{ steps.cache-plan.outputs.namespace || 'release-build-v1' }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ steps.rust.outputs.cachekey }}-release-default-${{ hashFiles('Cargo.lock', '**/Cargo.toml', '.cargo/config.toml', '.github/workflows/release.yml') }}-${{ github.sha }}
           restore-keys: |
-            release-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ steps.rust.outputs.cachekey }}-release-default-${{ hashFiles('Cargo.lock', '**/Cargo.toml', '.cargo/config.toml', '.github/workflows/release.yml') }}-
-            release-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ steps.rust.outputs.cachekey }}-release-default-
+            ${{ steps.cache-plan.outputs.namespace == '' && format('release-build-v1-{0}-{1}-{2}-{3}-release-default-{4}-', runner.os, runner.arch, matrix.target, steps.rust.outputs.cachekey, hashFiles('Cargo.lock', '**/Cargo.toml', '.cargo/config.toml', '.github/workflows/release.yml')) || '' }}
+            ${{ steps.cache-plan.outputs.namespace == '' && format('release-build-v1-{0}-{1}-{2}-{3}-release-default-', runner.os, runner.arch, matrix.target, steps.rust.outputs.cachekey) || '' }}
+
+      - name: Verify warm cache exact
+        if: inputs.cache_probe == 'warm'
+        shell: bash
+        run: python scripts/ci_release_probe.py verify-warm
+        env:
+          REGISTRY_CACHE_HIT: ${{ steps.registry-cache.outputs.cache-hit }}
+          REGISTRY_CACHE_OUTCOME: ${{ steps.registry-cache.outcome }}
+          BUILD_CACHE_HIT: ${{ steps.build-cache.outputs.cache-hit }}
+          BUILD_CACHE_OUTCOME: ${{ steps.build-cache.outcome }}
 
       - name: Record cache identity
         if: always()
@@ -420,7 +551,7 @@ jobs:
         run: python scripts/ci_release_metrics.py cache --output "release-diagnostics/${{ matrix.target }}/cache.json"
         env:
           RELEASE_TARGET: ${{ matrix.target }}
-          CACHE_IDENTITY: ${{ steps.build-cache.outputs.cache-primary-key }}
+          CACHE_IDENTITY: ${{ steps.cache-plan.outputs.build-key || steps.build-cache.outputs.cache-primary-key }}
           REGISTRY_CACHE_HIT: ${{ steps.registry-cache.outputs.cache-hit }}
           REGISTRY_CACHE_MATCHED_KEY: ${{ steps.registry-cache.outputs.cache-matched-key }}
           REGISTRY_CACHE_OUTCOME: ${{ steps.registry-cache.outcome }}
@@ -431,10 +562,17 @@ jobs:
       - name: Build Release
         id: release-build
         shell: bash
-        run: cargo build --release --target ${{ matrix.target }} --timings --locked
+        run: |
+          if [[ "$RELEASE_FINGERPRINT" == "true" ]]; then
+            python scripts/ci_release_build.py --target "$RELEASE_TARGET" --output "release-diagnostics/$RELEASE_TARGET/fingerprints.json"
+          else
+            cargo build --release --target "${RELEASE_TARGET}" --timings --locked
+          fi
         env:
           CARGO_INCREMENTAL: 0
           CARGO_NET_GIT_FETCH_WITH_CLI: true
+          RELEASE_TARGET: ${{ matrix.target }}
+          RELEASE_FINGERPRINT: ${{ steps.cache-plan.outputs.fingerprint || 'false' }}
 
       # Save unsigned compiler output before bundling/signing, with the same restore identity.
       - name: Save Cargo registry
@@ -445,7 +583,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ steps.registry-cache.outputs.cache-primary-key }}
+          key: ${{ steps.cache-plan.outputs.registry-key || steps.registry-cache.outputs.cache-primary-key }}
 
       - name: Save Release build
         if: success() && steps.release-build.outcome == 'success' && steps.build-cache.outputs.cache-hit != 'true'
@@ -455,7 +593,7 @@ jobs:
             target/.rustc_info.json
             target/release/
             target/${{ matrix.target }}/release/
-          key: ${{ steps.build-cache.outputs.cache-primary-key }}
+          key: ${{ steps.cache-plan.outputs.build-key || steps.build-cache.outputs.cache-primary-key }}
 
       - name: Create zip artifacts
         if: ${{ !inputs.cache_only }}
@@ -510,6 +648,7 @@ jobs:
             ${{ env.APP_NAME }}-${{ matrix.target }}-bundle.zip
             ${{ env.APP_NAME }}-${{ matrix.target }}-debug.zip
           if-no-files-found: error
+          retention-days: 7
 
       - name: Upload build diagnostics
         if: always()
@@ -519,9 +658,11 @@ jobs:
           name: release-diagnostics-${{ matrix.target }}-attempt-${{ github.run_attempt }}
           path: |
             release-diagnostics/${{ matrix.target }}/cache.json
+            release-diagnostics/${{ matrix.target }}/probe.json
+            release-diagnostics/${{ matrix.target }}/fingerprints.json
             target/cargo-timings/*.html
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 3
 
   release:
     name: Create Release
@@ -619,4 +760,4 @@ jobs:
           name: release-stage-timings-attempt-${{ github.run_attempt }}
           path: release-timings/
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 3

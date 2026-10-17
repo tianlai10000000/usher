@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -64,6 +65,8 @@ class PolicyTests(unittest.TestCase):
             "ui/components/navigation/github_breadcrumb.slint",
             "ui/components/navigation/github_window_navigation.slint",
             "ui/views/workflow/pr_review_workspace.slint",
+            "ui/features/pr_review/factory_host.slint",
+            "crates/usher-ui/build.rs",
             "ui/main.slint",
         ):
             self.copy(path)
@@ -681,6 +684,143 @@ class PolicyTests(unittest.TestCase):
         result = self.check()
         self.assertEqual(result.returncode, 1)
         self.assertIn("independent factory root lacks a tooltip portal", result.stderr)
+
+    def test_public_factory_helper_checks_feature_roots_and_real_portal_instances(self):
+        self.write("crates/fixture/build.rs", '''fn main() {
+    usher_ui_build::compile_library_with_config(root.join("ui/features/fixture.slint"), config, "fixture");
+}
+''')
+        path = "ui/features/fixture.slint"
+        self.write(path, "GitHubTooltipOverlayHost {}\n")
+        self.assertEqual(self.check().returncode, 0)
+        self.write(path, 'import { GitHubTooltipOverlayHost } from "../components/github_tooltip_overlay.slint";\n// GitHubTooltipOverlayHost {}\nRectangle {}\n')
+        result = self.check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("independent factory root lacks a tooltip portal", result.stderr)
+
+    def test_factory_helper_alias_cannot_silently_skip_the_root_check(self):
+        self.write("crates/fixture/build.rs", '''use usher_ui_build::compile_library_with_config as factory;
+fn main() { factory(root.join("ui/features/fixture.slint"), config, "fixture"); }
+''')
+        self.write("ui/features/fixture.slint", "Rectangle {}\n")
+        result = self.check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("cannot locate the factory root view through a compiler alias", result.stderr)
+
+    def pr_static_fixture(self):
+        self.write("ui/main.slint", 'import { PrReviewHost } from "@pr-review";\nGitHubArtifactPreviewPanel {}\n')
+        self.copy("crates/usher-ui/build.rs")
+        self.copy("ui/features/pr_review/factory_host.slint")
+
+    def test_static_mainwindow_closure_allows_independent_and_integrated_graphs(self):
+        self.pr_static_fixture()
+        # The live interpreter is allowed its heavy UI graph; it is excluded
+        # from the actual static library selection/import closure.
+        self.write("ui/features/pr_review/integrated.slint", 'import { Page } from "../../views/workflow/pr_review_workspace.slint";\n')
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_static_mainwindow_closure_rejects_indirect_heavy_imports_and_reexports(self):
+        self.pr_static_fixture()
+        for owner in ("views/workflow/pr_review_workspace.slint", "views/workflow/pr_review_conflicts.slint", "components/pr_review/content.slint"):
+            with self.subTest(owner=owner):
+                self.write("ui/features/pr_review/factory_host.slint", 'export { Proxy } from "relay.slint";\n')
+                self.write("ui/features/pr_review/relay.slint", f'export {{ Page as Proxy }} from "../../{owner}";\n')
+                result = self.check()
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("static PR import closure reaches heavy owner", result.stderr)
+                self.assertIn("relay.slint", result.stderr)
+
+    def test_static_mainwindow_closure_does_not_require_the_pr_library_marker(self):
+        self.write("ui/main.slint", 'import { Page } from "views/workflow/pr_review_workspace.slint";\nGitHubArtifactPreviewPanel {}\n')
+        result = self.check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("static PR import closure reaches heavy owner", result.stderr)
+
+    def test_static_build_mapping_cannot_switch_back_to_integrated_or_use_comment_decoy(self):
+        self.pr_static_fixture()
+        path = self.root / "crates/usher-ui/build.rs"
+        source = path.read_text()
+        changed = source.replace('join("ui/features/pr_review/factory_host.slint")', 'join("ui/features/pr_review/integrated.slint")')
+        self.assertNotEqual(changed, source)
+        path.write_text(changed + "\n/* " + source + " */\n")
+        result = self.check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("static PR mapping must isolate the factory host", result.stderr)
+
+    def test_pr_factory_window_adapter_accepts_restoration_and_variable_renaming(self):
+        path = "src/workflow/pr_review/ui.rs"
+        self.copy(path)
+        target = self.root / path
+        source = target.read_text()
+        for original, replacement in (("host", "host_adapter"), ("shell", "shell_root"), ("result", "created")):
+            source = re.sub(r"\b" + original + r"\b", replacement, source)
+        target.write_text(source)
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_pr_factory_window_adapter_rejects_detached_or_late_restoration(self):
+        path = "src/workflow/pr_review/ui.rs"
+        source = (ROOT / path).read_text()
+        variants = [
+            source.replace("new_with_existing_window(window.window())", "new()", 1),
+            source.replace("new_with_existing_window(window.window())", "new_with_existing_window(other.window())", 1),
+            source.replace("    host.set_component(&shell);\n", "", 1) + "\n// host.set_component(&shell);\n",
+            source.replace("    host.set_component(&shell);\n", "", 1).replace('    let page = result.expect("failed to create PR Review UI");', '    let page = result.expect("failed to create PR Review UI");\n    host.set_component(&shell);', 1),
+        ]
+        for changed in variants:
+            with self.subTest(variant=variants.index(changed)):
+                self.assertNotEqual(changed, source)
+                self.write(path, changed)
+                result = self.check()
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("restore its shell before result handling or binding", result.stderr)
+
+    def pr_tooltip_fixture(self):
+        for suffix in ("state", "anchors", "buttons", "overlay"):
+            self.copy(f"ui/components/pr_review/tooltip_{suffix}.slint")
+
+    def test_pr_fixed_tooltip_literal_owner_graph_is_accepted(self):
+        self.pr_tooltip_fixture()
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_pr_fixed_tooltip_rejects_swapped_identity_dynamic_kind_and_generic_double_publisher(self):
+        self.pr_tooltip_fixture()
+        cases = [
+            ("anchors", "PrReviewTooltipKind.CopySourceBranch,", "PrReviewTooltipKind.CopyFullSha,"),
+            ("anchors", "export component PrCopySourceBranchTooltipAnchor inherits PrReviewTooltipAnchor {", "export component PrCopySourceBranchTooltipAnchor inherits PrReviewTooltipAnchor {\n    in property <PrReviewTooltipKind> kind;"),
+            ("buttons", "show-tooltip: !PrReviewTooltipState.enabled;", "show-tooltip: true;"),
+            ("state", "enabled: false;", "enabled: true;"),
+        ]
+        for suffix, original, replacement in cases:
+            with self.subTest(owner=suffix, replacement=replacement):
+                path = self.root / f"ui/components/pr_review/tooltip_{suffix}.slint"
+                source = path.read_text()
+                self.assertIn(original, source)
+                path.write_text(source.replace(original, replacement, 1))
+                result = self.check()
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn(f"ui/components/pr_review/tooltip_{suffix}.slint", result.stderr)
+                path.write_text(source)
+
+    def test_pr_fixed_tooltip_rejects_swapped_labels_dimensions_and_conditional_measurement(self):
+        self.pr_tooltip_fixture()
+        path = self.root / "ui/components/pr_review/tooltip_overlay.slint"
+        source = path.read_text()
+        variants = [
+            source.replace("text: I18n.pr-review-copy-source-branch;", "text: I18n.pr-review-copy-full-sha;", 1),
+            source.replace("? surface-copysourcebranch.width :", "? surface-copyfullsha.width :", 1),
+            source.replace("surface-copysourcebranch := GitHubTooltipSurface {", "if root.active: surface-copysourcebranch := GitHubTooltipSurface {", 1),
+            source.replace("text: I18n.pr-review-copy-source-branch;", "text: root.dynamic-text; // text: I18n.pr-review-copy-source-branch;", 1),
+        ]
+        for changed in variants:
+            with self.subTest(variant=variants.index(changed)):
+                self.assertNotEqual(changed, source)
+                path.write_text(changed)
+                result = self.check()
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("thirty fixed literal surfaces", result.stderr)
 
     def test_duplicate_preview_is_rejected(self):
         self.write("ui/main.slint", "GitHubArtifactPreviewPanel {}\n" * 2)

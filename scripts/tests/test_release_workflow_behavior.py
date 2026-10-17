@@ -133,21 +133,25 @@ def default_cache_only(text):
     return value == "true"
 
 
-def context_for(text, event="push", ref="refs/tags/v1.0.0", cache_only=None):
+def context_for(text, event="push", ref="refs/tags/v1.0.0", cache_only=None,
+                cache_probe="normal", cache_diagnostics=False, probe_id=""):
     return {
         "github.event_name": event,
         "github.ref": ref,
         "github.event.repository.default_branch": "main",
         "inputs.cache_only": default_cache_only(text) if cache_only is None else cache_only,
+        "inputs.cache_probe": cache_probe,
+        "inputs.cache_diagnostics": cache_diagnostics,
+        "inputs.probe_id": probe_id,
         "vars.MACOS_SIGNING_NOTARIZATION_ENABLED": "true",
     }
 
 
-def simulate_build(text, job_name, context, failures=(), cache_hit="false"):
+def simulate_build(text, job_name, context, failures=(), cache_hit="false", registry_cache_hit=None):
     steps = contract._steps(contract._jobs(contract._clean(text))[job_name])
     values = dict(context)
     for identity in ("registry-cache", "build-cache"):
-        values["steps." + identity + ".outputs.cache-hit"] = cache_hit
+        values["steps." + identity + ".outputs.cache-hit"] = cache_hit if identity == "build-cache" or registry_cache_hit is None else registry_cache_hit
     success = True
     records = []
     for index, step in enumerate(steps):
@@ -158,9 +162,19 @@ def simulate_build(text, job_name, context, failures=(), cache_hit="false"):
         else:
             # Recognized quoted Bash [[ != ]] comparison is case-sensitive.
             invalid_prewarm_ref = name == "Validate cache prewarm ref" and values["github.ref"] != "refs/heads/" + values["github.event.repository.default_branch"]
-            failed = name in failures or invalid_prewarm_ref
+            mode, probe_id = values["inputs.cache_probe"], values["inputs.probe_id"]
+            valid_inputs = ((mode == "normal" and not probe_id)
+                            or (mode == "cold" and values["inputs.cache_only"] and not probe_id)
+                            or (mode == "warm" and values["inputs.cache_only"] and bool(re.fullmatch(r"[1-9][0-9]{0,19}-[1-9][0-9]{0,3}", probe_id))))
+            invalid_probe = name == "Validate release probe inputs" and not valid_inputs
+            invalid_warm = name == "Verify warm cache exact" and any(
+                values.get("steps." + identity + ".outputs.cache-hit") != "true"
+                or values.get("steps." + identity + ".outcome") != "success"
+                for identity in ("registry-cache", "build-cache"))
+            failed = name in failures or invalid_prewarm_ref or invalid_probe or invalid_warm
             outcome = "failure" if failed else "success"
-            tolerated = contract._field(step, "continue-on-error", 8) == "true"
+            tolerance = contract._field(step, "continue-on-error", 8)
+            tolerated = enabled(tolerance, values, True) if tolerance is not None else False
             conclusion = "success" if tolerated else outcome
             if conclusion == "failure":
                 success = False
@@ -171,10 +185,11 @@ def simulate_build(text, job_name, context, failures=(), cache_hit="false"):
 
 
 def simulate(text, *, event="push", ref="refs/tags/v1.0.0", cache_only=None,
-             failures=None, report_failure=False, publish_failure=False, cache_hit="false"):
-    context = context_for(text, event, ref, cache_only)
+             failures=None, report_failure=False, publish_failure=False, cache_hit="false",
+             registry_cache_hit=None, cache_probe="normal", cache_diagnostics=False, probe_id=""):
+    context = context_for(text, event, ref, cache_only, cache_probe, cache_diagnostics, probe_id)
     jobs = contract._jobs(contract._clean(text))
-    builds = {name: simulate_build(text, name, context, (failures or {}).get(name, ()), cache_hit)
+    builds = {name: simulate_build(text, name, context, (failures or {}).get(name, ()), cache_hit, registry_cache_hit)
               for name in contract.BUILD_JOBS}
     build_success = all(build["result"] == "success" for build in builds.values())
     release_runs = enabled(contract._field(jobs["release"], "if", 4), context, build_success)
@@ -205,7 +220,7 @@ def cache_identity(text, job="build-macos", *, configuration="old-config", sha="
             raise ValueError("unsupported cache identity")
         return template
 
-    return render(contract._field(restore, "key", 10)), [render(value) for value in contract._restore_prefixes(restore)]
+    return render(contract._normal_key(contract._field(restore, "key", 10))), [render(value) for value in contract._normal_restore_prefixes(restore)]
 
 
 def cache_match(request, entry_key, *, current_ref="refs/tags/v2", entry_ref="refs/heads/main", default_ref="refs/heads/main"):
@@ -335,7 +350,13 @@ class BehaviorTests(unittest.TestCase):
                 right = next((step for step in contract._steps(after_jobs[job]) if contract._field(step, "name", 8) == name), None)
                 if left is not None:
                     original, current = contract._field(left, "run", 8), contract._field(right, "run", 8)
-                    self.assertEqual(current.replace(" --locked", "") if name == "Build Release" else current, original)
+                    if name == "Build Release":
+                        self.assertEqual(contract._script(right), contract._build_script(job))
+                        direct = next(line.strip() for line in contract._build_script(job).splitlines() if line.strip().startswith("cargo build"))
+                        direct = direct.replace('"${RELEASE_TARGET}"', '${{ matrix.target }}').replace(" --locked", "")
+                        self.assertEqual(direct, original)
+                    else:
+                        self.assertEqual(current, original)
             rust_before = next(step for step in contract._steps(before_jobs[job]) if contract._field(step, "id", 8) == "rust")
             rust_after = next(step for step in contract._steps(after_jobs[job]) if contract._field(step, "id", 8) == "rust")
             self.assertEqual(rust_before, rust_after)
@@ -431,6 +452,59 @@ class BehaviorTests(unittest.TestCase):
         self.assertNotEqual(changed, self.after)
         result = simulate(changed, event="workflow_dispatch", ref="refs/heads/main", cache_only=True)
         self.assertEqual(outcomes(result, "build-windows", {"Create zip artifacts"}), {"Create zip artifacts": "success"})
+
+    def test_normal_diagnostic_plan_failure_is_tolerated_but_probe_failure_is_strict(self):
+        for job in contract.BUILD_JOBS:
+            normal = simulate(self.after, event="workflow_dispatch", ref="refs/heads/main", cache_diagnostics=True,
+                              failures={job: {"Plan cache diagnostics"}})
+            self.assertTrue(normal["workflow_success"])
+            self.assertEqual(outcomes(normal, job, {"Build Release"}), {"Build Release": "success"})
+            cold = simulate(self.after, event="workflow_dispatch", ref="refs/heads/main", cache_only=True,
+                            cache_probe="cold", failures={job: {"Plan cache diagnostics"}})
+            self.assertFalse(cold["workflow_success"])
+            self.assertEqual(outcomes(cold, job, {"Build Release", "Save Release build"}),
+                             {"Build Release": "skipped", "Save Release build": "skipped"})
+
+    def test_cold_probe_skips_both_restores_builds_saves_and_has_no_product_actions(self):
+        result = simulate(self.after, event="workflow_dispatch", ref="refs/heads/main", cache_only=True, cache_probe="cold")
+        self.assertTrue(result["workflow_success"])
+        self.assertEqual(result["release"], "skipped")
+        for job in contract.BUILD_JOBS:
+            self.assertEqual(set(outcomes(result, job, {"Restore Cargo registry", "Restore Release build"}).values()), {"skipped"})
+            self.assertEqual(set(outcomes(result, job, {"Build Release", "Save Cargo registry", "Save Release build"}).values()), {"success"})
+            self.assertEqual(set(outcomes(result, job, contract.PRODUCT_STEPS[job]).values()), {"skipped"})
+
+    def test_warm_probe_requires_both_exact_hits_including_windows_and_still_builds(self):
+        options = dict(event="workflow_dispatch", ref="refs/heads/main", cache_only=True, cache_probe="warm", probe_id="12345-1")
+        warm = simulate(self.after, cache_hit="true", registry_cache_hit="true", **options)
+        self.assertTrue(warm["workflow_success"])
+        for job in contract.BUILD_JOBS:
+            self.assertEqual(outcomes(warm, job, {"Build Release"}), {"Build Release": "success"})
+            self.assertEqual(set(outcomes(warm, job, {"Save Cargo registry", "Save Release build"}).values()), {"skipped"})
+            self.assertEqual(set(outcomes(warm, job, contract.PRODUCT_STEPS[job]).values()), {"skipped"})
+        for build, registry in (("false", "true"), ("true", "false"), ("", "")):
+            result = simulate(self.after, cache_hit=build, registry_cache_hit=registry, **options)
+            self.assertFalse(result["workflow_success"])
+            for job in contract.BUILD_JOBS:
+                self.assertEqual(outcomes(result, job, {"Verify warm cache exact"}), {"Verify warm cache exact": "failure"})
+                self.assertEqual(outcomes(result, job, {"Build Release"}), {"Build Release": "skipped"})
+
+    def test_probe_non_cache_only_and_invalid_cohort_fail_before_checkout(self):
+        for mode, flag, identifier in (("cold", False, ""), ("warm", False, "12345-1"),
+                                       ("warm", True, ""), ("cold", True, "12345-1")):
+            result = simulate(self.after, event="workflow_dispatch", ref="refs/heads/main", cache_only=flag,
+                              cache_probe=mode, probe_id=identifier)
+            self.assertFalse(result["workflow_success"])
+            for job in contract.BUILD_JOBS:
+                self.assertEqual(outcomes(result, job, {"Checkout", "Build Release"}), {"Checkout": "skipped", "Build Release": "skipped"})
+
+    def test_negative_probe_tolerance_would_make_failed_probe_falsely_green(self):
+        changed = self.after.replace("continue-on-error: ${{ inputs.cache_probe == 'normal' }}", "continue-on-error: true")
+        self.assertNotEqual(changed, self.after)
+        result = simulate(changed, event="workflow_dispatch", ref="refs/heads/main", cache_only=True,
+                          cache_probe="cold", failures={"build-windows": {"Plan cache diagnostics"}})
+        self.assertTrue(result["workflow_success"])
+        self.assertTrue(contract.validate_contract(changed))
 
 
 if __name__ == "__main__":

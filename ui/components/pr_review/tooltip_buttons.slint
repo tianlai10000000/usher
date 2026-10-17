@@ -1,0 +1,133 @@
+import { GitHubIconButton } from "../button/github_icon_button.slint";
+import { GitHubCopyButton } from "../button/github_copy_button.slint";
+import { GitHubTooltipPlacement, GitHubTooltipAlignment } from "../../state/tooltip_overlay_state.slint";
+import { PrReviewTooltipState } from "tooltip_state.slint";
+import { PrConflictsBackTooltipAnchor, PrConflictsToggleFilesTooltipAnchor, PrConflictsRefreshTooltipAnchor, PrConflictsPreviousTooltipAnchor, PrConflictsNextTooltipAnchor, PrCopyFullShaTooltipAnchor, PrCopyFilePathTooltipAnchor, PrCopySourceBranchTooltipAnchor, PrConflictsCopyTooltipAnchor, PrCopiedTooltipAnchor, PrCloseAiReviewTooltipAnchor, PrReviewWithAiTooltipAnchor } from "tooltip_anchors.slint";
+import { I18n } from "@i18n";
+
+export component GitHubPrConflictsBackButton inherits GitHubIconButton {
+    tooltip-text: I18n.conflicts-back;
+    show-tooltip: !PrReviewTooltipState.enabled;
+    PrConflictsBackTooltipAnchor {
+        active: PrReviewTooltipState.enabled && root.tooltip-active;
+        placement: root.tooltip-above ? GitHubTooltipPlacement.Top : GitHubTooltipPlacement.Bottom;
+        alignment: root.tooltip-align-right ? GitHubTooltipAlignment.End : GitHubTooltipAlignment.Center;
+    }
+}
+
+export component GitHubPrConflictsFilesButton inherits GitHubIconButton {
+    tooltip-text: I18n.conflicts-toggle-files;
+    show-tooltip: !PrReviewTooltipState.enabled;
+    PrConflictsToggleFilesTooltipAnchor {
+        active: PrReviewTooltipState.enabled && root.tooltip-active;
+        placement: root.tooltip-above ? GitHubTooltipPlacement.Top : GitHubTooltipPlacement.Bottom;
+        alignment: root.tooltip-align-right ? GitHubTooltipAlignment.End : GitHubTooltipAlignment.Center;
+    }
+}
+
+export component GitHubPrConflictsRefreshButton inherits GitHubIconButton {
+    tooltip-text: I18n.conflicts-refresh;
+    show-tooltip: !PrReviewTooltipState.enabled;
+    PrConflictsRefreshTooltipAnchor {
+        active: PrReviewTooltipState.enabled && root.tooltip-active;
+        placement: root.tooltip-above ? GitHubTooltipPlacement.Top : GitHubTooltipPlacement.Bottom;
+        alignment: root.tooltip-align-right ? GitHubTooltipAlignment.End : GitHubTooltipAlignment.Center;
+    }
+}
+
+export component GitHubPrConflictsPreviousButton inherits GitHubIconButton {
+    tooltip-text: I18n.conflicts-previous;
+    show-tooltip: !PrReviewTooltipState.enabled;
+    PrConflictsPreviousTooltipAnchor {
+        active: PrReviewTooltipState.enabled && root.tooltip-active;
+        placement: root.tooltip-above ? GitHubTooltipPlacement.Top : GitHubTooltipPlacement.Bottom;
+        alignment: root.tooltip-align-right ? GitHubTooltipAlignment.End : GitHubTooltipAlignment.Center;
+    }
+}
+
+export component GitHubPrConflictsNextButton inherits GitHubIconButton {
+    tooltip-text: I18n.conflicts-next;
+    show-tooltip: !PrReviewTooltipState.enabled;
+    PrConflictsNextTooltipAnchor {
+        active: PrReviewTooltipState.enabled && root.tooltip-active;
+        placement: root.tooltip-above ? GitHubTooltipPlacement.Top : GitHubTooltipPlacement.Bottom;
+        alignment: root.tooltip-align-right ? GitHubTooltipAlignment.End : GitHubTooltipAlignment.Center;
+    }
+}
+
+export component GitHubPrCopyShaButton inherits GitHubCopyButton {
+    tooltip-text: I18n.pr-review-copy-full-sha;
+    show-tooltip: !PrReviewTooltipState.enabled;
+    PrCopyFullShaTooltipAnchor {
+        active: PrReviewTooltipState.enabled && root.tooltip-active && !root.copied;
+        placement: root.tooltip-above ? GitHubTooltipPlacement.Top : GitHubTooltipPlacement.Bottom;
+        alignment: root.tooltip-align-right ? GitHubTooltipAlignment.End : GitHubTooltipAlignment.Center;
+    }
+    PrCopiedTooltipAnchor {
+        active: PrReviewTooltipState.enabled && root.copied;
+        placement: root.tooltip-above ? GitHubTooltipPlacement.Top : GitHubTooltipPlacement.Bottom;
+        alignment: root.tooltip-align-right ? GitHubTooltipAlignment.End : GitHubTooltipAlignment.Center;
+    }
+}
+
+export component GitHubPrCopyPathButton inherits GitHubCopyButton {
+    tooltip-text: I18n.pr-review-copy-file-path;
+    show-tooltip: !PrReviewTooltipState.enabled;
+    PrCopyFilePathTooltipAnchor {
+        active: PrReviewTooltipState.enabled && root.tooltip-active && !root.copied;
+        placement: root.tooltip-above ? GitHubTooltipPlacement.Top : GitHubTooltipPlacement.Bottom;
+        alignment: root.tooltip-align-right ? GitHubTooltipAlignment.End : GitHubTooltipAlignment.Center;
+    }
+    PrCopiedTooltipAnchor {
+        active: PrReviewTooltipState.enabled && root.copied;
+        placement: root.tooltip-above ? GitHubTooltipPlacement.Top : GitHubTooltipPlacement.Bottom;
+        alignment: root.tooltip-align-right ? GitHubTooltipAlignment.End : GitHubTooltipAlignment.Center;
+    }
+}
+
+export component GitHubPrCopyBranchButton inherits GitHubCopyButton {
+    tooltip-text: I18n.pr-review-copy-source-branch;
+    show-tooltip: !PrReviewTooltipState.enabled;
+    PrCopySourceBranchTooltipAnchor {
+        active: PrReviewTooltipState.enabled && root.tooltip-active && !root.copied;
+        placement: root.tooltip-above ? GitHubTooltipPlacement.Top : GitHubTooltipPlacement.Bottom;
+        alignment: root.tooltip-align-right ? GitHubTooltipAlignment.End : GitHubTooltipAlignment.Center;
+    }
+    PrCopiedTooltipAnchor {
+        active: PrReviewTooltipState.enabled && root.copied;
+        placement: root.tooltip-above ? GitHubTooltipPlacement.Top : GitHubTooltipPlacement.Bottom;
+        alignment: root.tooltip-align-right ? GitHubTooltipAlignment.End : GitHubTooltipAlignment.Center;
+    }
+}
+
+export component GitHubPrConflictsCopyButton inherits GitHubCopyButton {
+    tooltip-text: I18n.conflicts-copy;
+    show-tooltip: !PrReviewTooltipState.enabled;
+    PrConflictsCopyTooltipAnchor {
+        active: PrReviewTooltipState.enabled && root.tooltip-active && !root.copied;
+        placement: root.tooltip-above ? GitHubTooltipPlacement.Top : GitHubTooltipPlacement.Bottom;
+        alignment: root.tooltip-align-right ? GitHubTooltipAlignment.End : GitHubTooltipAlignment.Center;
+    }
+    PrCopiedTooltipAnchor {
+        active: PrReviewTooltipState.enabled && root.copied;
+        placement: root.tooltip-above ? GitHubTooltipPlacement.Top : GitHubTooltipPlacement.Bottom;
+        alignment: root.tooltip-align-right ? GitHubTooltipAlignment.End : GitHubTooltipAlignment.Center;
+    }
+}
+
+// Commit-range metadata remains on the dynamic portal; success uses its own fixed leaf.
+export component GitHubPrDynamicCopyButton inherits GitHubCopyButton {
+    show-tooltip: !PrReviewTooltipState.enabled || !root.copied;
+    PrCopiedTooltipAnchor {
+        active: PrReviewTooltipState.enabled && root.copied;
+        placement: root.tooltip-above ? GitHubTooltipPlacement.Top : GitHubTooltipPlacement.Bottom;
+        alignment: root.tooltip-align-right ? GitHubTooltipAlignment.End : GitHubTooltipAlignment.Center;
+    }
+}
+
+export component GitHubPrAiReviewButton inherits GitHubIconButton {
+    tooltip-text: root.selected ? I18n.ai-review-close : I18n.pr-list-review-with-ai;
+    show-tooltip: !PrReviewTooltipState.enabled;
+    PrCloseAiReviewTooltipAnchor { active: PrReviewTooltipState.enabled && root.tooltip-active && root.selected; alignment: GitHubTooltipAlignment.End; }
+    PrReviewWithAiTooltipAnchor { active: PrReviewTooltipState.enabled && root.tooltip-active && !root.selected; alignment: GitHubTooltipAlignment.End; }
+}

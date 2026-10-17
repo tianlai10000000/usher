@@ -11,10 +11,11 @@ This specification is the portable contract for the current pull-request capabil
 | Change / 改动 | Implementation and contract / 实现及契约 | Focused checks / 定向检查 |
 | --- | --- | --- |
 | List/query/pagination / 列表、查询及分页 | `src/workflow/pr_list.rs`, `pr_list_state.rs`; `ui/components/workflow/github_pr_flow.slint`, `github_pr_list_components.slint`; [product boundary](#product-boundary--产品边界) | `cargo test --lib --locked workflow::pr_list`; `cargo test --test pagination_ui --locked`; `cargo test --test pr_list_status_layout_ui --locked`; `cargo test --test pr_list_menu_ui --locked` |
-| Approval, mutations and shared state / 批准、远端变更及共享状态 | `src/workflow/pr_data.rs`; `pr_review/controller/actions.rs`, `actions/{remote,presentation}.rs`; [execution flow](#execution-and-state-flow--执行与状态流) | `cargo test --lib --locked workflow::pr_data`; `cargo test --lib --locked workflow::pr_review::controller::actions`; `cargo test --test pr_review_core_journeys --locked` |
+| Approval, mutations and shared state / 批准、远端变更及共享状态 | `src/workflow/pr_data.rs`; `pr_review/controller/actions.rs`, `actions/{reviews,remote,presentation}.rs`; [execution flow](#execution-and-state-flow--执行与状态流) | `cargo test --lib --locked workflow::pr_data`; `cargo test --lib --locked workflow::pr_review::controller::actions`; `cargo test --test pr_review_core_journeys --locked` |
 | Diff/source, Find and selection / Diff、源码、Find 及选区 | `pr_review/{hunk,diff_model,diff_projection,find_worker,find_bridge,selection,text_geometry,virtual_list}.rs`; `controller/diff_bindings.rs`; `ui/features/pr_review/diff_bridge.slint` | `cargo test --lib --locked workflow::pr_review`; [search](search.md), [text layout](text-layout.md) and [virtual scrolling](virtual-scrolling.md) matrices / 对应验收矩阵 |
-| Highlight/lifecycle completion / 高亮及生命周期回写 | `pr_review/state.rs`; `controller/{highlight_session,highlight_completion,lifecycle}.rs`; [controller ownership](#controller-ownership--控制器职责) | Focused library tests above; native Release A/B before adopting memory-policy changes / 上方定向单测及内存策略采用前的原生 Release A/B |
+| Highlight/lifecycle completion / 高亮及生命周期回写 | `pr_review/state.rs`; `controller/{highlight_session,highlighting,highlight_completion,lifecycle}.rs`; [controller ownership](#controller-ownership--控制器职责) | Focused library tests above; native Release A/B before adopting memory-policy changes / 上方定向单测及内存策略采用前的原生 Release A/B |
 | Provider behavior and failure / Provider 行为及失败 | `src/git/{provider,model,locator,json}.rs`, provider modules; [adapter contract](#provider-adapter-contract--provider-适配契约) | `cargo test --lib --locked git::`; [security](security-boundaries.md) and [HTTP](http.md) negative fixtures / 负例 |
+| UI root, factory and model ownership / UI root、工厂及 model 归属 | [PR Review UI](pr-review-ui.md); `crates/usher-ui-pr-review/`, `pr_review/ui.rs`, `ui/{context,input}.rs`, `ui/features/pr_review/` | `cargo test --test pr_review_factory_ui --locked`; architecture/UI-policy and native matrices / 结构、UI 门禁及原生矩阵 |
 | Conflicts / 冲突 | [PR conflict browsing](pr-conflicts.md) owns the independent snapshot and workspace lifecycle / 独立快照及工作区生命周期归该规格 | Its focused and native checklist / 该规格的定向及原生清单 |
 
 Focused checks guide iteration; handoff still requires `AGENTS.md` checks and
@@ -140,25 +141,152 @@ Closing/resetting the session invalidates those completions before any UI write.
 高亮完成回调必须先匹配请求代次、所选文件索引/路径及 Diff/全文模式，才能清除
 loading 或应用结果；关闭/重置会话必须先使旧回调失效。
 
-Queued syntax work must capture a session-local lazy resource lease before
-scheduling. Reset replaces the session slot; an old worker may finish on its
-old lease but must never populate the new session's resource owner. Source and
-expand completions validate their generation and selected file before any
-loading-state write. Memory-release experiments must distinguish navigation
+The retained B5 working-tree fix candidate routes Diff and full-file highlighting
+through `controller/highlighting.rs` and the shared `LatestCompute` worker.
+Per controller, at most one calculation runs while one pending input is replaced
+by the latest request. Inputs capture generation, selected index, immutable file,
+mode, scroll decision and the session lease before scheduling; identity must not
+be taken from the first worker loop's closure when a pending request replaces it.
+Cache hits and deferred-file selection cancel obsolete work even if no new
+calculation is submitted. Reset/close cancels pending/completed output and the
+active computation checks cancellation before initialization and between logical
+lines; resource loading and one Syntect line remain indivisible. Cancelled partial
+tokens are discarded. The established completion guard remains authoritative
+before any loading/model write, including when returning from a cached selection.
+
+保留的 B5 工作区修复候选通过 `controller/highlighting.rs` 与共享 `LatestCompute`
+统一处理 Diff/全文高亮。每个控制器最多一个运行中计算，另一个待执行输入由最新请求
+替换。入队前捕获代次、所选索引、不可变文件、模式、滚动决策和会话 lease；替换待执行
+请求时不能从首个 Worker 循环的闭包读取请求身份。缓存命中和延迟加载文件选择即使不
+提交新计算，也要取消旧任务。重置/关闭会取消待执行及已完成输出，执行中的计算在
+初始化前及每条逻辑行之间检查取消；资源加载和单次 Syntect 行解析仍不可中断。
+取消时丢弃部分 token，任何 loading/model 回写仍以既有完成身份校验为准，缓存选择
+返回路径同样如此。
+
+B5 contains only the bounded-highlight fix and remains an unaccepted candidate.
+The earlier controlled 90-second A/B and scoped macOS native
+file-switch/cache/reentry/locale checks passed the candidate criteria, while the
+joint strict checker retained original-A failures. The subsequent
+[full P6 run](../archive/maintenance/b5-full-p6-20261017.md) is complete;
+all six paired fixtures and three other soaks pass, but the 15-minute PR soak
+fails both RSS growth and slope. Short-run or
+RSS-ceiling passes do not waive those failures. Do not promote B5 or the whole
+split to an accepted baseline. The rejected B4 native-canvas proposal is not
+part of B5. Preserve original A, B3/short-B5 evidence, unchanged Release parameters
+and every existing threshold; do not pool absolute results from different
+display scales.
+
+B5 仅包含有界高亮修复，仍是未采用候选。此前 90 秒受控 A/B 与限定 macOS 快速选择、
+缓存/重入及语言切换的候选检查通过，联合 strict 仍保留原 A 失败；后续
+[完整 P6](../archive/maintenance/b5-full-p6-20261017.md) 已完成，六组短对照和另外
+三组长时检查通过，但 15 分钟 PR soak 因 RSS 增长及斜率失败。短对照或 RSS 峰值
+通过不能豁免增长失败，
+B5 和整批拆分均不晋升基线。已拒绝的 B4 原生 Canvas 不属于 B5；保留原始 A、
+B3/短 B5 证据、Release 参数和全部门槛，不混合不同显示 scale 的绝对数据。
+
+The [B6 experiment](../archive/maintenance/b6-pr-soak-20261017.md) is rejected.
+Its single B5/B6 900-second observations pass B6's PR RSS growth/slope checks, but
+the three original-A/B6 90-second pairs fail the unchanged final-footprint
+relative gate: 80.41 → 89.14 MiB, +8.73 MiB versus the 8 MiB allowance. Full P6
+was not run for rejected B6. The [B7 idle-ownership candidate](../archive/maintenance/b7-pr-idle-cache-20261017.md)
+has completed all 40 requested runs in one 2× display cohort. Six paired
+generic/relative comparisons and the PR-specific strict gates pass; candidate
+soaks 65, 66 and 70 pass. Hook soak 69 fails footprint slope (0.979011 MiB/min,
+limit 0.5), so the full batch fails and B7 remains unaccepted. The raw audit
+passes evidence integrity with no pending run; unchanged joint strict failures
+partition as original A: 12, B7: 0, global: 0. These historical A failures and
+the Hook generic failure are separate. The Hook cause remains unassigned;
+passing PR gates does not waive it or promote the compilation split. Original A
+remains the formal baseline; all B5/B6 failures, Release parameters and every
+threshold are preserved. Do not pool this 2× cohort with the earlier 1× results.
+
+[B6 实验](../archive/maintenance/b6-pr-soak-20261017.md) 已拒绝。B5/B6 各一次
+900 秒对照中 B6 的 PR RSS 增长/斜率通过，但原 A/B6 三对 90 秒对照的最终
+footprint 为 80.41 → 89.14 MiB，增量 8.73 MiB 超过保持不变的 8 MiB 额度。
+被拒绝的 B6 未执行完整 P6。[B7 空闲所有权候选](../archive/maintenance/b7-pr-idle-cache-20261017.md)
+已在同一 2× 显示批次完成全部 40 次请求运行。六组通用/相对短对照及 PR 专项严格
+门槛通过，候选 soak 65、66、70 通过；Hook soak 69 因 footprint 斜率
+0.979011 MiB/min 超过 0.5 失败，因此整批失败，B7 仍未采用。raw audit 证据完整性
+通过，无待完成运行；未改动的联合 strict 失败分区为原 A 12、B7 0、global 0。
+这些原 A 历史失败与 Hook 通用门禁失败分别保留。Hook 根因尚未归因，PR 门槛通过
+不能豁免该失败或晋升编译拆分；正式基线仍为原始 A，全部 B5/B6 失败、Release
+参数和每项门槛不变。本批 2× 与此前 1× 的绝对数值不得混合。
+
+In B7, `controller/highlight_cache.rs` owns one current lazy builtin-resource
+slot per controller. Normal review open synchronously calls `activate()` before
+asynchronous metadata/provider reads; this declares interest without loading a
+grammar. A scheduled highlight captures both the session lease and a cache-slot
+`lease()` before submission. Both slot identities remain fixed for that request;
+it never acquires the mutable cache owner from a worker. Reset first cancels
+pending/completed highlight output and detaches the session slot outside its
+lock, then requests an idle check. Real close and project reset use this path;
+same-operation reopen/reload may reclaim the existing graph before confirmation.
+
+`request_idle_check(None)` coalesces resets into at most one weak event-loop
+check. A failed asynchronous read instead supplies its captured intent ticket;
+it may request release only if no later open or highlight lease has claimed the
+cache, after the existing typed Diff generation guard. `confirm_idle()` reads
+the latest intent, so reset → claim → reset is not lost behind an old queued
+epoch. Only confirmed idle slots move to the shared
+`app_runtime::release_resources` blocking drain. At most one release drain owns
+the cache; its `next_release()` may take a newer slot only after another UI
+confirmation. A queued but unconfirmed reset cannot be stolen by that worker.
+Old admitted work may still warm its captured retired cache/session slots, but
+cannot initialize either replacement slot or publish stale output. Ordinary
+idle retirement drops detached resources on the blocking worker, outside cache
+and session locks. Final controller destruction remains the existing CPU-only
+teardown path; this does not introduce a global deferred-destruction service.
+
+The current slot holds a lazily initialized bundled `SyntaxSet`/`Theme` graph;
+retired in-flight leases can temporarily keep an older graph alive. Synchronized
+lazy grammar/regex internals can mutate and grow as builtin languages initialize,
+so a graph count is not a byte bound. Each file still creates fresh
+`ParseState`/`HighlightState` and output; the cache retains no file text, selected
+paths, tokens or per-file parser history. Session `is_loaded` and
+`highlight_controller_grammar_cache_entries` describe separate current owners,
+not all retired leases or an allocator-residency/RSS plateau. Unit lifetime
+checks do not establish acceptable closed-session retained cost.
+
+Source and expand completions validate their generation and selected file before
+any loading-state write. Memory-release experiments must distinguish navigation
 state from derived presentation and must not invalidate remote mutations merely
 because the review route is hidden. The offline `test-fixtures` option
 `USHER_PR_PRESENTATION_LIFECYCLE=release-derived-v1` is an unaccepted candidate,
 not default product behavior; its native A/B remains required.
 
-语法任务入队前必须捕获会话局部惰性资源 lease。重置时替换槽，旧 Worker 可在旧
-lease 上结束，但不得填充新会话资源。源码/展开回调在任何 loading 回写前必须先
+B7 的 `controller/highlight_cache.rs` 为每个控制器持有一个当前内置资源惰性槽。
+正常打开审核在异步 metadata/Provider 读取前同步 `activate()`，只声明使用意图，
+不加载语法。高亮入队前捕获会话 lease 及缓存槽 `lease()`；该请求的两个槽身份
+固定，Worker 不持有可重新取槽的可变缓存 owner。重置先取消待执行/已完成高亮
+输出，在锁外分离会话槽，再申请空闲检查。真正关闭与项目重置走此路径；同次操作
+重开/重载可在确认前重新声明使用，复用现有图。
+
+`request_idle_check(None)` 把重复重置合并为最多一个 weak event-loop 检查。
+异步读取失败则使用捕获的意图 ticket，并先通过既有 Diff 强类型代次防护；只有
+之后未被新 open 或高亮 lease 重新声明使用，才可申请释放。`confirm_idle()` 读取
+最新意图，避免 reset → claim → reset 被首个排队 epoch 遗漏。只有已确认空闲的
+槽才交给共享 `app_runtime::release_resources` blocking drain；每个缓存最多一个
+释放 drain，其 `next_release()` 只能接走另一次 UI 确认后的新槽，不能抢取尚待
+确认的 reset。旧任务可预热其捕获的旧缓存/会话槽，但不能初始化任何替换槽或发布
+过期结果。正常空闲释放在 blocking Worker、缓存锁及会话锁之外析构；最终控制器
+销毁沿用既有 CPU 资源清理路径，不增加全局延迟析构服务。
+
+当前槽持有一个惰性初始化的内置 `SyntaxSet`/`Theme` 图；执行中的旧 lease 可暂时
+保留旧图。线程安全的惰性语法/正则缓存可随内置语言初始化而变化、增长，图数量
+不是字节上限。每个文件仍创建新的 `ParseState`/`HighlightState` 和结果；缓存
+不保留文件正文、所选路径、token 或逐文件解析历史。会话 `is_loaded` 与
+`highlight_controller_grammar_cache_entries` 描述不同的当前 owner，不涵盖所有
+旧 lease，也不代表 allocator 驻留页/RSS 平台；对象生命周期单测不能证明关闭后
+保留成本已通过验收。
+
+源码/展开回调在任何 loading 回写前必须先
 检查代次和所选文件。内存释放实验须区分导航状态与派生展示，不能仅因隐藏审核页
 就使远端 mutation 失效。离线 `test-fixtures` 选项
 `USHER_PR_PRESENTATION_LIFECYCLE=release-derived-v1` 仍为未验收候选，不是产品
 默认行为，原生 A/B 仍是必需验收。
 
 Normal route hiding retains the current review's syntax resources, token/source
-caches, root models and request generations. The unadopted syntax-only release
+caches, feature-owned presentation models and request generations. The unadopted syntax-only release
 experiment is no longer an application runtime option; its implementation and
 evidence remain in historical snapshots. Retention must stay bounded across PR
 replacement: one current review cache, no per-visited-PR model collection, and
@@ -171,7 +299,7 @@ growth and reentry latency, not just a single Home transition. Label synthetic
 fixtures explicitly; unit tests do not prove native RSS stability. Use the P6
 growth gates with the user-required RSS <300 MiB.
 
-正常隐藏路由时保留当前审核的语法资源、token/源码缓存、根 model 和请求代次。
+正常隐藏路由时保留当前审核的语法资源、token/源码缓存、功能自有展示 model 和请求代次。
 未采用的仅释放语法资源实验不再是应用运行时选项，实现和证据保留在历史快照中。
 PR 替换必须保持有界：只有当前审核缓存，不按访问过的 PR 累积 model，旧 Worker
 不得写入替换会话。分离资源槽必须隔离旧 Worker lease，并在释放槽锁后析构旧 owner。
@@ -188,25 +316,32 @@ Workflow scope are separate cleanup boundaries, not equivalent route changes.
 Workflow 域不可达是独立的清理边界，不能把任意离页都当作会话关闭。
 
 `src/workflow/pr_review/controller.rs` owns context, loading and navigation;
-`controller/actions.rs` owns command admission and guarded completion; its
-`actions/remote.rs` leaf captures repository/credential identity and Hook metadata
-before asynchronous execution, publishes confirmed mutations before Hooks, and
-never writes UI. `actions/presentation.rs` owns capability/readiness/locale projection.
-`controller/diff_bindings.rs` owns the event-loop Diff geometry, selection,
+`controller/presentation.rs` owns synchronous header/detail/file/model projection,
+locale refresh and tree projection. `controller/actions.rs` owns command admission
+and generation-guarded completion; `actions/reviews.rs` owns review submission,
+dismissal and completion-driven list/conversation refresh. `actions/remote.rs`
+captures repository/credential identity and Hook metadata before asynchronous
+execution, publishes confirmed mutations before Hooks, and never writes UI.
+`actions/presentation.rs` owns capability/readiness/locale projection.
+`controller/diff_bindings.rs` owns event-loop Diff geometry, selection,
 virtual-list and Find adapters; `controller/diagnostics.rs` owns opt-in evidence.
-The stateless `PrDiffBridge` global in `ui/features/pr_review/diff_bridge.slint`
-is the Rust-facing Diff callback contract. The root only forwards page events;
-request generations, weak-window delivery and project scoping remain unchanged.
+These consumers resolve the actual feature root and bind its `PrReviewBridge`,
+`PrDiffBridge` and `PrConflictsBridge` directly. MainWindow keeps only shell
+context, chrome summaries and navigation, without PR row-model copies or
+per-command root proxies. The [PR Review UI contract](pr-review-ui.md) owns the
+factory, shared renderer, retained host, document lifetime and build-mode boundary.
+Request generations, weak-window delivery and project scoping remain unchanged.
 
-`src/workflow/pr_review/controller.rs` 负责上下文、加载和导航，
-`controller/actions.rs` 负责命令准入与受保护的完成回写；`actions/remote.rs` 在异步
-执行前捕获仓库/凭据身份与 Hook 元数据，确认操作成功后先发布共享状态再发 Hook，
-不写 UI。`actions/presentation.rs` 负责能力/就绪状态/国际化投影。`controller/diff_bindings.rs`
-负责 event-loop 上的 Diff 几何、选择、虚拟列表与 Find adapter，
-`controller/diagnostics.rs` 负责显式开启的诊断证据。
-`ui/features/pr_review/diff_bridge.slint` 中无状态的 `PrDiffBridge` global
-是面向 Rust 的 Diff callback 契约；根窗口只转发页面事件。请求 generation、
-weak window 回写和项目隔离语义不变。
+`controller.rs` 负责上下文、加载和导航；`controller/presentation.rs` 负责同步页头、
+详情、文件/model、语言和树投影。`actions.rs` 负责命令准入及 generation 保护的完成回写；
+`actions/reviews.rs` 负责评审提交、撤回和完成后的列表/Conversation 刷新。
+`actions/remote.rs` 在异步执行前捕获仓库、凭据与 Hook 身份，成功后先发布共享状态再发
+Hook，不写 UI。`actions/presentation.rs` 负责能力、就绪状态和语言投影。
+`diff_bindings.rs` 负责 event-loop 的 Diff 几何、选区、虚拟列表与 Find adapter，
+`diagnostics.rs` 负责 opt-in 证据。使用方取得实际功能 root 后直接绑定其三个 bridge；
+MainWindow 仅保留主壳上下文、chrome 摘要与路由，不复制 PR 行 model 或逐命令代理。
+工厂、共享 renderer、稳定 host、文档生命周期和构建模式详见新 UI 契约；请求代次、
+weak window 回写及项目隔离保持不变。
 
 ## Product boundary / 产品边界
 
@@ -280,7 +415,7 @@ Close/reopen, inline draft reviews, merge queues, and auto-merge are not part of
 ## Ownership / 职责
 
 - `src/workflow/pr_review.rs` is the stable façade; `controller.rs` owns active requests, state-store generation guards, remote action orchestration, and Slint model updates.
-- `src/workflow/pr_review/state.rs` owns eight independent typed request generations; `controller/highlight_session.rs` owns session resource leases, `highlight_completion.rs` guards completion writes, and `lifecycle.rs` separates ordinary route hiding from explicit reset and opt-in presentation experiments.
+- `src/workflow/pr_review/state.rs` owns eight independent typed request generations; `controller/highlight_session.rs` defines isolated session leases. The unaccepted B7 candidate `controller/highlight_cache.rs` owns the current builtin-resource slot, intent and coalesced idle/release state; `controller/highlighting.rs` captures slot leases and bounds tokenization/cancellation. `highlight_completion.rs` guards completion writes; `lifecycle.rs` queues weak idle confirmation and shared blocking release, and separates ordinary route hiding from explicit reset and opt-in presentation experiments.
 - `src/workflow/pr_data.rs` owns cross-surface domain synchronization; remote operation publication belongs to `controller/actions/remote.rs`, not the UI bridge.
 - `src/workflow/pr_review/cache.rs` owns bounded review/range/highlight/source caches, shared immutable diff ownership, copy-on-write expanded files, and cache memory statistics.
 - `src/workflow/pr_review/avatar.rs` owns bounded, deduplicated avatar download and decoding.
@@ -293,14 +428,25 @@ Close/reopen, inline draft reviews, merge queues, and auto-merge are not part of
 - `src/workflow/pr_review/timeline.rs` owns Conversation/Commit Slint model conversion, deterministic row sizing and connection/grouping rules, plus display/chronological commit-range mapping.
 - `src/git/model.rs`, `locator.rs`, and `diff.rs` own provider-neutral models, remote location, and unified-diff parsing. Provider modules own request/response handling; Gitee authentication/endpoints, decoding, Conversation/Commit normalization, readiness, and revert capability are isolated under `src/git/gitee/`.
 - `src/codereview/api/` owns provider endpoint URL templates only.
-- `ui/features/pr_review/` owns the stable page-package entry and public protocol. Default/release builds map `@pr-review` to the complete `ui/views/workflow/pr_review_workspace.slint` implementation; the explicit `dev-shell` build maps the whole package to a protocol-compatible empty implementation and makes the route unavailable. The complete implementation owns cross-region state, review layout, and user interaction. `ui/components/pr_review/shell.slint` owns public structs and shell controls; `content.slint` owns reusable file-tree and diff content controls. Routes and future entry points consume the package rather than own it.
+- `ui/features/pr_review/` owns the stable page-package entry and public protocol.
+  Static default/Release builds map the shell's `@pr-review` to `factory_host.slint`;
+  `usher-ui-pr-review` generates the complete page through `@pr-review-page` →
+  `full.slint` → `ui/views/workflow/pr_review_workspace.slint`. `live-preview` maps
+  `@pr-review` to `integrated.slint` and uses that page inside MainWindow without
+  separate static factory generation. Explicit `dev-shell` selects the
+  protocol-compatible empty `dev_shell.slint` through `@pr-review-page` in both
+  static UI owners and normalizes PrReview navigation to Workflow. The complete
+  implementation owns cross-region state, review layout, and user interaction.
+  `ui/components/pr_review/shell.slint` owns public structs and shell controls;
+  `content.slint` owns reusable file-tree and diff content controls. Routes and
+  future entry points consume the package rather than own it.
 - `src/workflow/pr_list.rs` owns list-page selection, confirmed-count pagination projection, and UTC+08:00 timestamp formatting; `pr_list_state.rs` owns independent typed generations for Page and Totals requests. `crates/usher-ui/src/pagination.rs` supplies the shared bounded Primer page-link algorithm used by PR and Inbox bridges.
 - `src/workflow/bindings.rs` supplies the selected project context, remote-URL copy, local-folder reveal via `src/platform/`, and the optional `fat`/`uat`/`prod` count refresh.
 - `src/ai_review/` owns optional AI task execution and result projection; PR list/detail only emit actions and consume task/result models.
 - `src/git/overview.rs` owns provider-neutral `fat`/`uat`/`prod` count aggregation; Provider selection, authentication, requests, and response normalization remain in the Git façade and adapters.
 
 - `src/workflow/pr_review.rs` 是稳定 façade；`controller.rs` 负责当前请求、state-store generation 防护、远端 action 编排和 Slint model 更新。
-- `src/workflow/pr_review/state.rs` 负责八种独立强类型请求代际；`controller/highlight_session.rs` 持有会话资源 lease，`highlight_completion.rs` 校验完成回写，`lifecycle.rs` 区分正常隐藏、显式重置与 opt-in 展示实验。
+- `src/workflow/pr_review/state.rs` 负责八种独立强类型请求代际；`controller/highlight_session.rs` 定义隔离的会话 lease。尚未采用的 B7 候选 `controller/highlight_cache.rs` 持有当前内置资源槽、意图和合并后的空闲/释放状态；`controller/highlighting.rs` 捕获槽 lease 并负责有界 token 化/取消。`highlight_completion.rs` 校验完成回写；`lifecycle.rs` 排队 weak 空闲确认及共享 blocking 释放，区分正常隐藏、显式重置和 opt-in 展示实验。
 - `src/workflow/pr_data.rs` 负责跨表面领域同步；远端操作发布归 `controller/actions/remote.rs`，不归 UI bridge。
 - `src/workflow/pr_review/cache.rs` 负责有界 review/range/highlight/source 缓存、共享不可变 Diff 所有权、展开文件的写时复制和缓存内存统计。
 - `src/workflow/pr_review/avatar.rs` 负责有界且去重的头像下载和解码。
@@ -313,7 +459,15 @@ Close/reopen, inline draft reviews, merge queues, and auto-merge are not part of
 - `src/workflow/pr_review/timeline.rs` 负责 Conversation/Commit Slint model 转换、确定性行高和连接/分组规则，以及展示顺序与时间顺序之间的 commit range 映射。
 - `src/git/model.rs`、`locator.rs`、`diff.rs` 分别负责 Provider-neutral 模型、remote 定位和 unified diff 解析。Provider 模块负责请求/响应；Gitee 的鉴权/endpoint、解码、Conversation/Commit 归一化、readiness 和 revert capability 分别隔离在 `src/git/gitee/` 下。
 - `src/codereview/api/` 只负责 Provider endpoint URL 模板。
-- `ui/features/pr_review/` 负责稳定的页面包入口和公开协议。默认/Release 构建把 `@pr-review` 映射到完整的 `ui/views/workflow/pr_review_workspace.slint` 实现；显式 `dev-shell` 构建把整个包映射到协议兼容的空实现，并让该路由不可用。完整实现负责跨区域状态、审核布局和交互；`ui/components/pr_review/shell.slint` 负责公开 struct 与外壳控件，`content.slint` 负责可复用文件树和 Diff 内容控件。路由及后续入口只消费该包，不拥有它。
+- `ui/features/pr_review/` 负责稳定的页面包入口和公开协议。静态默认/Release 构建
+  将主壳 `@pr-review` 映射到 `factory_host.slint`；由 `usher-ui-pr-review` 通过
+  `@pr-review-page` → `full.slint` → `ui/views/workflow/pr_review_workspace.slint`
+  独立生成完整页面。`live-preview` 将 `@pr-review` 映射到 `integrated.slint`，
+  在 MainWindow 内使用完整页面，跳过独立静态 factory 生成。显式 `dev-shell`
+  在两个静态 UI owner 中将 `@pr-review-page` 选为协议兼容的 `dev_shell.slint`
+  空实现，并把 PrReview 导航归一到 Workflow。完整实现负责跨区域状态、审核布局和
+  交互；`ui/components/pr_review/shell.slint` 负责公开 struct 与外壳控件，
+  `content.slint` 负责可复用文件树和 Diff 内容控件。路由及后续入口只消费该包，不拥有它。
 - `src/workflow/pr_list.rs` 负责列表页选择、已确认页数的分页投影和东八区时间格式化；`pr_list_state.rs` 负责 Page 与 Totals 请求相互独立的强类型代际。`crates/usher-ui/src/pagination.rs` 提供 PR 与 Inbox bridge 共用的有界 Primer 页码链接算法。
 - `src/workflow/bindings.rs` 提供当前项目上下文、远程 URL 复制、经 `src/platform/` 打开本地目录，以及可选的 `fat`/`uat`/`prod` 数量刷新。
 - `src/ai_review/` 负责可选 AI 任务执行和结果投影；PR 列表/详情只发出动作并消费任务/结果 model。

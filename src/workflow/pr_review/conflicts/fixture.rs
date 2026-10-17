@@ -1,5 +1,6 @@
 //! Opt-in offline fixture uses the production parser, worker and UI models.
 use super::*;
+use crate::pr_review_ui::PrReviewUiExt;
 
 fn snapshot() -> ConflictSnapshot {
     let content = format!(
@@ -150,38 +151,64 @@ pub(super) fn setup(controller: &ConflictController, ui: &MainWindow) {
                 ui.invoke_navigate(crate::Route::UiComponents);
                 return;
             }
-            ui.set_workflow_pr_review_title("Add conflict preview to Pull Request review".into());
-            ui.set_workflow_pr_review_number("42".into());
-            ui.set_workflow_pr_review_author("yuankai".into());
-            ui.set_workflow_pr_review_source_branch("feature/conflict-preview".into());
-            ui.set_workflow_pr_review_target_branch("main".into());
-            ui.set_workflow_pr_review_visible(true);
-            ui.set_workflow_pr_review_loading(false);
-            ui.set_workflow_pr_merge_readiness_kind("conflicts".into());
-            ui.set_workflow_pr_merge_readiness_label(
-                crate::i18n::tr("pr_review.readiness.conflicts")
-                    .into_owned()
-                    .into(),
-            );
-            ui.set_workflow_pr_review_commit_count(2);
-            ui.set_workflow_pr_review_added_lines(32842);
-            ui.set_workflow_pr_review_removed_lines(2277);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_title("Add conflict preview to Pull Request review".into());
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_number("42".into());
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_author("yuankai".into());
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_source_branch("feature/conflict-preview".into());
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_target_branch("main".into());
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_visible(true);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_loading(false);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_merge_readiness_kind("conflicts".into());
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_merge_readiness_label(
+                    crate::i18n::tr("pr_review.readiness.conflicts")
+                        .into_owned()
+                        .into(),
+                );
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_commit_count(2);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_added_lines(32842);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_removed_lines(2277);
             ui.invoke_navigate(crate::Route::PrReview);
             if std::env::var("USHER_PR_CONFLICTS_SCENE").as_deref() == Ok("review") {
                 // The isolated fixture has no provider-backed active PR request.
                 let open_controller = controller.clone();
                 let open_window = ui.as_weak();
-                ui.global::<PrConflictsBridge>().on_open(move || {
-                    if let Some(ui) = open_window.upgrade() {
-                        open_controller.open(
-                            &ui,
-                            "conflicts-fixture".into(),
-                            "42".into(),
-                            "feature/conflict-preview".into(),
-                            "main".into(),
-                        );
-                    }
-                });
+                ui.pr_review()
+                    .global::<PrConflictsBridge>()
+                    .on_open(move || {
+                        if let Some(ui) = open_window.upgrade() {
+                            open_controller.open(
+                                &ui,
+                                "conflicts-fixture".into(),
+                                "42".into(),
+                                "feature/conflict-preview".into(),
+                                "main".into(),
+                            );
+                        }
+                    });
                 controller.prefetch(
                     &ui,
                     "conflicts-fixture".into(),
@@ -191,7 +218,9 @@ pub(super) fn setup(controller: &ConflictController, ui: &MainWindow) {
                 );
                 return;
             }
-            ui.global::<PrConflictsBridge>().set_active(true);
+            ui.pr_review()
+                .global::<PrConflictsBridge>()
+                .set_active(true);
             let generation = controller.generation.fetch_add(1, Ordering::SeqCst) + 1;
             let snapshot = Arc::new(selected_snapshot());
             let state = controller.state.clone();
@@ -211,6 +240,14 @@ pub(super) fn setup(controller: &ConflictController, ui: &MainWindow) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn settle_layout(ui: &MainWindow) {
+        // Scalar context crosses a queued Slint changed handler before the
+        // embedded factory can instantiate and lay out its current document.
+        i_slint_core::window::WindowInner::from_pub(ui.window()).ensure_tree_instantiated();
+        i_slint_backend_testing::mock_elapsed_time(std::time::Duration::ZERO);
+    }
+
     #[test]
     fn gutter_includes_opening_lane_and_all_markers() {
         i_slint_backend_testing::init_no_event_loop();
@@ -245,7 +282,8 @@ mod tests {
         i_slint_backend_testing::init_no_event_loop();
         let ui = MainWindow::new().unwrap();
         let controller = ConflictController::default();
-        let b = ui.global::<PrConflictsBridge>();
+        let pr_review_view = ui.pr_review();
+        let b = pr_review_view.global::<PrConflictsBridge>();
         b.set_active(true);
         b.set_copy_busy(true);
         controller.generation.store(2, Ordering::SeqCst);
@@ -273,11 +311,21 @@ mod tests {
         let ui = MainWindow::new().unwrap();
         ui.set_current_route(crate::Route::PrReview);
         ui.set_show_navigation_drawer(false);
-        ui.set_workflow_pr_review_loading(false);
-        ui.set_workflow_pr_merge_readiness_kind("conflicts".into());
-        ui.set_workflow_pr_review_added_lines(123456789);
-        ui.set_workflow_pr_review_removed_lines(987654321);
-        ui.global::<PrConflictsBridge>().set_file_count(17);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_loading(false);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_merge_readiness_kind("conflicts".into());
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_added_lines(123456789);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_removed_lines(987654321);
+        ui.pr_review()
+            .global::<PrConflictsBridge>()
+            .set_file_count(17);
         for locale in ["en", "zh-CN"] {
             crate::i18n::apply_preference(locale).unwrap();
             for (width, drawer) in [
@@ -291,6 +339,7 @@ mod tests {
                     .dispatch_event(slint::platform::WindowEvent::Resized {
                         size: slint::LogicalSize::new(width, 900.0),
                     });
+                settle_layout(&ui);
                 let nav = ElementHandle::find_by_element_id(
                     &ui,
                     "GitHubPullRequestReviewPage::review-nav",
@@ -313,7 +362,9 @@ mod tests {
                         <= stats.absolute_position().x + 0.5
                 );
                 assert!(
-                    (stats.absolute_position().x + stats.size().width - (width - 16.0)).abs() < 0.5
+                    (stats.absolute_position().x + stats.size().width - (width - 16.0)).abs() < 0.5,
+                    "{locale}, width={width}, drawer={drawer}: stats right={}",
+                    stats.absolute_position().x + stats.size().width,
                 );
                 assert_eq!(nav.absolute_position().y, stats.absolute_position().y);
                 assert!(viewport.absolute_position().x >= nav.absolute_position().x + 16.0);
@@ -332,8 +383,11 @@ mod tests {
         let ui = MainWindow::new().unwrap();
         ui.set_current_route(crate::Route::PrReview);
         ui.set_show_navigation_drawer(false);
-        ui.set_workflow_pr_review_loading(false);
-        let bridge = ui.global::<PrConflictsBridge>();
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_loading(false);
+        let pr_review_view = ui.pr_review();
+        let bridge = pr_review_view.global::<PrConflictsBridge>();
         bridge.set_active(true);
         let data = long_path_snapshot();
         ConflictController::default().present(&ui, &data);
@@ -341,6 +395,7 @@ mod tests {
         bridge.on_select_file(move |index| {
             weak.upgrade()
                 .unwrap()
+                .pr_review()
                 .global::<PrConflictsBridge>()
                 .set_selected_file(index);
         });
@@ -418,7 +473,8 @@ mod tests {
         i_slint_backend_testing::init_no_event_loop();
         let ui = MainWindow::new().unwrap();
         let controller = ConflictController::default();
-        let b = ui.global::<PrConflictsBridge>();
+        let pr_review_view = ui.pr_review();
+        let b = pr_review_view.global::<PrConflictsBridge>();
         assert_eq!(b.get_file_count(), -1);
         let mut data = snapshot();
         data.files.push(data.files[0].clone());
@@ -440,8 +496,11 @@ mod tests {
         i_slint_backend_testing::init_no_event_loop();
         let ui = MainWindow::new().unwrap();
         let controller = ConflictController::default();
-        let b = ui.global::<PrConflictsBridge>();
-        ui.set_workflow_pr_review_tab(1);
+        let pr_review_view = ui.pr_review();
+        let b = pr_review_view.global::<PrConflictsBridge>();
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_tab(1);
         controller.generation.store(1, Ordering::SeqCst);
         b.set_loading(true);
         controller.finish_load(&ui, 1, Ok(Arc::new(snapshot())));
@@ -450,7 +509,12 @@ mod tests {
         assert!(!b.get_loading());
         assert_eq!(b.get_files().row_count(), 0);
         assert_eq!(b.get_rows().row_count(), 0);
-        assert_eq!(ui.get_workflow_pr_review_tab(), 1);
+        assert_eq!(
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_tab(),
+            1
+        );
         controller.close(&ui);
         controller.finish_load(&ui, 1, Ok(Arc::new(snapshot())));
         assert_eq!(b.get_file_count(), -1);
@@ -471,7 +535,8 @@ mod tests {
         };
         *controller.context.lock().unwrap() = Some(context.clone());
         controller.generation.store(1, Ordering::SeqCst);
-        let b = ui.global::<PrConflictsBridge>();
+        let pr_review_view = ui.pr_review();
+        let b = pr_review_view.global::<PrConflictsBridge>();
         b.set_loading(true);
         controller.open(
             &ui,
@@ -519,7 +584,8 @@ mod tests {
         *controller.context.lock().unwrap() = Some(context.clone());
         controller.generation.store(7, Ordering::SeqCst);
         controller.selection.store(4, Ordering::SeqCst);
-        let b = ui.global::<PrConflictsBridge>();
+        let pr_review_view = ui.pr_review();
+        let b = pr_review_view.global::<PrConflictsBridge>();
         b.set_active(true);
         b.set_selected_file(1);
         b.set_selected_block(2);
@@ -551,11 +617,16 @@ mod tests {
         bind_geometry(&ui);
         ui.set_current_route(crate::Route::PrReview);
         ui.set_show_navigation_drawer(false);
-        ui.set_workflow_pr_review_loading(false);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_loading(false);
         ui.window().dispatch_event(WindowEvent::Resized {
             size: slint::LogicalSize::new(1200.0, 900.0),
         });
-        ui.global::<PrConflictsBridge>().set_active(true);
+        ui.pr_review()
+            .global::<PrConflictsBridge>()
+            .set_active(true);
+        settle_layout(&ui);
         let handle = || {
             ElementHandle::find_by_element_id(&ui, "PrReviewConflicts::files-resize-handle")
                 .next()
@@ -583,6 +654,7 @@ mod tests {
                 position: end,
                 button: PointerEventButton::Left,
             });
+            settle_layout(&ui);
         };
         assert_eq!(pane().size().width, 260.0);
         drag(120.0);
@@ -606,11 +678,13 @@ mod tests {
                 position,
                 button: PointerEventButton::Left,
             });
+            settle_layout(&ui);
         }
         assert_eq!(pane().size().width, 300.0);
         ui.window().dispatch_event(WindowEvent::Resized {
             size: slint::LogicalSize::new(800.0, 900.0),
         });
+        settle_layout(&ui);
         assert_eq!(pane().size().width, 300.0);
     }
 
@@ -625,17 +699,21 @@ mod tests {
         bind_geometry(&ui);
         ui.set_current_route(crate::Route::PrReview);
         ui.set_show_navigation_drawer(false);
-        ui.set_workflow_pr_review_loading(false);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_loading(false);
         ui.window().dispatch_event(WindowEvent::Resized {
             size: slint::LogicalSize::new(1200.0, 900.0),
         });
-        let b = ui.global::<PrConflictsBridge>();
+        let pr_review_view = ui.pr_review();
+        let b = pr_review_view.global::<PrConflictsBridge>();
         b.set_active(true);
         b.set_text_available(true);
         b.set_rows(ModelRc::new(
             projection::prepare(snapshot().files[0].clone()).into_model(),
         ));
         b.set_max_columns(200);
+        settle_layout(&ui);
         let surface = ElementHandle::find_by_element_id(&ui, "PrReviewConflicts::code-surface")
             .next()
             .unwrap();
@@ -703,8 +781,11 @@ mod tests {
         ui.set_current_route(crate::Route::PrReview);
         ui.set_show_navigation_drawer(false);
         ui.set_show_breadcrumb(false);
-        ui.set_workflow_pr_review_loading(false);
-        let bridge = ui.global::<PrConflictsBridge>();
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_loading(false);
+        let pr_review_view = ui.pr_review();
+        let bridge = pr_review_view.global::<PrConflictsBridge>();
         bridge.set_active(true);
         let snapshot = snapshot();
         let prepared = projection::prepare(snapshot.files[0].clone());
@@ -725,6 +806,7 @@ mod tests {
                     .dispatch_event(slint::platform::WindowEvent::Resized {
                         size: slint::LogicalSize::new(width, 900.0),
                     });
+                settle_layout(&ui);
                 let code =
                     ElementHandle::find_by_element_type_name(&ui, "GitHubSelectableDiffCode")
                         .next()

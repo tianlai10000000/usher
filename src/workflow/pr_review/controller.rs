@@ -1,3 +1,4 @@
+use crate::pr_review_ui::PrReviewUiExt;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,7 +24,7 @@ use crate::{
 
 use super::super::bindings::show_error;
 use super::super::pr_list::WorkflowPrListController;
-use super::super::syntax_highlight::{HighlightResources, HighlightedLine, highlight_diff_lines};
+use super::super::syntax_highlight::{HighlightResources, HighlightedLine};
 
 use super::avatar::{load_commit_avatars, load_conversation_avatars};
 use super::cache::{
@@ -61,10 +62,17 @@ mod diff_bindings;
 use actions::{readiness_label_key, reset_action_ui, retranslate_action_state};
 mod diagnostics;
 mod highlight_benchmark;
+mod highlight_cache;
 mod highlight_completion;
 mod highlight_session;
+mod highlighting;
 mod lifecycle;
+mod presentation;
 use highlight_session::HighlightSession;
+use presentation::{
+    apply_file_header, apply_highlighted_file, apply_review_header, empty_file_model,
+    empty_tree_model, reset_review_ui, set_empty_line_model, toggle_commit_message_expansion,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ReviewRequest {
@@ -101,6 +109,7 @@ pub(crate) struct WorkflowPrReviewController {
     show_viewed_files: Arc<Mutex<bool>>,
     collapsed_folders: Arc<Mutex<HashSet<String>>>,
     highlight_resources: Arc<HighlightSession<HighlightResources>>,
+    highlighting: highlighting::HighlightWorker,
     highlighted_files: Arc<Mutex<BoundedCache<Arc<Vec<HighlightedLine>>>>>,
     source_files: Arc<Mutex<BoundedCache<String>>>,
     location_reveal: Arc<Mutex<Option<LocationReveal>>>,
@@ -132,6 +141,7 @@ pub(crate) fn bind_pr_review(
         show_viewed_files: Arc::new(Mutex::new(true)),
         collapsed_folders: Arc::new(Mutex::new(HashSet::new())),
         highlight_resources: Arc::new(HighlightSession::default()),
+        highlighting: highlighting::HighlightWorker::default(),
         highlighted_files: Arc::new(Mutex::new(BoundedCache::new(HIGHLIGHT_CACHE_CAPACITY))),
         source_files: Arc::new(Mutex::new(BoundedCache::new(SOURCE_CACHE_CAPACITY))),
         location_reveal: Arc::new(Mutex::new(None)),
@@ -149,465 +159,583 @@ pub(crate) fn bind_pr_review(
     controller.conflicts.bind(ui);
     let conflict_controller = controller.clone();
     let weak = ui.as_weak();
-    ui.global::<crate::PrConflictsBridge>().on_open(move || {
-        let Some(ui) = weak.upgrade() else { return };
-        if ui.global::<crate::PrConflictsBridge>().get_active() {
-            return;
-        }
-        let request = conflict_controller
-            .active_request
-            .lock()
-            .ok()
-            .and_then(|r| r.clone());
-        if let Some(request) = request {
-            ui.global::<crate::PrConflictsBridge>()
-                .set_return_to_list(false);
-            let alias = conflict_controller.project_alias.lock().unwrap().clone();
-            conflict_controller.conflicts.open(
-                &ui,
-                alias,
-                request.number,
-                request.source_branch,
-                request.target_branch,
-            );
-        }
-    });
+    ui.pr_review()
+        .global::<crate::PrConflictsBridge>()
+        .on_open(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            if ui
+                .pr_review()
+                .global::<crate::PrConflictsBridge>()
+                .get_active()
+            {
+                return;
+            }
+            let request = conflict_controller
+                .active_request
+                .lock()
+                .ok()
+                .and_then(|r| r.clone());
+            if let Some(request) = request {
+                ui.pr_review()
+                    .global::<crate::PrConflictsBridge>()
+                    .set_return_to_list(false);
+                let alias = conflict_controller.project_alias.lock().unwrap().clone();
+                conflict_controller.conflicts.open(
+                    &ui,
+                    alias,
+                    request.number,
+                    request.source_branch,
+                    request.target_branch,
+                );
+            }
+        });
     let conflict_controller = controller.clone();
     let weak = ui.as_weak();
-    ui.global::<crate::PrConflictsBridge>().on_back(move || {
-        let Some(ui) = weak.upgrade() else { return };
-        let to_list = ui.global::<crate::PrConflictsBridge>().get_return_to_list();
-        conflict_controller.conflicts.leave_workspace(&ui);
-        if to_list {
-            conflict_controller.navigate_back(&ui);
-            return;
-        }
-        let request = conflict_controller
-            .active_request
-            .lock()
-            .ok()
-            .and_then(|r| r.clone());
-        if let Some(request) = request {
-            conflict_controller.open(&ui, request, false);
-        }
-    });
+    ui.pr_review()
+        .global::<crate::PrConflictsBridge>()
+        .on_back(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let to_list = ui
+                .pr_review()
+                .global::<crate::PrConflictsBridge>()
+                .get_return_to_list();
+            conflict_controller.conflicts.leave_workspace(&ui);
+            if to_list {
+                conflict_controller.navigate_back(&ui);
+                return;
+            }
+            let request = conflict_controller
+                .active_request
+                .lock()
+                .ok()
+                .and_then(|r| r.clone());
+            if let Some(request) = request {
+                conflict_controller.open(&ui, request, false);
+            }
+        });
 
     let open_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_open(
-        move |number, title, author, source_branch, target_branch, updated_at, initial_tab| {
-            let Some(ui) = ui_weak.upgrade() else {
-                return;
-            };
-            open_controller.open_with_intent(
-                &ui,
-                ReviewRequest {
-                    number: number.to_string(),
-                    title: title.to_string(),
-                    author: author.to_string(),
-                    source_branch: source_branch.to_string(),
-                    target_branch: target_branch.to_string(),
-                    updated_at: updated_at.to_string(),
-                    ignore_whitespace: false,
-                },
-                false,
-                initial_tab == 3,
-            );
-            if initial_tab != 2 && initial_tab != 3 {
-                ui.invoke_workflow_pr_review_select_tab(initial_tab);
-            }
-        },
-    );
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_open(
+            move |number, title, author, source_branch, target_branch, updated_at, initial_tab| {
+                let Some(ui) = ui_weak.upgrade() else {
+                    return;
+                };
+                open_controller.open_with_intent(
+                    &ui,
+                    ReviewRequest {
+                        number: number.to_string(),
+                        title: title.to_string(),
+                        author: author.to_string(),
+                        source_branch: source_branch.to_string(),
+                        target_branch: target_branch.to_string(),
+                        updated_at: updated_at.to_string(),
+                        ignore_whitespace: false,
+                    },
+                    false,
+                    initial_tab == 3,
+                );
+                if initial_tab != 2 && initial_tab != 3 {
+                    ui.pr_review()
+                        .global::<crate::PrReviewBridge>()
+                        .invoke_workflow_pr_review_select_tab(initial_tab);
+                }
+            },
+        );
 
     let back_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_back(move || {
-        if let Some(ui) = ui_weak.upgrade() {
-            back_controller.navigate_back(&ui);
-        }
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_back(move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                back_controller.navigate_back(&ui);
+            }
+        });
 
     let tab_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_select_tab(move |tab| {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
-        let tab = tab.clamp(0, 2);
-        ui.set_workflow_pr_review_tab(tab);
-        if tab != 2
-            && let Ok(mut return_tab) = tab_controller.commit_detail_return_tab.lock()
-        {
-            *return_tab = None;
-        }
-        tab_controller.load_tab(&ui, tab);
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_select_tab(move |tab| {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            let tab = tab.clamp(0, 2);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_tab(tab);
+            if tab != 2
+                && let Ok(mut return_tab) = tab_controller.commit_detail_return_tab.lock()
+            {
+                *return_tab = None;
+            }
+            tab_controller.load_tab(&ui, tab);
+        });
 
     let commits_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_ensure_commits(move || {
-        if let Some(ui) = ui_weak.upgrade() {
-            commits_controller.load_commits(&ui);
-        }
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_ensure_commits(move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                commits_controller.load_commits(&ui);
+            }
+        });
 
     let range_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_apply_commit_range(move |start, end| {
-        if let Some(ui) = ui_weak.upgrade() {
-            range_controller.apply_commit_range(&ui, start, end);
-        }
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_apply_commit_range(move |start, end| {
+            if let Some(ui) = ui_weak.upgrade() {
+                range_controller.apply_commit_range(&ui, start, end);
+            }
+        });
 
     let open_commit_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_open_commit(move |sha| {
-        if let Some(ui) = ui_weak.upgrade() {
-            open_commit_controller.open_commit(&ui, sha.as_str());
-        }
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_open_commit(move |sha| {
+            if let Some(ui) = ui_weak.upgrade() {
+                open_commit_controller.open_commit(&ui, sha.as_str());
+            }
+        });
 
     let select_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_select_file(move |index| {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
-        select_controller.select_file(&ui, index);
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_select_file(move |index| {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            select_controller.select_file(&ui, index);
+        });
 
     let relative_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_select_relative_file(move |offset| {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
-        let selected = ui.get_workflow_pr_review_selected_file_index();
-        relative_controller.select_file(&ui, selected.saturating_add(offset));
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_select_relative_file(move |offset| {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            let selected = ui
+                .pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_selected_file_index();
+            relative_controller.select_file(&ui, selected.saturating_add(offset));
+        });
 
     let reveal_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_reveal_location(move |path, line, side, head_sha| {
-        if let Some(ui) = ui_weak.upgrade() {
-            reveal_controller.reveal_location(
-                &ui,
-                path.to_string(),
-                line,
-                DiffLineSide::parse(side.as_str()),
-                head_sha.as_str(),
-            );
-        }
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_reveal_location(move |path, line, side, head_sha| {
+            if let Some(ui) = ui_weak.upgrade() {
+                reveal_controller.reveal_location(
+                    &ui,
+                    path.to_string(),
+                    line,
+                    DiffLineSide::parse(side.as_str()),
+                    head_sha.as_str(),
+                );
+            }
+        });
 
     let view_location_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_view_location_file(move |path, side| {
-        if let Some(ui) = ui_weak.upgrade() {
-            view_location_controller.view_location_file(
-                &ui,
-                path.as_str(),
-                DiffLineSide::parse(side.as_str()),
-            );
-        }
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_view_location_file(move |path, side| {
+            if let Some(ui) = ui_weak.upgrade() {
+                view_location_controller.view_location_file(
+                    &ui,
+                    path.as_str(),
+                    DiffLineSide::parse(side.as_str()),
+                );
+            }
+        });
 
     let clear_location_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_clear_location(move || {
-        if let Some(ui) = ui_weak.upgrade() {
-            clear_location_controller.cancel_location_reveal(&ui);
-        }
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_clear_location(move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                clear_location_controller.cancel_location_reveal(&ui);
+            }
+        });
 
     let reload_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_reload(move |ignore_whitespace| {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
-        let request = reload_controller
-            .active_request
-            .lock()
-            .ok()
-            .and_then(|guard| guard.clone());
-        if let Some(mut request) = request {
-            request.ignore_whitespace = ignore_whitespace;
-            ui.set_workflow_pr_review_commit_range_start(-1);
-            ui.set_workflow_pr_review_commit_range_end(-1);
-            ui.set_workflow_pr_review_commit_range_label(
-                crate::i18n::tr("pr_review.all_commits").into_owned().into(),
-            );
-            reload_controller.open(&ui, request, true);
-        }
-    });
-
-    let diff_settings_controller = controller.clone();
-    let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_apply_diff_settings(move |diff_view, ignore_whitespace| {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
-        let diff_view = if diff_view.as_str() == "split" {
-            "split"
-        } else {
-            "unified"
-        };
-        let ignore_whitespace =
-            ui.get_workflow_pr_review_ignore_whitespace_supported() && ignore_whitespace;
-        let whitespace_changed = ui.get_workflow_pr_review_ignore_whitespace() != ignore_whitespace;
-
-        ui.set_workflow_pr_review_diff_view(diff_view.into());
-        ui.set_workflow_pr_review_ignore_whitespace(ignore_whitespace);
-
-        if whitespace_changed {
-            let request = diff_settings_controller
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_reload(move |ignore_whitespace| {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            let request = reload_controller
                 .active_request
                 .lock()
                 .ok()
                 .and_then(|guard| guard.clone());
             if let Some(mut request) = request {
                 request.ignore_whitespace = ignore_whitespace;
-                ui.set_workflow_pr_review_commit_range_start(-1);
-                ui.set_workflow_pr_review_commit_range_end(-1);
-                ui.set_workflow_pr_review_commit_range_label(
-                    crate::i18n::tr("pr_review.all_commits").into_owned().into(),
-                );
-                diff_settings_controller.open(&ui, request, true);
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .set_workflow_pr_review_commit_range_start(-1);
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .set_workflow_pr_review_commit_range_end(-1);
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .set_workflow_pr_review_commit_range_label(
+                        crate::i18n::tr("pr_review.all_commits").into_owned().into(),
+                    );
+                reload_controller.open(&ui, request, true);
             }
-        } else {
-            let selected = ui.get_workflow_pr_review_selected_file_index();
-            if selected >= 0 {
-                diff_settings_controller.select_file(&ui, selected);
+        });
+
+    let diff_settings_controller = controller.clone();
+    let ui_weak = ui.as_weak();
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_apply_diff_settings(move |diff_view, ignore_whitespace| {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            let diff_view = if diff_view.as_str() == "split" {
+                "split"
+            } else {
+                "unified"
+            };
+            let ignore_whitespace = ui
+                .pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_ignore_whitespace_supported()
+                && ignore_whitespace;
+            let whitespace_changed = ui
+                .pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_ignore_whitespace()
+                != ignore_whitespace;
+
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_diff_view(diff_view.into());
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_ignore_whitespace(ignore_whitespace);
+
+            if whitespace_changed {
+                let request = diff_settings_controller
+                    .active_request
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.clone());
+                if let Some(mut request) = request {
+                    request.ignore_whitespace = ignore_whitespace;
+                    ui.pr_review()
+                        .global::<crate::PrReviewBridge>()
+                        .set_workflow_pr_review_commit_range_start(-1);
+                    ui.pr_review()
+                        .global::<crate::PrReviewBridge>()
+                        .set_workflow_pr_review_commit_range_end(-1);
+                    ui.pr_review()
+                        .global::<crate::PrReviewBridge>()
+                        .set_workflow_pr_review_commit_range_label(
+                            crate::i18n::tr("pr_review.all_commits").into_owned().into(),
+                        );
+                    diff_settings_controller.open(&ui, request, true);
+                }
+            } else {
+                let selected = ui
+                    .pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .get_workflow_pr_review_selected_file_index();
+                if selected >= 0 {
+                    diff_settings_controller.select_file(&ui, selected);
+                }
             }
-        }
-    });
+        });
 
     let load_large_diff_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_load_large_diff(move || {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
-        let selected = ui.get_workflow_pr_review_selected_file_index();
-        if selected < 0 {
-            return;
-        }
-        let marked = load_large_diff_controller
-            .cache
-            .lock()
-            .ok()
-            .and_then(|mut cache| {
-                let cache = cache.as_mut()?;
-                is_large_diff(cache.file(selected as usize)?)
-                    .then(|| cache.loaded_large_diffs.insert(selected as usize))
-            })
-            .unwrap_or(false);
-        if marked {
-            load_large_diff_controller.select_file(&ui, selected);
-            ui.set_workflow_pr_review_large_diff_loading(ui.get_workflow_pr_review_code_loading());
-        }
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_load_large_diff(move || {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            let selected = ui
+                .pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_selected_file_index();
+            if selected < 0 {
+                return;
+            }
+            let marked = load_large_diff_controller
+                .cache
+                .lock()
+                .ok()
+                .and_then(|mut cache| {
+                    let cache = cache.as_mut()?;
+                    is_large_diff(cache.file(selected as usize)?)
+                        .then(|| cache.loaded_large_diffs.insert(selected as usize))
+                })
+                .unwrap_or(false);
+            if marked {
+                load_large_diff_controller.select_file(&ui, selected);
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .set_workflow_pr_review_large_diff_loading(
+                        ui.pr_review()
+                            .global::<crate::PrReviewBridge>()
+                            .get_workflow_pr_review_code_loading(),
+                    );
+            }
+        });
 
     let filter_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_filter_files(move |query| {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
-        filter_controller.filter_files(&ui, query.to_string());
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_filter_files(move |query| {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            filter_controller.filter_files(&ui, query.to_string());
+        });
 
     let extension_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_toggle_extension_filter(move |extension| {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
-        extension_controller.toggle_extension_filter(&ui, extension.to_string());
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_toggle_extension_filter(move |extension| {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            extension_controller.toggle_extension_filter(&ui, extension.to_string());
+        });
 
     let manifest_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_toggle_manifest_filter(move || {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
-        if let Ok(mut enabled) = manifest_controller.only_manifest_files.lock() {
-            *enabled = !*enabled;
-        }
-        manifest_controller.refresh_tree(&ui);
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_toggle_manifest_filter(move || {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            if let Ok(mut enabled) = manifest_controller.only_manifest_files.lock() {
+                *enabled = !*enabled;
+            }
+            manifest_controller.refresh_tree(&ui);
+        });
 
     let viewed_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_toggle_viewed_files(move || {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
-        if let Ok(mut enabled) = viewed_controller.show_viewed_files.lock() {
-            *enabled = !*enabled;
-        }
-        viewed_controller.refresh_tree(&ui);
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_toggle_viewed_files(move || {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            if let Ok(mut enabled) = viewed_controller.show_viewed_files.lock() {
+                *enabled = !*enabled;
+            }
+            viewed_controller.refresh_tree(&ui);
+        });
 
     let folder_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_toggle_folder(move |path| {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
-        folder_controller.toggle_folder(&ui, path.to_string());
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_toggle_folder(move |path| {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            folder_controller.toggle_folder(&ui, path.to_string());
+        });
 
     let expand_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_expand_hunk(move |line_index, direction| {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
-        let direction = match direction.as_str() {
-            "down" => HunkExpansionDirection::Down,
-            "all" => HunkExpansionDirection::All,
-            _ => HunkExpansionDirection::Up,
-        };
-        expand_controller.expand_hunk(&ui, line_index, direction);
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_expand_hunk(move |line_index, direction| {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            let direction = match direction.as_str() {
+                "down" => HunkExpansionDirection::Down,
+                "all" => HunkExpansionDirection::All,
+                _ => HunkExpansionDirection::Up,
+            };
+            expand_controller.expand_hunk(&ui, line_index, direction);
+        });
 
     let expand_all_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_expand_all_hunks(move || {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
-        expand_all_controller.expand_all_hunks(&ui);
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_expand_all_hunks(move || {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            expand_all_controller.expand_all_hunks(&ui);
+        });
 
     let collapse_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_collapse_non_diff_lines(move || {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
-        collapse_controller.collapse_non_diff_lines(&ui);
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_collapse_non_diff_lines(move || {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            collapse_controller.collapse_non_diff_lines(&ui);
+        });
 
     let view_file_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_view_file(move || {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
-        view_file_controller.toggle_view_file(&ui);
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_view_file(move || {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            view_file_controller.toggle_view_file(&ui);
+        });
 
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_copy_file_path(move |path| {
-        let path = path.trim();
-        if path.is_empty() {
-            return false;
-        }
-        match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(path)) {
-            Ok(()) => true,
-            Err(error) => {
-                log::warn!("[Workflow][PR Review] Failed to copy file path: {error}");
-                if let Some(ui) = ui_weak.upgrade() {
-                    show_error(&ui, crate::i18n::tr("pr_review.copy_file_failed").as_ref());
-                }
-                false
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_copy_file_path(move |path| {
+            let path = path.trim();
+            if path.is_empty() {
+                return false;
             }
-        }
-    });
-
-    let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_copy_commit_sha(move |sha| {
-        let sha = sha.trim();
-        if sha.is_empty() {
-            return false;
-        }
-        match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(sha)) {
-            Ok(()) => true,
-            Err(error) => {
-                log::warn!("[Workflow][PR Review] Failed to copy commit SHA: {error}");
-                if let Some(ui) = ui_weak.upgrade() {
-                    show_error(&ui, crate::i18n::tr("pr_review.copy_sha_failed").as_ref());
+            match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(path)) {
+                Ok(()) => true,
+                Err(error) => {
+                    log::warn!("[Workflow][PR Review] Failed to copy file path: {error}");
+                    if let Some(ui) = ui_weak.upgrade() {
+                        show_error(&ui, crate::i18n::tr("pr_review.copy_file_failed").as_ref());
+                    }
+                    false
                 }
-                false
             }
-        }
-    });
+        });
 
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_toggle_commit_message(move |sha| {
-        if let Some(ui) = ui_weak.upgrade() {
-            toggle_commit_message_expansion(&ui, sha.as_str());
-        }
-    });
-
-    let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_copy_source_branch(move |branch| {
-        let branch = branch.trim();
-        if branch.is_empty() {
-            return false;
-        }
-        match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(branch)) {
-            Ok(()) => true,
-            Err(error) => {
-                log::warn!("[Workflow][PR Review] Failed to copy source branch: {error}");
-                if let Some(ui) = ui_weak.upgrade() {
-                    show_error(
-                        &ui,
-                        crate::i18n::tr("pr_review.copy_branch_failed").as_ref(),
-                    );
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_copy_commit_sha(move |sha| {
+            let sha = sha.trim();
+            if sha.is_empty() {
+                return false;
+            }
+            match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(sha)) {
+                Ok(()) => true,
+                Err(error) => {
+                    log::warn!("[Workflow][PR Review] Failed to copy commit SHA: {error}");
+                    if let Some(ui) = ui_weak.upgrade() {
+                        show_error(&ui, crate::i18n::tr("pr_review.copy_sha_failed").as_ref());
+                    }
+                    false
                 }
-                false
             }
-        }
-    });
+        });
+
+    let ui_weak = ui.as_weak();
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_toggle_commit_message(move |sha| {
+            if let Some(ui) = ui_weak.upgrade() {
+                toggle_commit_message_expansion(&ui, sha.as_str());
+            }
+        });
+
+    let ui_weak = ui.as_weak();
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_review_copy_source_branch(move |branch| {
+            let branch = branch.trim();
+            if branch.is_empty() {
+                return false;
+            }
+            match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(branch)) {
+                Ok(()) => true,
+                Err(error) => {
+                    log::warn!("[Workflow][PR Review] Failed to copy source branch: {error}");
+                    if let Some(ui) = ui_weak.upgrade() {
+                        show_error(
+                            &ui,
+                            crate::i18n::tr("pr_review.copy_branch_failed").as_ref(),
+                        );
+                    }
+                    false
+                }
+            }
+        });
 
     let submit_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_submit_review(move |action, body| {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
-        submit_controller.submit_review(&ui, action.as_str(), body.as_str());
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_submit_review(move |action, body| {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            submit_controller.submit_review(&ui, action.as_str(), body.as_str());
+        });
 
     let dismiss_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_dismiss_review(move |review_id, reason| {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
-        dismiss_controller.dismiss_review(&ui, review_id.as_str(), reason.as_str());
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_dismiss_review(move |review_id, reason| {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            dismiss_controller.dismiss_review(&ui, review_id.as_str(), reason.as_str());
+        });
 
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_default_merge_method(move || {
-        ui_weak
-            .upgrade()
-            .map(|ui| actions::default_merge_method(&ui))
-            .unwrap_or_default()
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_default_merge_method(move || {
+            ui_weak
+                .upgrade()
+                .map(|ui| actions::default_merge_method(&ui))
+                .unwrap_or_default()
+        });
 
     let merge_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_merge(move |method, remove_source_branch| {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
-        merge_controller.merge(&ui, method.as_str(), remove_source_branch);
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_merge(move |method, remove_source_branch| {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            merge_controller.merge(&ui, method.as_str(), remove_source_branch);
+        });
 
     let revert_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_revert(move || {
-        let Some(ui) = ui_weak.upgrade() else {
-            return;
-        };
-        revert_controller.revert(&ui);
-    });
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .on_workflow_pr_revert(move || {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            revert_controller.revert(&ui);
+        });
 
     highlight_benchmark::setup(ui, controller.clone());
     controller
@@ -703,8 +831,12 @@ impl WorkflowPrReviewController {
         }
 
         apply_review_header(ui, &request);
-        ui.set_workflow_pr_review_visible(true);
-        ui.set_workflow_pr_review_loading(false);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_visible(true);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_loading(false);
         self.apply_detail(ui, &base_detail);
         ui.invoke_navigate(Route::PrReview);
         self.log_memory_diagnostics("memory_fixture.loaded");
@@ -741,16 +873,29 @@ impl WorkflowPrReviewController {
             let Some(ui) = ui_weak.upgrade() else {
                 return;
             };
-            let ready = !ui.get_workflow_pr_review_code_loading()
-                && ui.get_workflow_pr_review_lines().row_count() == 2_932
+            let ready = !ui
+                .pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_code_loading()
+                && ui
+                    .pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .get_workflow_pr_review_lines()
+                    .row_count()
+                    == 2_932
                 && (cycle > 1 || controller.highlight_resources.is_loaded());
             if !ready {
                 if started.elapsed() >= Duration::from_secs(20) {
                     log::error!(
                         "[Workflow][PR Review][Memory] reason=memory_fixture.highlight_timeout cycle={} lines={} loading={} resources_loaded={}",
                         cycle,
-                        ui.get_workflow_pr_review_lines().row_count(),
-                        ui.get_workflow_pr_review_code_loading(),
+                        ui.pr_review()
+                            .global::<crate::PrReviewBridge>()
+                            .get_workflow_pr_review_lines()
+                            .row_count(),
+                        ui.pr_review()
+                            .global::<crate::PrReviewBridge>()
+                            .get_workflow_pr_review_code_loading(),
                         controller.highlight_resources.is_loaded(),
                     );
                     return;
@@ -843,10 +988,12 @@ impl WorkflowPrReviewController {
     }
 
     fn invalidate_pending_requests(&self) {
+        self.highlighting.cancel();
         self.state.invalidate_all();
     }
 
     fn reset_request_scoped_state(&self, ui: &MainWindow, reset_tab: bool) {
+        self.highlighting.cancel();
         self.conflicts.close(ui);
         super::find_bridge::cancel();
         if let Ok(mut location) = self.location_reveal.lock() {
@@ -869,6 +1016,7 @@ impl WorkflowPrReviewController {
             folders.clear();
         }
         self.highlight_resources.detach();
+        self.release_idle_highlight_resources(None);
         if let Ok(mut highlighted) = self.highlighted_files.lock() {
             highlighted.clear();
         }
@@ -894,24 +1042,54 @@ impl WorkflowPrReviewController {
             *return_tab = None;
         }
         if reset_tab {
-            ui.set_workflow_pr_review_tab(2);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_tab(2);
         }
-        ui.set_workflow_pr_review_conversation_count(0);
-        ui.set_workflow_pr_review_commit_count(0);
-        ui.set_workflow_pr_review_conversation_items(empty_conversation_model());
-        ui.set_workflow_pr_review_conversation_content_height(0);
-        ui.set_workflow_pr_review_expanded_commit_body_height(0);
-        ui.set_workflow_pr_review_commits(empty_commit_model());
-        ui.set_workflow_pr_review_conversation_loading(false);
-        ui.set_workflow_pr_review_commits_loading(false);
-        ui.set_workflow_pr_review_conversation_error("".into());
-        ui.set_workflow_pr_review_commits_error("".into());
-        ui.set_workflow_pr_review_commit_range_start(-1);
-        ui.set_workflow_pr_review_commit_range_end(-1);
-        ui.set_workflow_pr_review_commit_range_label(
-            crate::i18n::tr("pr_review.all_commits").into_owned().into(),
-        );
-        ui.set_workflow_pr_review_file_filter("".into());
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_conversation_count(0);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_commit_count(0);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_conversation_items(empty_conversation_model());
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_conversation_content_height(0);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_expanded_commit_body_height(0);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_commits(empty_commit_model());
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_conversation_loading(false);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_commits_loading(false);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_conversation_error("".into());
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_commits_error("".into());
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_commit_range_start(-1);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_commit_range_end(-1);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_commit_range_label(
+                crate::i18n::tr("pr_review.all_commits").into_owned().into(),
+            );
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_file_filter("".into());
         reset_action_ui(ui);
     }
 
@@ -932,7 +1110,9 @@ impl WorkflowPrReviewController {
             .ok()
             .and_then(|mut return_tab| return_tab.take());
         if let Some(tab) = return_tab {
-            ui.set_workflow_pr_review_tab(tab);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_tab(tab);
             self.load_tab(ui, tab);
             return;
         }
@@ -963,77 +1143,6 @@ impl WorkflowPrReviewController {
         self.log_memory_diagnostics("project_switch.after_clear");
     }
 
-    pub(crate) fn sync_language(&self, ui: &MainWindow) {
-        if let Some(request) = self
-            .active_request
-            .lock()
-            .ok()
-            .and_then(|request| request.clone())
-        {
-            apply_review_header(ui, &request);
-        }
-        if self
-            .conversation_loaded
-            .lock()
-            .map(|loaded| *loaded)
-            .unwrap_or(false)
-            && let Ok(items) = self.conversation.lock()
-        {
-            ui.set_workflow_pr_review_conversation_content_height(conversation_content_height(
-                items.as_slice(),
-            ));
-            ui.set_workflow_pr_review_expanded_commit_body_height(0);
-            ui.set_workflow_pr_review_conversation_items(conversation_model(
-                items.as_slice(),
-                &HashMap::new(),
-            ));
-        }
-        if self
-            .commits_loaded
-            .lock()
-            .map(|loaded| *loaded)
-            .unwrap_or(false)
-            && let Ok(commits) = self.commits.lock()
-        {
-            ui.set_workflow_pr_review_commits(commit_model(commits.as_slice(), &HashMap::new()));
-        }
-        if !ui.get_workflow_pr_review_conversation_error().is_empty() {
-            ui.set_workflow_pr_review_conversation_error(
-                crate::i18n::tr("pr_review.conversation_load_failed")
-                    .into_owned()
-                    .into(),
-            );
-        }
-        if !ui.get_workflow_pr_review_commits_error().is_empty() {
-            ui.set_workflow_pr_review_commits_error(
-                crate::i18n::tr("pr_review.commits_load_failed")
-                    .into_owned()
-                    .into(),
-            );
-        }
-        if ui.get_workflow_pr_review_commit_range_start() < 0
-            && ui.get_workflow_pr_review_commit_range_end() < 0
-        {
-            ui.set_workflow_pr_review_commit_range_label(
-                crate::i18n::tr("pr_review.all_commits").into_owned().into(),
-            );
-        }
-        self.refresh_tree(ui);
-        let state = self
-            .action_state
-            .lock()
-            .ok()
-            .and_then(|state| state.clone());
-        if let Some(state) = state {
-            retranslate_action_state(ui, &state);
-        } else if !ui.get_workflow_pr_merge_readiness_kind().is_empty() {
-            let label_key = readiness_label_key(ui.get_workflow_pr_merge_readiness_kind().as_str());
-            ui.set_workflow_pr_merge_readiness_label(
-                crate::i18n::tr(label_key).into_owned().into(),
-            );
-        }
-    }
-
     fn open(&self, ui: &MainWindow, request: ReviewRequest, force_refresh: bool) {
         self.open_with_intent(ui, request, force_refresh, false);
     }
@@ -1051,12 +1160,16 @@ impl WorkflowPrReviewController {
             .map(|alias| alias.clone())
             .unwrap_or_default();
         if project_alias.is_empty() {
-            ui.set_workflow_pr_review_visible(true);
-            ui.set_workflow_pr_review_error(
-                crate::i18n::tr("pr_review.project_context_missing")
-                    .into_owned()
-                    .into(),
-            );
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_visible(true);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_error(
+                    crate::i18n::tr("pr_review.project_context_missing")
+                        .into_owned()
+                        .into(),
+                );
             return;
         }
 
@@ -1081,17 +1194,24 @@ impl WorkflowPrReviewController {
         }
 
         apply_review_header(ui, &request);
-        ui.set_workflow_pr_review_visible(true);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_visible(true);
         if let Ok(mut active_request) = self.active_request.lock() {
             *active_request = Some(request.clone());
         }
         ui.invoke_navigate(Route::PrReview);
-        ui.set_workflow_pr_review_error("".into());
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_error("".into());
         if conflicts {
             self.refresh_action_state(ui);
-            ui.global::<crate::PrConflictsBridge>()
+            ui.pr_review()
+                .global::<crate::PrConflictsBridge>()
                 .set_return_to_list(true);
-            ui.set_workflow_pr_review_loading(false);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_loading(false);
             self.conflicts.open(
                 ui,
                 project_alias,
@@ -1108,6 +1228,9 @@ impl WorkflowPrReviewController {
             request.source_branch.clone(),
             request.target_branch.clone(),
         );
+        // Normal review intent outlives asynchronous metadata/provider reads.
+        // Claim before dispatch without loading a grammar or holding file text.
+        let syntax_intent = self.highlighting.resource_cache().activate();
         let cached = if force_refresh {
             None
         } else {
@@ -1121,7 +1244,9 @@ impl WorkflowPrReviewController {
             })
         };
         if let Some(detail) = cached {
-            ui.set_workflow_pr_review_loading(false);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_loading(false);
             self.apply_detail(ui, &detail);
             self.refresh_action_state(ui);
             self.log_memory_diagnostics("review_open.cache_hit_applied");
@@ -1132,9 +1257,15 @@ impl WorkflowPrReviewController {
             let detail = Arc::new(SharedDiffDetail::from(ai_review_fixture_diff_detail(
                 request.number.as_str(),
             )));
-            ui.set_workflow_pr_review_loading(false);
-            ui.set_workflow_pr_review_ignore_whitespace_supported(false);
-            ui.set_workflow_pr_review_ignore_whitespace(false);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_loading(false);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_ignore_whitespace_supported(false);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_ignore_whitespace(false);
             if let Ok(mut cache) = self.cache.lock() {
                 *cache = Some(ReviewCache {
                     project_alias: project_alias.clone(),
@@ -1157,21 +1288,39 @@ impl WorkflowPrReviewController {
             return;
         }
 
-        self.state.invalidate(ReviewRequestKind::Highlight);
+        self.invalidate_highlight();
         if let Ok(mut highlighted) = self.highlighted_files.lock() {
             highlighted.clear();
         }
 
-        ui.set_workflow_pr_review_loading(true);
-        ui.set_workflow_pr_review_code_loading(false);
-        ui.set_workflow_pr_review_large_diff_deferred(false);
-        ui.set_workflow_pr_review_large_diff_loading(false);
-        ui.set_workflow_pr_review_files(empty_file_model());
-        ui.set_workflow_pr_review_tree_items(empty_tree_model());
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_loading(true);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_code_loading(false);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_large_diff_deferred(false);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_large_diff_loading(false);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_files(empty_file_model());
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_tree_items(empty_tree_model());
         set_empty_line_model(ui);
-        ui.set_workflow_pr_review_selected_file_index(-1);
-        ui.set_workflow_pr_review_selected_file_path("".into());
-        ui.set_workflow_pr_review_context_expanded(false);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_selected_file_index(-1);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_selected_file_path("".into());
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_context_expanded(false);
 
         let generation = self.state.begin(ReviewRequestKind::Diff);
         let controller = self.clone();
@@ -1229,7 +1378,7 @@ impl WorkflowPrReviewController {
                 let Some(ui) = ui_weak.upgrade() else {
                     return;
                 };
-                ui.set_workflow_pr_review_loading(false);
+                ui.pr_review().global::<crate::PrReviewBridge>().set_workflow_pr_review_loading(false);
                 match result {
                     Ok((
                         metadata,
@@ -1237,14 +1386,14 @@ impl WorkflowPrReviewController {
                         ignore_whitespace_supported,
                         merge_delete_source_branch_supported,
                     )) => {
-                        ui.set_workflow_pr_review_ignore_whitespace_supported(
+                        ui.pr_review().global::<crate::PrReviewBridge>().set_workflow_pr_review_ignore_whitespace_supported(
                             ignore_whitespace_supported,
                         );
-                        ui.set_workflow_pr_merge_delete_source_branch_supported(
+                        ui.pr_review().global::<crate::PrReviewBridge>().set_workflow_pr_merge_delete_source_branch_supported(
                             merge_delete_source_branch_supported,
                         );
                         if !ignore_whitespace_supported {
-                            ui.set_workflow_pr_review_ignore_whitespace(false);
+                            ui.pr_review().global::<crate::PrReviewBridge>().set_workflow_pr_review_ignore_whitespace(false);
                         }
                         log::info!(
                             "[Workflow][PR Review] Loaded diff: project={} pr={} files={} added={} removed={} ignore_whitespace={}",
@@ -1273,22 +1422,28 @@ impl WorkflowPrReviewController {
                         controller.log_memory_diagnostics("review_diff.loaded_and_applied");
                     }
                     Err(error) => {
-                        ui.set_workflow_pr_review_ignore_whitespace_supported(false);
-                        ui.set_workflow_pr_review_ignore_whitespace(false);
-                        ui.set_workflow_pr_merge_delete_source_branch_supported(false);
+                        controller.release_idle_highlight_resources(Some(syntax_intent));
+                        ui.pr_review().global::<crate::PrReviewBridge>().set_workflow_pr_review_ignore_whitespace_supported(false);
+                        ui.pr_review().global::<crate::PrReviewBridge>().set_workflow_pr_review_ignore_whitespace(false);
+                        ui.pr_review().global::<crate::PrReviewBridge>().set_workflow_pr_merge_delete_source_branch_supported(false);
                         log::warn!("[Workflow][PR Review] Failed to load diff: {error}");
-                        ui.set_workflow_pr_review_error(
+                        ui.pr_review().global::<crate::PrReviewBridge>().set_workflow_pr_review_error(
                             crate::i18n::tr(error.user_message_key())
                                 .into_owned()
                                 .into(),
                         );
-                        ui.set_workflow_pr_review_error_kind(error.error_kind().into());
+                        ui.pr_review().global::<crate::PrReviewBridge>().set_workflow_pr_review_error_kind(error.error_kind().into());
                     }
                 }
             });
         });
         if force_refresh {
-            self.load_tab(ui, ui.get_workflow_pr_review_tab());
+            self.load_tab(
+                ui,
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .get_workflow_pr_review_tab(),
+            );
         }
     }
 
@@ -1323,8 +1478,12 @@ impl WorkflowPrReviewController {
             .map(|alias| alias.clone())
             .unwrap_or_default();
         let generation = self.state.begin(ReviewRequestKind::Conversation);
-        ui.set_workflow_pr_review_conversation_loading(true);
-        ui.set_workflow_pr_review_conversation_error("".into());
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_conversation_loading(true);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_conversation_error("".into());
         let controller = self.clone();
         let ui_weak = ui.as_weak();
         crate::app_runtime::shared_runtime().spawn(async move {
@@ -1361,15 +1520,23 @@ impl WorkflowPrReviewController {
                         let Some(ui) = initial_ui_weak.upgrade() else {
                             return;
                         };
-                        ui.set_workflow_pr_review_conversation_loading(false);
-                        ui.set_workflow_pr_review_conversation_content_height(
-                            conversation_content_height(&initial_items),
-                        );
-                        ui.set_workflow_pr_review_expanded_commit_body_height(0);
-                        ui.set_workflow_pr_review_conversation_items(conversation_model(
-                            &initial_items,
-                            &HashMap::new(),
-                        ));
+                        ui.pr_review()
+                            .global::<crate::PrReviewBridge>()
+                            .set_workflow_pr_review_conversation_loading(false);
+                        ui.pr_review()
+                            .global::<crate::PrReviewBridge>()
+                            .set_workflow_pr_review_conversation_content_height(
+                                conversation_content_height(&initial_items),
+                            );
+                        ui.pr_review()
+                            .global::<crate::PrReviewBridge>()
+                            .set_workflow_pr_review_expanded_commit_body_height(0);
+                        ui.pr_review()
+                            .global::<crate::PrReviewBridge>()
+                            .set_workflow_pr_review_conversation_items(conversation_model(
+                                &initial_items,
+                                &HashMap::new(),
+                            ));
                         if let Ok(mut stored) = initial_controller.conversation.lock() {
                             *stored = initial_items;
                         }
@@ -1392,7 +1559,10 @@ impl WorkflowPrReviewController {
                         let Some(ui) = ui_weak.upgrade() else {
                             return;
                         };
-                        let model = ui.get_workflow_pr_review_conversation_items();
+                        let model = ui
+                            .pr_review()
+                            .global::<crate::PrReviewBridge>()
+                            .get_workflow_pr_review_conversation_items();
                         patch_conversation_avatars(&model, &items, &avatars);
                     });
                 }
@@ -1407,13 +1577,17 @@ impl WorkflowPrReviewController {
                         let Some(ui) = ui_weak.upgrade() else {
                             return;
                         };
-                        ui.set_workflow_pr_review_conversation_loading(false);
+                        ui.pr_review()
+                            .global::<crate::PrReviewBridge>()
+                            .set_workflow_pr_review_conversation_loading(false);
                         log::warn!("[Workflow][PR Review] Failed to load conversation: {error}");
-                        ui.set_workflow_pr_review_conversation_error(
-                            crate::i18n::tr("pr_review.conversation_load_failed")
-                                .into_owned()
-                                .into(),
-                        );
+                        ui.pr_review()
+                            .global::<crate::PrReviewBridge>()
+                            .set_workflow_pr_review_conversation_error(
+                                crate::i18n::tr("pr_review.conversation_load_failed")
+                                    .into_owned()
+                                    .into(),
+                            );
                     });
                 }
             }
@@ -1425,7 +1599,12 @@ impl WorkflowPrReviewController {
         if let Ok(mut loaded) = self.conversation_loaded.lock() {
             *loaded = false;
         }
-        if ui.get_workflow_pr_review_tab() == 0 {
+        if ui
+            .pr_review()
+            .global::<crate::PrReviewBridge>()
+            .get_workflow_pr_review_tab()
+            == 0
+        {
             self.load_conversation(ui);
         }
     }
@@ -1453,8 +1632,12 @@ impl WorkflowPrReviewController {
             .map(|alias| alias.clone())
             .unwrap_or_default();
         let generation = self.state.begin(ReviewRequestKind::Commits);
-        ui.set_workflow_pr_review_commits_loading(true);
-        ui.set_workflow_pr_review_commits_error("".into());
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_commits_loading(true);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_commits_error("".into());
         let controller = self.clone();
         let ui_weak = ui.as_weak();
         crate::app_runtime::shared_runtime().spawn(async move {
@@ -1491,18 +1674,27 @@ impl WorkflowPrReviewController {
                         let Some(ui) = initial_ui_weak.upgrade() else {
                             return;
                         };
-                        ui.set_workflow_pr_review_commits_loading(false);
+                        ui.pr_review()
+                            .global::<crate::PrReviewBridge>()
+                            .set_workflow_pr_review_commits_loading(false);
                         // Provider summaries normally populate the badge before
                         // activation. Keep the successfully loaded list as a
                         // final compatibility fallback for older enterprise APIs.
-                        let current = ui.get_workflow_pr_review_commit_count();
-                        ui.set_workflow_pr_review_commit_count(
-                            current.max(initial_commits.len() as i32),
-                        );
-                        ui.set_workflow_pr_review_commits(commit_model(
-                            &initial_commits,
-                            &HashMap::new(),
-                        ));
+                        let current = ui
+                            .pr_review()
+                            .global::<crate::PrReviewBridge>()
+                            .get_workflow_pr_review_commit_count();
+                        ui.pr_review()
+                            .global::<crate::PrReviewBridge>()
+                            .set_workflow_pr_review_commit_count(
+                                current.max(initial_commits.len() as i32),
+                            );
+                        ui.pr_review()
+                            .global::<crate::PrReviewBridge>()
+                            .set_workflow_pr_review_commits(commit_model(
+                                &initial_commits,
+                                &HashMap::new(),
+                            ));
                         if let Ok(mut stored) = initial_controller.commits.lock() {
                             *stored = initial_commits;
                         }
@@ -1533,7 +1725,10 @@ impl WorkflowPrReviewController {
                         let Some(ui) = ui_weak.upgrade() else {
                             return;
                         };
-                        let model = ui.get_workflow_pr_review_commits();
+                        let model = ui
+                            .pr_review()
+                            .global::<crate::PrReviewBridge>()
+                            .get_workflow_pr_review_commits();
                         patch_commit_avatars(&model, &commits, &avatars);
                     });
                 }
@@ -1548,18 +1743,22 @@ impl WorkflowPrReviewController {
                         let Some(ui) = ui_weak.upgrade() else {
                             return;
                         };
-                        ui.set_workflow_pr_review_commits_loading(false);
+                        ui.pr_review()
+                            .global::<crate::PrReviewBridge>()
+                            .set_workflow_pr_review_commits_loading(false);
                         let was_opening_commit = controller
                             .pending_open_commit
                             .lock()
                             .map(|mut pending| pending.take().is_some())
                             .unwrap_or(false);
                         log::warn!("[Workflow][PR Review] Failed to load commits: {error}");
-                        ui.set_workflow_pr_review_commits_error(
-                            crate::i18n::tr("pr_review.commits_load_failed")
-                                .into_owned()
-                                .into(),
-                        );
+                        ui.pr_review()
+                            .global::<crate::PrReviewBridge>()
+                            .set_workflow_pr_review_commits_error(
+                                crate::i18n::tr("pr_review.commits_load_failed")
+                                    .into_owned()
+                                    .into(),
+                            );
                         if was_opening_commit {
                             show_error(
                                 &ui,
@@ -1577,13 +1776,18 @@ impl WorkflowPrReviewController {
         if sha.is_empty() {
             return;
         }
-        let source_tab = ui.get_workflow_pr_review_tab();
+        let source_tab = ui
+            .pr_review()
+            .global::<crate::PrReviewBridge>()
+            .get_workflow_pr_review_tab();
         if let Some(source_tab) = commit_detail_source_tab(source_tab)
             && let Ok(mut return_tab) = self.commit_detail_return_tab.lock()
         {
             *return_tab = Some(source_tab);
         }
-        ui.set_workflow_pr_review_tab(2);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_tab(2);
         let commit_index = self.commits.lock().ok().and_then(|commits| {
             commit_index_by_sha(&commits, sha).and_then(|chrono_index| {
                 chrono_commit_index_to_display(chrono_index, commits.len())
@@ -1619,12 +1823,20 @@ impl WorkflowPrReviewController {
                 .and_then(|cache| cache.as_ref().map(|cache| cache.all_detail.clone()));
             if let Some(detail) = detail {
                 self.activate_commit_range(ui, detail);
-                ui.set_workflow_pr_review_commit_range_start(-1);
-                ui.set_workflow_pr_review_commit_range_end(-1);
-                ui.set_workflow_pr_review_commit_range_label(
-                    crate::i18n::tr("pr_review.all_commits").into_owned().into(),
-                );
-                ui.set_workflow_pr_review_error("".into());
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .set_workflow_pr_review_commit_range_start(-1);
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .set_workflow_pr_review_commit_range_end(-1);
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .set_workflow_pr_review_commit_range_label(
+                        crate::i18n::tr("pr_review.all_commits").into_owned().into(),
+                    );
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .set_workflow_pr_review_error("".into());
             }
             return;
         }
@@ -1660,10 +1872,18 @@ impl WorkflowPrReviewController {
             if let Some(detail) = detail {
                 self.state.invalidate(ReviewRequestKind::Diff);
                 self.activate_commit_range(ui, detail);
-                ui.set_workflow_pr_review_commit_range_start(display_start as i32);
-                ui.set_workflow_pr_review_commit_range_end(display_end as i32);
-                ui.set_workflow_pr_review_commit_range_label(label.into());
-                ui.set_workflow_pr_review_error("".into());
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .set_workflow_pr_review_commit_range_start(display_start as i32);
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .set_workflow_pr_review_commit_range_end(display_end as i32);
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .set_workflow_pr_review_commit_range_label(label.into());
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .set_workflow_pr_review_error("".into());
                 return;
             }
         }
@@ -1702,16 +1922,28 @@ impl WorkflowPrReviewController {
         if let Some(detail) = cached {
             self.state.invalidate(ReviewRequestKind::Diff);
             self.activate_commit_range(ui, detail);
-            ui.set_workflow_pr_review_commit_range_start(display_start as i32);
-            ui.set_workflow_pr_review_commit_range_end(display_end as i32);
-            ui.set_workflow_pr_review_commit_range_label(label.into());
-            ui.set_workflow_pr_review_error("".into());
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_commit_range_start(display_start as i32);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_commit_range_end(display_end as i32);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_commit_range_label(label.into());
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_error("".into());
             return;
         }
 
         let generation = self.state.begin(ReviewRequestKind::Diff);
-        ui.set_workflow_pr_review_loading(true);
-        ui.set_workflow_pr_review_error("".into());
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_loading(true);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_error("".into());
         let controller = self.clone();
         let ui_weak = ui.as_weak();
         crate::app_runtime::shared_runtime().spawn(async move {
@@ -1735,7 +1967,7 @@ impl WorkflowPrReviewController {
                 let Some(ui) = ui_weak.upgrade() else {
                     return;
                 };
-                ui.set_workflow_pr_review_loading(false);
+                ui.pr_review().global::<crate::PrReviewBridge>().set_workflow_pr_review_loading(false);
                 match result {
                     Ok(detail) => {
                         let detail = Arc::new(SharedDiffDetail::from(detail));
@@ -1747,9 +1979,9 @@ impl WorkflowPrReviewController {
                                 .insert(cache_key, detail.clone());
                         }
                         controller.activate_commit_range(&ui, detail);
-                        ui.set_workflow_pr_review_commit_range_start(display_start as i32);
-                        ui.set_workflow_pr_review_commit_range_end(display_end as i32);
-                        ui.set_workflow_pr_review_commit_range_label(label.into());
+                        ui.pr_review().global::<crate::PrReviewBridge>().set_workflow_pr_review_commit_range_start(display_start as i32);
+                        ui.pr_review().global::<crate::PrReviewBridge>().set_workflow_pr_review_commit_range_end(display_end as i32);
+                        ui.pr_review().global::<crate::PrReviewBridge>().set_workflow_pr_review_commit_range_label(label.into());
                         log::info!(
                             "[Workflow][PR Review] Applied commit range: start={} end={} base={} head={}",
                             display_start,
@@ -1762,7 +1994,7 @@ impl WorkflowPrReviewController {
                         log::warn!(
                             "[Workflow][PR Review] Failed to load commit range diff: {error}"
                         );
-                        ui.set_workflow_pr_review_error(
+                        ui.pr_review().global::<crate::PrReviewBridge>().set_workflow_pr_review_error(
                             crate::i18n::tr("pr_review.range_load_failed")
                                 .into_owned()
                                 .into(),
@@ -1774,7 +2006,7 @@ impl WorkflowPrReviewController {
     }
 
     fn activate_commit_range(&self, ui: &MainWindow, detail: Arc<SharedDiffDetail>) {
-        self.state.invalidate(ReviewRequestKind::Highlight);
+        self.invalidate_highlight();
         self.state.invalidate(ReviewRequestKind::Expand);
         if let Ok(mut highlighted) = self.highlighted_files.lock() {
             highlighted.clear();
@@ -1802,8 +2034,12 @@ impl WorkflowPrReviewController {
     ) {
         let generation = self.state.begin(ReviewRequestKind::Reveal);
         self.clear_location_presentation(ui);
-        ui.set_workflow_pr_review_tab(2);
-        ui.invoke_workflow_pr_review_select_tab(2);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_tab(2);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .invoke_workflow_pr_review_select_tab(2);
 
         let prepared = self.cache.lock().ok().and_then(|mut cache| {
             let cache = cache.as_mut()?;
@@ -1868,11 +2104,17 @@ impl WorkflowPrReviewController {
             });
         }
         if restoring_all {
-            ui.set_workflow_pr_review_commit_range_start(-1);
-            ui.set_workflow_pr_review_commit_range_end(-1);
-            ui.set_workflow_pr_review_commit_range_label(
-                crate::i18n::tr("pr_review.all_commits").into_owned().into(),
-            );
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_commit_range_start(-1);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_commit_range_end(-1);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_commit_range_label(
+                    crate::i18n::tr("pr_review.all_commits").into_owned().into(),
+                );
             self.apply_detail(ui, &detail);
         }
         self.select_file(ui, file_index as i32);
@@ -1890,8 +2132,17 @@ impl WorkflowPrReviewController {
         if !self
             .state
             .is_current(ReviewRequestKind::Reveal, location.generation)
-            || ui.get_workflow_pr_review_selected_file_index() != location.file_index as i32
-            || ui.get_workflow_pr_review_selected_file_path().as_str() != location.path
+            || ui
+                .pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_selected_file_index()
+                != location.file_index as i32
+            || ui
+                .pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_selected_file_path()
+                .as_str()
+                != location.path
         {
             return;
         }
@@ -1913,14 +2164,26 @@ impl WorkflowPrReviewController {
             file.lines.as_slice(),
             location.line,
             location.side,
-            ui.get_workflow_pr_review_diff_view().as_str() == "split",
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_diff_view()
+                .as_str()
+                == "split",
         ) {
-            ui.set_workflow_pr_review_location_row_index(row as i32);
-            ui.set_workflow_pr_review_location_side(location.side.as_str().into());
-            ui.set_workflow_pr_review_location_reveal_revision(
-                ui.get_workflow_pr_review_location_reveal_revision()
-                    .wrapping_add(1),
-            );
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_location_row_index(row as i32);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_location_side(location.side.as_str().into());
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_location_reveal_revision(
+                    ui.pr_review()
+                        .global::<crate::PrReviewBridge>()
+                        .get_workflow_pr_review_location_reveal_revision()
+                        .wrapping_add(1),
+                );
             ui.set_ai_review_finding_navigation_message("".into());
             ui.set_ai_review_finding_navigation_can_view_file(false);
             return;
@@ -2153,8 +2416,12 @@ impl WorkflowPrReviewController {
         if !self.state.is_current(ReviewRequestKind::Reveal, generation) {
             return;
         }
-        ui.set_workflow_pr_review_location_row_index(-1);
-        ui.set_workflow_pr_review_location_side("".into());
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_location_row_index(-1);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_location_side("".into());
         ui.set_ai_review_finding_navigation_message(
             crate::i18n::tr(message_key).into_owned().into(),
         );
@@ -2162,8 +2429,12 @@ impl WorkflowPrReviewController {
     }
 
     fn clear_location_presentation(&self, ui: &MainWindow) {
-        ui.set_workflow_pr_review_location_row_index(-1);
-        ui.set_workflow_pr_review_location_side("".into());
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_location_row_index(-1);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_location_side("".into());
         ui.set_ai_review_finding_navigation_message("".into());
         ui.set_ai_review_finding_navigation_can_view_file(false);
     }
@@ -2207,7 +2478,9 @@ impl WorkflowPrReviewController {
     }
 
     fn select_file(&self, ui: &MainWindow, index: i32) {
-        ui.set_workflow_pr_review_large_diff_loading(false);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_large_diff_loading(false);
         let index = index.max(0) as usize;
         let selected = self.cache.lock().ok().and_then(|guard| {
             let cache = guard.as_ref()?;
@@ -2231,15 +2504,32 @@ impl WorkflowPrReviewController {
             })
             .unwrap_or(false);
         if !location_matches {
-            ui.set_workflow_pr_review_location_row_index(-1);
-            ui.set_workflow_pr_review_location_side("".into());
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_location_row_index(-1);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_location_side("".into());
         }
-        ui.set_workflow_pr_review_viewing_file(false);
-        ui.set_workflow_pr_review_has_expandable_hunks(false);
-        ui.set_workflow_pr_review_context_expanded(context_expanded);
-        let reset_scroll = ui.get_workflow_pr_review_selected_file_path().as_str() != file.path;
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_viewing_file(false);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_has_expandable_hunks(false);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_context_expanded(context_expanded);
+        let reset_scroll = ui
+            .pr_review()
+            .global::<crate::PrReviewBridge>()
+            .get_workflow_pr_review_selected_file_path()
+            .as_str()
+            != file.path;
         if reset_scroll {
-            ui.set_workflow_pr_review_hunk_scroll_restore_pending(false);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_hunk_scroll_restore_pending(false);
         }
         apply_file_header(ui, index, &file);
         // A late provider read may finish while Home is visible. Retain its
@@ -2248,24 +2538,40 @@ impl WorkflowPrReviewController {
             return;
         }
         if is_large_diff(&file) && !large_diff_loaded {
-            self.state.invalidate(ReviewRequestKind::Highlight);
+            self.invalidate_highlight();
             set_empty_line_model(ui);
-            ui.set_workflow_pr_review_max_code_columns(0);
-            ui.set_workflow_pr_review_longest_code_line("".into());
-            ui.set_workflow_pr_review_code_loading(false);
-            ui.set_workflow_pr_review_large_diff_loading(false);
-            ui.set_workflow_pr_review_large_diff_deferred(true);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_max_code_columns(0);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_longest_code_line("".into());
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_code_loading(false);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_large_diff_loading(false);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_large_diff_deferred(true);
             if reset_scroll {
-                ui.set_workflow_pr_review_line_model_revision(
-                    ui.get_workflow_pr_review_line_model_revision()
-                        .wrapping_add(1),
-                );
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .set_workflow_pr_review_line_model_revision(
+                        ui.pr_review()
+                            .global::<crate::PrReviewBridge>()
+                            .get_workflow_pr_review_line_model_revision()
+                            .wrapping_add(1),
+                    );
             }
             self.log_memory_diagnostics("large_diff.deferred");
             return;
         }
-        ui.set_workflow_pr_review_large_diff_deferred(false);
-        let generation = self.state.begin(ReviewRequestKind::Highlight);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_large_diff_deferred(false);
+        let generation = self.begin_highlight();
         let cached = self
             .highlighted_files
             .lock()
@@ -2273,8 +2579,12 @@ impl WorkflowPrReviewController {
             .and_then(|mut highlighted| highlighted.get_cloned(file.path.as_str()));
         if let Some(highlighted) = cached {
             apply_highlighted_file(ui, file, highlighted, reset_scroll);
-            ui.set_workflow_pr_review_code_loading(false);
-            ui.set_workflow_pr_review_large_diff_loading(false);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_code_loading(false);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_large_diff_loading(false);
             self.log_memory_diagnostics("file_highlight.cache_hit_applied");
             self.continue_location_reveal(ui);
             return;
@@ -2283,53 +2593,10 @@ impl WorkflowPrReviewController {
         // Keep the previous file/model mounted while syntax highlighting runs.
         // Clearing it here causes a full white flash on file switches and hunk
         // expansion. The completed model is applied atomically on the UI loop.
-        ui.set_workflow_pr_review_code_loading(true);
-        let controller = self.clone();
-        let highlight_resources = self.highlight_resources.lease();
-        let ui_weak = ui.as_weak();
-        crate::app_runtime::shared_runtime().spawn(async move {
-            let file_for_highlight = file.clone();
-            let highlighted = tokio::task::spawn_blocking(move || {
-                let resources =
-                    highlight_resources.get_or_init(|| Arc::new(HighlightResources::load()));
-                highlight_diff_lines(
-                    &resources,
-                    file_for_highlight.path.as_str(),
-                    file_for_highlight.lines.as_slice(),
-                )
-            })
-            .await;
-            let _ = slint::invoke_from_event_loop(move || {
-                let Some(ui) = ui_weak.upgrade() else {
-                    return;
-                };
-                if !highlight_completion::finish(
-                    &controller.state,
-                    &ui,
-                    generation,
-                    index,
-                    &file.path,
-                    false,
-                ) {
-                    return;
-                }
-                let Ok(highlighted) = highlighted else {
-                    ui.set_workflow_pr_review_error(
-                        crate::i18n::tr("pr_review.syntax_highlight_failed")
-                            .into_owned()
-                            .into(),
-                    );
-                    return;
-                };
-                let highlighted = Arc::new(highlighted);
-                if let Ok(mut cached) = controller.highlighted_files.lock() {
-                    cached.insert(file.path.clone(), highlighted.clone());
-                }
-                apply_highlighted_file(&ui, file, highlighted, reset_scroll);
-                controller.log_memory_diagnostics("file_highlight.generated_and_applied");
-                controller.continue_location_reveal(&ui);
-            });
-        });
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_code_loading(true);
+        self.schedule_highlight(ui, generation, index, file, false, reset_scroll);
     }
 
     fn filter_files(&self, ui: &MainWindow, query: String) {
@@ -2361,7 +2628,11 @@ impl WorkflowPrReviewController {
     }
 
     fn expand_hunk(&self, ui: &MainWindow, line_index: i32, direction: HunkExpansionDirection) {
-        let selected_index = ui.get_workflow_pr_review_selected_file_index().max(0) as usize;
+        let selected_index = ui
+            .pr_review()
+            .global::<crate::PrReviewBridge>()
+            .get_workflow_pr_review_selected_file_index()
+            .max(0) as usize;
         log::debug!(
             "[Workflow][PR Review] Expand hunk requested: file_index={} line_index={} direction={:?}",
             selected_index,
@@ -2406,11 +2677,13 @@ impl WorkflowPrReviewController {
             .then_some((head_sha.clone(), file.path.clone()))
             .filter(|(reference, path)| !reference.is_empty() && !path.is_empty());
         if base_request.is_none() && head_request.is_none() {
-            ui.set_workflow_pr_review_error(
-                crate::i18n::tr("pr_review.source_reference_missing")
-                    .into_owned()
-                    .into(),
-            );
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_error(
+                    crate::i18n::tr("pr_review.source_reference_missing")
+                        .into_owned()
+                        .into(),
+                );
             return;
         }
 
@@ -2493,7 +2766,12 @@ impl WorkflowPrReviewController {
                 {
                     return;
                 }
-                if ui.get_workflow_pr_review_selected_file_index() != selected_index as i32 {
+                if ui
+                    .pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .get_workflow_pr_review_selected_file_index()
+                    != selected_index as i32
+                {
                     return;
                 }
                 match result {
@@ -2524,7 +2802,11 @@ impl WorkflowPrReviewController {
     }
 
     fn expand_all_hunks(&self, ui: &MainWindow) {
-        let selected_index = ui.get_workflow_pr_review_selected_file_index().max(0) as usize;
+        let selected_index = ui
+            .pr_review()
+            .global::<crate::PrReviewBridge>()
+            .get_workflow_pr_review_selected_file_index()
+            .max(0) as usize;
         let selected = self.cache.lock().ok().and_then(|cache| {
             let cache = cache.as_ref()?;
             Some((
@@ -2558,11 +2840,13 @@ impl WorkflowPrReviewController {
             .then_some((head_sha.clone(), file.path.clone()))
             .filter(|(reference, path)| !reference.is_empty() && !path.is_empty());
         if base_request.is_none() && head_request.is_none() {
-            ui.set_workflow_pr_review_error(
-                crate::i18n::tr("pr_review.source_reference_missing")
-                    .into_owned()
-                    .into(),
-            );
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_error(
+                    crate::i18n::tr("pr_review.source_reference_missing")
+                        .into_owned()
+                        .into(),
+                );
             return;
         }
         let base_key = base_request
@@ -2594,7 +2878,9 @@ impl WorkflowPrReviewController {
             return;
         }
 
-        ui.set_workflow_pr_review_code_loading(true);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_code_loading(true);
         let generation = self.state.begin(ReviewRequestKind::Expand);
         let controller = self.clone();
         let ui_weak = ui.as_weak();
@@ -2686,7 +2972,9 @@ impl WorkflowPrReviewController {
             updated.then(|| cache.shared_file(file_index)).flatten()
         });
         let Some(file) = updated else {
-            ui.set_workflow_pr_review_code_loading(false);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_code_loading(false);
             return;
         };
         if let Ok(mut highlighted) = self.highlighted_files.lock() {
@@ -2696,7 +2984,11 @@ impl WorkflowPrReviewController {
     }
 
     fn collapse_non_diff_lines(&self, ui: &MainWindow) {
-        let selected_index = ui.get_workflow_pr_review_selected_file_index().max(0) as usize;
+        let selected_index = ui
+            .pr_review()
+            .global::<crate::PrReviewBridge>()
+            .get_workflow_pr_review_selected_file_index()
+            .max(0) as usize;
         self.state.invalidate(ReviewRequestKind::Expand);
         let restored = self.cache.lock().ok().and_then(|mut cache| {
             let cache = cache.as_mut()?;
@@ -2708,7 +3000,9 @@ impl WorkflowPrReviewController {
         if let Ok(mut highlighted) = self.highlighted_files.lock() {
             highlighted.remove(file.path.as_str());
         }
-        ui.set_workflow_pr_review_error("".into());
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_error("".into());
         log::info!(
             "[Workflow][PR Review] Collapsed non-diff lines: file={}",
             file.path
@@ -2717,9 +3011,19 @@ impl WorkflowPrReviewController {
     }
 
     fn toggle_view_file(&self, ui: &MainWindow) {
-        let selected_index = ui.get_workflow_pr_review_selected_file_index().max(0) as usize;
-        if ui.get_workflow_pr_review_viewing_file() {
-            ui.set_workflow_pr_review_viewing_file(false);
+        let selected_index = ui
+            .pr_review()
+            .global::<crate::PrReviewBridge>()
+            .get_workflow_pr_review_selected_file_index()
+            .max(0) as usize;
+        if ui
+            .pr_review()
+            .global::<crate::PrReviewBridge>()
+            .get_workflow_pr_review_viewing_file()
+        {
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_viewing_file(false);
             self.select_file(ui, selected_index as i32);
             return;
         }
@@ -2761,7 +3065,9 @@ impl WorkflowPrReviewController {
             return;
         }
 
-        ui.set_workflow_pr_review_code_loading(true);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_code_loading(true);
         let generation = self.state.begin(ReviewRequestKind::Expand);
         let controller = self.clone();
         let ui_weak = ui.as_weak();
@@ -2816,51 +3122,20 @@ impl WorkflowPrReviewController {
             return;
         }
         let full_file = Arc::new(full_source_file(&file, source.as_str()));
-        ui.set_workflow_pr_review_viewing_file(true);
-        ui.set_workflow_pr_review_has_expandable_hunks(false);
-        ui.set_workflow_pr_review_context_expanded(false);
-        ui.set_workflow_pr_review_code_loading(true);
-        let generation = self.state.begin(ReviewRequestKind::Highlight);
-        let controller = self.clone();
-        let highlight_resources = self.highlight_resources.lease();
-        let ui_weak = ui.as_weak();
-        crate::app_runtime::shared_runtime().spawn(async move {
-            let highlight_file = full_file.clone();
-            let highlighted = tokio::task::spawn_blocking(move || {
-                let resources =
-                    highlight_resources.get_or_init(|| Arc::new(HighlightResources::load()));
-                highlight_diff_lines(
-                    &resources,
-                    highlight_file.path.as_str(),
-                    highlight_file.lines.as_slice(),
-                )
-            })
-            .await;
-            let _ = slint::invoke_from_event_loop(move || {
-                let Some(ui) = ui_weak.upgrade() else {
-                    return;
-                };
-                if !highlight_completion::finish(
-                    &controller.state,
-                    &ui,
-                    generation,
-                    selected_index,
-                    &full_file.path,
-                    true,
-                ) {
-                    return;
-                }
-                match highlighted {
-                    Ok(highlighted) => {
-                        apply_highlighted_file(&ui, full_file, Arc::new(highlighted), true);
-                        controller.log_memory_diagnostics("full_file.highlighted_and_applied");
-                    }
-                    Err(error) => {
-                        log::warn!("[Workflow][PR Review] Full-file highlighting failed: {error}");
-                    }
-                }
-            });
-        });
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_viewing_file(true);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_has_expandable_hunks(false);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_context_expanded(false);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_code_loading(true);
+        let generation = self.begin_highlight();
+        self.schedule_highlight(ui, generation, selected_index, full_file, true, true);
     }
 
     fn apply_hunk_expansion(
@@ -2907,9 +3182,15 @@ impl WorkflowPrReviewController {
         if let Ok(mut highlighted) = self.highlighted_files.lock() {
             highlighted.remove(file.path.as_str());
         }
-        ui.set_workflow_pr_review_hunk_scroll_anchor_source_index(anchor_source_index);
-        ui.set_workflow_pr_review_hunk_scroll_restore_pending(true);
-        ui.set_workflow_pr_review_error("".into());
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_hunk_scroll_anchor_source_index(anchor_source_index);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_hunk_scroll_restore_pending(true);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_error("".into());
         log::info!(
             "[Workflow][PR Review] Expanded hunk context: file={} line_index={} direction={:?} limit={}",
             file.path,
@@ -2918,106 +3199,6 @@ impl WorkflowPrReviewController {
             HUNK_CONTEXT_PAGE_SIZE
         );
         self.select_file(ui, file_index as i32);
-    }
-
-    fn apply_detail(&self, ui: &MainWindow, detail: &SharedDiffDetail) {
-        apply_detail_summary(ui, detail);
-        // Tab-row statistics describe the entire PR even while comparing a commit range.
-        if let Some(all_detail) = self
-            .cache
-            .lock()
-            .ok()
-            .and_then(|cache| cache.as_ref().map(|cache| cache.all_detail.clone()))
-        {
-            ui.set_workflow_pr_review_added_lines(all_detail.added_lines as i32);
-            ui.set_workflow_pr_review_removed_lines(all_detail.removed_lines as i32);
-        }
-        if let Ok(mut selected) = self.selected_extensions.lock() {
-            *selected = extension_counts(detail.files.as_slice())
-                .into_keys()
-                .collect();
-        }
-        if let Ok(mut enabled) = self.only_manifest_files.lock() {
-            *enabled = false;
-        }
-        if let Ok(mut enabled) = self.show_viewed_files.lock() {
-            *enabled = true;
-        }
-        self.refresh_tree(ui);
-        if !detail.files.is_empty() {
-            self.select_file(ui, 0);
-        } else {
-            clear_selected_file(ui);
-        }
-    }
-
-    fn refresh_tree(&self, ui: &MainWindow) {
-        let detail = self
-            .cache
-            .lock()
-            .ok()
-            .and_then(|guard| guard.as_ref().map(|cache| cache.base_detail.clone()));
-        let Some(detail) = detail else {
-            ui.set_workflow_pr_review_tree_items(empty_tree_model());
-            return;
-        };
-        let query = self
-            .file_filter
-            .lock()
-            .map(|filter| filter.clone())
-            .unwrap_or_default();
-        let collapsed = self
-            .collapsed_folders
-            .lock()
-            .map(|folders| folders.clone())
-            .unwrap_or_default();
-        let selected_extensions = self
-            .selected_extensions
-            .lock()
-            .map(|extensions| extensions.clone())
-            .unwrap_or_default();
-        let only_manifest_files = self
-            .only_manifest_files
-            .lock()
-            .map(|enabled| *enabled)
-            .unwrap_or(false);
-        let show_viewed_files = self
-            .show_viewed_files
-            .lock()
-            .map(|enabled| *enabled)
-            .unwrap_or(true);
-        let counts = extension_counts(detail.files.as_slice());
-        let extension_filters = counts
-            .iter()
-            .map(|(extension, count)| WorkflowPrFileExtensionFilter {
-                extension: extension.clone().into(),
-                label: if extension == "No extension" {
-                    crate::i18n::tr("pr_review.no_extension")
-                        .into_owned()
-                        .into()
-                } else {
-                    extension.clone().into()
-                },
-                count: *count as i32,
-                selected: selected_extensions.contains(extension),
-            })
-            .collect::<Vec<_>>();
-        ui.set_workflow_pr_review_extension_filters(ModelRc::new(VecModel::from(
-            extension_filters,
-        )));
-        ui.set_workflow_pr_review_only_manifest_files(only_manifest_files);
-        ui.set_workflow_pr_review_show_viewed_files(show_viewed_files);
-        ui.set_workflow_pr_review_file_filters_active(
-            only_manifest_files || !show_viewed_files || selected_extensions.len() != counts.len(),
-        );
-        ui.set_workflow_pr_review_tree_items(ModelRc::new(VecModel::from(build_tree_items(
-            detail.files.as_slice(),
-            query.as_str(),
-            &collapsed,
-            &selected_extensions,
-            only_manifest_files,
-            show_viewed_files,
-        ))));
     }
 
     fn log_memory_diagnostics(&self, reason: &str) {
@@ -3050,8 +3231,11 @@ impl WorkflowPrReviewController {
             .map(|cache| (cache.entries.len(), source_cache_stats(&cache)))
             .unwrap_or_default();
         let highlight_resources_loaded = self.highlight_resources.is_loaded();
+        // Session detach can be false while the separate builtin graph stays resident.
+        let highlight_controller_grammar_cache_entries =
+            usize::from(self.highlighting.resource_cache().is_loaded());
         log::info!(
-            "[Workflow][PR Review][Memory] reason={} base_files={} base_lines={} base_text_bytes={} base_heap_estimate_bytes={} owned_detail_entries={} owned_detail_files={} owned_detail_lines={} owned_detail_text_bytes={} owned_detail_heap_estimate_bytes={} override_files={} override_lines={} override_text_bytes={} override_heap_estimate_bytes={} highlight_resources_loaded={} highlight_cache_entries={} highlight_lines={} highlight_tokens={} highlight_text_bytes={} highlight_heap_estimate_bytes={} source_cache_entries={} source_text_bytes={} source_heap_estimate_bytes={}",
+            "[Workflow][PR Review][Memory] reason={} base_files={} base_lines={} base_text_bytes={} base_heap_estimate_bytes={} owned_detail_entries={} owned_detail_files={} owned_detail_lines={} owned_detail_text_bytes={} owned_detail_heap_estimate_bytes={} override_files={} override_lines={} override_text_bytes={} override_heap_estimate_bytes={} highlight_resources_loaded={} highlight_controller_grammar_cache_entries={} highlight_cache_entries={} highlight_lines={} highlight_tokens={} highlight_text_bytes={} highlight_heap_estimate_bytes={} source_cache_entries={} source_text_bytes={} source_heap_estimate_bytes={}",
             reason,
             base_stats.items,
             base_stats.children,
@@ -3067,6 +3251,7 @@ impl WorkflowPrReviewController {
             override_stats.text_bytes,
             override_stats.estimated_heap_bytes,
             highlight_resources_loaded,
+            highlight_controller_grammar_cache_entries,
             highlight_entries,
             highlight_stats.items,
             highlight_stats.children,
@@ -3227,88 +3412,6 @@ fn memory_benchmark_diff_detail(seed: usize) -> PullRequestDiffDetail {
     }
 }
 
-fn apply_review_header(ui: &MainWindow, request: &ReviewRequest) {
-    let bridge = ui.global::<crate::PrConflictsBridge>();
-    bridge.set_number(request.number.clone().into());
-    bridge.set_repository(bridge.get_list_repository());
-    let rows = ui.get_workflow_pr_list_items();
-    bridge.set_status(
-        (0..rows.row_count())
-            .filter_map(|i| rows.row_data(i))
-            .find(|row| row.number.as_str() == request.number)
-            .map(|row| row.conflict_status)
-            .unwrap_or_else(|| "unknown".into()),
-    );
-    ui.set_workflow_pr_review_number(request.number.clone().into());
-    let title = if request.title.trim().is_empty() {
-        crate::i18n::tr("pr_list.untitled_pull_request").into_owned()
-    } else {
-        request.title.clone()
-    };
-    let author = if request.author.trim().is_empty() {
-        crate::i18n::tr("common.unknown_author").into_owned()
-    } else {
-        request.author.clone()
-    };
-    ui.set_workflow_pr_review_title(title.into());
-    ui.set_workflow_pr_review_author(author.into());
-    ui.set_workflow_pr_review_source_branch(request.source_branch.clone().into());
-    ui.set_workflow_pr_review_target_branch(request.target_branch.clone().into());
-    ui.set_workflow_pr_review_updated_at(
-        super::super::pr_list::format_github_relative_time(request.updated_at.as_str()).into(),
-    );
-    ui.set_workflow_pr_review_updated_at_tooltip(
-        super::super::pr_list::format_github_absolute_tooltip(request.updated_at.as_str()).into(),
-    );
-    ui.set_workflow_pr_review_ignore_whitespace(request.ignore_whitespace);
-}
-
-fn apply_detail_summary(ui: &MainWindow, detail: &SharedDiffDetail) {
-    let files = detail
-        .files
-        .iter()
-        .map(|file| to_slint_file(file))
-        .collect::<Vec<_>>();
-    ui.set_workflow_pr_review_files(ModelRc::new(VecModel::from(files)));
-    ui.set_workflow_pr_review_added_lines(detail.added_lines as i32);
-    ui.set_workflow_pr_review_removed_lines(detail.removed_lines as i32);
-    // Prefer the larger of the summary field and any already-visible badge so a
-    // later range compare with a missing total cannot wipe the Commits counter.
-    let current_commits = ui.get_workflow_pr_review_commit_count();
-    ui.set_workflow_pr_review_commit_count(current_commits.max(detail.commit_count as i32));
-    if let Some(conversation_count) = detail.conversation_count {
-        let current = ui.get_workflow_pr_review_conversation_count();
-        ui.set_workflow_pr_review_conversation_count(current.max(conversation_count as i32));
-    }
-    ui.set_workflow_pr_review_base_sha(detail.base_sha.clone().into());
-    ui.set_workflow_pr_review_head_sha(detail.head_sha.clone().into());
-    ui.set_workflow_pr_review_too_many_commits(detail.too_many_commits);
-    ui.set_workflow_pr_review_files_truncated(detail.files_truncated);
-    ui.set_workflow_pr_review_error("".into());
-    ui.set_workflow_pr_review_error_kind("".into());
-}
-
-fn clear_selected_file(ui: &MainWindow) {
-    ui.set_workflow_pr_review_selected_file_index(-1);
-    ui.set_workflow_pr_review_selected_file_path("".into());
-    ui.set_workflow_pr_review_selected_file_added_lines(0);
-    ui.set_workflow_pr_review_selected_file_removed_lines(0);
-    ui.set_workflow_pr_review_max_code_columns(0);
-    ui.set_workflow_pr_review_longest_code_line("".into());
-    set_empty_line_model(ui);
-    ui.set_workflow_pr_review_code_loading(false);
-    ui.set_workflow_pr_review_large_diff_deferred(false);
-    ui.set_workflow_pr_review_large_diff_loading(false);
-    ui.set_workflow_pr_review_context_expanded(false);
-}
-
-fn apply_file_header(ui: &MainWindow, index: usize, file: &PullRequestDiffFile) {
-    ui.set_workflow_pr_review_selected_file_index(index as i32);
-    ui.set_workflow_pr_review_selected_file_path(file.path.clone().into());
-    ui.set_workflow_pr_review_selected_file_added_lines(file.added_lines as i32);
-    ui.set_workflow_pr_review_selected_file_removed_lines(file.removed_lines as i32);
-}
-
 fn location_file_index(files: &[SharedDiffFile], path: &str, side: DiffLineSide) -> Option<usize> {
     if side == DiffLineSide::Left
         && let Some(index) = files.iter().position(|file| {
@@ -3328,204 +3431,6 @@ fn is_large_diff(file: &PullRequestDiffFile) -> bool {
             .map(|line| line.content.len())
             .sum::<usize>()
             >= LARGE_DIFF_BYTE_THRESHOLD
-}
-
-fn apply_highlighted_file(
-    ui: &MainWindow,
-    file: SharedDiffFile,
-    highlighted: Arc<Vec<HighlightedLine>>,
-    reset_scroll: bool,
-) {
-    let max_columns = highlighted
-        .iter()
-        .map(|line| line.columns)
-        .max()
-        .unwrap_or(0);
-    let longest_code_line = highlighted
-        .iter()
-        .max_by_key(|line| line.columns)
-        .map(|line| {
-            line.tokens
-                .iter()
-                .map(|token| token.text.as_str())
-                .collect::<String>()
-        })
-        .unwrap_or_default();
-    ui.set_workflow_pr_review_max_code_columns(max_columns as i32);
-    ui.set_workflow_pr_review_longest_code_line(longest_code_line.into());
-    let line_model = Rc::new(LazyPrDiffLineModel::new(
-        file.clone(),
-        highlighted,
-        ui.get_workflow_pr_review_diff_view().as_str() == "split",
-    ));
-    let metrics = ModelRc::new(VecModel::from(line_model.row_metrics()));
-    set_line_model(ui, ModelRc::from(line_model), metrics);
-    ui.set_workflow_pr_review_has_expandable_hunks(
-        !ui.get_workflow_pr_review_viewing_file()
-            && file
-                .lines
-                .iter()
-                .enumerate()
-                .any(|(index, _)| hunk_is_expandable(&file, index)),
-    );
-    if ui.get_workflow_pr_review_hunk_scroll_restore_pending() {
-        ui.set_workflow_pr_review_hunk_scroll_restore_pending(false);
-        ui.set_workflow_pr_review_hunk_scroll_restore_revision(
-            ui.get_workflow_pr_review_hunk_scroll_restore_revision()
-                .wrapping_add(1),
-        );
-    }
-    if reset_scroll {
-        ui.set_workflow_pr_review_line_model_revision(
-            ui.get_workflow_pr_review_line_model_revision()
-                .wrapping_add(1),
-        );
-    }
-}
-
-fn set_line_model(
-    ui: &MainWindow,
-    lines: ModelRc<WorkflowPrDiffLine>,
-    metrics: ModelRc<WorkflowPrDiffRowMetric>,
-) {
-    super::find_bridge::cancel();
-    ui.set_workflow_pr_review_lines(lines);
-    ui.set_workflow_pr_review_line_metrics(metrics);
-    ui.set_workflow_pr_review_line_content_revision(
-        ui.get_workflow_pr_review_line_content_revision()
-            .wrapping_add(1),
-    );
-}
-
-fn set_empty_line_model(ui: &MainWindow) {
-    set_line_model(ui, empty_line_model(), empty_line_metric_model());
-}
-
-fn empty_file_model() -> ModelRc<WorkflowPrDiffFile> {
-    ModelRc::new(VecModel::from(Vec::<WorkflowPrDiffFile>::new()))
-}
-
-fn empty_line_model() -> ModelRc<WorkflowPrDiffLine> {
-    ModelRc::new(VecModel::from(Vec::<WorkflowPrDiffLine>::new()))
-}
-
-fn empty_line_metric_model() -> ModelRc<WorkflowPrDiffRowMetric> {
-    ModelRc::new(VecModel::from(Vec::<WorkflowPrDiffRowMetric>::new()))
-}
-
-fn empty_tree_model() -> ModelRc<WorkflowPrTreeItem> {
-    ModelRc::new(VecModel::from(Vec::<WorkflowPrTreeItem>::new()))
-}
-
-fn empty_extension_filter_model() -> ModelRc<WorkflowPrFileExtensionFilter> {
-    ModelRc::new(VecModel::from(Vec::<WorkflowPrFileExtensionFilter>::new()))
-}
-
-fn toggle_commit_message_expansion(ui: &MainWindow, sha: &str) {
-    let sha = sha.trim();
-    if sha.is_empty() {
-        return;
-    }
-
-    let conversation = ui.get_workflow_pr_review_conversation_items();
-    let mut conversation_items = (0..conversation.row_count())
-        .filter_map(|index| conversation.row_data(index))
-        .collect::<Vec<_>>();
-    let commits = ui.get_workflow_pr_review_commits();
-    let mut commit_items = (0..commits.row_count())
-        .filter_map(|index| commits.row_data(index))
-        .collect::<Vec<_>>();
-
-    // Keep Conversation and Commits in sync for the same SHA. Use the union of
-    // current expand state so a stale tab cannot invert the other.
-    let currently_expanded = conversation_items.iter().any(|item| {
-        item.kind.as_str() == "commit" && item.id.as_str() == sha && item.message_expanded
-    }) || commit_items
-        .iter()
-        .any(|item| item.sha.as_str() == sha && item.message_expanded);
-    let target = !currently_expanded;
-
-    for (index, item) in conversation_items.iter_mut().enumerate() {
-        if item.kind.as_str() == "commit" && item.id.as_str() == sha {
-            item.message_expanded = target;
-            // Preserve the ModelRc identity so an active ListView keeps its
-            // viewport anchor while only this delegate changes height.
-            conversation.set_row_data(index, item.clone());
-        }
-    }
-    let expanded_body_height = conversation_items
-        .iter()
-        .filter(|item| item.kind.as_str() == "commit" && item.message_expanded)
-        .map(|item| item.message_body_height)
-        .sum::<i32>();
-    ui.set_workflow_pr_review_expanded_commit_body_height(expanded_body_height);
-
-    for item in &mut commit_items {
-        if item.sha.as_str() == sha {
-            item.message_expanded = target;
-        }
-    }
-    refresh_commit_group_expand_extras(&mut commit_items);
-    // Updating rows in place is essential here. Replacing the entire model
-    // makes Slint rebuild the ListView and can move the clicked kebab away from
-    // the pointer. Stable row identity keeps everything above the row fixed;
-    // only this row grows and subsequent content moves down.
-    for (index, item) in commit_items.into_iter().enumerate() {
-        commits.set_row_data(index, item);
-    }
-}
-
-fn reset_review_ui(ui: &MainWindow) {
-    ui.set_workflow_pr_review_visible(false);
-    ui.set_workflow_pr_review_loading(false);
-    ui.set_workflow_pr_review_code_loading(false);
-    ui.set_workflow_pr_review_large_diff_deferred(false);
-    ui.set_workflow_pr_review_large_diff_loading(false);
-    ui.set_workflow_pr_review_location_row_index(-1);
-    ui.set_workflow_pr_review_location_side("".into());
-    ui.set_workflow_pr_review_error("".into());
-    ui.set_workflow_pr_review_files(empty_file_model());
-    ui.set_workflow_pr_review_tree_items(empty_tree_model());
-    ui.set_workflow_pr_review_extension_filters(empty_extension_filter_model());
-    ui.set_workflow_pr_review_only_manifest_files(false);
-    ui.set_workflow_pr_review_show_viewed_files(true);
-    ui.set_workflow_pr_review_file_filters_active(false);
-    set_empty_line_model(ui);
-    ui.set_workflow_pr_review_selected_file_index(-1);
-    ui.set_workflow_pr_review_selected_file_path("".into());
-    ui.set_workflow_pr_review_selected_file_added_lines(0);
-    ui.set_workflow_pr_review_selected_file_removed_lines(0);
-    ui.set_workflow_pr_review_max_code_columns(0);
-    ui.set_workflow_pr_review_longest_code_line("".into());
-    ui.set_workflow_pr_review_added_lines(0);
-    ui.set_workflow_pr_review_removed_lines(0);
-    ui.set_workflow_pr_review_commit_count(0);
-    ui.set_workflow_pr_review_conversation_count(0);
-    ui.set_workflow_pr_review_base_sha("".into());
-    ui.set_workflow_pr_review_head_sha("".into());
-    ui.set_workflow_pr_review_too_many_commits(false);
-    ui.set_workflow_pr_review_files_truncated(false);
-    ui.set_workflow_pr_review_tab(2);
-    ui.set_workflow_pr_review_conversation_items(empty_conversation_model());
-    ui.set_workflow_pr_review_conversation_content_height(0);
-    ui.set_workflow_pr_review_expanded_commit_body_height(0);
-    ui.set_workflow_pr_review_commits(empty_commit_model());
-    ui.set_workflow_pr_review_conversation_loading(false);
-    ui.set_workflow_pr_review_commits_loading(false);
-    ui.set_workflow_pr_review_conversation_error("".into());
-    ui.set_workflow_pr_review_commits_error("".into());
-    ui.set_workflow_pr_review_commit_range_start(-1);
-    ui.set_workflow_pr_review_commit_range_end(-1);
-    ui.set_workflow_pr_review_commit_range_label(
-        crate::i18n::tr("pr_review.all_commits").into_owned().into(),
-    );
-    ui.set_workflow_pr_review_has_expandable_hunks(false);
-    ui.set_workflow_pr_review_context_expanded(false);
-    ui.set_workflow_pr_review_viewing_file(false);
-    ui.set_workflow_pr_review_ignore_whitespace_supported(false);
-    ui.set_workflow_pr_review_ignore_whitespace(false);
-    ui.set_workflow_pr_review_file_filter("".into());
-    reset_action_ui(ui);
 }
 
 #[cfg(test)]

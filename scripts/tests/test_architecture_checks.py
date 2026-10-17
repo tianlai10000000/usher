@@ -31,9 +31,9 @@ class ArchitectureGateTests(unittest.TestCase):
                        "callback fixture();\nin property <bool> fixture;\n")
         self.write("src/http/mod.rs", "pub fn fixture() {}\n")
         self.write("crates/fixture/src/lib.rs", "pub fn fixture() {}\n")
-        for owner in ("usher-ui", "usher-ui-settings", "usher-messages", "usher-ui-components", "usher-i18n-build", "usher-ui-build"):
+        for owner in ("usher-ui", "usher-ui-settings", "usher-messages", "usher-ui-components", "usher-ui-pr-review", "usher-i18n-build", "usher-ui-build"):
             self.write(f"crates/{owner}/Cargo.toml", '[package]\nname = "fixture"\n')
-        for owner in ("usher-ui", "usher-ui-settings", "usher-messages", "usher-ui-components"):
+        for owner in ("usher-ui", "usher-ui-settings", "usher-messages", "usher-ui-components", "usher-ui-pr-review"):
             self.write(f"crates/{owner}/build.rs", "fn main() {}\n")
 
     def write(self, path, source):
@@ -122,6 +122,157 @@ fn fixture() { let _ = another_crate::Client::new(); }
         result = self.check()
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("src/lib.rs lines is 1101 (budget 1100)", result.stderr)
+
+    def test_pr_factory_extracted_owners_keep_independent_size_limits(self):
+        owners = {
+            "src/workflow/pr_review/ui.rs": 120,
+            "src/workflow/pr_review/ui/context.rs": 170,
+            "src/workflow/pr_review/ui/input.rs": 120,
+            "src/workflow/pr_review/controller/presentation.rs": 550,
+            "src/workflow/pr_review/controller/actions/reviews.rs": 160,
+            "src/workflow/pr_review/controller/highlighting.rs": 260,
+            "src/workflow/pr_review/controller/highlighting_tests.rs": 280,
+            "src/workflow/pr_review/controller/highlight_session.rs": 260,
+            "src/workflow/pr_review/controller/highlight_cache.rs": 260,
+            "src/workflow/pr_review/controller/highlight_cache_tests.rs": 280,
+            "ui/features/pr_review/bridge.slint": 190,
+            "ui/features/pr_review/host_bridge.slint": 110,
+            "ui/features/pr_review/surface.slint": 280,
+            "ui/features/pr_review/factory.slint": 80,
+            "ui/features/pr_review/factory_host.slint": 40,
+            "ui/features/pr_review/integrated.slint": 35,
+            "crates/usher-ui-pr-review/build.rs": 80,
+            "crates/usher-ui-pr-review/src/lib.rs": 30,
+            "ui/components/pr_review/tooltip_state.slint": 80,
+            "ui/components/pr_review/tooltip_anchors.slint": 230,
+            "ui/components/pr_review/tooltip_buttons.slint": 160,
+            "ui/components/pr_review/tooltip_overlay.slint": 330,
+        }
+        for path, limit in owners.items():
+            self.write(path, "// bounded owner\n" * limit)
+        self.assert_accepted()
+        for path, limit in owners.items():
+            with self.subTest(owner=path):
+                self.write(path, "// bounded owner\n" * (limit + 1))
+                result = self.check()
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn(f"is {limit + 1} (budget {limit})", result.stderr)
+                self.write(path, "// bounded owner\n" * limit)
+
+    def test_pr_async_idle_ui_test_owner_has_an_independent_size_limit(self):
+        path = "src/workflow/pr_review/controller/async_ui_tests.rs"
+        self.write(path, "// async UI control\n" * 220)
+        self.assert_accepted()
+        self.write(path, "// async UI control\n" * 221)
+        result = self.check()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("async idle UI test owner lines is 221 (budget 220)", result.stderr)
+
+    def test_pr_highlighting_accepts_only_bounded_compute_ownership(self):
+        path = "src/workflow/pr_review/controller/highlighting.rs"
+        self.write(path, "use crate::app_runtime::latest_compute::LatestCompute;\n")
+        self.assert_accepted()
+        for source in ("use tokio as runtime;", "spawn_blocking(work);", "use std::thread;",
+                       "use reqwest::Client;", "use usher_state_store::LocalStateStore;"):
+            with self.subTest(source=source):
+                self.write(path, source + "\n")
+                result = self.check()
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("highlighting bypasses bounded compute ownership", result.stderr)
+
+    def test_pr_grammar_owner_has_no_io_runtime_or_store_dependencies(self):
+        for path in ("src/workflow/pr_review/controller/highlight_session.rs",
+                     "src/workflow/pr_review/controller/highlight_cache.rs"):
+            self.write(path, "use std::sync::{Arc, Mutex, OnceLock};\n")
+            self.assert_accepted()
+            for source in ("use std::fs;", "use std::thread;", "use tokio as runtime;",
+                           "spawn_blocking(work);", "use usher_state_store::LocalStateStore;"):
+                with self.subTest(owner=path, source=source):
+                    self.write(path, source + "\n")
+                    result = self.check()
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertIn("grammar ownership contains I/O, runtime or Store work", result.stderr)
+            self.write(path, "use std::sync::{Arc, Mutex, OnceLock};\n")
+
+    def test_pr_review_modal_shortcut_regression_owner_remains_bounded(self):
+        path = "src/shortcuts/pr_review_modal_tests.rs"
+        self.write(path, "// modal shortcut fixture\n" * 90)
+        self.assert_accepted()
+        self.write(path, "// modal shortcut fixture\n" * 91)
+        result = self.check()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("PR Review modal shortcut regression lines is 91 (budget 90)", result.stderr)
+
+    def test_pr_ui_adapters_accept_event_loop_models_and_captured_action_facade(self):
+        self.write("src/workflow/pr_review/ui/context.rs", """use slint::{ComponentHandle, ModelRc};
+fn sync() { page.global::<crate::PrReviewBridge>().set_workflow_pr_review_files(rows); }
+""")
+        self.write("src/workflow/pr_review/controller/actions/reviews.rs", """use super::*;
+fn submit() { self.run_action(ui, context.submit_review(action, body), completed); }
+""")
+        self.write("ui/features/pr_review/host_bridge.slint", """export global PrReviewHostBridge {
+    in property <string> review-identity;
+    in property <component-factory> factory;
+    callback open-review(string);
+}
+""")
+        self.assert_accepted()
+
+    def test_pr_event_loop_owners_reject_io_scheduling_clients_and_stores(self):
+        for owner in ("src/workflow/pr_review/ui.rs", "src/workflow/pr_review/ui/context.rs",
+                      "src/workflow/pr_review/ui/input.rs", "src/workflow/pr_review/controller/presentation.rs"):
+            for source in ("use std :: fs;", "use std::{sync::Arc, process as worker};",
+                           "use tokio as runtime;", "use crate::app_runtime;",
+                           "use usher_state_store::PersistentStore;", "use crate::settings::SettingsManager;"):
+                with self.subTest(owner=owner, source=source):
+                    self.write(owner, source + "\n")
+                    result = self.check()
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertIn("PR Review factory UI owns I/O", result.stderr)
+                    self.assertIn(owner, result.stderr)
+            self.write(owner, "// event-loop owner\n")
+
+    def test_pr_shell_does_not_duplicate_models_or_reverse_import_the_root(self):
+        cases = {
+            "ui/features/pr_review/host_bridge.slint": "in property <[WorkflowPrDiffLine]> lines;\n",
+            "ui/features/pr_review/bridge.slint": 'import { MainWindow } from "../../main.slint";\n',
+            "crates/usher-ui-pr-review/src/lib.rs": "use std::process::Command;\n",
+            "src/workflow/pr_review/controller/actions/reviews.rs": "use reqwest::Url;\n",
+        }
+        for owner, source in cases.items():
+            with self.subTest(owner=owner):
+                previous = (self.root / owner).read_text()
+                self.write(owner, source)
+                result = self.check()
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("PR Review factory UI owns I/O", result.stderr)
+                self.assertIn(owner, result.stderr)
+                self.write(owner, previous)
+
+    def test_pr_package_uses_the_shared_catalog_free_public_build_helper(self):
+        self.write("crates/usher-ui-pr-review/build.rs", "fn main() { slint_build::compile(root); }\n")
+        result = self.check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("public compiler/source-input boundary", result.stderr)
+        self.write("crates/usher-ui-pr-review/build.rs", "fn main() { usher_ui_build::compile(root); }\n")
+        self.write("crates/usher-ui-pr-review/Cargo.toml", '[dependencies]\nusher-i18n = { path = "../usher-i18n" }\n')
+        result = self.check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("embedded/runtime catalogs", result.stderr)
+
+    def test_pr_generated_package_dependencies_cannot_grow_runtime_infrastructure(self):
+        path = "crates/usher-ui-pr-review/Cargo.toml"
+        self.write(path, (ROOT / path).read_text())
+        self.assert_accepted()
+        for addition in ('\n[dev-dependencies]\nreqwest = "1"\n',
+                         '\n[target.unix.dependencies]\nworkers = { package = "tokio", version = "1" }\n',
+                         '\n[dependencies]\ntransport = { package = "reqwest", version = "1" }\n',
+                         '\n[dependencies]\nslint = { package = "reqwest", version = "1" }\n'):
+            with self.subTest(addition=addition):
+                self.write(path, (ROOT / path).read_text() + addition)
+                result = self.check()
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("PR Review factory UI owns I/O", result.stderr)
 
     def test_window_navigation_accepts_shared_presentation_dependencies(self):
         path = "ui/components/navigation/github_window_navigation.slint"

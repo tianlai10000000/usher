@@ -338,6 +338,9 @@ push `v*` tag 是唯一的自动构建触发器，只会启动 Release workflow�
 生产优化参数。诊断工具准备、缓存/计时导出和 `Release timing report` 尽力执行；
 构建、打包、已启用的签名、产品上传及发布失败仍阻断发布。
 
+产品 Actions artifact 保留 7 天，诊断 artifact 保留 3 天；已发布版本仍通过
+Release 附件下载。缩短保留期只影响新上传，不会清理已有 artifact。
+
 不同 tag 不能共享彼此的 tag 缓存。预热时在 **Release → Run workflow** 选择默认
 分支，并将 `cache_only` 设为 `true`（默认 `false`）；checkout 前会做区分大小写的
 精确分支校验。该模式构建相同三个 target 并保存缓存，跳过打包工具安装、打包、

@@ -5,7 +5,10 @@ USHER_TEST_I18N_BUILD_SCRIPT to exercise a particular before/after executable.
 No fixture workspace is compiled, and no workstation settings are used.
 """
 
+import copy
 import json
+import re
+import tomllib
 import os
 from pathlib import Path
 import subprocess
@@ -134,6 +137,75 @@ class I18nBuildPathTests(unittest.TestCase):
                 )
                 outputs.append(catalog)
             self.assertNotEqual(outputs[0], outputs[1])
+
+
+PR_BOUNDARY_SOURCES = [
+    "Cargo.toml", "crates/usher-ui-pr-review/Cargo.toml", "crates/usher-ui-pr-review/src/lib.rs",
+    "src/lib.rs", "src/workflow/pr_review/ui.rs", "ui/features/pr_review/factory.slint",
+    "ui/features/pr_review/factory_host.slint", "ui/features/pr_review/integrated.slint",
+]
+
+
+def validate_pr_review_feature_ownership(sources):
+    """Static ownership contract; full feature compilation remains a separate check."""
+    root = tomllib.loads(sources["Cargo.toml"])
+    feature = tomllib.loads(sources["crates/usher-ui-pr-review/Cargo.toml"])
+    for name in ["renderer-femtovg", "renderer-femtovg-wgpu", "renderer-skia"]:
+        assert f"usher-ui-pr-review/{name}" in root["features"][name], "renderer forwarding"
+    assert "usher-ui-pr-review/integrated-preview" in root["features"]["live-preview"], "preview forwarding"
+    assert {"usher-ui/dev-shell", "usher-ui-pr-review/dev-shell"}.issubset(root["features"]["dev-shell"]), "dev-shell forwarding"
+    assert feature["features"]["integrated-preview"] == [], "preview must not build a second static tree"
+    assert "usher-i18n-build" in feature["build-dependencies"], "catalog-free build helper"
+    assert "usher-i18n" not in feature["build-dependencies"], "Rust-only catalog is not a Slint build dependency"
+    assert re.search(r'#\[cfg\(not\(feature = "integrated-preview"\)\)\]\s*slint::include_modules!\(\);',
+                     sources["crates/usher-ui-pr-review/src/lib.rs"]), "static generated-code guard"
+    access = sources["src/workflow/pr_review/ui.rs"]
+    assert re.search(r'#\[cfg\(not\(feature = "live-preview"\)\)\]\s*pub type PrReviewUiRoot = usher_ui_pr_review::PrReviewFactory;', access), "static root type"
+    assert re.search(r'#\[cfg\(feature = "live-preview"\)\]\s*pub type PrReviewUiRoot = crate::MainWindow;', access), "integrated root type"
+    canonical = set()
+    for group in re.findall(r'export\s*\{([^}]+)\}', sources["ui/features/pr_review/factory.slint"]):
+        canonical.update(name.strip() for name in group.split(",") if name.strip().startswith(("WorkflowPr", "PrConflict")) and not name.strip().endswith("Bridge"))
+    assert "WorkflowPrDiffVirtualRow" in canonical, "nested model row identity"
+    rust_export = re.search(r'#\[cfg\(not\(feature = "live-preview"\)\)\]\s*pub use usher_ui_pr_review::\{([^}]+)\};', sources["src/lib.rs"])
+    assert rust_export, "static canonical Rust exports"
+    assert canonical.issubset({name.strip() for name in rust_export[1].split(",")}), "static DTO identity"
+    for path in ["ui/features/pr_review/integrated.slint", "ui/features/pr_review/factory_host.slint"]:
+        exported = set()
+        for group in re.findall(r'export\s*\{([^}]+)\}', sources[path]):
+            exported.update(name.strip() for name in group.split(","))
+        assert canonical.issubset(exported), "feature entry DTO contract"
+    integrated = sources["ui/features/pr_review/integrated.slint"]
+    assert 'export { PrReviewBridge } from "bridge.slint";' in integrated, "integrated actual state owner"
+    assert "PrReviewSurface" in integrated, "integrated page owner"
+    static = sources["ui/features/pr_review/factory_host.slint"]
+    assert "PrReviewSurface" not in static and "pr_review_workspace.slint" not in static, "static shell excludes the body"
+
+
+class PrReviewI18nFeatureOwnershipTests(unittest.TestCase):
+    def setUp(self):
+        self.sources = {path: (ROOT / path).read_text(encoding="utf-8") for path in PR_BOUNDARY_SOURCES}
+
+    def test_static_preview_and_dev_shell_keep_one_canonical_model_owner(self):
+        validate_pr_review_feature_ownership(self.sources)
+
+    def test_feature_and_nested_dto_drift_are_rejected(self):
+        mutations = [
+            ("Cargo.toml", '"usher-ui-pr-review/integrated-preview", ', "", "preview forwarding"),
+            ("Cargo.toml", '"usher-ui-pr-review/dev-shell"', '"usher-ui/dev-shell"', "dev-shell forwarding"),
+            ("src/workflow/pr_review/ui.rs", 'pub type PrReviewUiRoot = crate::MainWindow;',
+             'pub type PrReviewUiRoot = usher_ui_pr_review::PrReviewFactory;', "integrated root type"),
+            ("crates/usher-ui-pr-review/src/lib.rs", '#[cfg(not(feature = "integrated-preview"))]',
+             '#[cfg(feature = "integrated-preview")]', "static generated-code guard"),
+            ("ui/features/pr_review/integrated.slint", 'WorkflowPrDiffVirtualRow, ', "", "feature entry DTO contract"),
+            ("src/lib.rs", 'WorkflowPrDiffVirtualRow, ', "", "static DTO identity"),
+        ]
+        for path, before, after, reason in mutations:
+            with self.subTest(path=path, reason=reason):
+                candidate = copy.copy(self.sources)
+                self.assertIn(before, candidate[path])
+                candidate[path] = candidate[path].replace(before, after, 1)
+                with self.assertRaisesRegex(AssertionError, reason):
+                    validate_pr_review_feature_ownership(candidate)
 
 
 if __name__ == "__main__":

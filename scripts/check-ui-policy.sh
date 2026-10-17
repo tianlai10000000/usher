@@ -48,12 +48,12 @@ import pathlib
 import re
 import sys
 
-repo_root = pathlib.Path(sys.argv[1])
+repo_root = pathlib.Path(sys.argv[1]).resolve()
 token_pattern = re.compile(
     r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|'
     r'<=>|:=|&&|\|\||==|!=|<=|>=|'
     r'[A-Za-z_][A-Za-z0-9_-]*|\d+(?:\.\d+)?(?:px)?|'
-    r'[{}():;,.!+\-*/@<>]',
+    r'[{}():;,.!?+\-*/@<>]',
     re.DOTALL,
 )
 
@@ -477,6 +477,195 @@ if agent_tooltip_path in sources:
     if not valid:
         print(f"{agent_tooltip_path}: Agent actions require seven fixed literal surfaces in one transient host")
 
+# Factory entry points can live under features as well as views. Recognize the
+# public build helper in addition to the older as_library call, then inspect the
+# actual first argument rather than every unrelated library mapping in a script.
+for build in sorted((repo_root / "crates").glob("*/build.rs")):
+    rust = tokenize(build.read_text(encoding="utf-8"))
+    sites = [i for i, (value, _, quoted) in enumerate(rust)
+             if not quoted and value in {"as_library", "compile_library", "compile_library_with_config"}
+             and i + 1 < len(rust) and rust[i + 1][0] == "("]
+    if not sites and any(value in {"compile_library", "compile_library_with_config"} and not quoted
+                         for value, _, quoted in rust):
+        print(f"{build.relative_to(repo_root)}: cannot locate the factory root view through a compiler alias")
+    for site in sites:
+        depth, argument = 0, []
+        for token in rust[site + 2:]:
+            if token[0] == ")" and depth == 0 or token[0] == "," and depth == 0:
+                break
+            argument.append(token)
+            depth += token[0] == "("
+            depth -= token[0] == ")"
+        roots = [value.strip('"') for value, _, quoted in argument
+                 if quoted and re.fullmatch(r'"ui/[^"\n]+\.slint"', value)]
+        if rust[site][0] == "as_library" and not roots:
+            # Preserve the old builder's view lookup: its as_library argument
+            # may be a module name while compile_with_config names the root.
+            roots = [value.strip('"') for value, _, quoted in rust
+                     if quoted and re.fullmatch(r'"ui/views/[^"\n]+\.slint"', value)]
+        if not roots:
+            print(f"{build.relative_to(repo_root)}: cannot locate the factory root view")
+        for root_path in roots:
+            entry = sources.get(pathlib.Path(root_path))
+            if entry is None or not any(sequence_positions(entry[1], [name, "{"])
+                    for name in ("GitHubTooltipOverlayHost", "GitHubMessageTooltipOverlayHost")):
+                print(f"{root_path}: independent factory root lacks a tooltip portal")
+
+# Check the static import closure, not only main.slint's direct import lines.
+# The interpreter's integrated root is a legitimate separate mapping; static
+# MainWindow must resolve @pr-review to the small ComponentContainer host.
+main_path = pathlib.Path("ui/main.slint")
+main_entry = sources.get(main_path)
+if main_entry:
+    build_path = repo_root / "crates/usher-ui/build.rs"
+    build_source = "" if not build_path.exists() else build_path.read_text(encoding="utf-8")
+    build_source = re.sub(r'//[^\n]*|/\*.*?\*/', '', build_source, flags=re.S)
+    mapping = re.compile(
+        r'let\s+pr_review_library\s*=\s*if\s+std::env::var_os\("CARGO_FEATURE_LIVE_PREVIEW"\)\.is_some\(\)\s*'
+        r'\{\s*\w+\.join\("ui/features/pr_review/integrated\.slint"\)\s*\}\s*else\s*'
+        r'\{\s*\w+\.join\("ui/features/pr_review/factory_host\.slint"\)\s*\}\s*;')
+    binding = re.compile(r'\(\s*"pr-review"\.(?:to_string|into)\(\),\s*pr_review_library\s*\)')
+    if sequence_positions(main_entry[1], ["from", '"@pr-review"']) and (len(mapping.findall(build_source)) != 1 or len(binding.findall(build_source)) != 1):
+        print("crates/usher-ui/build.rs: static PR mapping must isolate the factory host from the integrated preview")
+    libraries = {
+        "@pr-review": "ui/features/pr_review/factory_host.slint",
+        "@pr-review-page": "ui/features/pr_review/full.slint",
+        "@ui-components": "ui/features/ui_components_factory.slint",
+        "@ai-review": "ui/features/ai_review/full.slint",
+    }
+    heavy = {pathlib.Path(path) for path in (
+        "ui/views/workflow/pr_review_workspace.slint",
+        "ui/views/workflow/pr_review_conflicts.slint",
+        "ui/components/pr_review/content.slint",
+    )}
+    pending, seen = [(main_path, [main_path])], set()
+    while pending:
+        relative, chain = pending.pop()
+        if relative in seen:
+            continue
+        seen.add(relative)
+        if relative in heavy:
+            print("ui/main.slint: static PR import closure reaches heavy owner: " + " -> ".join(map(str, chain)))
+            continue
+        if relative not in sources:
+            continue  # External/generated library inputs have separate build checks.
+        tokens = sources[relative][1]
+        for index, (value, _, quoted) in enumerate(tokens[:-1]):
+            if quoted or value != "from" or not tokens[index + 1][2]:
+                continue
+            dependency = tokens[index + 1][0].strip('"')
+            if dependency.startswith("@"):
+                target = pathlib.Path(libraries[dependency]) if dependency in libraries else None
+                if target is None and dependency not in {"@i18n", "@material"}:
+                    print(f"{relative}: unreviewed static library mapping in PR import closure: {dependency}")
+            else:
+                absolute = (repo_root / relative.parent / dependency).resolve()
+                target = absolute.relative_to(repo_root) if absolute.is_relative_to(repo_root) else None
+            if target is not None:
+                pending.append((target, chain + [target]))
+
+# A Window-rooted product must share the actual host renderer. Restoration is
+# deliberately before unwrap/expect and all callback binding, including errors.
+adapter_path = repo_root / "src/workflow/pr_review/ui.rs"
+if adapter_path.exists():
+    adapter = adapter_path.read_text(encoding="utf-8")
+    adapter = re.sub(r'//[^\n]*|/\*.*?\*/', '', adapter, flags=re.S)
+    restored = re.compile(
+        r'let\s+(\w+)\s*=\s*i_slint_core::window::WindowInner::from_pub\(window\.window\(\)\);\s*'
+        r'let\s+(\w+)\s*=\s*\1\.component\(\);\s*'
+        r'let\s+(\w+)\s*=\s*PrReviewUiRoot::new_with_existing_window\(window\.window\(\)\);\s*'
+        r'\1\.set_component\(&\2\);\s*let\s+\w+\s*=\s*\3\.(?:expect|unwrap)\(')
+    if len(restored.findall(adapter)) != 1 or len(re.findall(r'PrReviewUiRoot::new(?:_with_existing_window)?\(', adapter)) != 1:
+        print("src/workflow/pr_review/ui.rs: PR factory must use the actual host Window and restore its shell before result handling or binding")
+
+# Literal semantic leaves and permanently mounted I18n surfaces are reviewed
+# pairs. Deriving this table from the candidate would let a swapped identity or
+# catalog label validate itself. This is source identity coverage, not native QA.
+pr_labels = {
+    "ShowCommitDescription": "diff-show-commit-description", "HideCommitDescription": "diff-hide-commit-description",
+    "OpenDiffSettings": "pr-review-open-diff-settings", "CopyFullSha": "pr-review-copy-full-sha", "Copied": "common-copied",
+    "CloseAiReview": "ai-review-close", "ReviewWithAi": "pr-list-review-with-ai",
+    "WriteComment": "pr-review-write-comment", "AddComment": "pr-review-add-comment", "ConfigureToComment": "pr-review-configure-to-comment",
+    "ViewCommitDetails": "pr-review-view-commit-details", "CopyFilePath": "pr-review-copy-file-path",
+    "CollapseNonDiff": "pr-review-collapse-non-diff", "ExpandAllLines": "pr-review-expand-all-lines",
+    "PreviousFile": "pr-review-previous-file", "NextFile": "pr-review-next-file",
+    "HideFileTree": "diff-hide-file-tree", "ShowFileTree": "diff-show-file-tree", "MoreFileActions": "diff-more-file-actions",
+    "CopySourceBranch": "pr-review-copy-source-branch", "ConflictsBack": "conflicts-back",
+    "ConflictsToggleFiles": "conflicts-toggle-files", "ConflictsRefresh": "conflicts-refresh",
+    "ConflictsPrevious": "conflicts-previous", "ConflictsNext": "conflicts-next", "ConflictsCopy": "conflicts-copy",
+    "ReviewChanges": "pr-review-comment-approve-request", "ConfigureToReview": "pr-review-configure-provider",
+    "ChooseMergeMethod": "pr-review-choose-merge-method", "ReverseChanges": "pr-review-reverse-changes",
+}
+pr_paths = [pathlib.Path("ui/components/pr_review/tooltip_" + suffix + ".slint")
+            for suffix in ("state", "anchors", "buttons", "overlay")]
+if any(path in sources for path in pr_paths):
+    if not all(path in sources for path in pr_paths):
+        print("PR Review fixed Tooltip owners must retain state, anchors, buttons and overlay")
+    else:
+        state, anchors, buttons, portal = [sources[path][1] for path in pr_paths]
+        kinds, count = owner_body(state, ["export", "enum", "PrReviewTooltipKind"])
+        declared = [] if kinds is None else [value for value, _, _ in kinds if value != ","]
+        if count != 1 or len(declared) != len(pr_labels) + 1 or set(declared) != set(pr_labels) | {"None"} or not sequence_positions(state, ["property", "<", "bool", ">", "enabled", ":", "false", ";"]):
+            print(f"{pr_paths[0]}: PR fixed Tooltip identities and factory-only opt-in must remain explicit")
+        if any(sequence_positions(anchors, pattern) for pattern in (
+                ["property", "<", "string", ">"], ["property", "<", "PrReviewTooltipKind", ">"])):
+            print(f"{pr_paths[1]}: PR fixed leaves must not accept text or dynamic action kinds")
+        for kind in pr_labels:
+            leaf, count = owner_body(anchors, ["export", "component", "Pr" + kind + "TooltipAnchor"])
+            literal = ["PrReviewTooltipState", ".", "show", "(", "PrReviewTooltipKind", ".", kind, ","]
+            if count != 1 or leaf is None or len(sequence_positions(leaf, literal)) != 1 or len(sequence_positions(leaf, ["PrReviewTooltipState", ".", "show", "("])) != 1:
+                print(f"{pr_paths[1]}: {kind} requires its own literal semantic leaf")
+        button_kinds = {
+            "GitHubPrConflictsBackButton": ["ConflictsBack"], "GitHubPrConflictsFilesButton": ["ConflictsToggleFiles"],
+            "GitHubPrConflictsRefreshButton": ["ConflictsRefresh"], "GitHubPrConflictsPreviousButton": ["ConflictsPrevious"],
+            "GitHubPrConflictsNextButton": ["ConflictsNext"], "GitHubPrCopyShaButton": ["CopyFullSha", "Copied"],
+            "GitHubPrCopyPathButton": ["CopyFilePath", "Copied"], "GitHubPrCopyBranchButton": ["CopySourceBranch", "Copied"],
+            "GitHubPrConflictsCopyButton": ["ConflictsCopy", "Copied"], "GitHubPrAiReviewButton": ["CloseAiReview", "ReviewWithAi"],
+        }
+        for name, kinds in button_kinds.items():
+            button, count = owner_body(buttons, ["export", "component", name])
+            valid = count == 1 and button is not None
+            valid = valid and direct_bindings(button).get("show-tooltip") == [["show-tooltip", ":", "!", "PrReviewTooltipState", ".", "enabled", ";"]]
+            if valid:
+                valid = all(len(sequence_positions(button, ["Pr" + kind + "TooltipAnchor", "{"])) == 1 for kind in kinds)
+            if not valid:
+                print(f"{pr_paths[2]}: {name} must retain its fixed action anchors and suppress the generic publisher")
+        overlay, count = owner_body(portal, ["export", "component", "GitHubPrReviewTooltipOverlay"])
+        host, host_count = (None, 0) if overlay is None else owner_body(overlay, ["GitHubTransientFloatingOverlayHost", "{"])
+        valid = count == 1 and host_count == 1 and host is not None
+        surfaces = {}
+        if valid:
+            depth, start = 0, 0
+            for index, (value, _, quoted) in enumerate(host):
+                if not quoted and depth == 0 and value == "GitHubTooltipSurface" and index + 1 < len(host) and host[index + 1][0] == "{":
+                    prefix = values(host[start:index])
+                    end = closing_brace(host, index + 1)
+                    if len(prefix) != 2 or prefix[1] != ":=" or end is None:
+                        valid = False  # Conditional/repeated text would retain shared measurement.
+                    else:
+                        surfaces[prefix[0]] = direct_bindings(host[index + 2:end])
+                if value == "{":
+                    depth += 1
+                elif value == "}":
+                    depth -= 1
+                    if depth == 0:
+                        start = index + 1
+                elif value == ";" and depth == 0:
+                    start = index + 1
+            valid = valid and len(surfaces) == len(pr_labels) and len(sequence_positions(host, ["GitHubTooltipSurface", "{"])) == len(pr_labels)
+            for kind, label in pr_labels.items():
+                matches = [(name, bindings) for name, bindings in surfaces.items()
+                           if bindings.get("visible") == [["visible", ":", "PrReviewTooltipState", ".", "kind", "==", "PrReviewTooltipKind", ".", kind, ";"]]]
+                if len(matches) != 1:
+                    valid = False
+                    continue
+                name, bindings = matches[0]
+                valid = valid and bindings.get("text") == [["text", ":", "I18n", ".", label, ";"]]
+                for dimension in ("width", "height"):
+                    valid = valid and bool(sequence_positions(host, ["PrReviewTooltipState", ".", "kind", "==", "PrReviewTooltipKind", ".", kind, "?", name, ".", dimension, ":"]))
+        if not valid:
+            print(f"{pr_paths[3]}: PR actions require thirty fixed literal surfaces and matching dimensions in one transient host")
+
 if elevation_path.exists():
     relative = pathlib.Path("ui/components/github_elevation.slint")
     source, tokens = sources[relative]
@@ -612,25 +801,8 @@ if [ -f ui/components/github_elevation.slint ]; then
     fi
 fi
 
-# Slint globals do not cross ComponentFactory/library-module boundaries. Every
-# independently generated route must therefore mount a factory-local tooltip
-# portal at its root, even when its current controls happen not to show tips.
-factory_build_scripts=$(rg -l '\.as_library\(' crates --glob 'build.rs' || true)
-for factory_build_script in $factory_build_scripts; do
-    factory_views=$(rg -o 'ui/views/[^" ]+\.slint' "$factory_build_script" || true)
-    if [ -z "$factory_views" ]; then
-        echo "UI policy: cannot locate the factory root view in $factory_build_script" >&2
-        failed=1
-        continue
-    fi
-
-    for factory_view in $factory_views; do
-        if ! rg -q 'GitHub(Message)?TooltipOverlayHost' "$factory_view"; then
-            echo "UI policy: independent factory root lacks a tooltip portal: $factory_view" >&2
-            failed=1
-        fi
-    done
-done
+# Factory-root portal presence is checked above for legacy builders and the
+# shared compiler helper, including entry points under ui/features/.
 
 # Tooltip surfaces may differ in factory-local state/labels, but all placement
 # must flow through the shared lifecycle facade. Its geometry implementation is

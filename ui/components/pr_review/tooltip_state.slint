@@ -1,0 +1,42 @@
+import { FloatingOverlayRect } from "../../state/floating_overlay_bridge.slint";
+import { TooltipOverlayState, GitHubTooltipPlacement, GitHubTooltipAlignment } from "../../state/tooltip_overlay_state.slint";
+
+// Fixed semantic identities and geometry only; factory-local labels stay in the portal.
+export enum PrReviewTooltipKind { None, ShowCommitDescription, HideCommitDescription, OpenDiffSettings, CopyFullSha, Copied, CloseAiReview, ReviewWithAi, WriteComment, AddComment, ConfigureToComment, ViewCommitDetails, CopyFilePath, CollapseNonDiff, ExpandAllLines, PreviousFile, NextFile, HideFileTree, ShowFileTree, MoreFileActions, CopySourceBranch, ConflictsBack, ConflictsToggleFiles, ConflictsRefresh, ConflictsPrevious, ConflictsNext, ConflictsCopy, ReviewChanges, ConfigureToReview, ChooseMergeMethod, ReverseChanges, }
+export global PrReviewTooltipState {
+    in-out property <bool> enabled: false;
+    in-out property <FloatingOverlayRect> viewport;
+    in-out property <PrReviewTooltipKind> kind: PrReviewTooltipKind.None;
+    in-out property <length> anchor-x;
+    in-out property <length> anchor-y;
+    in-out property <length> anchor-width;
+    in-out property <length> anchor-height;
+    in-out property <GitHubTooltipPlacement> placement: GitHubTooltipPlacement.Top;
+    in-out property <GitHubTooltipAlignment> alignment: GitHubTooltipAlignment.Center;
+    in-out property <int> claim: 0;
+    in-out property <int> lease: 0;
+    callback show(PrReviewTooltipKind, length, length, length, length, GitHubTooltipPlacement, GitHubTooltipAlignment) -> int;
+    callback renew(int, length, length, length, length);
+    callback hide(int);
+    callback dismiss();
+    show(kind, x, y, width, height, placement, alignment) => {
+        if !root.enabled { return 0; }
+        TooltipOverlayState.dismiss-all();
+        root.claim += 1;
+        root.kind = kind;
+        root.anchor-x = x; root.anchor-y = y;
+        root.anchor-width = width; root.anchor-height = height;
+        root.placement = placement; root.alignment = alignment;
+        root.lease += 1;
+        return root.claim;
+    }
+    renew(claim, x, y, width, height) => {
+        if root.enabled && claim == root.claim && root.kind != PrReviewTooltipKind.None {
+            root.anchor-x = x; root.anchor-y = y;
+            root.anchor-width = width; root.anchor-height = height;
+            root.lease += 1;
+        }
+    }
+    hide(claim) => { if claim == root.claim { root.dismiss(); } }
+    dismiss => { root.claim += 1; root.kind = PrReviewTooltipKind.None; }
+}

@@ -1876,7 +1876,10 @@ pub(crate) fn install_titlebar_settings_button(window: &MainWindow) {
             NSRect {
                 origin: NSPoint { x: 0.0, y: 0.0 },
                 size: NSSize {
-                    width: 92.0,
+                    // Alignment follows the shifted traffic lights. Reserve
+                    // that horizontal offset so the trailing sidebar button
+                    // and its native hover/pressed bezel stay inside the host.
+                    width: 92.0 + TRAFFIC_LIGHT_X_OFFSET,
                     // Use the full title-bar inset instead of AppKit's compact
                     // accessory baseline. This lets the 28 px controls sit on
                     // the same visual center as the traffic lights and

@@ -43,7 +43,7 @@ and verification limits belong in the linked spec and current implementation.
 | [HTTP pipeline / HTTP 管线](http.md) | `src/http/mod.rs`, `src/settings/request_preferences.rs`, feature request callers |
 | [State store / 跨页面状态](state-store.md) | `crates/usher-state-store/`, feature-owned facades and persistence workers |
 | [Shared search / 搜索与定位](search.md) | `crates/usher-search/`, feature Find adapters; PR `find_bridge.rs`, `controller/diff_bindings.rs`, `PrDiffBridge` |
-| [Internationalization / 国际化](i18n.md) | `i18n/` Slint/Rust registry and PO scopes, catalog-free `crates/usher-i18n-build/`, `crates/usher-ui-build/` source/output watch boundary, merged runtime `crates/usher-i18n/`, `src/i18n.rs`, locale callbacks and feature projections; Settings/playground `create_page` host-renderer ownership and native repaint acceptance |
+| [Internationalization / 国际化](i18n.md) | `i18n/` Slint/Rust registry and PO scopes, catalog-free `crates/usher-i18n-build/`, `crates/usher-ui-build/` source/output watch boundary, merged runtime `crates/usher-i18n/`, `src/i18n.rs`, locale callbacks and feature projections; Settings/playground/PR Review shared-window host-renderer ownership and native repaint acceptance |
 | [Diagnostics / 诊断日志](diagnostics.md) | `src/diagnostics.rs`, `src/diagnostics/archive.rs`, `src/logger/`, `src/memory_diagnostics.rs`, `src/settings.rs`, shutdown and Settings bridges |
 
 ## UI 与布局 / UI and layout
@@ -76,11 +76,12 @@ contracts here rather than duplicating local iteration summaries in navigation.
 | --- | --- |
 | [Project repository / 项目与仓库元数据](project-repository.md) | `src/project/`, `ui/features/project/bridge.slint`, `src/git/`, `src/codereview/api/` |
 | [PR workflow / PR 读取与评审](pr-review.md) | `src/workflow/pr_data.rs`, `pr_list.rs`, `pr_review/`, `src/git/`, `ui/features/pr_review/`, `ui/components/pr_review/` |
+| [PR Review UI / 审核工厂与编译边界](pr-review-ui.md) | `crates/usher-ui-pr-review/`, `src/workflow/pr_review/ui.rs`, `src/workflow/pr_review/ui/{context,input}.rs`, `controller/{presentation,highlight_session,highlight_cache,highlighting,lifecycle}.rs`, `ui/features/pr_review/`; single models, fixed Tooltip and build modes; earlier short A/B/native checks passed scoped criteria; [full P6](../archive/maintenance/b5-full-p6-20261017.md) complete, 15-minute PR growth/slope failed, B5 unaccepted; preserve A and old strict/B3 failures; [B6](../archive/maintenance/b6-pr-soak-20261017.md) rejected at original-A/B6 final footprint +8.73 MiB >8, full P6 not run; [B7](../archive/maintenance/b7-pr-idle-cache-20261017.md) 40/40 complete: six paired generic/relative and PR gates pass, Hook soak 69 footprint slope fails; strict A12/B0/global0 preserved, whole batch unaccepted / 此前短对照/限定原生检查通过，完整 P6 已完成，15 分钟 PR 增长/斜率失败，B5 未采用，原 A/旧 strict/B3 证据保留；B6 因原 A/B6 最终 footprint +8.73 MiB >8 被拒绝，未执行完整 P6；B7 40/40 完成，六组通用/相对短对照及 PR 门槛通过，Hook soak 69 footprint 斜率失败；strict 原 A12/B0/global0 保留，整批仍未采用 |
 | [PR conflicts / 只读冲突工作区](pr-conflicts.md) | `src/git/conflicts/`, `src/workflow/pr_conflict_status.rs`, `pr_conflict_status_owner.rs`, `src/workflow/pr_review/conflicts/` |
 | [Tag workflow / Tag 流程](tag.md) | `src/workflow/tag.rs`, `src/workflow/tag/` (entry reads remote Tags; create pulls main before rebase/tag / 进入时读取远端 Tag；创建时先拉取 main 再 rebase/打 Tag), `src/workflow/state.rs`, `src/workflow/state/`, `ui/components/workflow/` |
 | [Reusable jobs / Job 运行页与日志](jobs.md) | `src/jobs/`, `ui/views/job_run.slint`, `ui/components/jobs/`, feature controllers |
 | [Application Hooks / 应用 Hook](hooks.md) | `src/hooks/`, project selection, Settings search/grouped list and dialogs, PR/AI completion sources and shutdown drains / 设置搜索与分组列表 |
-| [Release CI / 生产构建与缓存](release-ci.md) | `.github/workflows/release.yml`, `scripts/ci_release_metrics.py`, `scripts/tests/test_release_workflow*.py`; typed `cache_only`, exact default-branch ref guard, blocking production/best-effort diagnostics and layered cache restore / 类型化预热开关、默认分支精确校验、生产阻断/尽力诊断与分层恢复 |
+| [Release CI / 生产构建与缓存](release-ci.md) | `.github/workflows/release.yml`, `scripts/ci_release_{metrics,probe,build}.py`, `scripts/tests/test_*release*.py`; typed prewarm/probes, exact ref/cohort guards, bounded fingerprint facts, failure boundaries, layered cache restore and artifact retention / 类型化预热/探针、精确 ref/批次校验、有界 fingerprint 事实、失败边界、分层缓存和 artifact 保留期 |
 
 ## AI、Chat 与预览 / AI, Chat and preview
 
@@ -114,15 +115,17 @@ unadopted candidates and pending native acceptance are separate from production.
 需要特别区分的当前边界：
 
 - [AI Review](ai-code-review.md)：生产 Session 事务与仅测试的聚合 drain；
-  [PR Review](pr-review.md)：仅离线候选的派生展示释放。
+  [PR Review](pr-review.md)：仅离线候选的派生展示释放；
+  [PR Review UI](pr-review-ui.md)：完整 factory 边界已落地，性能采用与原生验收另记，不由结构通过推定。
 - [PR conflicts](pr-conflicts.md)：当前只读；后续编辑/提交见
   [iteration plan](../pr-conflicts-iterations.md)。
 - [Tray](tray.md)：原生 locale 夹具已有证据，macOS 点击矩阵和 Windows 原生验收仍待完成；
   [i18n](i18n.md)：全路由视觉验收仍待完成。
 - [Chat](chat.md)、[state store](state-store.md)：旧文本兼容与底层 API 边界详见正文；
   不应把兼容机制当作通用语义 Schema 或 checked close。
-- [Release CI](release-ci.md)：诊断隔离、预热和分层恢复已通过本地正反例；未执行
-  托管 runner 构建或冷/暖 A/B，不能从缓存命中或本机 dev 数据推断生产耗时收益。
+- [Release CI](release-ci.md)：诊断隔离、预热和分层恢复已通过本地正反例；已观察到
+  macOS 云端编译/打包成功后因 artifact 配额上传失败，保留期修复仅本地验证。
+  该候选重跑及冷/暖 A/B 未执行，不能从缓存命中或本机 dev 数据推断生产耗时收益。
 
 See those specs for the current production/test/candidate boundaries and gaps.
 The source-audit scope and executed checks are recorded in

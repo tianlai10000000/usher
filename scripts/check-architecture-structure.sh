@@ -47,8 +47,87 @@ check_max "root Slint callbacks" "$(slint_declaration_count ui/main.slint '^[[:s
 check_max "root Slint properties" "$(slint_declaration_count ui/main.slint '^[[:space:]]*(in|out|in-out|private)[[:space:]]+property')" 410
 check_max "PR Review Slint lines" "$(line_count ui/views/workflow/pr_review_workspace.slint)" 4500
 
+# The complete PR factory owns its UI graph and event-loop adapters. These new
+# limits supplement every existing controller/root limit; extraction never
+# grants more room to the old composition owners.
+check_max "PR Review UI owner lines" "$(line_count src/workflow/pr_review/ui.rs)" 120
+check_max "PR Review UI context lines" "$(line_count src/workflow/pr_review/ui/context.rs)" 170
+check_max "PR Review UI input lines" "$(line_count src/workflow/pr_review/ui/input.rs)" 120
+check_max "PR Review modal shortcut regression lines" "$(line_count src/shortcuts/pr_review_modal_tests.rs)" 90
+check_max "PR Review projection lines" "$(line_count src/workflow/pr_review/controller/presentation.rs)" 550
+check_max "PR Review submission owner lines" "$(line_count src/workflow/pr_review/controller/actions/reviews.rs)" 160
+check_max "PR Review UI bridge lines" "$(line_count ui/features/pr_review/bridge.slint)" 190
+check_max "PR Review shell bridge lines" "$(line_count ui/features/pr_review/host_bridge.slint)" 110
+check_max "PR Review UI surface lines" "$(line_count ui/features/pr_review/surface.slint)" 280
+check_max "PR Review factory root lines" "$(line_count ui/features/pr_review/factory.slint)" 80
+check_max "PR Review static host lines" "$(line_count ui/features/pr_review/factory_host.slint)" 40
+check_max "PR Review integrated host lines" "$(line_count ui/features/pr_review/integrated.slint)" 35
+check_max "PR Review build script lines" "$(line_count crates/usher-ui-pr-review/build.rs)" 80
+check_max "PR Review generated module lines" "$(line_count crates/usher-ui-pr-review/src/lib.rs)" 30
+check_max "PR Review Tooltip state lines" "$(line_count ui/components/pr_review/tooltip_state.slint)" 80
+check_max "PR Review Tooltip anchors lines" "$(line_count ui/components/pr_review/tooltip_anchors.slint)" 230
+check_max "PR Review Tooltip buttons lines" "$(line_count ui/components/pr_review/tooltip_buttons.slint)" 160
+check_max "PR Review Tooltip overlay lines" "$(line_count ui/components/pr_review/tooltip_overlay.slint)" 330
+
+# Lexical tripwires, not type resolution: event-loop adapters/projections may
+# bind feature APIs and move models, but must not own I/O, task scheduling or a
+# concrete Store. Grouped imports and namespace aliases cannot bypass this.
+unexpected_pr_ui_work=$(rg -nUH \
+    '\bstd\s*::\s*(fs|io|net|process|thread)\b|\buse\s+std\s*::\s*\{[^;]*\b(fs|io|net|process|thread)\b|\b(tokio|reqwest|LocalStateStore|PersistentStore|SettingsManager|app_runtime)\b|\bhttp\s*::' \
+    src/workflow/pr_review/ui.rs src/workflow/pr_review/ui \
+    src/workflow/pr_review/controller/presentation.rs --glob '*.rs' || true)
+unexpected_pr_shell_models=$(rg -nH '<[[:space:]]*\[' ui/features/pr_review/host_bridge.slint || true)
+unexpected_pr_ui_reverse=$(rg -nH 'from[[:space:]]+"[^"\n]*main\.slint"' \
+    ui/features/pr_review ui/components/pr_review/tooltip_*.slint || true)
+unexpected_pr_package_work=$(rg -nH '\b(reqwest|tokio|usher_i18n|LocalStateStore|PersistentStore)\b|std[[:space:]]*::[[:space:]]*(fs|io|net|process|thread)' \
+    crates/usher-ui-pr-review/src --glob '*.rs' || true)
+unexpected_pr_package_dependency=$(awk '
+    /^\[/ {
+        runtime = ($0 == "[dependencies]");
+        build = ($0 == "[build-dependencies]");
+        if ($0 ~ /dependencies/ && !runtime && !build) print NR ":" $0;
+    }
+    runtime && $0 !~ /^\[dependencies\]$|^slint[[:space:]]*=|^[[:space:]]*(#|$)/ { print NR ":" $0; }
+    build && $0 !~ /^\[build-dependencies\]$|^usher-(ui|i18n)-build[[:space:]]*=|^[[:space:]]*(#|$)/ { print NR ":" $0; }
+' crates/usher-ui-pr-review/Cargo.toml)
+unexpected_pr_package_alias=$(rg -nH 'package[[:space:]]*=' crates/usher-ui-pr-review/Cargo.toml || true)
+# Submission orchestration may use the parent's captured async remote-action
+# facade; direct I/O/clients or another Store still do not belong here.
+unexpected_pr_reviews_work=$(rg -nUH \
+    '\bstd\s*::\s*(fs|io|net|process|thread)\b|\buse\s+std\s*::\s*\{[^;]*\b(fs|io|net|process|thread)\b|\b(reqwest|LocalStateStore|PersistentStore|SettingsManager)\b|\bhttp\s*::' \
+    src/workflow/pr_review/controller/actions/reviews.rs || true)
+if [ -n "$unexpected_pr_ui_work$unexpected_pr_shell_models$unexpected_pr_ui_reverse$unexpected_pr_package_work$unexpected_pr_package_dependency$unexpected_pr_package_alias$unexpected_pr_reviews_work" ]; then
+    echo "Architecture structure: PR Review factory UI owns I/O, scheduling, concrete Stores, shell models or reverse shell imports:" >&2
+    echo "$unexpected_pr_ui_work$unexpected_pr_shell_models$unexpected_pr_ui_reverse$unexpected_pr_package_work$unexpected_pr_package_dependency$unexpected_pr_package_alias$unexpected_pr_reviews_work" >&2
+    failed=1
+fi
+
+# Highlighter may use LatestCompute, but never create I/O, a runtime, or an
+# independent unbounded blocking admission path. Tests are separately bounded.
+unexpected_pr_highlight_work=$(rg -nUH '\bstd\s*::\s*(fs|io|net|process|thread)\b|\b(tokio|reqwest|LocalStateStore|PersistentStore|SettingsManager)\b|spawn_blocking|Builder\s*::' src/workflow/pr_review/controller/highlighting.rs || true)
+if [ -n "$unexpected_pr_highlight_work" ]; then
+    echo "Architecture structure: PR Review highlighting bypasses bounded compute ownership:" >&2
+    echo "$unexpected_pr_highlight_work" >&2
+    failed=1
+fi
+
+# Grammar ownership stays data-only; a reusable graph does not own source I/O,
+# another runtime/store or unbounded work admission.
+unexpected_pr_grammar_work=$(rg -nUH '\bstd\s*::\s*(fs|io|net|process|thread)\b|\b(tokio|reqwest|LocalStateStore|PersistentStore|SettingsManager)\b|spawn_blocking|Builder\s*::' src/workflow/pr_review/controller/highlight_session.rs src/workflow/pr_review/controller/highlight_cache.rs || true)
+if [ -n "$unexpected_pr_grammar_work" ]; then
+    echo "Architecture structure: PR Review grammar ownership contains I/O, runtime or Store work:" >&2
+    echo "$unexpected_pr_grammar_work" >&2
+    failed=1
+fi
+check_max "PR Review session and grammar resource owner lines" "$(line_count src/workflow/pr_review/controller/highlight_session.rs)" 260
+check_max "PR Review idle grammar cache owner lines" "$(line_count src/workflow/pr_review/controller/highlight_cache.rs)" 260
+check_max "PR Review idle grammar cache tests lines" "$(line_count src/workflow/pr_review/controller/highlight_cache_tests.rs)" 280
+check_max "PR Review async idle UI test owner lines" "$(line_count src/workflow/pr_review/controller/async_ui_tests.rs)" 220
+
 # P5-D owners have their own tripwires so extraction cannot hide regrowth.
 check_max "PR Review remote actions lines" "$(line_count src/workflow/pr_review/controller/actions.rs)" 580
+check_max "PR Review highlight worker lines" "$(line_count src/workflow/pr_review/controller/highlighting.rs)" 260
+check_max "PR Review highlight worker tests lines" "$(line_count src/workflow/pr_review/controller/highlighting_tests.rs)" 280
 check_max "PR Review Diff bindings lines" "$(line_count src/workflow/pr_review/controller/diff_bindings.rs)" 430
 check_max "PR Review diagnostics lines" "$(line_count src/workflow/pr_review/controller/diagnostics.rs)" 190
 check_max "Chat viewport policy lines" "$(line_count src/chat/viewport_policy.rs)" 390
@@ -183,7 +262,8 @@ unexpected_ui_build_runtime=$(rg -n \
     crates/usher-ui-build/src --glob '*.rs' --glob '!tests.rs' || true)
 unexpected_direct_ui_compiler=$(rg -n '\bslint_build\b' \
     crates/usher-ui/build.rs crates/usher-ui-settings/build.rs \
-    crates/usher-messages/build.rs crates/usher-ui-components/build.rs || true)
+    crates/usher-messages/build.rs crates/usher-ui-components/build.rs \
+    crates/usher-ui-pr-review/build.rs || true)
 if [ -n "$unexpected_ui_build_dependency$unexpected_ui_build_alias$unexpected_ui_build_runtime$unexpected_direct_ui_compiler" ] \
     || [ -f crates/usher-ui-build/build.rs ]; then
     echo "Architecture structure: shared Slint build integration bypasses its public compiler/source-input boundary:" >&2
@@ -195,6 +275,7 @@ unexpected_i18n_runtime_dependency=$(rg -n \
     '(^usher-i18n[[:space:]]*=|package[[:space:]]*=[[:space:]]*"usher-i18n")' \
     crates/usher-ui/Cargo.toml crates/usher-ui-settings/Cargo.toml \
     crates/usher-messages/Cargo.toml crates/usher-ui-components/Cargo.toml \
+    crates/usher-ui-pr-review/Cargo.toml \
     crates/usher-i18n-build/Cargo.toml || true)
 unexpected_i18n_embedded_catalog=$(rg -n \
     'include(_str)?![[:space:]]*\(|env!\("CARGO_MANIFEST_DIR"\)|usher_i18n::|slint::' \

@@ -371,6 +371,10 @@ Diagnostic setup, cache/timing exports and `Release timing report` are best-effo
 build, packaging, enabled signing, product upload and publication failures still
 block release.
 
+Product Actions artifacts expire after 7 days; diagnostic artifacts after 3 days.
+Published Release assets remain the download source for released versions.
+Shorter retention applies to new uploads and does not remove existing artifacts.
+
 Different tags cannot share tag-scoped caches. To prewarm reusable caches, select
 the default branch in **Release → Run workflow** and set `cache_only` to `true`
 (default: `false`). A case-sensitive branch check runs before checkout. This mode

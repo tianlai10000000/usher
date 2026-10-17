@@ -362,6 +362,32 @@ class JobsMetadataTests(unittest.TestCase):
                 with self.assertRaises(METRICS.MetricsError):
                     METRICS.jobs_metadata(payload(row))
 
+    def test_cancelled_negative_interval_retains_timestamps_and_reports_unknown(self):
+        for in_step in (False, True):
+            row = job()
+            owner = row["steps"][0] if in_step else row
+            owner.update(conclusion="cancelled", started_at="2026-10-16T00:00:05Z",
+                         completed_at="2026-10-16T00:00:04Z")
+            with self.subTest(in_step=in_step):
+                report = METRICS.jobs_metadata(payload(row))
+                projected = report["jobs"][0]["steps"][0] if in_step else report["jobs"][0]
+                self.assertIsNone(projected["duration_seconds"])
+                self.assertEqual(projected["conclusion"], "cancelled")
+                self.assertEqual(projected["started_at"], owner["started_at"])
+                self.assertEqual(projected["completed_at"], owner["completed_at"])
+                self.assertEqual(projected["timing_anomaly"], "cancelled_end_precedes_start")
+                self.assertIn("Timing anomaly", METRICS.render_summary(report))
+
+    def test_non_cancelled_reverse_intervals_remain_invalid(self):
+        for conclusion in ("success", "failure", "skipped", None):
+            for in_step in (False, True):
+                row = job()
+                owner = row["steps"][0] if in_step else row
+                owner.update(conclusion=conclusion, completed_at="2026-10-15T23:59:59Z")
+                with self.subTest(conclusion=conclusion, in_step=in_step):
+                    with self.assertRaises(METRICS.MetricsError):
+                        METRICS.jobs_metadata(payload(row))
+
     def test_failure_durations_are_retained_and_skipped_durations_are_unknown(self):
         for conclusion in ("failure", "cancelled"):
             failed = job(conclusion=conclusion, steps=[step(conclusion=conclusion)])
@@ -474,6 +500,25 @@ class CliTests(unittest.TestCase):
             report = json.loads((output / "timings.json").read_bytes().decode("utf-8"))
             self.assertEqual(report["jobs"][0]["name"], "构建 Windows")
             self.assertIn("打包完成", (output / "summary.md").read_bytes().decode("utf-8"))
+
+    def test_cancelled_negative_step_does_not_discard_other_job_timings(self):
+        with tempfile.TemporaryDirectory(prefix="release cancellation ") as temporary:
+            root = Path(temporary)
+            source = root / "input.json"
+            source.write_text(json.dumps(payload(
+                job(), job(102, conclusion="cancelled", steps=[step(
+                    conclusion="cancelled", completed_at="2026-10-16T00:00:04Z",
+                    private=SECRET)]))))
+            output = root / "out"
+            result = self.run_cli("jobs", "--input", source, "--output-dir", output)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            text = (output / "timings.json").read_text()
+            rows = json.loads(text)["jobs"]
+            self.assertEqual(rows[0]["duration_seconds"], 20)
+            self.assertIsNone(rows[1]["steps"][0]["duration_seconds"])
+            self.assertEqual(rows[1]["steps"][0]["timing_anomaly"], "cancelled_end_precedes_start")
+            self.assertIn("Timing anomaly", (output / "summary.md").read_text())
+            self.assertNotIn(SECRET, text + result.stdout + result.stderr)
 
     def test_invalid_json_and_invalid_schema_do_not_echo_payload(self):
         for label, contents in (

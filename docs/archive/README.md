@@ -42,6 +42,14 @@ for current development.
 | Terminal 排查 | [terminal_viewport_iteration_notes.md](terminal_viewport_iteration_notes.md) |
 | AI Review 超时 | [ai-review-response-timeout-investigation.md](ai-review-response-timeout-investigation.md) |
 | Workflow 回滚 | [workflow-optimization-rollback.md](workflow-optimization-rollback.md) |
+| Release artifact 配额 | [2026-10-16 调查与保留策略](maintenance/release-artifact-quota-20261016.md)；当前契约见 [Release CI](../specs/release-ci.md) |
+| Release 成功运行 | [2026-10-16 阶段、缓存与编译瓶颈审计](maintenance/release-ci-success-audit-20261016.md)；观察结果不是受控性能 A/B |
+| Release fingerprint | [2026-10-16 诊断与严格缓存探针](maintenance/release-ci-fingerprint-20261016.md)；本地验证与尚未执行的云端范围分别记录 |
+| MainWindow PR 编译拆分 / PR compilation split | [2026-10-16 十组编译对照与回归](maintenance/mainwindow-build-split-20261016.md)；编译收益确认，运行时门禁失败，B3 拒绝进入新基线 / compile gains measured, runtime gates failed, candidate rejected |
+| PR 运行时后续 / PR runtime follow-up | [2026-10-17 归因与有界高亮对照](maintenance/pr-review-runtime-20261017.md)；B4 拒绝，B5 候选门槛与限定 macOS 原生检查通过；联合 strict 保留 12 项原 A 失败，保留 B5 候选但不晋升整批基线 / B4 rejected, B5 scoped criteria/native checks pass, joint strict retains A-only failures, no whole-batch baseline promotion |
+| B5 完整 P6 / Full P6 and soak | [2026-10-17 完整回归与长时失败](maintenance/b5-full-p6-20261017.md)；40/40 完成关闭，六组短对照及另外三组 soak 通过，15 分钟 PR RSS 增长/斜率失败，B5 仍未采用；旧 2× 与新 1× 批次不混用 / complete, paired fixtures and three other soaks pass, PR sustained growth/slope fail, no adoption |
+| B6 PR soak 归因 / Investigation | [2026-10-17 语法资源生命周期对照](maintenance/b6-pr-soak-20261017.md)；2 次长时及 6 次原 A/B6 短对照完成，B6 RSS 增长/斜率通过，但最终 footprint 增量 8.73 MiB 超过 8 MiB，拒绝 B6；完整 P6 未执行，原 A/B5 历史保留 / two sustained and six original-A/B6 paired runs complete; B6 RSS growth/slope pass, final footprint delta 8.73 MiB exceeds 8 MiB, rejected; full P6 not run, original A/B5 history preserved |
+| B7 PR 空闲资源 / Idle resources | [2026-10-17 合并空闲检查与后台释放](maintenance/b7-pr-idle-cache-20261017.md)；40/40 完成且证据完整性通过，六组通用/相对短对照及 PR 门槛通过，Hook soak 69 footprint 斜率 0.979011 >0.5 失败；strict 原 A12/B7 0/global0 独立保留，B7/整批未采用；原 A 基线、Release 与门槛不变 / complete; candidate PR passes, Hook footprint slope fails, historical A-only strict failures preserved, no baseline promotion |
 | 2026-10-14 维护 | [安全批次 1–5](maintenance/security-maintenance-20261014.md) · [结构批次 6](maintenance/structure-cleanup-20261014.md)；原始门禁输出已校验并本地归档，恢复索引见 [validation/（归档：docs/validation/）](../local-archives.md#validation-tracked-history-20261016) |
 
 ## UI 与 PR 冲突 / UI and PR conflicts

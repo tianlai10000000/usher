@@ -1,3 +1,7 @@
+import { PrReviewTooltipState } from "../../components/pr_review/tooltip_state.slint";
+import { GitHubPrCopyShaButton, GitHubPrCopyPathButton, GitHubPrDynamicCopyButton, GitHubPrAiReviewButton } from "../../components/pr_review/tooltip_buttons.slint";
+import { PrViewCommitDetailsTooltipAnchor, PrWriteCommentTooltipAnchor, PrAddCommentTooltipAnchor, PrConfigureToCommentTooltipAnchor } from "../../components/pr_review/tooltip_anchors.slint";
+import { GitHubPrOpenDiffSettingsButton, GitHubPrPreviousFileButton, GitHubPrNextFileButton, GitHubPrContextToggleButton } from "../../components/pr_review/content.slint";
 import { GitHubResizeHandle } from "../../components/github_resize_handle.slint";
 import { ScrollView } from "@material";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
@@ -994,7 +998,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                 root.ensure-commits();
                             }
                         }
-                        diff-settings-button := GitHubFileToolbarButton {
+                        diff-settings-button := GitHubPrOpenDiffSettingsButton {
                             width: 30px;
                             height: parent.height;
                             icon-source: @image-url("../../assets/icons/octicon-gear-16.svg");
@@ -1102,7 +1106,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                         horizontal-alignment: right;
                         vertical-alignment: center;
                     }
-                    GitHubCopyButton {
+                    GitHubPrDynamicCopyButton {
                         tooltip-text: I18n.pr-review-copy-full-sha-for + " "
                             + root.commits[root.commit-range-start].short-sha;
                         tooltip-align-right: true;
@@ -1117,7 +1121,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                     // inset so it remains distinct from the review-pane divider.
                     width: GitHubMetrics.control-medium-size + GitHubMetrics.size-12;
                     height: parent.height;
-                    GitHubIconButton {
+                    GitHubPrAiReviewButton {
                         y: (parent.height - self.height) / 2;
                         icon: @image-url("../../assets/icons/octicon-copilot-16.svg");
                         invisible: true;
@@ -2012,12 +2016,16 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                     color: root.github-fg-muted;
                                     vertical-alignment: center;
                                 }
-                                GitHubCommentButton {
+                                comment-action := GitHubCommentButton {
                                     x: parent.width - 108px;
                                     y: 10px;
                                     width: 96px;
                                     height: 32px;
                                     text: root.action-loading ? I18n.pr-review-commenting : I18n.pr-review-comment;
+                                    show-tooltip: !PrReviewTooltipState.enabled;
+                                    PrWriteCommentTooltipAnchor { active: PrReviewTooltipState.enabled && comment-action.tooltip-active && root.can-comment && root.conversation-comment-body == ""; alignment: GitHubTooltipAlignment.End; }
+                                    PrAddCommentTooltipAnchor { active: PrReviewTooltipState.enabled && comment-action.tooltip-active && root.can-comment && root.conversation-comment-body != ""; alignment: GitHubTooltipAlignment.End; }
+                                    PrConfigureToCommentTooltipAnchor { active: PrReviewTooltipState.enabled && comment-action.tooltip-active && !root.can-comment; alignment: GitHubTooltipAlignment.End; }
                                     button-enabled: root.can-comment && !root.action-loading && root.conversation-comment-body != "";
                                     tooltip-text: root.can-comment
                                         ? (root.conversation-comment-body == ""
@@ -2436,13 +2444,14 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                     commit-row.sha-hovered = self.has-hover;
                                 }
                             }
+                            PrViewCommitDetailsTooltipAnchor { active: PrReviewTooltipState.enabled && commit-row.sha-hovered; alignment: GitHubTooltipAlignment.End; }
                             GitHubTooltip {
                                 preferred-placement: GitHubTooltipPlacement.Top;
                                 alignment: GitHubTooltipAlignment.End;
-                                text: commit-row.sha-hovered ? I18n.pr-review-view-commit-details : "";
+                                text: !PrReviewTooltipState.enabled && commit-row.sha-hovered ? I18n.pr-review-view-commit-details : "";
                             }
                         }
-                        copy-sha-button := GitHubCopyButton {
+                        copy-sha-button := GitHubPrCopyShaButton {
                             x: parent.width - 44px;
                             y: (parent.height - self.height) / 2;
                             tooltip-text: I18n.pr-review-copy-full-sha;
@@ -3015,7 +3024,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                             overflow: elide;
                                             vertical-alignment: center;
                                         }
-                                        GitHubCopyButton {
+                                        GitHubPrCopyPathButton {
                                             button-enabled: root.selected-file-path != "";
                                             tooltip-text: I18n.pr-review-copy-file-path;
                                             // An above-tooltip would leave this toolbar's
@@ -3023,14 +3032,12 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                             tooltip-above: false;
                                             copy-requested => { root.copy-file-path(root.selected-file-path) }
                                         }
-                                        GitHubFileToolbarButton {
+                                        GitHubPrContextToggleButton {
                                             icon-source: root.context-expanded
                                                 ? @image-url("../../assets/icons/octicon-fold-16.svg")
                                                 : @image-url("../../assets/icons/octicon-unfold-16.svg");
                                             button-enabled: (root.has-expandable-hunks || root.context-expanded) && !root.viewing-file && !root.code-loading;
-                                            tooltip-text: root.context-expanded
-                                                ? I18n.pr-review-collapse-non-diff
-                                                : I18n.pr-review-expand-all-lines;
+                                            context-expanded: root.context-expanded;
                                             clicked => {
                                                 if root.context-expanded { root.collapse-non-diff-lines(); }
                                                 else { root.expand-all-hunks(); }
@@ -3086,13 +3093,13 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                     color: GitHubTheme.fg-muted;
                                     vertical-alignment: center;
                                 }
-                                if !root.diff-find-open: GitHubFileToolbarButton {
+                                if !root.diff-find-open: GitHubPrPreviousFileButton {
                                     icon-source: @image-url("../../assets/icons/octicon-chevron-left-16.svg");
                                     button-enabled: root.selected-file-index > 0 && !root.code-loading;
                                     tooltip-text: I18n.pr-review-previous-file;
                                     clicked => { root.select-relative-file(-1); }
                                 }
-                                if !root.diff-find-open: GitHubFileToolbarButton {
+                                if !root.diff-find-open: GitHubPrNextFileButton {
                                     icon-source: @image-url("../../assets/icons/octicon-chevron-right-16.svg");
                                     button-enabled: root.selected-file-index >= 0 && root.selected-file-index + 1 < root.files.length && !root.code-loading;
                                     tooltip-text: I18n.pr-review-next-file;

@@ -1,5 +1,6 @@
 use i_slint_backend_testing::ElementHandle;
 use slint::{ComponentHandle, LogicalSize, ModelRc, VecModel};
+use usher_lib::PrReviewUiExt;
 use usher_lib::{MainWindow, Route, WorkflowPullRequestItem};
 
 fn find(ui: &MainWindow, id: &str) -> ElementHandle {
@@ -168,7 +169,9 @@ fn metadata_flows_compactly_without_overlapping_or_reserved_status_columns() {
 
     let opened = std::rc::Rc::new(std::cell::Cell::new(-1));
     let selected = opened.clone();
-    ui.on_workflow_pr_review_open(move |_, _, _, _, _, _, tab| selected.set(tab));
+    ui.pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .on_workflow_pr_review_open(move |_, _, _, _, _, _, tab| selected.set(tab));
     for (id, tab) in [
         ("GitHubPullRequestFlow::review-status-touch", 0),
         ("GitHubPullRequestFlow::conflict-badge", 3),

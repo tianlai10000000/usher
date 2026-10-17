@@ -1,3 +1,4 @@
+use crate::pr_review_ui::PrReviewUiExt;
 use chrono::{DateTime, Datelike, FixedOffset, Timelike, Utc};
 
 use crate::git::{
@@ -89,7 +90,8 @@ pub(crate) fn bind_pr_list(ui: &MainWindow) -> WorkflowPrListController {
 
     let conflict_controller = controller.clone();
     let weak = ui.as_weak();
-    ui.global::<crate::PrConflictsBridge>()
+    ui.pr_review()
+        .global::<crate::PrConflictsBridge>()
         .on_refresh_list(move || {
             if let Some(ui) = weak.upgrade()
                 && let Some(metadata) = conflict_controller
@@ -930,7 +932,8 @@ fn apply_page_to_ui(
     let page = page.clamp(1, page_count);
     let items = items.iter().map(to_slint_item).collect::<Vec<_>>();
     ui.set_workflow_pr_list_items(ModelRc::new(VecModel::from(items)));
-    ui.global::<crate::PrConflictsBridge>()
+    ui.pr_review()
+        .global::<crate::PrConflictsBridge>()
         .invoke_refresh_list();
     ui.invoke_ai_review_refresh_pr_rows();
     ui.set_workflow_pr_list_page(page as i32);

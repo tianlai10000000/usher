@@ -1,0 +1,242 @@
+import { GitHubPullRequestReviewPage } from "@pr-review-page";
+import { PrReviewBridge } from "bridge.slint";
+import { PrReviewHostBridge } from "host_bridge.slint";
+import { PrDiffBridge } from "diff_bridge.slint";
+
+// Page and all owned Diff/Find/Conflicts/dialog children stay in one UI graph.
+export component PrReviewSurface inherits Rectangle {
+    background: transparent;
+    if PrReviewHostBridge.context.active: GitHubPullRequestReviewPage {
+        // Keep the large PR render tree fixed at the window origin. Moving the
+        // complete frozen diff tree during native live resize can retain a
+        // stale compositor transform; ordinary content applies the discrete
+        // sidebar inset inside the component instead.
+        x: 0px;
+        y: PrReviewHostBridge.context.titlebar-inset;
+        width: root.width;
+        height: PrReviewHostBridge.context.content-height;
+        z: 800;
+        application-width: root.width;
+        application-height: root.height;
+        shell-leading-inset: PrReviewHostBridge.context.content-x;
+        shell-content-width: PrReviewHostBridge.context.content-width;
+        // Divider drags use the same bounded-cost projection as native live
+        // resize and commit the expensive diff layout once on release.
+        live-resizing: PrReviewHostBridge.context.live-resizing;
+        project-name: PrReviewHostBridge.context.project-name;
+        provider: PrReviewHostBridge.context.provider;
+        pull-request-number: PrReviewBridge.workflow-pr-review-number;
+        pull-request-title: PrReviewBridge.workflow-pr-review-title;
+        author: PrReviewBridge.workflow-pr-review-author;
+        source-branch: PrReviewBridge.workflow-pr-review-source-branch;
+        target-branch: PrReviewBridge.workflow-pr-review-target-branch;
+        updated-at: PrReviewBridge.workflow-pr-review-updated-at;
+        updated-at-tooltip: PrReviewBridge.workflow-pr-review-updated-at-tooltip;
+        added-lines: PrReviewBridge.workflow-pr-review-added-lines;
+        removed-lines: PrReviewBridge.workflow-pr-review-removed-lines;
+        commit-count: PrReviewBridge.workflow-pr-review-commit-count;
+        conversation-count: PrReviewBridge.workflow-pr-review-conversation-count;
+        base-sha: PrReviewBridge.workflow-pr-review-base-sha;
+        head-sha: PrReviewBridge.workflow-pr-review-head-sha;
+        too-many-commits: PrReviewBridge.workflow-pr-review-too-many-commits;
+        files-truncated: PrReviewBridge.workflow-pr-review-files-truncated;
+        selected-tab <=> PrReviewBridge.workflow-pr-review-tab;
+        conversation-items: PrReviewBridge.workflow-pr-review-conversation-items;
+        conversation-content-height: PrReviewBridge.workflow-pr-review-conversation-content-height;
+        expanded-commit-body-height: PrReviewBridge.workflow-pr-review-expanded-commit-body-height;
+        commits: PrReviewBridge.workflow-pr-review-commits;
+        conversation-loading: PrReviewBridge.workflow-pr-review-conversation-loading;
+        commits-loading: PrReviewBridge.workflow-pr-review-commits-loading;
+        conversation-error: PrReviewBridge.workflow-pr-review-conversation-error;
+        commits-error: PrReviewBridge.workflow-pr-review-commits-error;
+        commit-range-start: PrReviewBridge.workflow-pr-review-commit-range-start;
+        commit-range-end: PrReviewBridge.workflow-pr-review-commit-range-end;
+        commit-range-label: PrReviewBridge.workflow-pr-review-commit-range-label;
+        files: PrReviewBridge.workflow-pr-review-files;
+        tree-items: PrReviewBridge.workflow-pr-review-tree-items;
+        extension-filters: PrReviewBridge.workflow-pr-review-extension-filters;
+        only-manifest-files: PrReviewBridge.workflow-pr-review-only-manifest-files;
+        show-viewed-files: PrReviewBridge.workflow-pr-review-show-viewed-files;
+        file-filters-active: PrReviewBridge.workflow-pr-review-file-filters-active;
+        lines: PrReviewBridge.workflow-pr-review-lines;
+        line-metrics: PrReviewBridge.workflow-pr-review-line-metrics;
+        max-code-columns: PrReviewBridge.workflow-pr-review-max-code-columns;
+        longest-code-line: PrReviewBridge.workflow-pr-review-longest-code-line;
+        line-content-revision: PrReviewBridge.workflow-pr-review-line-content-revision;
+        find-result-revision: PrReviewBridge.workflow-pr-review-find-result-revision;
+        line-model-revision: PrReviewBridge.workflow-pr-review-line-model-revision;
+        scroll-diagnostics-enabled: PrReviewBridge.workflow-pr-review-scroll-diagnostics-enabled;
+        hunk-scroll-anchor-source-index: PrReviewBridge.workflow-pr-review-hunk-scroll-anchor-source-index;
+        hunk-scroll-restore-revision: PrReviewBridge.workflow-pr-review-hunk-scroll-restore-revision;
+        location-row-index: PrReviewBridge.workflow-pr-review-location-row-index;
+        location-side: PrReviewBridge.workflow-pr-review-location-side;
+        location-reveal-revision: PrReviewBridge.workflow-pr-review-location-reveal-revision;
+        code-font-family: PrReviewHostBridge.context.code-font-family;
+        code-font-size: PrReviewHostBridge.context.code-font-size;
+        tree-font-family: PrReviewHostBridge.context.tree-font-family;
+        file-list-preferred-width <=> PrReviewBridge.workflow-pr-review-file-list-width;
+        selected-file-index: PrReviewBridge.workflow-pr-review-selected-file-index;
+        selected-file-path: PrReviewBridge.workflow-pr-review-selected-file-path;
+        selected-file-added-lines: PrReviewBridge.workflow-pr-review-selected-file-added-lines;
+        selected-file-removed-lines: PrReviewBridge.workflow-pr-review-selected-file-removed-lines;
+        has-expandable-hunks: PrReviewBridge.workflow-pr-review-has-expandable-hunks;
+        context-expanded: PrReviewBridge.workflow-pr-review-context-expanded;
+        viewing-file: PrReviewBridge.workflow-pr-review-viewing-file;
+        loading: PrReviewBridge.workflow-pr-review-loading;
+        code-loading: PrReviewBridge.workflow-pr-review-code-loading;
+        large-diff-deferred: PrReviewBridge.workflow-pr-review-large-diff-deferred;
+        large-diff-loading: PrReviewBridge.workflow-pr-review-large-diff-loading;
+        error-text: PrReviewBridge.workflow-pr-review-error;
+        error-kind: PrReviewBridge.workflow-pr-review-error-kind;
+        ignore-whitespace-supported: PrReviewBridge.workflow-pr-review-ignore-whitespace-supported;
+        merge-delete-source-branch-supported: PrReviewBridge.workflow-pr-merge-delete-source-branch-supported;
+        ignore-whitespace <=> PrReviewBridge.workflow-pr-review-ignore-whitespace;
+        diff-view <=> PrReviewBridge.workflow-pr-review-diff-view;
+        file-filter <=> PrReviewBridge.workflow-pr-review-file-filter;
+        review-dialog-open <=> PrReviewBridge.workflow-pr-review-dialog-open;
+        dismiss-review-dialog-open <=> PrReviewBridge.workflow-pr-dismiss-review-dialog-open;
+        merge-dialog-open <=> PrReviewBridge.workflow-pr-merge-dialog-open;
+        revert-dialog-open <=> PrReviewBridge.workflow-pr-revert-dialog-open;
+        commit-range-dialog-open <=> PrReviewBridge.workflow-pr-commit-range-dialog-open;
+        action-loading: PrReviewBridge.workflow-pr-action-loading;
+        can-comment: PrReviewBridge.workflow-pr-can-comment;
+        can-approve: PrReviewBridge.workflow-pr-can-approve;
+        can-request-changes: PrReviewBridge.workflow-pr-can-request-changes;
+        remote-review-state: PrReviewBridge.workflow-pr-remote-review-state;
+        comment-submission-revision: PrReviewBridge.workflow-pr-comment-submission-revision;
+        can-merge: PrReviewBridge.workflow-pr-can-merge;
+        can-revert: PrReviewBridge.workflow-pr-can-revert;
+        merge-readiness-kind: PrReviewBridge.workflow-pr-merge-readiness-kind;
+        merge-readiness-label: PrReviewBridge.workflow-pr-merge-readiness-label;
+        merge-readiness-detail: PrReviewBridge.workflow-pr-merge-readiness-detail;
+        merge-block-reason: PrReviewBridge.workflow-pr-merge-block-reason;
+        revert-block-reason: PrReviewBridge.workflow-pr-revert-block-reason;
+        revert-action-label: PrReviewBridge.workflow-pr-revert-action-label;
+        revert-confirmation: PrReviewBridge.workflow-pr-revert-confirmation;
+        merge-method-merge: PrReviewBridge.workflow-pr-merge-method-merge;
+        merge-method-squash: PrReviewBridge.workflow-pr-merge-method-squash;
+        merge-method-rebase: PrReviewBridge.workflow-pr-merge-method-rebase;
+        merge-method-fast-forward: PrReviewBridge.workflow-pr-merge-method-fast-forward;
+        selected-merge-method <=> PrReviewBridge.workflow-pr-selected-merge-method;
+        default-merge-method => { return PrReviewBridge.workflow-pr-default-merge-method(); }
+        ai-review-status: PrReviewHostBridge.context.ai-status;
+        ai-review-finding-count: PrReviewHostBridge.context.ai-finding-count;
+        ai-review-panel-visible: PrReviewHostBridge.context.ai-visible;
+        select-tab(tab) => { PrReviewBridge.workflow-pr-review-select-tab(tab); }
+        ensure-commits => { PrReviewBridge.workflow-pr-review-ensure-commits(); }
+        apply-commit-range(start, end) => { PrReviewBridge.workflow-pr-review-apply-commit-range(start, end); }
+        open-commit(sha) => { PrReviewBridge.workflow-pr-review-open-commit(sha); }
+        select-file(index) => { PrReviewBridge.workflow-pr-review-select-file(index); }
+        select-relative-file(offset) => { PrReviewBridge.workflow-pr-review-select-relative-file(offset); }
+        reload(ignore-whitespace) => { PrReviewBridge.workflow-pr-review-reload(ignore-whitespace); }
+        apply-diff-settings(diff-view, ignore-whitespace) => {
+            PrReviewBridge.workflow-pr-review-apply-diff-settings(diff-view, ignore-whitespace);
+        }
+        load-large-diff => { PrReviewBridge.workflow-pr-review-load-large-diff(); }
+        filter-files(query) => { PrReviewBridge.workflow-pr-review-filter-files(query); }
+        toggle-extension-filter(extension) => { PrReviewBridge.workflow-pr-review-toggle-extension-filter(extension); }
+        toggle-manifest-filter => { PrReviewBridge.workflow-pr-review-toggle-manifest-filter(); }
+        toggle-viewed-files => { PrReviewBridge.workflow-pr-review-toggle-viewed-files(); }
+        toggle-folder(path) => { PrReviewBridge.workflow-pr-review-toggle-folder(path); }
+        expand-hunk(line-index, direction) => {
+            PrReviewBridge.workflow-pr-review-expand-hunk(line-index, direction);
+        }
+        expand-all-hunks => { PrReviewBridge.workflow-pr-review-expand-all-hunks(); }
+        collapse-non-diff-lines => { PrReviewBridge.workflow-pr-review-collapse-non-diff-lines(); }
+        copy-file-path(path) => { PrReviewBridge.workflow-pr-review-copy-file-path(path) }
+        copy-commit-sha(sha) => { PrReviewBridge.workflow-pr-review-copy-commit-sha(sha) }
+        copy-source-branch(branch) => { PrReviewBridge.workflow-pr-review-copy-source-branch(branch) }
+        copy-diff-selection(start-line, start-col, end-line, end-col, side) => {
+            PrReviewBridge.workflow-pr-review-copy-diff-selection(start-line, start-col, end-line, end-col, side);
+        }
+        resolve-diff-selection(line, x, y, row-height, code-width, cell-width, line-pitch, family, size, side) => {
+            PrDiffBridge.workflow-pr-review-resolve-diff-selection(line, x, y, row-height, code-width, cell-width, line-pitch, family, size, side)
+        }
+        resolve-diff-token-hit(text, x, width, family, size, bold, italic) => {
+            PrDiffBridge.workflow-pr-review-resolve-diff-token-hit(text, x, width, family, size, bold, italic)
+        }
+        resolve-diff-token-range(text, start, end, width, family, size, bold, italic) => {
+            PrDiffBridge.workflow-pr-review-resolve-diff-token-range(
+                text, start, end, width, family, size, bold, italic
+            )
+        }
+        resolve-diff-wrapped-range(text, start, end, width, pitch, family, size) => {
+            PrDiffBridge.workflow-pr-review-resolve-diff-wrapped-range(
+                text, start, end, width, pitch, family, size
+            )
+        }
+        resolve-diff-selection-slice(line, side, start-col, end-col) => {
+            PrDiffBridge.workflow-pr-review-resolve-diff-selection-slice(line, side, start-col, end-col)
+        }
+        resolve-diff-wrap-line-start(line, side, caret, max-cols) => {
+            PrDiffBridge.workflow-pr-review-resolve-diff-wrap-line-start(line, side, caret, max-cols)
+        }
+        resolve-diff-click-range(line, column, side, mode) => {
+            PrDiffBridge.workflow-pr-review-resolve-diff-click-range(line, column, side, mode)
+        }
+        find-diff-matches(query, split) => {
+            PrDiffBridge.workflow-pr-review-find-diff-matches(query, split)
+        }
+        find-diff-row-matches(line, side, query) => {
+            PrDiffBridge.workflow-pr-review-find-diff-row-matches(line, side, query)
+        }
+        step-diff-find-index(current, count, backward) => {
+            PrDiffBridge.workflow-pr-review-step-diff-find-index(current, count, backward)
+        }
+        resolve-diff-find-viewport-y(line, start-char, code-width, cell-width, side, current-viewport-y, visible-height, content-height) => {
+            PrDiffBridge.workflow-pr-review-resolve-diff-find-viewport-y(
+                line,
+                start-char,
+                code-width,
+                cell-width,
+                side,
+                current-viewport-y,
+                visible-height,
+                content-height
+            )
+        }
+        resolve-location-viewport-y(line, current-viewport-y, visible-height) => {
+            PrDiffBridge.workflow-pr-review-resolve-location-viewport-y(
+                line,
+                current-viewport-y,
+                visible-height
+            )
+        }
+        layout-diff-virtual-window(revision, metrics, scroll-offset, visible-height, code-width, cell-width, code-line-height, hunk-line-height) => {
+            PrDiffBridge.workflow-pr-review-layout-diff-virtual-window(
+                revision,
+                metrics,
+                scroll-offset,
+                visible-height,
+                code-width,
+                cell-width,
+                code-line-height,
+                hunk-line-height
+            )
+        }
+        diagnose-diff-scroll(kind, viewport-y, requested-y, visible-height, viewport-height, find-open, find-focused, hunk-pending, find-revision, line-revision, hunk-attempts) => {
+            PrDiffBridge.workflow-pr-review-diagnose-diff-scroll(
+                kind,
+                viewport-y,
+                requested-y,
+                visible-height,
+                viewport-height,
+                find-open,
+                find-focused,
+                hunk-pending,
+                find-revision,
+                line-revision,
+                hunk-attempts
+            )
+        }
+        view-file => { PrReviewBridge.workflow-pr-review-view-file(); }
+        open-settings => { PrReviewHostBridge.open-settings(); }
+        toggle-commit-message(sha) => { PrReviewBridge.workflow-pr-review-toggle-commit-message(sha); }
+        submit-review(action, body) => { PrReviewBridge.workflow-pr-submit-review(action, body); }
+        dismiss-review(review-id, reason) => { PrReviewBridge.workflow-pr-dismiss-review(review-id, reason); }
+        merge(method, remove-source-branch) => { PrReviewBridge.workflow-pr-merge(method, remove-source-branch); }
+        revert => { PrReviewBridge.workflow-pr-revert(); }
+        toggle-ai-review => { PrReviewHostBridge.toggle-ai-review(); }
+    }
+
+}

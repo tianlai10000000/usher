@@ -215,7 +215,6 @@ pub(crate) fn tr_args(key: &str, arguments: &[(&str, &str)]) -> String {
 mod tests {
     use super::*;
     use i_slint_backend_testing::ElementHandle;
-    #[cfg(all(feature = "ui-components", not(feature = "live-preview")))]
     use slint::ComponentHandle;
     use usher_messages::AppState as MessagesAppState;
     use usher_ui_settings::{AppState as SettingsAppState, GitHubSettingsPage};
@@ -263,10 +262,38 @@ mod tests {
         let window = MainWindow::new().expect("main window");
         let settings = GitHubSettingsPage::new().expect("settings page");
         let messages = usher_messages::GitHubMessagesPage::new().expect("messages page");
+        // Static builds resolve a separate global graph on the same actual
+        // WindowAdapter. Integrated preview resolves the existing MainWindow;
+        // neither path reconstructs PR data models for locale changes.
+        let review = crate::pr_review_fixture_view(&window);
+        let assert_review_catalog = |locale: &str| {
+            let expected = usher_i18n::translate_for(locale, "language.title");
+            #[cfg(not(feature = "live-preview"))]
+            assert_eq!(
+                review
+                    .global::<usher_ui_pr_review::AppState>()
+                    .get_i18n_catalog_sentinel(),
+                expected,
+                "PR Review factory must retain the complete UI catalog ordering"
+            );
+            #[cfg(feature = "live-preview")]
+            assert_eq!(AppState::get(&review).get_i18n_catalog_sentinel(), expected);
+            let state = review.global::<crate::PrReviewBridge>();
+            assert_eq!(
+                state.get_workflow_pr_review_commit_range_label(),
+                usher_i18n::translate_for(locale, "pr_review.all_commits"),
+                "PR Review global copy must refresh at the same language index"
+            );
+            assert_eq!(
+                state.get_workflow_pr_revert_action_label(),
+                usher_i18n::translate_for(locale, "pr_review.revert_pull_request")
+            );
+        };
         #[cfg(all(feature = "ui-components", not(feature = "live-preview")))]
         let gallery = usher_ui_components::GitHubUiComponentsWindow::new().expect("gallery page");
 
         apply_preference(usher_i18n::source_locale().id).expect("select source language");
+        assert_review_catalog(usher_i18n::source_locale().id);
         #[cfg(all(feature = "ui-components", not(feature = "live-preview")))]
         assert_eq!(
             gallery
@@ -294,6 +321,7 @@ mod tests {
             .filter(|locale| locale.id != usher_i18n::source_locale().id)
         {
             apply_preference(locale.id).expect("select packaged locale");
+            assert_review_catalog(locale.id);
             sync_main_window(&window, locale.id);
             assert_eq!(
                 window.get_workflow_pr_list_compact_text_offset_y(),
@@ -339,6 +367,7 @@ mod tests {
         }
 
         apply_preference(usher_i18n::source_locale().id).expect("restore source language");
+        assert_review_catalog(usher_i18n::source_locale().id);
         sync_main_window(&window, usher_i18n::source_locale().id);
     }
 }

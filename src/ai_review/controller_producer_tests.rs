@@ -1,4 +1,5 @@
 use super::*;
+use crate::pr_review_ui::PrReviewUiExt;
 use std::sync::mpsc;
 use usher_messages::NoopDesktopNotifier;
 
@@ -12,6 +13,9 @@ fn fixture(initial: ReviewTaskState, deferred: bool) -> Fixture {
     i_slint_backend_testing::init_no_event_loop();
     let root = tempfile::tempdir().unwrap();
     let window = MainWindow::new().unwrap();
+    // Match the composition root: install the shared-window PR factory before
+    // AI callbacks can observe its initial route/visibility publication.
+    crate::pr_review_ui::install(&window);
     let config = ReviewConfigFacade::isolated(root.path().join("config.json"));
     let task_store: Arc<TaskStore> = Arc::new(LocalStateStore::new(initial, reduce_tasks));
     let catalog = task_store.clone();
@@ -235,17 +239,29 @@ fn prepare_ask(fixture: &Fixture) {
         .unwrap()
         .clone();
     fixture.window.set_current_route(Route::PrReview);
+    fixture.window.set_ai_review_panel_visible(true);
     fixture
         .window
-        .set_ai_review_current_task_id(task.id.0.into());
+        .set_ai_review_current_task_id(task.id.0.clone().into());
     fixture
         .window
         .set_workflow_project_id(task.target.project_key.0.into());
     fixture
         .window
+        .pr_review()
+        .global::<crate::PrReviewBridge>()
         .set_workflow_pr_review_number(task.target.pull_request_number.into());
     fixture.window.set_ai_review_chat_sending(false);
-    fixture.controller.inner.begin_response_mount();
+    let generation = fixture.controller.inner.begin_response_mount();
+    assert_eq!(fixture.window.get_current_route(), Route::PrReview);
+    assert!(fixture.window.get_ai_review_panel_visible());
+    assert_eq!(fixture.window.get_ai_review_current_task_id(), task.id.0);
+    assert!(
+        fixture
+            .controller
+            .inner
+            .response_mount_is_current(generation)
+    );
 }
 
 #[test]
@@ -258,6 +274,7 @@ fn accepted_ask_waits_its_blocking_user_receipt_even_after_shutdown_waiter_is_ca
     fixture
         .window
         .invoke_ai_review_send_message("Accepted before shutdown".into());
+    assert!(fixture.window.get_ai_review_chat_sending());
     gate.entered.recv_timeout(Duration::from_secs(5)).unwrap();
     let controller = fixture.controller.clone();
     let first = crate::app_runtime::shared_runtime()
@@ -365,6 +382,7 @@ fn successful_explicit_same_text_ask_after_io_failure_does_not_poison_shutdown()
     fixture
         .window
         .invoke_ai_review_send_message("same text".into());
+    assert!(fixture.window.get_ai_review_chat_sending());
     crate::app_runtime::shared_runtime().block_on(async {
         let deadline = Instant::now() + Duration::from_secs(5);
         while !fixture
@@ -389,6 +407,7 @@ fn successful_explicit_same_text_ask_after_io_failure_does_not_poison_shutdown()
     fixture
         .window
         .invoke_ai_review_send_message("same text".into());
+    assert!(fixture.window.get_ai_review_chat_sending());
     crate::app_runtime::shared_runtime()
         .block_on(fixture.controller.shutdown_async())
         .unwrap();

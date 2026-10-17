@@ -1,0 +1,84 @@
+import { I18n } from "@i18n";
+import { TransientOverlayState } from "../../state/transient_overlay_state.slint";
+export struct PrReviewHostContext {
+    active: bool,
+    width: length,
+    height: length,
+    titlebar-inset: length,
+    content-x: length,
+    content-width: length,
+    content-height: length,
+    live-resizing: bool,
+    project-name: string,
+    provider: string,
+    code-font-family: string,
+    code-font-size: length,
+    tree-font-family: string,
+    font-family: string,
+    theme-mode: int,
+    dark-mode: bool,
+    ai-status: string,
+    ai-finding-count: int,
+    ai-visible: bool,
+    user-avatar: image,
+}
+
+// Shell-only geometry, navigation and chrome. No PR data models live here.
+export global PrReviewHostBridge {
+    in property <component-factory> factory;
+    in-out property <PrReviewHostContext> context;
+    in-out property <bool> modal-visible: false;
+    in-out property <string> review-identity: "";
+    in-out property <bool> workflow-pr-review-visible: false;
+    in-out property <bool> workflow-pr-action-loading: false;
+    in-out property <bool> workflow-pr-can-comment: false;
+    in-out property <bool> workflow-pr-can-approve: false;
+    in-out property <bool> workflow-pr-can-request-changes: false;
+    in-out property <string> workflow-pr-remote-review-state: "";
+    in-out property <bool> workflow-pr-can-merge: false;
+    in-out property <bool> workflow-pr-can-revert: false;
+    in-out property <string> workflow-pr-merge-readiness-kind: "";
+    in-out property <string> workflow-pr-merge-readiness-label: "";
+    in-out property <string> workflow-pr-merge-readiness-detail: "";
+    in-out property <string> workflow-pr-merge-block-reason: "";
+    in-out property <string> workflow-pr-revert-action-label: I18n.pr-review-revert-pull-request;
+    in-out property <bool> workflow-pr-merge-method-merge: false;
+    in-out property <bool> workflow-pr-merge-method-squash: false;
+    in-out property <bool> workflow-pr-merge-method-rebase: false;
+    in-out property <bool> workflow-pr-merge-method-fast-forward: false;
+    callback sync();
+    callback header-action(string);
+    callback open-review(string, string, string, string, string, string, int);
+    callback open-settings();
+    callback toggle-ai-review();
+    callback dismiss(bool);
+    callback key-pressed(string, bool, bool, bool, bool) -> bool;
+    callback claim-host-exclusive();
+    private property <int> own-generation: -1;
+    private property <int> host-generation: TransientOverlayState.exclusive-generation;
+    claim-host-exclusive => {
+        if root.context.active {
+            root.own-generation = TransientOverlayState.exclusive-generation + 1;
+            TransientOverlayState.claim-exclusive();
+        }
+    }
+    changed host-generation => {
+        if root.context.active && root.host-generation != root.own-generation { root.dismiss(false); }
+    }
+}
+
+export component PrReviewHostAdapter inherits Rectangle {
+    in property <PrReviewHostContext> context;
+    out property <bool> ever-opened: false;
+    background: transparent;
+    // Keep the host paint traversal live so the owned Surface conditional
+    // releases its document on route exit, even with no further input.
+    visible: true;
+    init => { root.publish(); }
+    changed context => { root.publish(); }
+    function publish() {
+        if root.context.active { root.ever-opened = true; }
+        PrReviewHostBridge.context = root.context;
+        PrReviewHostBridge.sync();
+    }
+}

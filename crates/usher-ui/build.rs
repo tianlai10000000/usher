@@ -18,10 +18,15 @@ fn main() {
     } else {
         repository_root.join("ui/features/ui_components_disabled.slint")
     };
-    let pr_review_library = if std::env::var_os("CARGO_FEATURE_DEV_SHELL").is_some() {
+    let pr_review_page = if std::env::var_os("CARGO_FEATURE_DEV_SHELL").is_some() {
         repository_root.join("ui/features/pr_review/dev_shell.slint")
     } else {
         repository_root.join("ui/features/pr_review/full.slint")
+    };
+    let pr_review_library = if std::env::var_os("CARGO_FEATURE_LIVE_PREVIEW").is_some() {
+        repository_root.join("ui/features/pr_review/integrated.slint")
+    } else {
+        repository_root.join("ui/features/pr_review/factory_host.slint")
     };
     let ai_review_library = if std::env::var_os("CARGO_FEATURE_AI_CODE_REVIEW").is_some() {
         repository_root.join("ui/features/ai_review/full.slint")
@@ -46,6 +51,7 @@ fn main() {
             ),
             ("ui-components".to_string(), ui_components_library),
             ("pr-review".to_string(), pr_review_library),
+            ("pr-review-page".to_string(), pr_review_page),
             ("ai-review".to_string(), ai_review_library),
             ("i18n".to_string(), i18n.library_path),
         ]));

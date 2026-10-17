@@ -1,0 +1,22 @@
+[package]
+name = "usher-ui-pr-review"
+version = "0.0.9-alpha.1"
+edition = "2024"
+license = "LicenseRef-Proprietary"
+publish = false
+build = "build.rs"
+
+[features]
+default = ["renderer-femtovg"]
+renderer-femtovg = ["slint/renderer-femtovg"]
+renderer-femtovg-wgpu = ["slint/renderer-femtovg-wgpu"]
+renderer-skia = ["slint/renderer-skia"]
+integrated-preview = []
+dev-shell = []
+
+[dependencies]
+slint = { version = "1.18.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "raw-window-handle-06", "unstable-fontique-011"] }
+
+[build-dependencies]
+usher-ui-build = { path = "../usher-ui-build" }
+usher-i18n-build = { path = "../usher-i18n-build" }

@@ -7271,6 +7271,7 @@ dependencies = [
  "usher-state-store",
  "usher-ui",
  "usher-ui-components",
+ "usher-ui-pr-review",
  "usher-ui-settings",
  "usher-virtual-list",
  "vt100",
@@ -7377,6 +7378,15 @@ dependencies = [
 
 [[package]]
 name = "usher-ui-components"
+version = "0.0.9-alpha.1"
+dependencies = [
+ "slint",
+ "usher-i18n-build",
+ "usher-ui-build",
+]
+
+[[package]]
+name = "usher-ui-pr-review"
 version = "0.0.9-alpha.1"
 dependencies = [
  "slint",

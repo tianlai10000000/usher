@@ -1,6 +1,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
+use usher_lib::PrReviewUiExt;
 
 use i_slint_backend_testing::ElementHandle;
 use slint::platform::{PointerEventButton, WindowEvent};
@@ -46,7 +47,13 @@ fn pr_review_keeps_the_status_bar_interactive_until_a_dialog_opens() {
         "the status-bar backdrop must stay unmounted without a dialog"
     );
 
-    window.set_workflow_pr_review_dialog_open(true);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_dialog_open(true);
+    // The feature publishes its scalar modal summary at the event-loop
+    // boundary before the next native input event.
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
     let status_bar_backdrop =
         ElementHandle::find_by_element_id(&window, "MainWindow::pr-review-status-bar-backdrop")
             .next()

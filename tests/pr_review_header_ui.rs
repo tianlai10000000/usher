@@ -1,6 +1,7 @@
 use i_slint_backend_testing::ElementHandle;
 use slint::platform::WindowEvent;
 use slint::{ComponentHandle, LogicalSize, ModelRc, VecModel};
+use usher_lib::PrReviewUiExt;
 use usher_lib::{MainWindow, Route, WorkflowPrCommit};
 
 fn find(window: &MainWindow, id: &str) -> ElementHandle {
@@ -21,17 +22,38 @@ fn approved_status_survives_repeated_comment_completion_and_locale_switch() {
     window.set_platform_is_macos(true);
     window.set_show_navigation_drawer(false);
     window.set_current_route(Route::PrReview);
-    window.set_workflow_pr_review_tab(0);
-    window.set_workflow_pr_can_comment(true);
-    window.set_workflow_pr_can_approve(true);
-    window.set_workflow_pr_can_merge(false);
-    window.set_workflow_pr_merge_readiness_kind("review_required".into());
-    window.set_workflow_pr_remote_review_state("approved".into());
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_tab(0);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_can_comment(true);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_can_approve(true);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_can_merge(false);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_merge_readiness_kind("review_required".into());
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_remote_review_state("approved".into());
     let submissions = Rc::new(RefCell::new(Vec::new()));
     let observed = submissions.clone();
-    window.on_workflow_pr_submit_review(move |action, body| {
-        observed.borrow_mut().push((action, body));
-    });
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .on_workflow_pr_submit_review(move |action, body| {
+            observed.borrow_mut().push((action, body));
+        });
 
     for (index, locale) in ["en", "zh-CN", "en"].into_iter().enumerate() {
         slint::select_bundled_translation(locale).unwrap();
@@ -55,17 +77,37 @@ fn approved_status_survives_repeated_comment_completion_and_locale_switch() {
         assert_eq!(submissions.borrow()[index].1, body);
         // A failed/incomplete request must keep the draft until success arrives.
         assert_eq!(editor.accessible_value().as_deref(), Some(body.as_str()));
-        window.set_workflow_pr_comment_submission_revision(index as i32 + 1);
+        window
+            .pr_review()
+            .global::<usher_lib::PrReviewBridge>()
+            .set_workflow_pr_comment_submission_revision(index as i32 + 1);
         i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(20));
         assert_eq!(editor.accessible_value().as_deref(), Some(""));
-        assert_eq!(window.get_workflow_pr_remote_review_state(), "approved");
         assert_eq!(
-            window.get_workflow_pr_merge_readiness_kind(),
+            window
+                .pr_review()
+                .global::<usher_lib::PrReviewBridge>()
+                .get_workflow_pr_remote_review_state(),
+            "approved"
+        );
+        assert_eq!(
+            window
+                .pr_review()
+                .global::<usher_lib::PrReviewBridge>()
+                .get_workflow_pr_merge_readiness_kind(),
             "review_required"
         );
-        assert!(!window.get_workflow_pr_can_merge());
+        assert!(
+            !window
+                .pr_review()
+                .global::<usher_lib::PrReviewBridge>()
+                .get_workflow_pr_can_merge()
+        );
     }
-    window.set_workflow_pr_remote_review_state("".into());
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_remote_review_state("".into());
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(20));
     assert!(
         ElementHandle::find_by_element_id(&window, "GitHubHeaderActionStrip::approved-label")
@@ -86,19 +128,40 @@ fn wide_pr_summary_clears_the_header_divider() {
     window.set_show_navigation_drawer(false);
     window.set_show_breadcrumb(false);
     window.set_current_route(Route::PrReview);
-    window.set_workflow_pr_review_title(
-        "feat(bancassurance-sales-activity-management): 新增个人详情页面、网点详情页面".into(),
-    );
-    window.set_workflow_pr_review_number("165".into());
-    window.set_workflow_pr_review_author("author".into());
-    window.set_workflow_pr_review_commit_count(1);
-    window.set_workflow_pr_review_target_branch(
-        "feature/p11_202608060018_bankInsActivityManagement".into(),
-    );
-    window.set_workflow_pr_review_source_branch(
-        "feature/p11_202608060018_bankInsActivityManagement_gy".into(),
-    );
-    window.set_workflow_pr_review_updated_at("yesterday".into());
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_title(
+            "feat(bancassurance-sales-activity-management): 新增个人详情页面、网点详情页面".into(),
+        );
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_number("165".into());
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_author("author".into());
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_commit_count(1);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_target_branch(
+            "feature/p11_202608060018_bankInsActivityManagement".into(),
+        );
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_source_branch(
+            "feature/p11_202608060018_bankInsActivityManagement_gy".into(),
+        );
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_updated_at("yesterday".into());
 
     let summary = ElementHandle::find_by_element_type_name(&window, "GitHubPullRequestSummaryRow")
         .next()
@@ -126,8 +189,14 @@ fn commit_identity_and_timestamp_share_one_shaping_node() {
     window.set_platform_is_macos(false);
     window.set_show_navigation_drawer(false);
     window.set_current_route(Route::PrReview);
-    window.set_workflow_pr_review_tab(1);
-    window.set_workflow_pr_review_commits_loading(false);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_tab(1);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_commits_loading(false);
     let commit = |message_body: &str, message_expanded| WorkflowPrCommit {
         sha: "ba19ff1".into(),
         short_sha: "ba19ff1".into(),
@@ -165,7 +234,10 @@ fn commit_identity_and_timestamp_share_one_shaping_node() {
             commit("Additional commit details", true),
         ),
     ] {
-        window.set_workflow_pr_review_commits(ModelRc::new(VecModel::from(vec![row])));
+        window
+            .pr_review()
+            .global::<usher_lib::PrReviewBridge>()
+            .set_workflow_pr_review_commits(ModelRc::new(VecModel::from(vec![row])));
 
         let timestamp = find(&window, row_id);
         let label = find(&window, "GitHubRelativeTimestamp::time-label");
@@ -192,7 +264,10 @@ fn commit_identity_and_timestamp_share_one_shaping_node() {
 
     let mut without_timestamp = commit("", false);
     without_timestamp.short_date_label = "".into();
-    window.set_workflow_pr_review_commits(ModelRc::new(VecModel::from(vec![without_timestamp])));
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_commits(ModelRc::new(VecModel::from(vec![without_timestamp])));
     let label = find(&window, "GitHubRelativeTimestamp::time-label");
     let anchor = find(&window, "GitHubRelativeTimestamp::time-anchor");
     assert_eq!(label.accessible_label().as_deref(), Some("Alice authored"));
@@ -205,7 +280,10 @@ fn commit_identity_and_timestamp_share_one_shaping_node() {
     let mut wrapped = commit("", false);
     wrapped.title = "feat(bancassurance-sales-activity-management): 实现初版银保活动量管理改造功能并补充多行标题排版验证，同时覆盖较长英文分支语义与中文说明在提交列表中的连续换行效果"
         .into();
-    window.set_workflow_pr_review_commits(ModelRc::new(VecModel::from(vec![wrapped])));
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_commits(ModelRc::new(VecModel::from(vec![wrapped])));
     let title = find(&window, "GitHubPullRequestReviewPage::commit-title-text");
     let author_row = find(
         &window,

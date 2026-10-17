@@ -2,6 +2,7 @@
 use super::find::collect_diff_find_row_matches;
 use super::find_worker::{FindModel, FindResults, FindSource, scan, side_key};
 use crate::app_runtime::latest_compute::LatestCompute;
+use crate::pr_review_ui::PrReviewUiExt;
 use crate::{MainWindow, WorkflowPrDiffFindMatch, WorkflowPrDiffLine};
 use slint::{ComponentHandle, ModelRc};
 use std::cell::RefCell;
@@ -41,7 +42,10 @@ impl FindBridge {
         split: bool,
     ) -> ModelRc<WorkflowPrDiffFindMatch> {
         let query = query.trim();
-        let lines = ui.get_workflow_pr_review_lines();
+        let lines = ui
+            .pr_review()
+            .global::<crate::PrReviewBridge>()
+            .get_workflow_pr_review_lines();
         if self
             .key
             .borrow()
@@ -96,17 +100,30 @@ impl FindBridge {
                             .borrow()
                             .as_ref()
                             .is_some_and(|(lines, query, split)| {
-                                lines == &ui.get_workflow_pr_review_lines()
+                                lines
+                                    == &ui
+                                        .pr_review()
+                                        .global::<crate::PrReviewBridge>()
+                                        .get_workflow_pr_review_lines()
                                     && query == &result.query
-                                    && *split == (ui.get_workflow_pr_review_diff_view() == "split")
+                                    && *split
+                                        == (ui
+                                            .pr_review()
+                                            .global::<crate::PrReviewBridge>()
+                                            .get_workflow_pr_review_diff_view()
+                                            == "split")
                             });
                     if current {
                         bridge.rows.borrow_mut().clear();
                         bridge.model.replace(Some(Arc::new(result)));
-                        ui.set_workflow_pr_review_find_result_revision(
-                            ui.get_workflow_pr_review_find_result_revision()
-                                .wrapping_add(1),
-                        );
+                        ui.pr_review()
+                            .global::<crate::PrReviewBridge>()
+                            .set_workflow_pr_review_find_result_revision(
+                                ui.pr_review()
+                                    .global::<crate::PrReviewBridge>()
+                                    .get_workflow_pr_review_find_result_revision()
+                                    .wrapping_add(1),
+                            );
                     } else {
                         bridge.cancel();
                     }
@@ -122,7 +139,10 @@ impl FindBridge {
         side: &str,
         query: &str,
     ) -> ModelRc<WorkflowPrDiffFindMatch> {
-        let lines = ui.get_workflow_pr_review_lines();
+        let lines = ui
+            .pr_review()
+            .global::<crate::PrReviewBridge>()
+            .get_workflow_pr_review_lines();
         let current = self
             .key
             .borrow()
@@ -168,14 +188,16 @@ pub(super) fn bind(ui: &MainWindow) {
     BRIDGE.with(|slot| *slot.borrow_mut() = Rc::downgrade(&bridge));
     let weak = ui.as_weak();
     let full = bridge.clone();
-    ui.global::<crate::PrDiffBridge>()
+    ui.pr_review()
+        .global::<crate::PrDiffBridge>()
         .on_workflow_pr_review_find_diff_matches(move |query, split| {
             weak.upgrade().map_or_else(ModelRc::default, |ui| {
                 full.matches(&ui, query.as_str(), split)
             })
         });
     let weak = ui.as_weak();
-    ui.global::<crate::PrDiffBridge>()
+    ui.pr_review()
+        .global::<crate::PrDiffBridge>()
         .on_workflow_pr_review_find_diff_row_matches(move |line, side, query| {
             weak.upgrade().map_or_else(ModelRc::default, |ui| {
                 bridge.row(&ui, line, side.as_str(), query.as_str())

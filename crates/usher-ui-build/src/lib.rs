@@ -2,7 +2,7 @@
 //!
 //! Catalog helpers watch their original inputs. Generated files under this
 //! build's `OUT_DIR` are outputs, not additional reasons to rerun the build.
-//! This facade supports the four application build scripts: absolute config
+//! This facade supports the five application build scripts: absolute config
 //! paths, generated translation bundles, and the default Rust module layout.
 
 use std::collections::BTreeSet;

@@ -1,0 +1,194 @@
+import { GitHubFixedTooltipAnchor } from "../github_fixed_tooltip_anchor.slint";
+import { GitHubTooltipPlacement, GitHubTooltipAlignment } from "../../state/tooltip_overlay_state.slint";
+import { PrReviewTooltipState, PrReviewTooltipKind } from "tooltip_state.slint";
+
+component PrReviewTooltipAnchor inherits GitHubFixedTooltipAnchor {
+    in property <GitHubTooltipPlacement> placement: GitHubTooltipPlacement.Top;
+    in property <GitHubTooltipAlignment> alignment: GitHubTooltipAlignment.Center;
+    in-out property <int> claim: 0;
+    bounded: true;
+    viewport: PrReviewTooltipState.viewport;
+    release(x, y) => { PrReviewTooltipState.hide(root.claim); }
+    renew(x, y, width, height) => { PrReviewTooltipState.renew(root.claim, x, y, width, height); }
+}
+
+export component PrShowCommitDescriptionTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.ShowCommitDescription, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrHideCommitDescriptionTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.HideCommitDescription, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrOpenDiffSettingsTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.OpenDiffSettings, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrCopyFullShaTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.CopyFullSha, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrCopiedTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.Copied, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrCloseAiReviewTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.CloseAiReview, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrReviewWithAiTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.ReviewWithAi, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrWriteCommentTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.WriteComment, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrAddCommentTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.AddComment, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrConfigureToCommentTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.ConfigureToComment, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrViewCommitDetailsTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.ViewCommitDetails, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrCopyFilePathTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.CopyFilePath, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrCollapseNonDiffTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.CollapseNonDiff, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrExpandAllLinesTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.ExpandAllLines, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrPreviousFileTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.PreviousFile, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrNextFileTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.NextFile, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrHideFileTreeTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.HideFileTree, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrShowFileTreeTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.ShowFileTree, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrMoreFileActionsTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.MoreFileActions, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrCopySourceBranchTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.CopySourceBranch, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrConflictsBackTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.ConflictsBack, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrConflictsToggleFilesTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.ConflictsToggleFiles, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrConflictsRefreshTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.ConflictsRefresh, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrConflictsPreviousTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.ConflictsPrevious, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrConflictsNextTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.ConflictsNext, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrConflictsCopyTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.ConflictsCopy, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrReviewChangesTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.ReviewChanges, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrConfigureToReviewTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.ConfigureToReview, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrChooseMergeMethodTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.ChooseMergeMethod, x, y, width, height, root.placement, root.alignment);
+    }
+}
+
+export component PrReverseChangesTooltipAnchor inherits PrReviewTooltipAnchor {
+    publish(x, y, width, height) => {
+        root.claim = PrReviewTooltipState.show(PrReviewTooltipKind.ReverseChanges, x, y, width, height, root.placement, root.alignment);
+    }
+}
+

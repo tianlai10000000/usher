@@ -1,6 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
+use usher_lib::PrReviewUiExt;
 
 use i_slint_backend_testing::ElementHandle;
 use slint::platform::{Key, PointerEventButton, WindowEvent};
@@ -32,29 +33,35 @@ fn opening_a_pull_request_preserves_context_and_initial_tab() {
     let window = window();
     let opened = Rc::new(RefCell::new(None));
     let observed = opened.clone();
-    window.on_workflow_pr_review_open(
-        move |number, title, author, source, target, updated_at, initial_tab| {
-            *observed.borrow_mut() = Some((
-                number.to_string(),
-                title.to_string(),
-                author.to_string(),
-                source.to_string(),
-                target.to_string(),
-                updated_at.to_string(),
-                initial_tab,
-            ));
-        },
-    );
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .on_workflow_pr_review_open(
+            move |number, title, author, source, target, updated_at, initial_tab| {
+                *observed.borrow_mut() = Some((
+                    number.to_string(),
+                    title.to_string(),
+                    author.to_string(),
+                    source.to_string(),
+                    target.to_string(),
+                    updated_at.to_string(),
+                    initial_tab,
+                ));
+            },
+        );
 
-    window.invoke_workflow_pr_review_open(
-        "42".into(),
-        "Keep the review journey stable".into(),
-        "octocat".into(),
-        "feature/journey".into(),
-        "main".into(),
-        "2 hours ago".into(),
-        2,
-    );
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .invoke_workflow_pr_review_open(
+            "42".into(),
+            "Keep the review journey stable".into(),
+            "octocat".into(),
+            "feature/journey".into(),
+            "main".into(),
+            "2 hours ago".into(),
+            2,
+        );
 
     assert_eq!(
         opened.borrow().as_ref(),
@@ -76,25 +83,43 @@ fn files_changed_commands_keep_their_order_and_payloads() {
     let commands = Rc::new(RefCell::new(Vec::new()));
 
     let observed = commands.clone();
-    window.on_workflow_pr_review_select_file(move |index| {
-        observed.borrow_mut().push(format!("file:{index}"));
-    });
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .on_workflow_pr_review_select_file(move |index| {
+            observed.borrow_mut().push(format!("file:{index}"));
+        });
     let observed = commands.clone();
-    window.on_workflow_pr_review_apply_diff_settings(move |view, ignore_whitespace| {
-        observed
-            .borrow_mut()
-            .push(format!("settings:{view}:{ignore_whitespace}"));
-    });
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .on_workflow_pr_review_apply_diff_settings(move |view, ignore_whitespace| {
+            observed
+                .borrow_mut()
+                .push(format!("settings:{view}:{ignore_whitespace}"));
+        });
     let observed = commands.clone();
-    window.on_workflow_pr_review_expand_hunk(move |line, direction| {
-        observed
-            .borrow_mut()
-            .push(format!("hunk:{line}:{direction}"));
-    });
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .on_workflow_pr_review_expand_hunk(move |line, direction| {
+            observed
+                .borrow_mut()
+                .push(format!("hunk:{line}:{direction}"));
+        });
 
-    window.invoke_workflow_pr_review_select_file(3);
-    window.invoke_workflow_pr_review_apply_diff_settings("split".into(), true);
-    window.invoke_workflow_pr_review_expand_hunk(17, "down".into());
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .invoke_workflow_pr_review_select_file(3);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .invoke_workflow_pr_review_apply_diff_settings("split".into(), true);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .invoke_workflow_pr_review_expand_hunk(17, "down".into());
 
     assert_eq!(
         commands.borrow().as_slice(),
@@ -109,13 +134,20 @@ fn diff_find_starts_its_debounce_for_the_first_query() {
         size: LogicalSize::new(1200.0, 800.0),
     });
     window.set_current_route(usher_lib::Route::PrReview);
-    window.set_workflow_pr_review_tab(2);
-    window.set_workflow_pr_review_selected_file_index(0);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_tab(2);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_selected_file_index(0);
     i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
 
     let queries = Rc::new(RefCell::new(Vec::new()));
     let observed = queries.clone();
     window
+        .pr_review()
         .global::<usher_lib::PrDiffBridge>()
         .on_workflow_pr_review_find_diff_matches(move |query, _| {
             observed.borrow_mut().push(query.to_string());
@@ -151,12 +183,30 @@ fn diff_code_click_dismisses_the_open_diff_settings_popover() {
     window.set_show_navigation_drawer(false);
     window.set_show_breadcrumb(false);
     window.set_current_route(Route::PrReview);
-    window.set_workflow_pr_review_visible(true);
-    window.set_workflow_pr_review_tab(2);
-    window.set_workflow_pr_review_selected_file_index(0);
-    window.set_workflow_pr_review_selected_file_path("src/lib.rs".into());
-    window.set_workflow_pr_review_loading(false);
-    window.set_workflow_pr_review_code_loading(false);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_visible(true);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_tab(2);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_selected_file_index(0);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_selected_file_path("src/lib.rs".into());
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_loading(false);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_code_loading(false);
 
     let empty_tokens = || ModelRc::new(VecModel::from(Vec::<WorkflowPrDiffToken>::new()));
     let line = WorkflowPrDiffLine {
@@ -181,16 +231,23 @@ fn diff_code_click_dismisses_the_open_diff_settings_popover() {
         right_content: "let value = 1;".into(),
         right_tokens: empty_tokens(),
     };
-    window.set_workflow_pr_review_lines(ModelRc::new(VecModel::from(vec![line.clone()])));
-    window.set_workflow_pr_review_line_metrics(ModelRc::new(VecModel::from(vec![
-        WorkflowPrDiffRowMetric {
-            kind: "context".into(),
-            columns: 14,
-            double_hunk: false,
-        },
-    ])));
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_lines(ModelRc::new(VecModel::from(vec![line.clone()])));
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_line_metrics(ModelRc::new(VecModel::from(vec![
+            WorkflowPrDiffRowMetric {
+                kind: "context".into(),
+                columns: 14,
+                double_hunk: false,
+            },
+        ])));
     let visible_line = line.clone();
     window
+        .pr_review()
         .global::<PrDiffBridge>()
         .on_workflow_pr_review_layout_diff_virtual_window(move |_, _, _, _, _, _, _, _| {
             WorkflowPrDiffVirtualWindow {
@@ -205,11 +262,15 @@ fn diff_code_click_dismisses_the_open_diff_settings_popover() {
             }
         });
     window
+        .pr_review()
         .global::<PrDiffBridge>()
         .on_workflow_pr_review_resolve_diff_selection(|_, _, _, _, _, _, _, _, _, _| {
             WorkflowPrDiffSelectionHit { line: 0, column: 0 }
         });
-    window.set_workflow_pr_review_line_content_revision(1);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .set_workflow_pr_review_line_content_revision(1);
     i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
 
     ElementHandle::find_by_accessible_label(&window, "Open Diff view settings")
@@ -252,24 +313,36 @@ fn review_submission_never_implicitly_merges() {
     let merge_count = Rc::new(Cell::new(0));
 
     let observed = review.clone();
-    window.on_workflow_pr_submit_review(move |action, body| {
-        *observed.borrow_mut() = Some((action.to_string(), body.to_string()));
-    });
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .on_workflow_pr_submit_review(move |action, body| {
+            *observed.borrow_mut() = Some((action.to_string(), body.to_string()));
+        });
     let observed = merge.clone();
     let observed_count = merge_count.clone();
-    window.on_workflow_pr_merge(move |method, remove_source_branch| {
-        observed_count.set(observed_count.get() + 1);
-        *observed.borrow_mut() = Some((method.to_string(), remove_source_branch));
-    });
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .on_workflow_pr_merge(move |method, remove_source_branch| {
+            observed_count.set(observed_count.get() + 1);
+            *observed.borrow_mut() = Some((method.to_string(), remove_source_branch));
+        });
 
-    window.invoke_workflow_pr_submit_review("approve".into(), "Looks good.".into());
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .invoke_workflow_pr_submit_review("approve".into(), "Looks good.".into());
     assert_eq!(
         review.borrow().as_ref(),
         Some(&("approve".to_string(), "Looks good.".to_string()))
     );
     assert_eq!(merge_count.get(), 0);
 
-    window.invoke_workflow_pr_merge("squash".into(), true);
+    window
+        .pr_review()
+        .global::<usher_lib::PrReviewBridge>()
+        .invoke_workflow_pr_merge("squash".into(), true);
     assert_eq!(merge_count.get(), 1);
     assert_eq!(merge.borrow().as_ref(), Some(&("squash".to_string(), true)));
 }

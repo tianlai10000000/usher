@@ -39,6 +39,24 @@ pub fn shared_runtime() -> Arc<Runtime> {
     SHARED_RUNTIME.clone()
 }
 
+/// Retire disposable CPU resources off the event loop. The owner supplies only
+/// its next confirmed idle slot, so repeated cleanup shares one release worker.
+pub(crate) fn release_resources<T: Send + 'static>(
+    initial: T,
+    mut next: impl FnMut() -> Option<T> + Send + 'static,
+) {
+    shared_runtime().spawn_blocking(move || {
+        let mut resource = initial;
+        loop {
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(resource))).is_err() {
+                log::error!("[Runtime] Disposable resource destructor panicked");
+            }
+            let Some(value) = next() else { return };
+            resource = value;
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::selected_worker_threads;

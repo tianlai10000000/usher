@@ -1,4 +1,6 @@
 use super::{MainWindow, ReviewRequestKind, ReviewStateFacade};
+use crate::pr_review_ui::PrReviewUiExt;
+use slint::ComponentHandle;
 
 pub(super) fn finish_expand(
     state: &ReviewStateFacade,
@@ -7,11 +9,17 @@ pub(super) fn finish_expand(
     index: usize,
 ) -> bool {
     if !state.is_current(ReviewRequestKind::Expand, generation)
-        || ui.get_workflow_pr_review_selected_file_index() != index as i32
+        || ui
+            .pr_review()
+            .global::<crate::PrReviewBridge>()
+            .get_workflow_pr_review_selected_file_index()
+            != index as i32
     {
         return false;
     }
-    ui.set_workflow_pr_review_code_loading(false);
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .set_workflow_pr_review_code_loading(false);
     true
 }
 
@@ -24,15 +32,32 @@ pub(super) fn finish(
     full_file: bool,
 ) -> bool {
     if !state.is_current(ReviewRequestKind::Highlight, generation)
-        || ui.get_workflow_pr_review_selected_file_index() != index as i32
-        || ui.get_workflow_pr_review_selected_file_path().as_str() != path
-        || ui.get_workflow_pr_review_viewing_file() != full_file
+        || ui
+            .pr_review()
+            .global::<crate::PrReviewBridge>()
+            .get_workflow_pr_review_selected_file_index()
+            != index as i32
+        || ui
+            .pr_review()
+            .global::<crate::PrReviewBridge>()
+            .get_workflow_pr_review_selected_file_path()
+            .as_str()
+            != path
+        || ui
+            .pr_review()
+            .global::<crate::PrReviewBridge>()
+            .get_workflow_pr_review_viewing_file()
+            != full_file
     {
         return false;
     }
-    ui.set_workflow_pr_review_code_loading(false);
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .set_workflow_pr_review_code_loading(false);
     if !full_file {
-        ui.set_workflow_pr_review_large_diff_loading(false);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_large_diff_loading(false);
     }
     true
 }
@@ -47,17 +72,29 @@ mod tests {
         i_slint_backend_testing::init_no_event_loop();
         let ui = MainWindow::new().unwrap();
         let state = ReviewStateFacade::new();
-        ui.set_workflow_pr_review_selected_file_index(0);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_selected_file_index(0);
         let old = state.begin(ReviewRequestKind::Expand);
         state.set_presentation_suspended(true);
         state.set_presentation_suspended(false);
         let current = state.begin(ReviewRequestKind::Expand);
-        ui.set_workflow_pr_review_code_loading(true);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_code_loading(true);
         assert!(!finish_expand(&state, &ui, old, 0));
         assert!(!finish_expand(&state, &ui, current, 1));
-        assert!(ui.get_workflow_pr_review_code_loading());
+        assert!(
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_code_loading()
+        );
         assert!(finish_expand(&state, &ui, current, 0));
-        assert!(!ui.get_workflow_pr_review_code_loading());
+        assert!(
+            !ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .get_workflow_pr_review_code_loading()
+        );
     }
 
     #[test]
@@ -66,8 +103,12 @@ mod tests {
         i_slint_backend_testing::init_no_event_loop();
         let ui = MainWindow::new().unwrap();
         let state = ReviewStateFacade::new();
-        ui.set_workflow_pr_review_selected_file_index(3);
-        ui.set_workflow_pr_review_selected_file_path("current.rs".into());
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_selected_file_index(3);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .set_workflow_pr_review_selected_file_path("current.rs".into());
         for (locale, full_file) in [
             ("en", false),
             ("en", true),
@@ -75,9 +116,15 @@ mod tests {
             ("zh-CN", true),
         ] {
             crate::i18n::apply_preference(locale).unwrap();
-            ui.set_workflow_pr_review_viewing_file(full_file);
-            ui.set_workflow_pr_review_code_loading(true);
-            ui.set_workflow_pr_review_large_diff_loading(true);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_viewing_file(full_file);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_code_loading(true);
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_large_diff_loading(true);
             let old = state.begin(ReviewRequestKind::Highlight);
             let current = state.begin(ReviewRequestKind::Highlight);
             for (generation, index, path, mode) in [
@@ -87,16 +134,39 @@ mod tests {
                 (current, 3, "current.rs", !full_file),
             ] {
                 assert!(!finish(&state, &ui, generation, index, path, mode));
-                assert!(ui.get_workflow_pr_review_code_loading());
-                assert!(ui.get_workflow_pr_review_large_diff_loading());
+                assert!(
+                    ui.pr_review()
+                        .global::<crate::PrReviewBridge>()
+                        .get_workflow_pr_review_code_loading()
+                );
+                assert!(
+                    ui.pr_review()
+                        .global::<crate::PrReviewBridge>()
+                        .get_workflow_pr_review_large_diff_loading()
+                );
             }
             assert!(finish(&state, &ui, current, 3, "current.rs", full_file));
-            assert!(!ui.get_workflow_pr_review_code_loading());
-            assert_eq!(ui.get_workflow_pr_review_large_diff_loading(), full_file);
-            ui.set_workflow_pr_review_code_loading(true);
+            assert!(
+                !ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .get_workflow_pr_review_code_loading()
+            );
+            assert_eq!(
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .get_workflow_pr_review_large_diff_loading(),
+                full_file
+            );
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .set_workflow_pr_review_code_loading(true);
             state.invalidate_all();
             assert!(!finish(&state, &ui, current, 3, "current.rs", full_file));
-            assert!(ui.get_workflow_pr_review_code_loading());
+            assert!(
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .get_workflow_pr_review_code_loading()
+            );
         }
         crate::i18n::apply_preference(usher_i18n::source_locale().id).unwrap();
     }

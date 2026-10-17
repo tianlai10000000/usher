@@ -3,10 +3,7 @@ export { UiComponentsBridge } from "./features/ui_components_bridge.slint";
 import { GitHubResizeHandle } from "./components/github_resize_handle.slint";
 import { GitHubNavigationSidebar, GitHubSidebarRightEdge, NavItem } from "./components/navigation/custom_nav_drawer.slint";
 import { I18n } from "@i18n";
-import { PrDiffBridge } from "./features/pr_review/diff_bridge.slint";
-import { PrConflictsBridge } from "./features/pr_review/conflicts_bridge.slint";
-export { PrConflictsBridge, PrConflictFile, PrConflictRow, PrConflictWindow } from "./features/pr_review/conflicts_bridge.slint";
-export { PrDiffBridge } from "./features/pr_review/diff_bridge.slint";
+export { PrConflictFile, PrConflictRow, PrConflictWindow } from "@pr-review";
 export { FloatingOverlayBridge, FloatingOverlayRect } from "./state/floating_overlay_bridge.slint";
 import { GitHubHomePage as HomePage } from "./views/home.slint";
 import { GitHubSearchPage as SearchPage } from "./views/search.slint";
@@ -16,7 +13,8 @@ import { GitHubWorkflowPage as WorkflowPage } from "./views/workflow/workflow.sl
 import { GitHubJobRunPage as JobRunPage } from "./views/job_run.slint";
 import { WorkflowPullRequestItem } from "./components/workflow/github_pr_flow.slint";
 import { GitHubPullRequestMenuOverlay, GitHubPrMenuState } from "./components/workflow/github_pr_menu_overlay.slint";
-import { GitHubPullRequestReviewPage } from "@pr-review";
+import { PrReviewHost, PrReviewHostBridge } from "@pr-review";
+export { PrReviewBridge, PrDiffBridge, PrConflictsBridge, PrReviewHostBridge, PrReviewHostContext } from "@pr-review";
 import { GitHubAiReviewPanel, AiReviewTaskItem, AiReviewRuleChoice, AiReviewFindingItem, AiReviewConversationItem, AiReviewResponseVisualRow, AgentResponseBlockKind, AgentResponseBlock } from "@ai-review";
 import { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffRowMetric, WorkflowPrDiffVirtualWindow, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffGlyphRange, WorkflowPrDiffGlyphRect, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit, GitHubHeaderActionStrip } from "./components/pr_review/shell.slint";
 import { JobLogLineItem, JobStepItem } from "./components/jobs/job.slint";
@@ -314,11 +312,7 @@ export component MainWindow inherits Window {
     private property <length> pr-readiness-anchor-height: 0px;
     private property <bool> pr-review-dialog-visible:
         root.current-route == Route.PrReview
-            && (root.workflow-pr-review-dialog-open
-                || root.workflow-pr-dismiss-review-dialog-open
-                || root.workflow-pr-merge-dialog-open
-                || root.workflow-pr-revert-dialog-open
-                || root.workflow-pr-commit-range-dialog-open);
+            && PrReviewHostBridge.modal-visible;
     out property <bool> modal-overlay-visible:
         ProjectBridge.show-add-modal
             || (root.current-route == Route.Settings && root.settings-hook-dialog-open)
@@ -707,102 +701,10 @@ export component MainWindow inherits Window {
     in property <bool> workflow-pr-list-loading: false;
     in property <string> workflow-pr-list-error: "";
     in property <string> workflow-pr-list-error-kind: "";
-    in-out property <bool> workflow-pr-review-visible: false;
-    in property <bool> workflow-pr-review-loading: false;
-    in property <bool> workflow-pr-review-code-loading: false;
-    in property <bool> workflow-pr-review-large-diff-deferred: false;
-    in property <bool> workflow-pr-review-large-diff-loading: false;
-    in property <string> workflow-pr-review-error: "";
-    in property <string> workflow-pr-review-error-kind: "";
-    in property <string> workflow-pr-review-number: "";
-    in property <string> workflow-pr-review-title: "";
-    in property <string> workflow-pr-review-author: "";
-    in property <string> workflow-pr-review-source-branch: "";
-    in property <string> workflow-pr-review-target-branch: "";
-    in property <string> workflow-pr-review-updated-at: "";
-    in property <string> workflow-pr-review-updated-at-tooltip: "";
-    in property <int> workflow-pr-review-added-lines: 0;
-    in property <int> workflow-pr-review-removed-lines: 0;
-    in property <int> workflow-pr-review-commit-count: 0;
-    in property <int> workflow-pr-review-conversation-count: 0;
-    in property <string> workflow-pr-review-base-sha: "";
-    in property <string> workflow-pr-review-head-sha: "";
-    in property <bool> workflow-pr-review-too-many-commits: false;
-    in property <bool> workflow-pr-review-files-truncated: false;
-    in-out property <int> workflow-pr-review-tab: 2;
-    in property <[WorkflowPrConversationItem]> workflow-pr-review-conversation-items: [];
-    in property <int> workflow-pr-review-conversation-content-height: 0;
-    in property <int> workflow-pr-review-expanded-commit-body-height: 0;
-    in property <[WorkflowPrCommit]> workflow-pr-review-commits: [];
-    in property <bool> workflow-pr-review-conversation-loading: false;
-    in property <bool> workflow-pr-review-commits-loading: false;
-    in property <string> workflow-pr-review-conversation-error: "";
-    in property <string> workflow-pr-review-commits-error: "";
-    in-out property <int> workflow-pr-review-commit-range-start: -1;
-    in-out property <int> workflow-pr-review-commit-range-end: -1;
-    in property <string> workflow-pr-review-commit-range-label: I18n.pr-review-all-commits;
-    in property <[WorkflowPrDiffFile]> workflow-pr-review-files: [];
-    in property <[WorkflowPrTreeItem]> workflow-pr-review-tree-items: [];
-    in property <[WorkflowPrFileExtensionFilter]> workflow-pr-review-extension-filters: [];
-    in property <bool> workflow-pr-review-only-manifest-files: false;
-    in property <bool> workflow-pr-review-show-viewed-files: true;
-    in property <bool> workflow-pr-review-file-filters-active: false;
-    in property <[WorkflowPrDiffLine]> workflow-pr-review-lines: [];
-    in property <[WorkflowPrDiffRowMetric]> workflow-pr-review-line-metrics: [];
-    in property <int> workflow-pr-review-max-code-columns: 0;
-    in property <string> workflow-pr-review-longest-code-line;
-    in property <int> workflow-pr-review-line-content-revision: 0;
-    in property <int> workflow-pr-review-find-result-revision: 0;
-    in property <int> workflow-pr-review-line-model-revision: 0;
-    in property <bool> workflow-pr-review-scroll-diagnostics-enabled: false;
-    in property <int> workflow-pr-review-hunk-scroll-anchor-source-index: -1;
-    in property <int> workflow-pr-review-hunk-scroll-restore-revision: 0;
-    in property <bool> workflow-pr-review-hunk-scroll-restore-pending: false;
-    in property <int> workflow-pr-review-location-row-index: -1;
-    in property <string> workflow-pr-review-location-side: "";
-    in property <int> workflow-pr-review-location-reveal-revision: 0;
     in property <string> workflow-pr-review-code-font-family: "Menlo";
     in property <length> workflow-pr-review-code-font-size: 13px;
     in property <string> workflow-pr-review-tree-font-family: ".SF NS";
-    in-out property <length> workflow-pr-review-file-list-width: 286px;
-    in property <int> workflow-pr-review-selected-file-index: -1;
-    in property <string> workflow-pr-review-selected-file-path: "";
-    in property <int> workflow-pr-review-selected-file-added-lines: 0;
-    in property <int> workflow-pr-review-selected-file-removed-lines: 0;
-    in property <bool> workflow-pr-review-has-expandable-hunks: false;
-    in property <bool> workflow-pr-review-context-expanded: false;
-    in property <bool> workflow-pr-review-viewing-file: false;
-    in property <bool> workflow-pr-review-ignore-whitespace-supported: false;
-    in property <bool> workflow-pr-merge-delete-source-branch-supported: false;
-    in-out property <bool> workflow-pr-review-ignore-whitespace: false;
-    in-out property <string> workflow-pr-review-diff-view: "unified";
-    in-out property <string> workflow-pr-review-file-filter: "";
-    in-out property <bool> workflow-pr-review-dialog-open: false;
-    in-out property <bool> workflow-pr-dismiss-review-dialog-open: false;
-    in-out property <bool> workflow-pr-merge-dialog-open: false;
-    in-out property <bool> workflow-pr-revert-dialog-open: false;
     in-out property <bool> workflow-pr-readiness-popup-open: false;
-    private property <bool> workflow-pr-commit-range-dialog-open: false;
-    in property <bool> workflow-pr-action-loading: false;
-    in property <bool> workflow-pr-can-comment: false;
-    in property <bool> workflow-pr-can-approve: false;
-    in property <bool> workflow-pr-can-request-changes: false;
-    in property <string> workflow-pr-remote-review-state: "";
-    in property <int> workflow-pr-comment-submission-revision: 0;
-    in property <bool> workflow-pr-can-merge: false;
-    in property <bool> workflow-pr-can-revert: false;
-    in property <string> workflow-pr-merge-readiness-kind: "";
-    in property <string> workflow-pr-merge-readiness-label: "";
-    in property <string> workflow-pr-merge-readiness-detail: "";
-    in property <string> workflow-pr-merge-block-reason: "";
-    in property <string> workflow-pr-revert-block-reason: "";
-    in property <string> workflow-pr-revert-action-label: I18n.pr-review-revert-pull-request;
-    in property <string> workflow-pr-revert-confirmation: "";
-    in property <bool> workflow-pr-merge-method-merge: false;
-    in property <bool> workflow-pr-merge-method-squash: false;
-    in property <bool> workflow-pr-merge-method-rebase: false;
-    in property <bool> workflow-pr-merge-method-fast-forward: false;
-    in-out property <string> workflow-pr-selected-merge-method: "";
     in property <bool> workflow-pr-count-auto-update: false;
     in property <bool> workflow-pr-count-loading: false;
     in property <bool> workflow-pr-count-failed: false;
@@ -859,39 +761,6 @@ export component MainWindow inherits Window {
     callback workflow-pr-list-sort-filter-change(string);
     callback workflow-copy-remote-repo(string) -> bool;
     callback workflow-open-local-repo(string);
-    callback workflow-pr-review-open(string, string, string, string, string, string, int);
-    callback workflow-pr-review-back();
-    callback workflow-pr-review-select-tab(int);
-    callback workflow-pr-review-ensure-commits();
-    callback workflow-pr-review-apply-commit-range(int, int);
-    callback workflow-pr-review-open-commit(string);
-    callback workflow-pr-review-select-file(int);
-    callback workflow-pr-review-select-relative-file(int);
-    callback workflow-pr-review-reload(bool);
-    callback workflow-pr-review-apply-diff-settings(string, bool);
-    callback workflow-pr-review-load-large-diff();
-    callback workflow-pr-review-filter-files(string);
-    callback workflow-pr-review-toggle-extension-filter(string);
-    callback workflow-pr-review-toggle-manifest-filter();
-    callback workflow-pr-review-toggle-viewed-files();
-    callback workflow-pr-review-toggle-folder(string);
-    callback workflow-pr-review-expand-hunk(int, string);
-    callback workflow-pr-review-expand-all-hunks();
-    callback workflow-pr-review-collapse-non-diff-lines();
-    callback workflow-pr-review-copy-file-path(string) -> bool;
-    callback workflow-pr-review-copy-commit-sha(string) -> bool;
-    callback workflow-pr-review-copy-source-branch(string) -> bool;
-    callback workflow-pr-default-merge-method() -> string;
-    callback workflow-pr-review-copy-diff-selection(int, int, int, int, string);
-    callback workflow-pr-review-view-file();
-    callback workflow-pr-review-reveal-location(string, int, string, string);
-    callback workflow-pr-review-view-location-file(string, string);
-    callback workflow-pr-review-clear-location();
-    callback workflow-pr-review-toggle-commit-message(string);
-    callback workflow-pr-submit-review(string, string);
-    callback workflow-pr-dismiss-review(string, string);
-    callback workflow-pr-merge(string, bool);
-    callback workflow-pr-revert();
     callback workflow-cd-start(string, string, string);
     callback workflow-cd-rollback(string);
     callback shell-drawer-toggle();
@@ -1049,7 +918,8 @@ export component MainWindow inherits Window {
         }
     }
 
-    changed workflow-pr-review-number => {
+    private property <string> pr-review-identity: PrReviewHostBridge.review-identity;
+    changed pr-review-identity => {
         root.workflow-pr-readiness-popup-open = false;
     }
 
@@ -1090,18 +960,15 @@ export component MainWindow inherits Window {
         GitHubSelectState.close(false);
         root.settings-select-dismiss();
         UiComponentsBridge.dismiss(true);
+        PrReviewHostBridge.dismiss(true);
         TransientOverlayState.dismiss-all();
-    }
-
-    // Presentation fixtures have no Settings controller; keep their default.
-    workflow-pr-default-merge-method => {
-        return root.workflow-pr-merge-method-merge ? "merge" : (root.workflow-pr-merge-method-squash ? "squash" : (root.workflow-pr-merge-method-rebase ? "rebase" : (root.workflow-pr-merge-method-fast-forward ? "fast_forward" : "")));
     }
 
     dismiss-transient-popovers => {
         GitHubSelectState.close(false);
         root.settings-select-dismiss();
         UiComponentsBridge.dismiss(false);
+        PrReviewHostBridge.dismiss(false);
         TransientOverlayState.dismiss-popovers();
     }
 
@@ -1158,7 +1025,10 @@ export component MainWindow inherits Window {
         height: root.height;
 
         capture-key-pressed(event) => {
-            if (UiComponentsFeature.independent && UiComponentsBridge.active
+            if (PrReviewHostBridge.context.active
+                    && (event.text == Key.Tab || event.text == Key.Backtab)
+                    && PrReviewHostBridge.key-pressed(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift, event.modifiers.meta))
+                    || (UiComponentsFeature.independent && UiComponentsBridge.active
                     && (event.text == Key.Tab || event.text == Key.Backtab)
                     && UiComponentsBridge.key-pressed(event.text, event.modifiers.control,
                         event.modifiers.alt, event.modifiers.shift, event.modifiers.meta))
@@ -1332,7 +1202,7 @@ export component MainWindow inherits Window {
                         // state on MainWindow, but destroy its component tree while
                         // the opaque review surface is mounted so hidden delegates do
                         // not participate in live-resize layout and rendering.
-                        if root.current-route == Route.Workflow && !root.workflow-pr-review-visible: WorkflowPage {
+                        if root.current-route == Route.Workflow && !PrReviewHostBridge.workflow-pr-review-visible: WorkflowPage {
                             overlay-viewport-x: page-scroll-view.absolute-position.x;
                             overlay-viewport-y: page-scroll-view.absolute-position.y;
                             overlay-viewport-width: page-scroll-view.visible-width;
@@ -1451,7 +1321,7 @@ export component MainWindow inherits Window {
                                 root.workflow-open-local-repo(path);
                             }
                             pr-open-detail(number, title, author, source-branch, target-branch, updated-at, initial-tab) => {
-                                root.workflow-pr-review-open(number, title, author, source-branch, target-branch, updated-at, initial-tab);
+                                PrReviewHostBridge.open-review(number, title, author, source-branch, target-branch, updated-at, initial-tab);
                             }
                             pr-start-ai-review(number, title, source-branch, target-branch) => {
                                 root.workflow-ai-review-start(number, title, source-branch, target-branch);
@@ -2223,237 +2093,31 @@ export component MainWindow inherits Window {
         height: root.height;
     }
 
-    if root.current-route == Route.PrReview: GitHubPullRequestReviewPage {
-        // Keep the large PR render tree fixed at the window origin. Moving the
-        // complete frozen diff tree during native live resize can retain a
-        // stale compositor transform; ordinary content applies the discrete
-        // sidebar inset inside the component instead.
-        x: 0px;
-        y: root.native-titlebar-inset;
-        width: root.width;
-        height: root.pr-review-content-height;
+    PrReviewHost {
+        x: 0px; y: 0px; width: root.width; height: root.height;
         z: 800;
-        application-width: root.width;
-        application-height: root.height;
-        shell-leading-inset: root.pr-content-x;
-        shell-content-width: root.pr-review-main-content-width;
-        // Divider drags use the same bounded-cost projection as native live
-        // resize and commit the expensive diff layout once on release.
-        live-resizing: root.window-live-resizing || root.ai-review-panel-resizing;
-        project-name: root.workflow-project-name;
-        provider: root.workflow-pr-repo-type;
-        pull-request-number: root.workflow-pr-review-number;
-        pull-request-title: root.workflow-pr-review-title;
-        author: root.workflow-pr-review-author;
-        source-branch: root.workflow-pr-review-source-branch;
-        target-branch: root.workflow-pr-review-target-branch;
-        updated-at: root.workflow-pr-review-updated-at;
-        updated-at-tooltip: root.workflow-pr-review-updated-at-tooltip;
-        added-lines: root.workflow-pr-review-added-lines;
-        removed-lines: root.workflow-pr-review-removed-lines;
-        commit-count: root.workflow-pr-review-commit-count;
-        conversation-count: root.workflow-pr-review-conversation-count;
-        base-sha: root.workflow-pr-review-base-sha;
-        head-sha: root.workflow-pr-review-head-sha;
-        too-many-commits: root.workflow-pr-review-too-many-commits;
-        files-truncated: root.workflow-pr-review-files-truncated;
-        selected-tab <=> root.workflow-pr-review-tab;
-        conversation-items: root.workflow-pr-review-conversation-items;
-        conversation-content-height: root.workflow-pr-review-conversation-content-height;
-        expanded-commit-body-height: root.workflow-pr-review-expanded-commit-body-height;
-        commits: root.workflow-pr-review-commits;
-        conversation-loading: root.workflow-pr-review-conversation-loading;
-        commits-loading: root.workflow-pr-review-commits-loading;
-        conversation-error: root.workflow-pr-review-conversation-error;
-        commits-error: root.workflow-pr-review-commits-error;
-        commit-range-start: root.workflow-pr-review-commit-range-start;
-        commit-range-end: root.workflow-pr-review-commit-range-end;
-        commit-range-label: root.workflow-pr-review-commit-range-label;
-        files: root.workflow-pr-review-files;
-        tree-items: root.workflow-pr-review-tree-items;
-        extension-filters: root.workflow-pr-review-extension-filters;
-        only-manifest-files: root.workflow-pr-review-only-manifest-files;
-        show-viewed-files: root.workflow-pr-review-show-viewed-files;
-        file-filters-active: root.workflow-pr-review-file-filters-active;
-        lines: root.workflow-pr-review-lines;
-        line-metrics: root.workflow-pr-review-line-metrics;
-        max-code-columns: root.workflow-pr-review-max-code-columns;
-        longest-code-line: root.workflow-pr-review-longest-code-line;
-        line-content-revision: root.workflow-pr-review-line-content-revision;
-        find-result-revision: root.workflow-pr-review-find-result-revision;
-        line-model-revision: root.workflow-pr-review-line-model-revision;
-        scroll-diagnostics-enabled: root.workflow-pr-review-scroll-diagnostics-enabled;
-        hunk-scroll-anchor-source-index: root.workflow-pr-review-hunk-scroll-anchor-source-index;
-        hunk-scroll-restore-revision: root.workflow-pr-review-hunk-scroll-restore-revision;
-        location-row-index: root.workflow-pr-review-location-row-index;
-        location-side: root.workflow-pr-review-location-side;
-        location-reveal-revision: root.workflow-pr-review-location-reveal-revision;
-        code-font-family: root.workflow-pr-review-code-font-family;
-        code-font-size: root.workflow-pr-review-code-font-size;
-        tree-font-family: root.workflow-pr-review-tree-font-family;
-        file-list-preferred-width <=> root.workflow-pr-review-file-list-width;
-        selected-file-index: root.workflow-pr-review-selected-file-index;
-        selected-file-path: root.workflow-pr-review-selected-file-path;
-        selected-file-added-lines: root.workflow-pr-review-selected-file-added-lines;
-        selected-file-removed-lines: root.workflow-pr-review-selected-file-removed-lines;
-        has-expandable-hunks: root.workflow-pr-review-has-expandable-hunks;
-        context-expanded: root.workflow-pr-review-context-expanded;
-        viewing-file: root.workflow-pr-review-viewing-file;
-        loading: root.workflow-pr-review-loading;
-        code-loading: root.workflow-pr-review-code-loading;
-        large-diff-deferred: root.workflow-pr-review-large-diff-deferred;
-        large-diff-loading: root.workflow-pr-review-large-diff-loading;
-        error-text: root.workflow-pr-review-error;
-        error-kind: root.workflow-pr-review-error-kind;
-        ignore-whitespace-supported: root.workflow-pr-review-ignore-whitespace-supported;
-        merge-delete-source-branch-supported: root.workflow-pr-merge-delete-source-branch-supported;
-        ignore-whitespace <=> root.workflow-pr-review-ignore-whitespace;
-        diff-view <=> root.workflow-pr-review-diff-view;
-        file-filter <=> root.workflow-pr-review-file-filter;
-        review-dialog-open <=> root.workflow-pr-review-dialog-open;
-        dismiss-review-dialog-open <=> root.workflow-pr-dismiss-review-dialog-open;
-        merge-dialog-open <=> root.workflow-pr-merge-dialog-open;
-        revert-dialog-open <=> root.workflow-pr-revert-dialog-open;
-        commit-range-dialog-open <=> root.workflow-pr-commit-range-dialog-open;
-        action-loading: root.workflow-pr-action-loading;
-        can-comment: root.workflow-pr-can-comment;
-        can-approve: root.workflow-pr-can-approve;
-        can-request-changes: root.workflow-pr-can-request-changes;
-        remote-review-state: root.workflow-pr-remote-review-state;
-        comment-submission-revision: root.workflow-pr-comment-submission-revision;
-        can-merge: root.workflow-pr-can-merge;
-        can-revert: root.workflow-pr-can-revert;
-        merge-readiness-kind: root.workflow-pr-merge-readiness-kind;
-        merge-readiness-label: root.workflow-pr-merge-readiness-label;
-        merge-readiness-detail: root.workflow-pr-merge-readiness-detail;
-        merge-block-reason: root.workflow-pr-merge-block-reason;
-        revert-block-reason: root.workflow-pr-revert-block-reason;
-        revert-action-label: root.workflow-pr-revert-action-label;
-        revert-confirmation: root.workflow-pr-revert-confirmation;
-        merge-method-merge: root.workflow-pr-merge-method-merge;
-        merge-method-squash: root.workflow-pr-merge-method-squash;
-        merge-method-rebase: root.workflow-pr-merge-method-rebase;
-        merge-method-fast-forward: root.workflow-pr-merge-method-fast-forward;
-        selected-merge-method <=> root.workflow-pr-selected-merge-method;
-        default-merge-method => { return root.workflow-pr-default-merge-method(); }
-        ai-review-status: root.ai-review-status;
-        ai-review-finding-count: root.ai-review-findings.length;
-        ai-review-panel-visible: root.ai-review-panel-visible;
-        select-tab(tab) => { root.workflow-pr-review-select-tab(tab); }
-        ensure-commits => { root.workflow-pr-review-ensure-commits(); }
-        apply-commit-range(start, end) => { root.workflow-pr-review-apply-commit-range(start, end); }
-        open-commit(sha) => { root.workflow-pr-review-open-commit(sha); }
-        select-file(index) => { root.workflow-pr-review-select-file(index); }
-        select-relative-file(offset) => { root.workflow-pr-review-select-relative-file(offset); }
-        reload(ignore-whitespace) => { root.workflow-pr-review-reload(ignore-whitespace); }
-        apply-diff-settings(diff-view, ignore-whitespace) => {
-            root.workflow-pr-review-apply-diff-settings(diff-view, ignore-whitespace);
-        }
-        load-large-diff => { root.workflow-pr-review-load-large-diff(); }
-        filter-files(query) => { root.workflow-pr-review-filter-files(query); }
-        toggle-extension-filter(extension) => { root.workflow-pr-review-toggle-extension-filter(extension); }
-        toggle-manifest-filter => { root.workflow-pr-review-toggle-manifest-filter(); }
-        toggle-viewed-files => { root.workflow-pr-review-toggle-viewed-files(); }
-        toggle-folder(path) => { root.workflow-pr-review-toggle-folder(path); }
-        expand-hunk(line-index, direction) => {
-            root.workflow-pr-review-expand-hunk(line-index, direction);
-        }
-        expand-all-hunks => { root.workflow-pr-review-expand-all-hunks(); }
-        collapse-non-diff-lines => { root.workflow-pr-review-collapse-non-diff-lines(); }
-        copy-file-path(path) => { root.workflow-pr-review-copy-file-path(path) }
-        copy-commit-sha(sha) => { root.workflow-pr-review-copy-commit-sha(sha) }
-        copy-source-branch(branch) => { root.workflow-pr-review-copy-source-branch(branch) }
-        copy-diff-selection(start-line, start-col, end-line, end-col, side) => {
-            root.workflow-pr-review-copy-diff-selection(start-line, start-col, end-line, end-col, side);
-        }
-        resolve-diff-selection(line, x, y, row-height, code-width, cell-width, line-pitch, family, size, side) => {
-            PrDiffBridge.workflow-pr-review-resolve-diff-selection(line, x, y, row-height, code-width, cell-width, line-pitch, family, size, side)
-        }
-        resolve-diff-token-hit(text, x, width, family, size, bold, italic) => {
-            PrDiffBridge.workflow-pr-review-resolve-diff-token-hit(text, x, width, family, size, bold, italic)
-        }
-        resolve-diff-token-range(text, start, end, width, family, size, bold, italic) => {
-            PrDiffBridge.workflow-pr-review-resolve-diff-token-range(
-                text, start, end, width, family, size, bold, italic
-            )
-        }
-        resolve-diff-wrapped-range(text, start, end, width, pitch, family, size) => {
-            PrDiffBridge.workflow-pr-review-resolve-diff-wrapped-range(
-                text, start, end, width, pitch, family, size
-            )
-        }
-        resolve-diff-selection-slice(line, side, start-col, end-col) => {
-            PrDiffBridge.workflow-pr-review-resolve-diff-selection-slice(line, side, start-col, end-col)
-        }
-        resolve-diff-wrap-line-start(line, side, caret, max-cols) => {
-            PrDiffBridge.workflow-pr-review-resolve-diff-wrap-line-start(line, side, caret, max-cols)
-        }
-        resolve-diff-click-range(line, column, side, mode) => {
-            PrDiffBridge.workflow-pr-review-resolve-diff-click-range(line, column, side, mode)
-        }
-        find-diff-matches(query, split) => {
-            PrDiffBridge.workflow-pr-review-find-diff-matches(query, split)
-        }
-        find-diff-row-matches(line, side, query) => {
-            PrDiffBridge.workflow-pr-review-find-diff-row-matches(line, side, query)
-        }
-        step-diff-find-index(current, count, backward) => {
-            PrDiffBridge.workflow-pr-review-step-diff-find-index(current, count, backward)
-        }
-        resolve-diff-find-viewport-y(line, start-char, code-width, cell-width, side, current-viewport-y, visible-height, content-height) => {
-            PrDiffBridge.workflow-pr-review-resolve-diff-find-viewport-y(
-                line,
-                start-char,
-                code-width,
-                cell-width,
-                side,
-                current-viewport-y,
-                visible-height,
-                content-height
-            )
-        }
-        resolve-location-viewport-y(line, current-viewport-y, visible-height) => {
-            PrDiffBridge.workflow-pr-review-resolve-location-viewport-y(
-                line,
-                current-viewport-y,
-                visible-height
-            )
-        }
-        layout-diff-virtual-window(revision, metrics, scroll-offset, visible-height, code-width, cell-width, code-line-height, hunk-line-height) => {
-            PrDiffBridge.workflow-pr-review-layout-diff-virtual-window(
-                revision,
-                metrics,
-                scroll-offset,
-                visible-height,
-                code-width,
-                cell-width,
-                code-line-height,
-                hunk-line-height
-            )
-        }
-        diagnose-diff-scroll(kind, viewport-y, requested-y, visible-height, viewport-height, find-open, find-focused, hunk-pending, find-revision, line-revision, hunk-attempts) => {
-            PrDiffBridge.workflow-pr-review-diagnose-diff-scroll(
-                kind,
-                viewport-y,
-                requested-y,
-                visible-height,
-                viewport-height,
-                find-open,
-                find-focused,
-                hunk-pending,
-                find-revision,
-                line-revision,
-                hunk-attempts
-            )
-        }
-        view-file => { root.workflow-pr-review-view-file(); }
-        open-settings => { root.navigate(Route.Settings); }
-        toggle-commit-message(sha) => { root.workflow-pr-review-toggle-commit-message(sha); }
-        submit-review(action, body) => { root.workflow-pr-submit-review(action, body); }
-        dismiss-review(review-id, reason) => { root.workflow-pr-dismiss-review(review-id, reason); }
-        merge(method, remove-source-branch) => { root.workflow-pr-merge(method, remove-source-branch); }
-        revert => { root.workflow-pr-revert(); }
-        toggle-ai-review => { root.ai-review-toggle-current(); }
+        context: {
+            active: root.current-route == Route.PrReview,
+            width: root.width,
+            height: root.height,
+            titlebar-inset: root.native-titlebar-inset,
+            content-x: root.pr-content-x,
+            content-width: root.pr-review-main-content-width,
+            content-height: root.pr-review-content-height,
+            live-resizing: root.window-live-resizing || root.ai-review-panel-resizing,
+            project-name: root.workflow-project-name,
+            provider: root.workflow-pr-repo-type,
+            code-font-family: root.workflow-pr-review-code-font-family,
+            code-font-size: root.workflow-pr-review-code-font-size,
+            tree-font-family: root.workflow-pr-review-tree-font-family,
+            font-family: root.application-font-family,
+            theme-mode: AppState.theme-mode,
+            dark-mode: AppState.effective-dark-mode,
+            ai-status: root.ai-review-status,
+            ai-finding-count: root.ai-review-findings.length,
+            ai-visible: root.ai-review-panel-visible,
+            user-avatar: AppState.user-avatar,
+        };
     }
 
     if root.current-route == Route.PrReview && root.ai-review-panel-visible: GitHubAiReviewPanel {
@@ -2589,28 +2253,25 @@ export component MainWindow inherits Window {
             height: 28px;
             titlebar-mode: true;
             show-readiness: true;
-            readiness-kind: root.workflow-pr-merge-readiness-kind;
-            readiness-label: root.workflow-pr-merge-readiness-label;
-            readiness-detail: root.workflow-pr-merge-readiness-detail;
-            remote-review-state: root.workflow-pr-remote-review-state;
-            action-loading: root.workflow-pr-action-loading;
-            actions-enabled: !root.workflow-pr-review-dialog-open
-                && !root.workflow-pr-dismiss-review-dialog-open
-                && !root.workflow-pr-merge-dialog-open
-                && !root.workflow-pr-revert-dialog-open;
+            readiness-kind: PrReviewHostBridge.workflow-pr-merge-readiness-kind;
+            readiness-label: PrReviewHostBridge.workflow-pr-merge-readiness-label;
+            readiness-detail: PrReviewHostBridge.workflow-pr-merge-readiness-detail;
+            remote-review-state: PrReviewHostBridge.workflow-pr-remote-review-state;
+            action-loading: PrReviewHostBridge.workflow-pr-action-loading;
+            actions-enabled: !PrReviewHostBridge.modal-visible;
             readiness-popup-open: root.workflow-pr-readiness-popup-open;
             render-readiness-popup: false;
             viewport-global-x: 0px;
             viewport-global-y: 0px;
             viewport-width: root.width;
             viewport-height: root.height;
-            can-comment: root.workflow-pr-can-comment;
-            can-approve: root.workflow-pr-can-approve;
-            can-request-changes: root.workflow-pr-can-request-changes;
-            can-merge: root.workflow-pr-can-merge;
-            can-revert: root.workflow-pr-can-revert;
-            revert-action-label: root.workflow-pr-revert-action-label;
-            merge-block-reason: root.workflow-pr-merge-block-reason;
+            can-comment: PrReviewHostBridge.workflow-pr-can-comment;
+            can-approve: PrReviewHostBridge.workflow-pr-can-approve;
+            can-request-changes: PrReviewHostBridge.workflow-pr-can-request-changes;
+            can-merge: PrReviewHostBridge.workflow-pr-can-merge;
+            can-revert: PrReviewHostBridge.workflow-pr-can-revert;
+            revert-action-label: PrReviewHostBridge.workflow-pr-revert-action-label;
+            merge-block-reason: PrReviewHostBridge.workflow-pr-merge-block-reason;
             background-color: GitHubTheme.canvas-default;
             outline-color: GitHubTheme.border-default;
             foreground-color: GitHubTheme.fg-default;
@@ -2621,22 +2282,22 @@ export component MainWindow inherits Window {
             done-color: GitHubTheme.done-fg-strong;
             review => {
                 root.workflow-pr-readiness-popup-open = false;
-                root.workflow-pr-review-dialog-open = true;
+                PrReviewHostBridge.header-action("review");
             }
             merge => {
                 root.workflow-pr-readiness-popup-open = false;
-                root.workflow-pr-merge-dialog-open = true;
+                PrReviewHostBridge.header-action("merge");
             }
             revert => {
                 root.workflow-pr-readiness-popup-open = false;
-                root.workflow-pr-revert-dialog-open = true;
+                PrReviewHostBridge.header-action("revert");
             }
             toggle-readiness-popup => {
                 // Peer Diff/file menus close via ActionMenu exclusive-claim when
                 // this root-mounted menu opens; no page-local dismiss-all here.
-                if root.workflow-pr-merge-readiness-kind == "conflicts" {
+                if PrReviewHostBridge.workflow-pr-merge-readiness-kind == "conflicts" {
                     root.workflow-pr-readiness-popup-open = false;
-                    PrConflictsBridge.open();
+                    PrReviewHostBridge.header-action("conflicts");
                 } else {
                     root.workflow-pr-readiness-popup-open = !root.workflow-pr-readiness-popup-open;
                 }
@@ -2669,33 +2330,33 @@ export component MainWindow inherits Window {
         z: 860;
 
         private property <color> state-color:
-            root.workflow-pr-merge-readiness-kind == "ready"
+            PrReviewHostBridge.workflow-pr-merge-readiness-kind == "ready"
                 ? GitHubTheme.success-fg
-                : (root.workflow-pr-merge-readiness-kind == "merged"
+                : (PrReviewHostBridge.workflow-pr-merge-readiness-kind == "merged"
                     ? GitHubTheme.done-fg-strong
-                    : ((root.workflow-pr-merge-readiness-kind == "conflicts"
-                            || root.workflow-pr-merge-readiness-kind == "changes_requested"
-                            || root.workflow-pr-merge-readiness-kind == "checks_failed"
-                            || root.workflow-pr-merge-readiness-kind == "closed")
+                    : ((PrReviewHostBridge.workflow-pr-merge-readiness-kind == "conflicts"
+                            || PrReviewHostBridge.workflow-pr-merge-readiness-kind == "changes_requested"
+                            || PrReviewHostBridge.workflow-pr-merge-readiness-kind == "checks_failed"
+                            || PrReviewHostBridge.workflow-pr-merge-readiness-kind == "closed")
                         ? GitHubTheme.danger-fg-strong
-                        : ((root.workflow-pr-merge-readiness-kind == "review_required"
-                                || root.workflow-pr-merge-readiness-kind == "checks_pending"
-                                || root.workflow-pr-merge-readiness-kind == "branch_out_of_date"
-                                || root.workflow-pr-merge-readiness-kind == "discussions_unresolved"
-                                || root.workflow-pr-merge-readiness-kind == "blocked")
+                        : ((PrReviewHostBridge.workflow-pr-merge-readiness-kind == "review_required"
+                                || PrReviewHostBridge.workflow-pr-merge-readiness-kind == "checks_pending"
+                                || PrReviewHostBridge.workflow-pr-merge-readiness-kind == "branch_out_of_date"
+                                || PrReviewHostBridge.workflow-pr-merge-readiness-kind == "discussions_unresolved"
+                                || PrReviewHostBridge.workflow-pr-merge-readiness-kind == "blocked")
                             ? GitHubTheme.attention-fg
                             : GitHubTheme.fg-muted)));
         private property <image> state-icon:
-            root.workflow-pr-merge-readiness-kind == "ready"
-                    || root.workflow-pr-merge-readiness-kind == "merged"
+            PrReviewHostBridge.workflow-pr-merge-readiness-kind == "ready"
+                    || PrReviewHostBridge.workflow-pr-merge-readiness-kind == "merged"
                 ? @image-url("./assets/icons/octicon-check-16.svg")
-                : ((root.workflow-pr-merge-readiness-kind == "conflicts"
-                        || root.workflow-pr-merge-readiness-kind == "changes_requested"
-                        || root.workflow-pr-merge-readiness-kind == "checks_failed"
-                        || root.workflow-pr-merge-readiness-kind == "closed")
+                : ((PrReviewHostBridge.workflow-pr-merge-readiness-kind == "conflicts"
+                        || PrReviewHostBridge.workflow-pr-merge-readiness-kind == "changes_requested"
+                        || PrReviewHostBridge.workflow-pr-merge-readiness-kind == "checks_failed"
+                        || PrReviewHostBridge.workflow-pr-merge-readiness-kind == "closed")
                     ? @image-url("./assets/icons/octicon-x-16.svg")
-                    : ((root.workflow-pr-merge-readiness-kind == "checking"
-                            || root.workflow-pr-merge-readiness-kind == "unavailable")
+                    : ((PrReviewHostBridge.workflow-pr-merge-readiness-kind == "checking"
+                            || PrReviewHostBridge.workflow-pr-merge-readiness-kind == "unavailable")
                         ? @image-url("./assets/icons/octicon-sync-16.svg")
                         : @image-url("./assets/icons/octicon-alert-16.svg")));
 
@@ -2703,7 +2364,7 @@ export component MainWindow inherits Window {
             width: 0px;
             height: 0px;
             visible: false;
-            text: root.workflow-pr-merge-readiness-label;
+            text: PrReviewHostBridge.workflow-pr-merge-readiness-label;
             font-size: 14px;
             font-weight: 600;
         }
@@ -2711,7 +2372,7 @@ export component MainWindow inherits Window {
             width: 0px;
             height: 0px;
             visible: false;
-            text: root.workflow-pr-merge-readiness-detail;
+            text: PrReviewHostBridge.workflow-pr-merge-readiness-detail;
             font-size: 12px;
         }
         private property <length> popup-width: min(
@@ -2725,7 +2386,7 @@ export component MainWindow inherits Window {
             width: pr-readiness-overlay.popup-width - 32px;
             height: self.preferred-height;
             visible: false;
-            text: root.workflow-pr-merge-readiness-detail;
+            text: PrReviewHostBridge.workflow-pr-merge-readiness-detail;
             wrap: word-wrap;
             font-size: 12px;
         }
@@ -2774,7 +2435,7 @@ export component MainWindow inherits Window {
                     y: 12px;
                     width: parent.width - 60px;
                     height: 28px;
-                    text: root.workflow-pr-merge-readiness-label;
+                    text: PrReviewHostBridge.workflow-pr-merge-readiness-label;
                     vertical-alignment: center;
                     font-size: 14px;
                     font-weight: 600;
@@ -2785,7 +2446,7 @@ export component MainWindow inherits Window {
                     y: 48px;
                     width: parent.width - 32px;
                     height: parent.height - 64px;
-                    text: root.workflow-pr-merge-readiness-detail;
+                    text: PrReviewHostBridge.workflow-pr-merge-readiness-detail;
                     vertical-alignment: top;
                     wrap: word-wrap;
                     font-size: 12px;
@@ -2801,11 +2462,7 @@ export component MainWindow inherits Window {
     // the Slint content view and therefore stay visible and clickable.
     if root.platform-is-macos
             && root.current-route == Route.PrReview
-            && (root.workflow-pr-review-dialog-open
-                || root.workflow-pr-dismiss-review-dialog-open
-                || root.workflow-pr-merge-dialog-open
-                || root.workflow-pr-revert-dialog-open
-                || root.workflow-pr-commit-range-dialog-open): Rectangle {
+            && PrReviewHostBridge.modal-visible: Rectangle {
         x: 0px;
         y: 0px;
         width: root.width;
@@ -2844,11 +2501,7 @@ export component MainWindow inherits Window {
     // testing outside a route component's own bounds is not guaranteed; the
     // title-bar continuation above completes the full-window scrim.
     if root.current-route == Route.PrReview
-            && (root.workflow-pr-review-dialog-open
-                || root.workflow-pr-dismiss-review-dialog-open
-                || root.workflow-pr-merge-dialog-open
-                || root.workflow-pr-revert-dialog-open
-                || root.workflow-pr-commit-range-dialog-open): Rectangle {
+            && PrReviewHostBridge.modal-visible: Rectangle {
         x: 0px;
         y: root.native-titlebar-inset;
         width: max(0px, main-content-host.x);

@@ -14,6 +14,24 @@ use slint::{CloseRequestResponse, ComponentHandle, Global, Timer};
 // Re-export generated UI types at the composition-root namespace so feature
 // modules retain their existing `crate::{MainWindow, Route, ...}` imports.
 pub use usher_ui::*;
+#[cfg(not(feature = "live-preview"))]
+pub use usher_ui_pr_review::{
+    PrConflictFile, PrConflictRow, PrConflictWindow, PrConflictsBridge, PrDiffBridge,
+    PrReviewBridge, PrReviewTooltipKind, PrReviewTooltipState, WorkflowPrCommit,
+    WorkflowPrConversationItem, WorkflowPrDiffFile, WorkflowPrDiffFindMatch,
+    WorkflowPrDiffGlyphRange, WorkflowPrDiffGlyphRect, WorkflowPrDiffLine, WorkflowPrDiffRowMetric,
+    WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice,
+    WorkflowPrDiffToken, WorkflowPrDiffVirtualRow, WorkflowPrDiffVirtualWindow,
+    WorkflowPrFileExtensionFilter, WorkflowPrTreeItem,
+};
+
+#[path = "workflow/pr_review/ui.rs"]
+mod pr_review_ui;
+#[doc(hidden)]
+pub use pr_review_ui::{
+    PrReviewUiExt, PrReviewUiRoot, install as install_pr_review_fixture,
+    view as pr_review_fixture_view,
+};
 
 mod notification;
 
@@ -142,6 +160,7 @@ fn ui(
     // Using native macOS title bar
     let app = MainWindow::new().context("Failed to create MainWindow")?;
     install_floating_overlay_positioning(&app);
+    pr_review_ui::install(&app);
     startup_timeline.checkpoint("main_window_created");
     i18n::initialize(&app, &loaded_settings.language)?;
     startup_timeline.checkpoint("language_initialized");
@@ -455,7 +474,9 @@ fn ui(
                 play_ui_click();
             }
             if ui.get_current_route() == Route::PrReview {
-                ui.invoke_workflow_pr_review_back();
+                ui.pr_review()
+                    .global::<crate::PrReviewBridge>()
+                    .invoke_workflow_pr_review_back();
                 return;
             }
             router_for_back.back();

@@ -1,3 +1,4 @@
+use crate::pr_review_ui::PrReviewUiExt;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 #[cfg(test)]
@@ -41,7 +42,7 @@ use crate::{
 use super::agent_identity;
 use super::config::{ReviewConfigFacade, default_session_dir};
 use super::producers::{ProducerPermit, Producers};
-use super::request_capture::request_from_ui;
+use super::request_capture::{request_from_review_ui, request_from_ui};
 use super::response::{self, ResponseVariant};
 #[cfg(any(test, feature = "test-fixtures"))]
 use super::review_input::bounded_utf8_prefix;
@@ -725,14 +726,14 @@ fn maybe_mount_response_fixture(ui: &MainWindow, inner: Arc<ControllerInner>) {
             if !inner.response_mount_is_current(mount_generation) {
                 return;
             }
-            ui.set_workflow_pr_review_visible(true);
-            ui.set_workflow_pr_review_loading(false);
-            ui.set_workflow_pr_review_number(task.target.pull_request_number.clone().into());
-            ui.set_workflow_pr_review_title(task.target.pull_request_title.clone().into());
-            ui.set_workflow_pr_review_author(task.target.author.clone().into());
-            ui.set_workflow_pr_review_source_branch(task.target.source_branch.clone().into());
-            ui.set_workflow_pr_review_target_branch(task.target.target_branch.clone().into());
-            ui.set_workflow_pr_review_updated_at(task.target.updated_at.clone().into());
+            ui.pr_review().global::<crate::PrReviewBridge>().set_workflow_pr_review_visible(true);
+            ui.pr_review().global::<crate::PrReviewBridge>().set_workflow_pr_review_loading(false);
+            ui.pr_review().global::<crate::PrReviewBridge>().set_workflow_pr_review_number(task.target.pull_request_number.clone().into());
+            ui.pr_review().global::<crate::PrReviewBridge>().set_workflow_pr_review_title(task.target.pull_request_title.clone().into());
+            ui.pr_review().global::<crate::PrReviewBridge>().set_workflow_pr_review_author(task.target.author.clone().into());
+            ui.pr_review().global::<crate::PrReviewBridge>().set_workflow_pr_review_source_branch(task.target.source_branch.clone().into());
+            ui.pr_review().global::<crate::PrReviewBridge>().set_workflow_pr_review_target_branch(task.target.target_branch.clone().into());
+            ui.pr_review().global::<crate::PrReviewBridge>().set_workflow_pr_review_updated_at(task.target.updated_at.clone().into());
             ui.invoke_navigate(Route::PrReview);
             apply_task_header(&ui, &task);
             ui.set_ai_review_summary(
@@ -991,7 +992,11 @@ fn bind_callbacks(ui: &MainWindow, inner: &Arc<ControllerInner>) {
             return;
         }
         let project = ProjectReviewKey(ui.get_workflow_project_id().to_string());
-        let number = ui.get_workflow_pr_review_number().to_string();
+        let number = ui
+            .pr_review()
+            .global::<crate::PrReviewBridge>()
+            .get_workflow_pr_review_number()
+            .to_string();
         let existing = latest_task_for_pr(
             inner_toggle.task_store.snapshot().state(),
             &project,
@@ -1002,14 +1007,7 @@ fn bind_callbacks(ui: &MainWindow, inner: &Arc<ControllerInner>) {
             inner_toggle.clone().open_task(&task_id, false);
             return;
         }
-        let request = request_from_ui(
-            &ui,
-            number.as_str(),
-            ui.get_workflow_pr_review_title().as_str(),
-            ui.get_workflow_pr_review_source_branch().as_str(),
-            ui.get_workflow_pr_review_target_branch().as_str(),
-            "",
-        );
+        let request = request_from_review_ui(&ui, Some(number.as_str()), "");
         inner_toggle.clone().enqueue(request, true);
     });
 
@@ -1039,14 +1037,7 @@ fn bind_callbacks(ui: &MainWindow, inner: &Arc<ControllerInner>) {
         let Some(ui) = inner_rerun.window.upgrade() else {
             return;
         };
-        let request = request_from_ui(
-            &ui,
-            ui.get_workflow_pr_review_number().as_str(),
-            ui.get_workflow_pr_review_title().as_str(),
-            ui.get_workflow_pr_review_source_branch().as_str(),
-            ui.get_workflow_pr_review_target_branch().as_str(),
-            extra.as_str(),
-        );
+        let request = request_from_review_ui(&ui, None, extra.as_str());
         inner_rerun.cancel_chat(&ReviewTaskId(
             ui.get_ai_review_current_task_id().to_string(),
         ));
@@ -1103,7 +1094,9 @@ fn bind_callbacks(ui: &MainWindow, inner: &Arc<ControllerInner>) {
         ui.set_ai_review_selected_finding_id(id);
         ui.set_ai_review_finding_navigation_message("".into());
         ui.set_ai_review_finding_navigation_can_view_file(false);
-        ui.invoke_workflow_pr_review_reveal_location(file, line, side, head_sha);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .invoke_workflow_pr_review_reveal_location(file, line, side, head_sha);
     });
 
     let inner_view_finding = inner.clone();
@@ -1111,7 +1104,9 @@ fn bind_callbacks(ui: &MainWindow, inner: &Arc<ControllerInner>) {
         let Some(ui) = inner_view_finding.window.upgrade() else {
             return;
         };
-        ui.invoke_workflow_pr_review_view_location_file(file, side);
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .invoke_workflow_pr_review_view_location_file(file, side);
     });
 
     let inner_response_preview = inner.clone();
@@ -1753,15 +1748,17 @@ impl ControllerInner {
             return;
         };
         if navigate_to_pr {
-            ui.invoke_workflow_pr_review_open(
-                task.target.pull_request_number.clone().into(),
-                task.target.pull_request_title.clone().into(),
-                task.target.author.clone().into(),
-                task.target.source_branch.clone().into(),
-                task.target.target_branch.clone().into(),
-                task.target.updated_at.clone().into(),
-                2,
-            );
+            ui.pr_review()
+                .global::<crate::PrReviewBridge>()
+                .invoke_workflow_pr_review_open(
+                    task.target.pull_request_number.clone().into(),
+                    task.target.pull_request_title.clone().into(),
+                    task.target.author.clone().into(),
+                    task.target.source_branch.clone().into(),
+                    task.target.target_branch.clone().into(),
+                    task.target.updated_at.clone().into(),
+                    2,
+                );
         } else if ui.get_current_route() != Route::PrReview {
             return;
         }
@@ -2068,14 +2065,7 @@ impl ControllerInner {
             }
             cancellations.insert(id.clone(), cancellation.clone());
         }
-        let request = request_from_ui(
-            &ui,
-            ui.get_workflow_pr_review_number().as_str(),
-            ui.get_workflow_pr_review_title().as_str(),
-            ui.get_workflow_pr_review_source_branch().as_str(),
-            ui.get_workflow_pr_review_target_branch().as_str(),
-            "",
-        );
+        let request = request_from_review_ui(&ui, None, "");
         let identity = agent_identity::capture(&request.profile);
         let settings = request.profile.connection.clone();
         let fallback = PullRequestChatSession {
@@ -2976,7 +2966,9 @@ fn rebuild_response_visual_rows(ui: &MainWindow) {
 }
 
 fn clear_panel_ui(ui: &MainWindow) {
-    ui.invoke_workflow_pr_review_clear_location();
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .invoke_workflow_pr_review_clear_location();
     ui.set_ai_review_panel_visible(false);
     ui.set_ai_review_current_task_id("".into());
     ui.set_ai_review_summary("".into());
@@ -2993,8 +2985,12 @@ fn clear_panel_ui(ui: &MainWindow) {
     ui.set_ai_review_selected_finding_id("".into());
     ui.set_ai_review_finding_navigation_message("".into());
     ui.set_ai_review_finding_navigation_can_view_file(false);
-    ui.set_workflow_pr_review_location_row_index(-1);
-    ui.set_workflow_pr_review_location_side("".into());
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .set_workflow_pr_review_location_row_index(-1);
+    ui.pr_review()
+        .global::<crate::PrReviewBridge>()
+        .set_workflow_pr_review_location_side("".into());
     ui.set_ai_review_conversation(ModelRc::new(VecModel::default()));
     rebuild_response_visual_rows(ui);
 }

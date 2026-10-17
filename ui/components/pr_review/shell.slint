@@ -1,9 +1,11 @@
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { GitHubTooltip } from "../github_tooltip.slint";
-import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint";
+import { GitHubTooltipAlignment, GitHubTooltipPlacement, TooltipOverlayState } from "../../state/tooltip_overlay_state.slint";
 import { GitHubActionMenu, GitHubActionMenuTriggerArea } from "../github_action_menu.slint";
 import { GitHubBlankslate } from "../github_blankslate.slint";
-import { GitHubCopyButton } from "../button/github_copy_button.slint";
+import { GitHubPrCopyBranchButton } from "tooltip_buttons.slint";
+import { PrReviewTooltipState } from "tooltip_state.slint";
+import { PrReviewChangesTooltipAnchor, PrConfigureToReviewTooltipAnchor, PrChooseMergeMethodTooltipAnchor, PrReverseChangesTooltipAnchor } from "tooltip_anchors.slint";
 import { I18n } from "@i18n";
 import { GitHubUnderlineNavItem } from "../navigation/github_underline_nav.slint";
 
@@ -277,8 +279,11 @@ export component GitHubReviewActionButton inherits Rectangle {
     in property <bool> tooltip-align-start: false;
     in property <string> tooltip-text: "";
     out property <bool> has-hover: action-touch.has-hover;
+    out property <bool> tooltip-active:
+        (action-touch.has-hover || root.keyboard-focus-visible) && !root.tooltip-dismissed;
     callback clicked();
     private property <bool> keyboard-focus-visible: false;
+    private property <bool> tooltip-dismissed: false;
 
     // Primer default Button tokens (not Material surfaces) so header actions
     // like "Create revert PR" match GitHub's secondary btn.
@@ -350,32 +355,49 @@ export component GitHubReviewActionButton inherits Rectangle {
     }
 
     action-focus := FocusScope {
+        x: 0px;
+        y: 0px;
         width: 100%;
         height: 100%;
+        focus-on-click: false;
         accessible-role: button;
         accessible-enabled: root.button-enabled;
         accessible-label: root.text;
         key-pressed(event) => {
             root.keyboard-focus-visible = true;
             if root.button-enabled && (event.text == Key.Return || event.text == " ") {
-                root.clicked();
+                root.activate();
                 return accept;
             }
             return reject;
         }
         focus-gained(reason) => {
+            if reason == FocusReason.tab-navigation { root.tooltip-dismissed = false; }
             root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
         }
         focus-lost => { root.keyboard-focus-visible = false; }
     }
 
     action-touch := TouchArea {
+        x: 0px;
+        y: 0px;
+        width: 100%;
+        height: 100%;
         mouse-cursor: root.button-enabled ? pointer : default;
-        clicked => {
-            root.keyboard-focus-visible = false;
-            action-focus.focus();
-            if (root.button-enabled) { root.clicked(); }
+        changed has-hover => {
+            if !self.has-hover { root.tooltip-dismissed = false; }
         }
+        clicked => {
+            if root.button-enabled { root.activate(); }
+        }
+    }
+    function activate() {
+        root.keyboard-focus-visible = false;
+        root.tooltip-dismissed = true;
+        TooltipOverlayState.dismiss-all();
+        if PrReviewTooltipState.enabled { PrReviewTooltipState.dismiss(); }
+        action-focus.focus();
+        root.clicked();
     }
     if action-focus.has-focus && root.keyboard-focus-visible: Rectangle {
         x: -GitHubMetrics.size-2;
@@ -393,7 +415,7 @@ export component GitHubReviewActionButton inherits Rectangle {
         alignment: root.tooltip-align-start
             ? GitHubTooltipAlignment.Start
             : GitHubTooltipAlignment.End;
-        text: action-touch.has-hover ? root.tooltip-text : "";
+        text: root.tooltip-active ? root.tooltip-text : "";
     }
 }
 
@@ -402,8 +424,12 @@ export component GitHubCommentButton inherits Rectangle {
     in property <string> text: I18n.pr-review-comment;
     in property <bool> button-enabled: true;
     in property <string> tooltip-text: "";
+    in property <bool> show-tooltip: true;
+    out property <bool> tooltip-active:
+        (action-touch.has-hover || root.keyboard-focus-visible) && !root.tooltip-dismissed;
     callback clicked();
     private property <bool> keyboard-focus-visible: false;
+    private property <bool> tooltip-dismissed: false;
 
     width: 96px;
     height: 32px;
@@ -432,31 +458,48 @@ export component GitHubCommentButton inherits Rectangle {
         }
     }
     comment-focus := FocusScope {
+        x: 0px;
+        y: 0px;
         width: 100%;
         height: 100%;
+        focus-on-click: false;
         accessible-role: button;
         accessible-enabled: root.button-enabled;
         accessible-label: root.text;
         key-pressed(event) => {
             root.keyboard-focus-visible = true;
             if root.button-enabled && (event.text == Key.Return || event.text == " ") {
-                root.clicked();
+                root.activate();
                 return accept;
             }
             return reject;
         }
         focus-gained(reason) => {
+            if reason == FocusReason.tab-navigation { root.tooltip-dismissed = false; }
             root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
         }
         focus-lost => { root.keyboard-focus-visible = false; }
     }
     action-touch := TouchArea {
+        x: 0px;
+        y: 0px;
+        width: 100%;
+        height: 100%;
         mouse-cursor: root.button-enabled ? pointer : default;
-        clicked => {
-            root.keyboard-focus-visible = false;
-            comment-focus.focus();
-            if (root.button-enabled) { root.clicked(); }
+        changed has-hover => {
+            if !self.has-hover { root.tooltip-dismissed = false; }
         }
+        clicked => {
+            if root.button-enabled { root.activate(); }
+        }
+    }
+    function activate() {
+        root.keyboard-focus-visible = false;
+        root.tooltip-dismissed = true;
+        TooltipOverlayState.dismiss-all();
+        if PrReviewTooltipState.enabled { PrReviewTooltipState.dismiss(); }
+        comment-focus.focus();
+        root.clicked();
     }
     if comment-focus.has-focus && root.keyboard-focus-visible: Rectangle {
         x: -GitHubMetrics.size-2;
@@ -468,10 +511,10 @@ export component GitHubCommentButton inherits Rectangle {
         border-color: GitHubTheme.focus-outline;
         background: transparent;
     }
-    if root.tooltip-text != "": GitHubTooltip {
+    if root.show-tooltip && root.tooltip-text != "": GitHubTooltip {
         preferred-placement: GitHubTooltipPlacement.Top;
         alignment: GitHubTooltipAlignment.End;
-        text: action-touch.has-hover ? root.tooltip-text : "";
+        text: root.tooltip-active ? root.tooltip-text : "";
     }
 }
 
@@ -771,8 +814,7 @@ export component GitHubPullRequestSummaryRow inherits Rectangle {
             background-color: root.branch-background;
             foreground-color: root.branch-foreground;
         }
-        GitHubCopyButton {
-            tooltip-text: I18n.pr-review-copy-source-branch;
+        GitHubPrCopyBranchButton {
             tooltip-above: false;
             tooltip-align-right: true;
             copy-requested => {
@@ -861,8 +903,7 @@ export component GitHubPullRequestSummaryRow inherits Rectangle {
             background-color: root.branch-background;
             foreground-color: root.branch-foreground;
         }
-        GitHubCopyButton {
-            tooltip-text: I18n.pr-review-copy-source-branch;
+        GitHubPrCopyBranchButton {
             tooltip-above: false;
             tooltip-align-right: true;
             copy-requested => {
@@ -1382,24 +1423,37 @@ export component GitHubHeaderActionStrip inherits Rectangle {
         if !root.terminal-state: Rectangle {
             width: root.titlebar-mode ? 112px : 120px;
             height: parent.height;
-            GitHubReviewActionButton {
+            review-action := GitHubReviewActionButton {
                 y: (parent.height - self.height) / 2;
                 height: root.titlebar-mode ? 28px : 36px;
                 width: parent.width;
                 titlebar-mode: root.titlebar-mode;
                 text: I18n.pr-review-review-changes;
                 tooltip-align-start: root.align-start;
+                embed-tooltip: !PrReviewTooltipState.enabled;
                 button-enabled: root.actions-enabled && !root.action-loading && (root.can-comment || root.can-approve || root.can-request-changes);
                 tooltip-text: root.can-comment || root.can-approve || root.can-request-changes
                     ? I18n.pr-review-comment-approve-request
                     : I18n.pr-review-configure-provider;
                 clicked => { root.review(); }
+                PrReviewChangesTooltipAnchor {
+                    active: PrReviewTooltipState.enabled && root.actions-enabled && review-action.tooltip-active
+                        && (root.can-comment || root.can-approve || root.can-request-changes);
+                    placement: GitHubTooltipPlacement.Bottom;
+                    alignment: root.align-start ? GitHubTooltipAlignment.Start : GitHubTooltipAlignment.End;
+                }
+                PrConfigureToReviewTooltipAnchor {
+                    active: PrReviewTooltipState.enabled && root.actions-enabled && review-action.tooltip-active
+                        && !(root.can-comment || root.can-approve || root.can-request-changes);
+                    placement: GitHubTooltipPlacement.Bottom;
+                    alignment: root.align-start ? GitHubTooltipAlignment.Start : GitHubTooltipAlignment.End;
+                }
             }
         }
         if !root.terminal-state: Rectangle {
             width: root.titlebar-mode ? 148px : 172px;
             height: parent.height;
-            GitHubReviewActionButton {
+            merge-action := GitHubReviewActionButton {
                 y: (parent.height - self.height) / 2;
                 height: root.titlebar-mode ? 28px : 36px;
                 width: parent.width;
@@ -1408,9 +1462,15 @@ export component GitHubHeaderActionStrip inherits Rectangle {
                 success: true;
                 show-chevron: true;
                 tooltip-align-start: root.align-start;
+                embed-tooltip: !PrReviewTooltipState.enabled || !root.can-merge;
                 button-enabled: root.actions-enabled && !root.action-loading && root.can-merge;
                 tooltip-text: root.can-merge ? I18n.pr-review-choose-merge-method : root.merge-block-reason;
                 clicked => { root.merge(); }
+                PrChooseMergeMethodTooltipAnchor {
+                    active: PrReviewTooltipState.enabled && root.actions-enabled && merge-action.tooltip-active && root.can-merge;
+                    placement: GitHubTooltipPlacement.Bottom;
+                    alignment: root.align-start ? GitHubTooltipAlignment.Start : GitHubTooltipAlignment.End;
+                }
             }
         }
         if root.readiness-kind == "merged" && root.can-revert: Rectangle {
@@ -1425,10 +1485,16 @@ export component GitHubHeaderActionStrip inherits Rectangle {
                 titlebar-mode: root.titlebar-mode;
                 hug-content: true;
                 tooltip-align-start: root.align-start;
+                embed-tooltip: !PrReviewTooltipState.enabled;
                 text: root.action-loading ? I18n.common-working : root.revert-action-label;
                 button-enabled: root.actions-enabled && !root.action-loading;
                 tooltip-text: I18n.pr-review-reverse-changes;
                 clicked => { root.revert(); }
+                PrReverseChangesTooltipAnchor {
+                    active: PrReviewTooltipState.enabled && root.actions-enabled && revert-action.tooltip-active;
+                    placement: GitHubTooltipPlacement.Bottom;
+                    alignment: root.align-start ? GitHubTooltipAlignment.Start : GitHubTooltipAlignment.End;
+                }
             }
         }
     }

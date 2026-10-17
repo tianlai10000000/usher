@@ -110,11 +110,19 @@ def _timed_fields(item, kind):
     started, start = _timestamp(item.get("started_at"), f"{kind} started_at")
     completed, end = _timestamp(item.get("completed_at"), f"{kind} completed_at")
     duration = None
+    anomaly = None
     if start is not None and end is not None:
         duration = (end - start).total_seconds()
         if duration < 0:
-            raise MetricsError(f"{kind} completed_at precedes started_at")
-    return {
+            # GitHub cancellation can race step-start publication and report an
+            # end one second before the start. Keep both original timestamps
+            # and the real cancellation, but never publish a negative/zero
+            # duration or fail collection for all other jobs because of it.
+            if item.get("conclusion") != "cancelled":
+                raise MetricsError(f"{kind} completed_at precedes started_at")
+            duration = None
+            anomaly = "cancelled_end_precedes_start"
+    fields = {
         "name": _optional_text(item.get("name"), f"{kind} name"),
         "status": _optional_text(item.get("status"), f"{kind} status"),
         "conclusion": _optional_text(item.get("conclusion"), f"{kind} conclusion"),
@@ -122,6 +130,9 @@ def _timed_fields(item, kind):
         "completed_at": completed,
         "duration_seconds": duration,
     }
+    if anomaly is not None:
+        fields["timing_anomaly"] = anomaly
+    return fields
 
 
 def _steps(items):
@@ -242,6 +253,16 @@ def render_summary(report):
         lines.append("| " + " | ".join(cells + [_duration(job["duration_seconds"])]) + " |")
     if not report["jobs"]:
         lines += ["", "No other jobs were reported for this attempt."]
+    anomalies = sum(
+        "timing_anomaly" in row
+        for job in report["jobs"] for row in (job, *job["steps"])
+    )
+    if anomalies:
+        lines += [
+            "",
+            f"Timing anomaly: {anomalies} cancelled interval(s) end before their start.",
+            "Their original timestamps and cancellation are retained; elapsed seconds remain unknown.",
+        ]
     for job in report["jobs"]:
         lines += [
             "", f"## {_markdown(job['name'])} (job {_markdown(job['id'])})", "",

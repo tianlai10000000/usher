@@ -101,6 +101,25 @@ Checked implementation references:
   release resources in the renderer that painted them. It supplements the
   literal-leaf recipe; it does not replace fixed action/measurement isolation.
 
+- [`PR Review factory`](../../ui/features/pr_review/factory.slint),
+  [`literal anchors`](../../ui/components/pr_review/tooltip_anchors.slint),
+  [`buttons`](../../ui/components/pr_review/tooltip_buttons.slint),
+  [`portal`](../../ui/components/pr_review/tooltip_overlay.slint) and
+  [`state`](../../ui/components/pr_review/tooltip_state.slint) own 30 fixed
+  action identities. Each kind has its own mounted I18n measure/paint Surface;
+  all use one factory-root `GitHubTransientFloatingOverlayHost`. State carries
+  kind/geometry/claim/lease, never a label. Route, modal, viewport, peer portal and
+  stale-lease transitions dismiss or invalidate publishers. Dynamic PR paths,
+  timestamps and commit metadata retain the generic two-slot exception. Fixed
+  controls suppress generic publishing when this factory portal is enabled;
+  integrated live preview keeps the ordinary MainWindow path. The factory uses
+  MainWindow's actual WindowAdapter and immediate shell-root restoration.
+  See [PR Review UI](pr-review-ui.md) for the ownership and input boundary.
+  PR Review 的 30 种固定动作分别使用 literal 叶子与独立常驻 I18n 测量/绘制 Surface，
+  共用一个 factory 根 transient Portal，不跨 delegate 传标签。路径、时间等动态
+  metadata 保留通用双槽例外，固定动作不得借用；实时预览集成图使用普通主窗口路径。
+  结构及 testing-backend 覆盖不代表原生文字绘制矩阵已经验收。
+
 ## Factory recipe / 工厂内正确做法
 
 1. Locate the actual compiled UI root and its clipping ancestors. Each independent
@@ -135,8 +154,8 @@ Checked implementation references:
 独立常驻；使用共享浮层定位；离开、点击、关闭和卸载均检查失效与续租。
 每个固定动作 Portal 只保留一个 `GitHubTransientFloatingOverlayHost`；固定文案 Surface
 分别常驻并按动作切换可见性，无提示时把 `active` 设为 false。Feature 禁止直接使用底层
-全窗口几何宿主，也不得给 transient host 设置 opacity 或 visible。Settings 与 Messages
-均遵守该结构，其他 factory Portal 仍须单独完成测量和验收。
+全窗口几何宿主，也不得给 transient host 设置 opacity 或 visible。Settings、Messages、
+演练场与 PR Review 均使用该结构；每个 factory Portal 仍须单独完成测量和原生验收。
 
 ## Prohibited fixes / 禁止的修法
 

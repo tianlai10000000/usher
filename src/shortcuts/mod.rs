@@ -371,6 +371,7 @@ pub(crate) fn handle_key_pressed(
     shift: bool,
     secondary: bool,
 ) -> bool {
+    crate::pr_review_ui::synchronize_modal_input(ui);
     if ui.get_current_route() == Route::Settings
         && ui.get_settings_hook_dialog_open()
         && ui.invoke_settings_hook_dialog_key_pressed(text.into(), primary, alt, shift, secondary)
@@ -660,3 +661,7 @@ mod tests {
         assert_eq!(format_binding(binding), "Ctrl+B");
     }
 }
+
+#[cfg(test)]
+#[path = "pr_review_modal_tests.rs"]
+mod pr_review_modal_tests;

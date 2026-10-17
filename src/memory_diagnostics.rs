@@ -1,3 +1,4 @@
+use crate::pr_review_ui::PrReviewUiExt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -488,10 +489,22 @@ pub(crate) fn log_ui_models(ui: &MainWindow, route: Route) {
         project_text_bytes,
         pull_requests.row_count(),
         pull_request_text_bytes,
-        ui.get_workflow_pr_review_files().row_count(),
-        ui.get_workflow_pr_review_tree_items().row_count(),
-        ui.get_workflow_pr_review_extension_filters().row_count(),
-        ui.get_workflow_pr_review_lines().row_count(),
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .get_workflow_pr_review_files()
+            .row_count(),
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .get_workflow_pr_review_tree_items()
+            .row_count(),
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .get_workflow_pr_review_extension_filters()
+            .row_count(),
+        ui.pr_review()
+            .global::<crate::PrReviewBridge>()
+            .get_workflow_pr_review_lines()
+            .row_count(),
         job_steps.row_count(),
         job_step_text_bytes,
         terminal_lines.row_count(),

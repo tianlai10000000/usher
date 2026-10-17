@@ -1,0 +1,158 @@
+import { I18n } from "@i18n";
+import { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffRowMetric, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit } from "../../components/pr_review/shell.slint";
+
+// Event-loop presentation and commands owned by PR Review, not the shell.
+export global PrReviewBridge {
+    in-out property <bool> workflow-pr-review-visible: false;
+    in property <bool> workflow-pr-review-loading: false;
+    in property <bool> workflow-pr-review-code-loading: false;
+    in property <bool> workflow-pr-review-large-diff-deferred: false;
+    in property <bool> workflow-pr-review-large-diff-loading: false;
+    in property <string> workflow-pr-review-error: "";
+    in property <string> workflow-pr-review-error-kind: "";
+    in property <string> workflow-pr-review-number: "";
+    in property <string> workflow-pr-review-title: "";
+    in property <string> workflow-pr-review-author: "";
+    in property <string> workflow-pr-review-source-branch: "";
+    in property <string> workflow-pr-review-target-branch: "";
+    in property <string> workflow-pr-review-updated-at: "";
+    in property <string> workflow-pr-review-updated-at-tooltip: "";
+    in property <int> workflow-pr-review-added-lines: 0;
+    in property <int> workflow-pr-review-removed-lines: 0;
+    in property <int> workflow-pr-review-commit-count: 0;
+    in property <int> workflow-pr-review-conversation-count: 0;
+    in property <string> workflow-pr-review-base-sha: "";
+    in property <string> workflow-pr-review-head-sha: "";
+    in property <bool> workflow-pr-review-too-many-commits: false;
+    in property <bool> workflow-pr-review-files-truncated: false;
+    in-out property <int> workflow-pr-review-tab: 2;
+    in property <[WorkflowPrConversationItem]> workflow-pr-review-conversation-items: [];
+    in property <int> workflow-pr-review-conversation-content-height: 0;
+    in property <int> workflow-pr-review-expanded-commit-body-height: 0;
+    in property <[WorkflowPrCommit]> workflow-pr-review-commits: [];
+    in property <bool> workflow-pr-review-conversation-loading: false;
+    in property <bool> workflow-pr-review-commits-loading: false;
+    in property <string> workflow-pr-review-conversation-error: "";
+    in property <string> workflow-pr-review-commits-error: "";
+    in-out property <int> workflow-pr-review-commit-range-start: -1;
+    in-out property <int> workflow-pr-review-commit-range-end: -1;
+    in property <string> workflow-pr-review-commit-range-label: I18n.pr-review-all-commits;
+    in property <[WorkflowPrDiffFile]> workflow-pr-review-files: [];
+    in property <[WorkflowPrTreeItem]> workflow-pr-review-tree-items: [];
+    in property <[WorkflowPrFileExtensionFilter]> workflow-pr-review-extension-filters: [];
+    in property <bool> workflow-pr-review-only-manifest-files: false;
+    in property <bool> workflow-pr-review-show-viewed-files: true;
+    in property <bool> workflow-pr-review-file-filters-active: false;
+    in property <[WorkflowPrDiffLine]> workflow-pr-review-lines: [];
+    in property <[WorkflowPrDiffRowMetric]> workflow-pr-review-line-metrics: [];
+    in property <int> workflow-pr-review-max-code-columns: 0;
+    in property <string> workflow-pr-review-longest-code-line;
+    in property <int> workflow-pr-review-line-content-revision: 0;
+    in property <int> workflow-pr-review-find-result-revision: 0;
+    in property <int> workflow-pr-review-line-model-revision: 0;
+    in property <bool> workflow-pr-review-scroll-diagnostics-enabled: false;
+    in property <int> workflow-pr-review-hunk-scroll-anchor-source-index: -1;
+    in property <int> workflow-pr-review-hunk-scroll-restore-revision: 0;
+    in property <bool> workflow-pr-review-hunk-scroll-restore-pending: false;
+    in property <int> workflow-pr-review-location-row-index: -1;
+    in property <string> workflow-pr-review-location-side: "";
+    in property <int> workflow-pr-review-location-reveal-revision: 0;
+    in-out property <length> workflow-pr-review-file-list-width: 286px;
+    in property <int> workflow-pr-review-selected-file-index: -1;
+    in property <string> workflow-pr-review-selected-file-path: "";
+    in property <int> workflow-pr-review-selected-file-added-lines: 0;
+    in property <int> workflow-pr-review-selected-file-removed-lines: 0;
+    in property <bool> workflow-pr-review-has-expandable-hunks: false;
+    in property <bool> workflow-pr-review-context-expanded: false;
+    in property <bool> workflow-pr-review-viewing-file: false;
+    in property <bool> workflow-pr-review-ignore-whitespace-supported: false;
+    in property <bool> workflow-pr-merge-delete-source-branch-supported: false;
+    in-out property <bool> workflow-pr-review-ignore-whitespace: false;
+    in-out property <string> workflow-pr-review-diff-view: "unified";
+    in-out property <string> workflow-pr-review-file-filter: "";
+    in-out property <bool> workflow-pr-review-dialog-open: false;
+    in-out property <bool> workflow-pr-dismiss-review-dialog-open: false;
+    in-out property <bool> workflow-pr-merge-dialog-open: false;
+    in-out property <bool> workflow-pr-revert-dialog-open: false;
+    in-out property <bool> workflow-pr-commit-range-dialog-open: false;
+    in property <bool> workflow-pr-action-loading: false;
+    in property <bool> workflow-pr-can-comment: false;
+    in property <bool> workflow-pr-can-approve: false;
+    in property <bool> workflow-pr-can-request-changes: false;
+    in property <string> workflow-pr-remote-review-state: "";
+    in property <int> workflow-pr-comment-submission-revision: 0;
+    in property <bool> workflow-pr-can-merge: false;
+    in property <bool> workflow-pr-can-revert: false;
+    in property <string> workflow-pr-merge-readiness-kind: "";
+    in property <string> workflow-pr-merge-readiness-label: "";
+    in property <string> workflow-pr-merge-readiness-detail: "";
+    in property <string> workflow-pr-merge-block-reason: "";
+    in property <string> workflow-pr-revert-block-reason: "";
+    in property <string> workflow-pr-revert-action-label: I18n.pr-review-revert-pull-request;
+    in property <string> workflow-pr-revert-confirmation: "";
+    in property <bool> workflow-pr-merge-method-merge: false;
+    in property <bool> workflow-pr-merge-method-squash: false;
+    in property <bool> workflow-pr-merge-method-rebase: false;
+    in property <bool> workflow-pr-merge-method-fast-forward: false;
+    in-out property <string> workflow-pr-selected-merge-method: "";
+    callback workflow-pr-review-open(string, string, string, string, string, string, int);
+    callback workflow-pr-review-back();
+    callback workflow-pr-review-select-tab(int);
+    callback workflow-pr-review-ensure-commits();
+    callback workflow-pr-review-apply-commit-range(int, int);
+    callback workflow-pr-review-open-commit(string);
+    callback workflow-pr-review-select-file(int);
+    callback workflow-pr-review-select-relative-file(int);
+    callback workflow-pr-review-reload(bool);
+    callback workflow-pr-review-apply-diff-settings(string, bool);
+    callback workflow-pr-review-load-large-diff();
+    callback workflow-pr-review-filter-files(string);
+    callback workflow-pr-review-toggle-extension-filter(string);
+    callback workflow-pr-review-toggle-manifest-filter();
+    callback workflow-pr-review-toggle-viewed-files();
+    callback workflow-pr-review-toggle-folder(string);
+    callback workflow-pr-review-expand-hunk(int, string);
+    callback workflow-pr-review-expand-all-hunks();
+    callback workflow-pr-review-collapse-non-diff-lines();
+    callback workflow-pr-review-copy-file-path(string) -> bool;
+    callback workflow-pr-review-copy-commit-sha(string) -> bool;
+    callback workflow-pr-review-copy-source-branch(string) -> bool;
+    callback workflow-pr-default-merge-method() -> string;
+    callback workflow-pr-review-copy-diff-selection(int, int, int, int, string);
+    callback workflow-pr-review-view-file();
+    callback workflow-pr-review-reveal-location(string, int, string, string);
+    callback workflow-pr-review-view-location-file(string, string);
+    callback workflow-pr-review-clear-location();
+    callback workflow-pr-review-toggle-commit-message(string);
+    callback workflow-pr-submit-review(string, string);
+    callback workflow-pr-dismiss-review(string, string);
+    callback workflow-pr-merge(string, bool);
+    callback workflow-pr-revert();
+    workflow-pr-default-merge-method => {
+        return root.workflow-pr-merge-method-merge ? "merge" : (root.workflow-pr-merge-method-squash ? "squash" : (root.workflow-pr-merge-method-rebase ? "rebase" : (root.workflow-pr-merge-method-fast-forward ? "fast_forward" : "")));
+    }
+    callback shell-summary-changed();
+    changed workflow-pr-review-number => { root.shell-summary-changed(); }
+    changed workflow-pr-review-visible => { root.shell-summary-changed(); }
+    changed workflow-pr-action-loading => { root.shell-summary-changed(); }
+    changed workflow-pr-can-comment => { root.shell-summary-changed(); }
+    changed workflow-pr-can-approve => { root.shell-summary-changed(); }
+    changed workflow-pr-can-request-changes => { root.shell-summary-changed(); }
+    changed workflow-pr-remote-review-state => { root.shell-summary-changed(); }
+    changed workflow-pr-can-merge => { root.shell-summary-changed(); }
+    changed workflow-pr-can-revert => { root.shell-summary-changed(); }
+    changed workflow-pr-merge-readiness-kind => { root.shell-summary-changed(); }
+    changed workflow-pr-merge-readiness-label => { root.shell-summary-changed(); }
+    changed workflow-pr-merge-readiness-detail => { root.shell-summary-changed(); }
+    changed workflow-pr-merge-block-reason => { root.shell-summary-changed(); }
+    changed workflow-pr-revert-action-label => { root.shell-summary-changed(); }
+    changed workflow-pr-merge-method-merge => { root.shell-summary-changed(); }
+    changed workflow-pr-merge-method-squash => { root.shell-summary-changed(); }
+    changed workflow-pr-merge-method-rebase => { root.shell-summary-changed(); }
+    changed workflow-pr-merge-method-fast-forward => { root.shell-summary-changed(); }
+    changed workflow-pr-review-dialog-open => { root.shell-summary-changed(); }
+    changed workflow-pr-dismiss-review-dialog-open => { root.shell-summary-changed(); }
+    changed workflow-pr-merge-dialog-open => { root.shell-summary-changed(); }
+    changed workflow-pr-revert-dialog-open => { root.shell-summary-changed(); }
+    changed workflow-pr-commit-range-dialog-open => { root.shell-summary-changed(); }
+}
