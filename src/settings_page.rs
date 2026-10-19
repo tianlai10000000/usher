@@ -102,9 +102,16 @@ fn create_page(window: &MainWindow) -> Result<GitHubSettingsPage, slint::Platfor
     // the shell before binding or returning, including constructor errors.
     let host = i_slint_core::window::WindowInner::from_pub(window.window());
     let shell = host.component();
-    let page = GitHubSettingsPage::new_with_existing_window(window.window());
+    let result = GitHubSettingsPage::new_with_existing_window(window.window());
     host.set_component(&shell);
-    page
+    let page = result?;
+    crate::transient_input::register_pointer_root(window, &page, |page, x, y| {
+        if page.get_route_active() {
+            page.global::<usher_ui_settings::TransientOverlayState>()
+                .invoke_pointer_pressed(x, y);
+        }
+    });
+    Ok(page)
 }
 
 impl SettingsPageBridge {
@@ -249,10 +256,6 @@ impl SettingsPageBridge {
             if let Some(window) = weak.upgrade() {
                 bridge.with_page(|page| sync_window_geometry(&window, page));
             }
-        });
-        let bridge = self.clone();
-        window.on_settings_select_pointer_released(move |x, y| {
-            bridge.with_page(|page| page.invoke_select_pointer_released(x, y));
         });
         let bridge = self.clone();
         window.on_settings_select_dismiss(move || {
@@ -1070,7 +1073,9 @@ mod tests {
             position,
             button: PointerEventButton::Left,
         });
-        page.invoke_select_pointer_released(position.x, position.y);
+        page.global::<usher_ui_settings::TransientOverlayState>()
+            .invoke_pointer_pressed(position.x, position.y);
+        i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
     }
 
     fn select_settings_section(page: &GitHubSettingsPage, label: &str) {
@@ -1947,6 +1952,7 @@ mod tests {
         let _locale_guard = crate::i18n::test_locale_guard();
         i_slint_backend_testing::init_no_event_loop();
         let window = MainWindow::new().expect("main window");
+        crate::transient_input::install_for_window(&window).unwrap();
         window
             .window()
             .dispatch_event(slint::platform::WindowEvent::Resized {
@@ -1981,9 +1987,9 @@ mod tests {
             );
 
             // Settings is mounted through a full-window ComponentFactory. The
-            // status bar's outside-click layer must stay above that ordinary
-            // page surface, otherwise both the dismiss layer and popup are
-            // hidden behind the factory host.
+            // status bar's popup surface must stay above that ordinary
+            // page surface. Outside dismissal observes the actual window
+            // dispatch even when that page consumes the target's click.
             let outside = slint::LogicalPosition::new(100.0, 100.0);
             window
                 .window()
@@ -2000,6 +2006,7 @@ mod tests {
                     position: outside,
                     button: PointerEventButton::Left,
                 });
+            i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
             assert!(
                 ElementHandle::find_by_element_id(&window, "GitHubActionMenu::menu-surface")
                     .next()
@@ -2062,7 +2069,14 @@ mod tests {
             expected_language_rows("跟随系统", "简体中文")
         );
 
-        window.invoke_post_dispatch_pointer_released(0.0, 0.0);
+        crate::transient_input::install_for_window(&window).unwrap();
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerPressed {
+                position: slint::LogicalPosition::new(0.0, 0.0),
+                button: PointerEventButton::Left,
+            });
+        i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
         assert!(
             language_rows(&page).is_empty(),
             "window chrome dismisses factory menu"

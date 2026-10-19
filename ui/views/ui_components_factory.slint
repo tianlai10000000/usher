@@ -19,6 +19,7 @@ export { NotificationManager, NotificationOptions, NotificationType, Notificatio
 export { DialogManager, DialogOptions } from "../components/dialog/dialog_manager.slint";
 export { FloatingOverlayBridge, FloatingOverlayRect } from "../state/floating_overlay_bridge.slint";
 export { FactoryTooltipState, FactoryTooltipKind } from "../state/factory_tooltip_state.slint";
+export { TransientOverlayState } from "../state/transient_overlay_state.slint";
 
 // The stable factory occupies the actual window, with one inset document
 // viewport. Popovers and Tooltip portals share its globals and escape clipping.
@@ -43,7 +44,6 @@ export component GitHubUiComponentsWindow inherits Window {
     callback navigate(Route);
     callback open-artifact-preview-fixture(string);
     callback dismiss-transients(bool);
-    callback select-pointer-released(length, length);
     width: root.window-width;
     height: root.window-height;
     background: transparent;
@@ -76,7 +76,6 @@ export component GitHubUiComponentsWindow inherits Window {
         if all { TransientOverlayState.dismiss-all(); }
         else { TransientOverlayState.dismiss-popovers(); }
     }
-    select-pointer-released(x, y) => { GitHubSelectState.pointer-released(x, y); }
 
     // Static factory roots have no parent link to the shell shortcut scope.
     // Let Select/menu descendants handle Tab dismissal before host traversal.

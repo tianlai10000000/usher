@@ -140,7 +140,6 @@ fn editor_reply_select_at_footer_keeps_anchor_surface_and_option_identity() {
             let p = trigger.absolute_position();
             let size = trigger.size();
             trigger.mock_single_click(PointerEventButton::Left);
-            page.invoke_select_pointer_released(p.x + size.width / 2.0, p.y + size.height / 2.0);
             for _ in 0..3 {
                 tick();
                 let state = GitHubSelectState::get(&page);

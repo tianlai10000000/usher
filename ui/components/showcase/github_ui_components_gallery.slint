@@ -924,21 +924,6 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 text <=> root.compact-field-text;
             }
 
-            // Demonstrate the caller-owned outside-click layer ActionMenu
-            // expects under the menu surface.
-            if root.action-menu-open: Rectangle {
-                x: 0px;
-                y: 0px;
-                width: parent.width;
-                height: parent.height;
-                z: 0;
-                background: transparent;
-                TouchArea {
-                    mouse-cursor: default;
-                    clicked => { root.action-menu-open = false; }
-                }
-            }
-
         }
 
         layout-group := GitHubShowcaseGroup {

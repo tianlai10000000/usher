@@ -45,6 +45,13 @@ check_max "AI Review controller functions" "$(rust_function_count src/ai_review/
 check_max "root Slint lines" "$(line_count ui/main.slint)" 3000
 check_max "root Slint callbacks" "$(slint_declaration_count ui/main.slint '^[[:space:]]*(pure[[:space:]]+)?callback[[:space:]]+')" 140
 check_max "root Slint properties" "$(slint_declaration_count ui/main.slint '^[[:space:]]*(in|out|in-out|private)[[:space:]]+property')" 410
+check_max "transient pointer observer lines" "$(line_count src/transient_input/observers.rs)" 160
+unexpected_pointer_feature=$(rg -n '\b(settings_page|ui_components|workflow|usher_ui_settings|usher_ui_components|usher_ui_pr_review|http|fs|tokio)\b' src/transient_input/observers.rs || true)
+if [ -n "$unexpected_pointer_feature" ]; then
+    echo "Transient pointer observers must remain feature-neutral event-loop infrastructure:" >&2
+    echo "$unexpected_pointer_feature" >&2
+    failed=1
+fi
 check_max "PR Review Slint lines" "$(line_count ui/views/workflow/pr_review_workspace.slint)" 4500
 
 # The complete PR factory owns its UI graph and event-loop adapters. These new

@@ -19,6 +19,16 @@ fn tab(
 }
 
 pub(super) fn bind(window: &MainWindow, page: &PrReviewUiRoot) {
+    crate::transient_input::register_pointer_root(window, page, |page, x, y| {
+        if page
+            .global::<usher_ui_pr_review::PrReviewHostBridge>()
+            .get_context()
+            .active
+        {
+            page.global::<usher_ui_pr_review::TransientOverlayState>()
+                .invoke_pointer_pressed(x, y);
+        }
+    });
     let host = window.as_weak();
     window
         .global::<usher_ui::PrReviewHostBridge>()

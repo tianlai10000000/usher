@@ -12,6 +12,9 @@ use slint::platform::{PointerEventButton, WindowEvent};
 
 use crate::MainWindow;
 
+mod observers;
+pub(crate) use observers::register_pointer_root;
+
 /// Restore native desktop blur behavior when a scroll viewport consumes a
 /// pointer press before a parent FocusScope can take focus.
 pub(crate) fn clear_text_input_focus_outside(
@@ -51,6 +54,7 @@ pub(crate) fn clear_text_input_focus_outside(
 /// Return whether the pointer press landed inside the currently focused native
 /// text field. This is evaluated after Slint dispatch so a newly focused input
 /// is included without every reusable field wiring its own popover callbacks.
+#[cfg(any(test, feature = "ui-components"))]
 pub(crate) fn focused_text_input_contains_pointer(
     window: &slint::Window,
     position: slint::LogicalPosition,
@@ -120,22 +124,12 @@ pub fn install_for_window(app: &MainWindow) -> Result<(), slint::PlatformError> 
     install_with_pointer_forwarding(app, true)
 }
 
-fn classify_text_input_press(app: &MainWindow, position: slint::LogicalPosition) -> bool {
-    clear_text_input_focus_outside(app.window(), position);
-    let inside = focused_text_input_contains_pointer(app.window(), position);
-    if inside {
-        app.invoke_dismiss_transient_popovers();
-    }
-    inside
-}
-
 fn install_with_pointer_forwarding(
     app: &MainWindow,
     forward_pointer: bool,
 ) -> Result<(), slint::PlatformError> {
     let weak = app.as_weak();
     let previous = set_window_event_hook(None)?;
-    let pending_press = std::cell::RefCell::new(None);
 
     set_window_event_hook(Some(Box::new(move |adapter, event, result| {
         if let Some(previous) = previous.as_ref() {
@@ -160,35 +154,21 @@ fn install_with_pointer_forwarding(
                 position,
                 button: PointerEventButton::Left,
             } => {
-                pending_press.take();
-                let route = app.get_current_route();
-                if !classify_text_input_press(&app, *position) {
-                    pending_press.replace(Some((*position, route)));
-                }
+                clear_text_input_focus_outside(app.window(), *position);
+                // Every real left press is published once after target dispatch,
+                // even when a Flickable delays its child press. Shared popovers
+                // classify bounds without depending on TextInput focus timing.
+                observers::publish_pointer_press(&app, position.x, position.y);
                 (position, false)
             }
             WindowEvent::PointerReleased {
                 position,
                 button: PointerEventButton::Left,
-            } => {
-                // A scrollable Flickable can defer the child press until its
-                // timer or release dispatch. Reconcile that original press
-                // once after Slint has delivered it, never the release point.
-                if let Some((press, route)) = pending_press.take() {
-                    if app.get_current_route() == route {
-                        classify_text_input_press(&app, press);
-                    }
-                }
-                (position, true)
-            }
-            WindowEvent::PointerExited | WindowEvent::WindowActiveChanged(false) => {
-                pending_press.take();
-                return;
-            }
+            } => (position, true),
             _ => return,
         };
         // AppKit owns native chrome and release forwarding on macOS. Input
-        // classification and delayed-press reconciliation belong to this hook.
+        // blur and popover press observation belong to this hook on all platforms.
         if forward_pointer {
             if released {
                 app.invoke_post_dispatch_pointer_released(position.x, position.y);
@@ -533,7 +513,7 @@ mod tests {
     struct HookFixture {
         host: MainWindow,
         page: TextFocusTestWindow,
-        dismissals: std::rc::Rc<std::cell::Cell<usize>>,
+        samples: std::rc::Rc<std::cell::Cell<usize>>,
         presses: std::rc::Rc<std::cell::Cell<usize>>,
         releases: std::rc::Rc<std::cell::Cell<usize>>,
     }
@@ -551,11 +531,12 @@ mod tests {
         host.set_settings_page_factory(slint::ComponentFactory::new(move |_| weak.upgrade()));
         host.set_current_route(crate::Route::Settings);
         WindowInner::from_pub(host.window()).ensure_tree_instantiated();
-        let dismissals = std::rc::Rc::new(std::cell::Cell::new(0));
+        let samples = std::rc::Rc::new(std::cell::Cell::new(0));
         let presses = std::rc::Rc::new(std::cell::Cell::new(0));
         let releases = std::rc::Rc::new(std::cell::Cell::new(0));
-        let count = dismissals.clone();
-        host.on_dismiss_transient_popovers(move || count.set(count.get() + 1));
+        let count = samples.clone();
+        host.global::<crate::TransientOverlayState>()
+            .on_pointer_pressed(move |_, _| count.set(count.get() + 1));
         let count = presses.clone();
         host.on_post_dispatch_pointer_pressed(move |_, _| count.set(count.get() + 1));
         let count = releases.clone();
@@ -564,7 +545,7 @@ mod tests {
         HookFixture {
             host,
             page,
-            dismissals,
+            samples,
             presses,
             releases,
         }
@@ -602,7 +583,7 @@ mod tests {
         );
         assert!(fixture.page.get_first_focused());
         assert_eq!(
-            fixture.dismissals.get(),
+            fixture.samples.get(),
             1,
             "real host press is the positive control"
         );
@@ -623,13 +604,13 @@ mod tests {
             fixture.page.get_first_focused(),
             "another adapter must not blur the host"
         );
-        assert_eq!(fixture.dismissals.get(), 1);
+        assert_eq!(fixture.samples.get(), 1);
         assert_eq!(fixture.presses.get(), 1);
         assert_eq!(fixture.releases.get(), 1);
     }
 
     #[test]
-    fn post_dispatch_hook_classifies_the_press_without_reclassifying_an_outside_release() {
+    fn post_dispatch_hook_publishes_the_press_without_reclassifying_an_outside_release() {
         let fixture = hook_fixture(true);
         pointer(
             fixture.host.window(),
@@ -638,11 +619,7 @@ mod tests {
             true,
         );
         assert!(fixture.page.get_first_focused());
-        assert_eq!(
-            fixture.dismissals.get(),
-            1,
-            "first press sees the newly focused input"
-        );
+        assert_eq!(fixture.samples.get(), 1, "the real press is published once");
         pointer(
             fixture.host.window(),
             slint::LogicalPosition::new(300.0, 180.0),
@@ -653,7 +630,7 @@ mod tests {
             fixture.page.get_first_focused(),
             "selection dragged outside keeps input focus"
         );
-        assert_eq!(fixture.dismissals.get(), 1);
+        assert_eq!(fixture.samples.get(), 1);
         assert_eq!(fixture.presses.get(), 1);
         assert_eq!(fixture.releases.get(), 1);
     }
@@ -675,13 +652,13 @@ mod tests {
         );
         assert!(fixture.page.get_first_focused());
         assert_eq!(
-            fixture.dismissals.get(),
+            fixture.samples.get(),
             1,
             "left press is the positive control"
         );
         assert_eq!(fixture.presses.get(), 1);
         assert_eq!(fixture.releases.get(), 1);
-        fixture.dismissals.set(0);
+        fixture.samples.set(0);
         fixture.presses.set(0);
         fixture.releases.set(0);
         for button in [PointerEventButton::Right, PointerEventButton::Middle] {
@@ -689,13 +666,13 @@ mod tests {
             pointer(fixture.host.window(), outside, button, true);
             pointer(fixture.host.window(), outside, button, false);
         }
-        assert_eq!(fixture.dismissals.get(), 0);
+        assert_eq!(fixture.samples.get(), 0);
         assert_eq!(fixture.presses.get(), 0);
         assert_eq!(fixture.releases.get(), 0);
     }
 
     #[test]
-    fn native_forwarding_mode_classifies_input_without_forwarding_pointer_phases() {
+    fn native_forwarding_mode_publishes_press_without_duplicate_pointer_phases() {
         let fixture = hook_fixture(false);
         let inside = slint::LogicalPosition::new(40.0, 36.0);
         pointer(
@@ -711,7 +688,7 @@ mod tests {
             false,
         );
         assert!(fixture.page.get_first_focused());
-        assert_eq!(fixture.dismissals.get(), 1);
+        assert_eq!(fixture.samples.get(), 1);
         assert_eq!(fixture.presses.get(), 0);
         assert_eq!(
             fixture.releases.get(),
@@ -721,7 +698,7 @@ mod tests {
     }
 
     #[test]
-    fn flickable_short_click_reconciles_its_delayed_child_press_once() {
+    fn flickable_short_click_publishes_before_its_delayed_child_press() {
         let fixture = hook_fixture(true);
         fixture.page.set_delay_press(true);
         let inside = slint::LogicalPosition::new(40.0, 36.0);
@@ -736,7 +713,7 @@ mod tests {
             !fixture.page.get_first_focused(),
             "Flickable still holds the child press"
         );
-        assert_eq!(fixture.dismissals.get(), 0);
+        assert_eq!(fixture.samples.get(), 1);
         pointer(
             fixture.host.window(),
             inside,
@@ -745,9 +722,9 @@ mod tests {
         );
         assert!(fixture.page.get_first_focused());
         assert_eq!(
-            fixture.dismissals.get(),
+            fixture.samples.get(),
             1,
-            "release dispatch delivered the pending child press"
+            "delayed child dispatch does not publish the press again"
         );
         assert_eq!(fixture.presses.get(), 1);
         assert_eq!(fixture.releases.get(), 1);
@@ -758,14 +735,14 @@ mod tests {
             false,
         );
         assert_eq!(
-            fixture.dismissals.get(),
+            fixture.samples.get(),
             1,
-            "an unmatched release cannot replay the press"
+            "an unmatched release cannot publish another press"
         );
     }
 
     #[test]
-    fn flickable_held_press_reconciles_after_its_internal_timer_without_polling() {
+    fn flickable_held_press_publishes_once_and_preserves_outside_selection_drag() {
         let fixture = hook_fixture(false);
         fixture.page.set_delay_press(true);
         let inside = slint::LogicalPosition::new(40.0, 36.0);
@@ -781,7 +758,7 @@ mod tests {
             fixture.page.get_first_focused(),
             "Flickable's timer delivered the child press"
         );
-        assert_eq!(fixture.dismissals.get(), 0);
+        assert_eq!(fixture.samples.get(), 1);
         let focused = WindowInner::from_pub(fixture.host.window())
             .focus_item
             .borrow()
@@ -825,12 +802,12 @@ mod tests {
             ),
             selection
         );
-        assert_eq!(fixture.dismissals.get(), 1);
+        assert_eq!(fixture.samples.get(), 1);
         assert_eq!(fixture.presses.get(), 0);
         assert_eq!(fixture.releases.get(), 0);
     }
 
-    fn assert_pending_press_cancelled(event: WindowEvent) {
+    fn assert_release_does_not_publish_after(event: WindowEvent) {
         let fixture = hook_fixture(false);
         fixture.page.set_delay_press(true);
         let inside = slint::LogicalPosition::new(40.0, 36.0);
@@ -852,7 +829,7 @@ mod tests {
             .host
             .window()
             .dispatch_event(WindowEvent::WindowActiveChanged(true));
-        // A later programmatic focus must not revive the cancelled gesture.
+        // A later programmatic focus must not create a second press sample.
         window.set_focus_item(&focused, false, FocusReason::Programmatic);
         window.set_focus_item(&focused, true, FocusReason::Programmatic);
         assert!(fixture.page.get_first_focused());
@@ -863,19 +840,19 @@ mod tests {
             false,
         );
         assert_eq!(
-            fixture.dismissals.get(),
-            0,
-            "cancelled press cannot dismiss a later surface"
+            fixture.samples.get(),
+            1,
+            "release cannot dismiss a later surface"
         );
     }
 
     #[test]
-    fn pointer_exit_discards_the_pending_delayed_press() {
-        assert_pending_press_cancelled(WindowEvent::PointerExited);
+    fn pointer_exit_then_release_does_not_publish_another_press() {
+        assert_release_does_not_publish_after(WindowEvent::PointerExited);
     }
 
     #[test]
-    fn window_deactivation_discards_the_pending_delayed_press() {
-        assert_pending_press_cancelled(WindowEvent::WindowActiveChanged(false));
+    fn window_deactivation_then_release_does_not_publish_another_press() {
+        assert_release_does_not_publish_after(WindowEvent::WindowActiveChanged(false));
     }
 }

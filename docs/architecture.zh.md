@@ -281,6 +281,7 @@ i18n catalog 构建脚本从当前 Cargo 调用定位仓库输入；共享 targe
 | `src/diagnostics.rs`, `src/diagnostics/archive.rs` | 门面保留哨兵、保留策略调度与目录打开；归档 owner 串行完成私有临时文件、唯一发布及成功前最多五份的保留策略。共享日志级别契约区分正常生命周期记录与失败/fallback 诊断；`src/logger/debug_logger.rs::flush_application_log` 在最终清理总结与 `MainWindow` 释放记录之后直接 flush 实际应用文件 sink。详见[诊断日志](specs/diagnostics.md)。 |
 | `src/startup.rs` | 启动 elapsed/delta 时间轴，以及把磁盘 hydration 和高开销图片投影延后到首帧后的单次任务队列。 |
 | `src/platform/` | 跨平台原生集成边界。`macos.rs` 负责 AppKit 外观、标题栏附件、窗口交互通知、原生标题栏点击桥接、PR Review 字体注册、`NSSound` 点击音和 Auto 主题实时跟随；同时成对管理并在正常关闭时注销 NSEvent monitor、窗口/主题 observer 与独立 Preview resize observer。`windows.rs` 负责 Windows 主题检测与 `MessageBeep`；`linux.rs` 负责 XDG Portal 主题检测和不阻塞 UI 的桌面音效播放。`mod.rs` 提供统一 API、Auto 主题监听开关（全平台 1 秒轮询兜底），以及用操作系统文件管理器打开目录（Finder / Explorer / `xdg-open`）。 |
+| `src/transient_input.rs`、`src/transient_input/observers.rs` | 按 MainWindow adapter 限定原生输入失焦与每次派发后左键按下发布；订阅注册表将原始窗口坐标交给弱引用 factory，创建 owner 注册一次并判断活动路由。回调在注册表借用外运行，清理已销毁 root/host；共享 Slint guard 拥有弹层边界与关闭。 |
 | `src/shutdown.rs`, `src/shutdown/pipeline.rs` | 按序协调异步发布方排空、原线程发布方停止、后台阻塞屏障及原线程 UI/AppKit、Logger 清理。dispatch 失败时跳过 UI/AppKit；共享阶段所有权保持优先级与仅一次完成。 |
 | `src/single_instance.rs` | 进程锁与有界文件信号唤起通道；第二次启动时让已有窗口重新显示并获得焦点。 |
 | `src/tray.rs` | 桌面托盘和托盘触发的生命周期操作。macOS 路由已完成的左/右键 mouse-up，临时挂载 `NSStatusItem.menu` 并通过 `performClick:` 进入原生追踪，返回后解除挂载以恢复主点击。追踪 guard 在嵌套 run loop 期间持有原生对象并抑制激活 observer 唤起。Quit 使用 `tray.quit`，由 `src/lib.rs` 语言 callback 调用 `tray::sync_language` 刷新。`src/tray/animation.rs` 负责虎鲸跳跃的 event-loop Timer 与按实际 elapsed 选帧；平台 adapter 预载原色原生图片（macOS 使用非 template 图片）、恢复启动时选定的静止图，并在托盘清理前停止播放。原生菜单验收仍待完成。详见[托盘行为](specs/tray.md)。 |
@@ -437,7 +438,7 @@ bridge；它不是另一份领域 Store。列表行的焦点与指针区域使�
 | `ui/components/github_fixed_tooltip_anchor.slint`、`ui/components/workflow/github_pr_factory_tooltip_anchors.slint` | 共享且不带动作的锚点几何/续租机制与 PR 固定动作叶子。生产 PR 控件直接依赖这些 owner，禁止反向导入开发演练场目录。 |
 | `ui/components/github_floating_overlay.slint` | 共享的全窗口浮层定位边界。底层几何树为私有实现；持久根层 Portal 统一使用 `GitHubTransientFloatingOverlayHost`，且只能通过其 `active` 输入控制内部可见性。Feature 可提供锚点和固定内容，但不得直接实例化几何宿主、按动作复制宿主或用 opacity 隐藏宿主。 |
 | `ui/state/tooltip_overlay_state.slint` | 窗口根 Tooltip 门户状态（文案、锚点矩形、首选方向/对齐、claim token、lease 心跳）。 |
-| `ui/components/github_action_menu.slint` | 点击浮层共用的 Primer ActionMenu/AnchoredOverlay 表面，统一焦点归属、Esc 关闭、打开时 peer exclusive-claim、视口碰撞定位、限高纵向滚动、ActionList 行，以及 `GitHubActionMenuTriggerArea` 的 press 态开/关（避免标题栏 Chrome dismiss 与 toggle 同一次点击先关后开）。页面空白点击关闭仍由各宿主在菜单之下自行挂载 TouchArea。`ui/state/transient_overlay_state.slint` 提供 `dismiss-revision` 与 `exclusive-generation`。 |
+| `ui/components/github_action_menu.slint` | 点击浮层共用的 Primer ActionMenu/AnchoredOverlay 表面，统一焦点归属、Esc 关闭、打开时 peer exclusive-claim、视口碰撞定位、限高纵向滚动、ActionList 行，以及 `GitHubActionMenuTriggerArea` 的 press 态开/关（避免标题栏 Chrome dismiss 与 toggle 同一次点击先关后开）。`GitHubPopoverDismissGuard` 按派发后窗口按下点与表面/触发器边界统一关闭，覆盖页面控件消费的点击。`ui/state/transient_overlay_state.slint` 拥有指针发布、显式关闭 revision 与弹层互斥；`src/transient_input.rs` 广播到主壳及弱引用注册的活动 factory。 |
 | `ui/components/page/github_page_header.slint` | 标题、说明、前导视觉、分隔线和尾部操作共用的 Primer PageHeader 基础。 |
 | `ui/components/button/github_copy_button.slint` | 所有图标复制操作共用的 GitHub CopyToClipboardButton 交互；组件负责短时 Copy→Check 状态和 `Copied!` Tooltip，feature callback 返回剪贴板写入是否成功。 |
 | `ui/components/jobs/` | 可复用的 GitHub Actions 风格 Run/Job/Step/日志展示；只接收归一化快照，不执行流程命令。 |
@@ -641,13 +642,16 @@ PR Review 复用共享 renderer 边界，但状态方向不同：
 30 种 literal Tooltip 身份共用一个 factory 根 transient Portal，各自保留独立的 I18n
 测量/绘制 Surface，动态 metadata 保留通用双槽例外。factory capture 普通快捷键，
 Tab 等局部控件处理后再 bubble，通过 `focus_navigation` 跨宿主遍历；根 modal 盾及
-既有 PR/AI/侧栏层级保持。详见 [PR Review UI](specs/pr-review-ui.md)，编译和 testing
+既有 PR/AI/侧栏层级保持。PR 创建时与 Settings、静态演练场一样向 `transient_input`
+注册弱引用指针订阅。共享菜单 guard 在独立 global 中收到同一派发后窗口坐标，使页面
+控件消费的外部点击也能关闭弹层，不拦截控件或回传路由清理 revision。
+详见 [PR Review UI](specs/pr-review-ui.md)，编译和 testing
 backend 证据不能代替原生绘制或构建性能验收。
 
 普通静态 `ui-components` 构建通过 `usher-ui-components` 另行生成 library-module
 产品。MainWindow 只导入 feature host 与协议 stub，其传递输入不得包含 showcase
 源码。`src/ui_components/` 直接绑定功能自有的 `UiComponentsBridge`，同步窗口/内容
-几何、主题和字体，转发 dismiss 与 pointer release，并把生成的反馈 DTO 转交既有
+几何、主题和字体，转发显式 dismiss 与可选 pointer-release 诊断，并把生成的反馈 DTO 转交既有
 应用控制器。透明全窗口产品在首次访问后保留本地 global 身份；离开路由时清理
 临时状态并释放路由文档与菜单浮层子树，Tooltip Portal 保持挂载；再次进入从顶部
 创建新演练场。`create_page`
@@ -761,25 +765,29 @@ Escape 取消，方向键及 Home/End 移动活动选项，Enter/Space 确认选
 分组示例从零偏移普通触发器的视口原点加自身局部偏移计算锚点，避免未经验证的继承
 `absolute-position` 重复计入组件偏移。两个示例菜单的活动选项仅在自身
 所属选择器展开时获取焦点。
-Select 不铺设整页输入遮罩。现有窗口指针观察器在目标处理完点击后报告鼠标释放，
-Settings bridge 将页面局部坐标转发到独立 global graph，排除触发器与实际菜单区域
-后关闭，同时转发原生标题栏等窗口级关闭通知。外部点击关闭不抢回触发器焦点，其他
-控件第一次点击即生效；全窗口键盘作用域关闭鼠标自动获取焦点，避免吞掉首次按下。
-Escape 和确认选择仍恢复触发器焦点。
+不铺设整页输入遮罩。ActionMenu、Select 与 Diff settings 使用共享
+`GitHubPopoverDismissGuard`，按真实派发后的左键按下点与窗口坐标中的实时表面、触发器
+边界判断外部点击。ActionMenu 转换父级局部锚点；Select 的 floating host 单独移动菜单，
+因此显式传入绝对锚点。外部关闭不抢回触发器焦点，也不消费原控件点击；Escape 与确认
+选择仍恢复触发器焦点，显式关闭和互斥 claim 通道与指针观察保持分离。用户滚动触发
+ActionMenu 的 `scroll-interacted`，Select 将焦点交给可见菜单作用域，避免活动选项被
+裁切后丢失下一按键；程序化选项 reveal 不产生该交互。
 
 窗口指针桥接为普通页面和独立生成页面统一恢复文本框失焦语义。鼠标主键按下时，
 只有指针位于可见字段边界（包括裁剪字段内边距）之外才清除已聚焦 `TextInput`。
 [`src/transient_input.rs`](../src/transient_input.rs) 从实际挂载树向下遍历，逐层转换指针坐标并处理容器偏移、
 变换和视口裁剪；从独立 factory 产品向上映射坐标可能漏掉宿主偏移。
 即使 `Flickable` 消费空白点击，该规则仍生效，并保留输入框间第一次点击的焦点转移。
-所有平台使用 Slint 实际派发后的窗口 hook，但 Flickable 仍可能延迟子节点 press。
-左键按下先立即分类，仅未命中者保存原点与路由；实际左键松开派发后取出 pending，
-同路由才按原按下点补分类一次。离开窗口或失活会取消，已命中者不重复，其他键或
-adapter 不消费 pending；桥接不新增 Timer/轮询。生产入口
-在 `Window::show()` 后安装，并按实际 adapter 身份限定 MainWindow，不影响独立
-窗口。macOS 原生监视器转发 chrome/release，不分类文本输入；生产 hook 避免重复
-转发指针，公开夹具入口仍转发两个阶段。松开位置绝不作为外部按下分类，因此框内
-拖选、框外松开仍保留焦点与选区。
+弹层关闭不再依赖发现输入焦点或重放延迟子节点按下：真实 post-dispatch 窗口 hook
+将每次左键按下仅发布一次到 `TransientOverlayState`，
+`src/transient_input/observers.rs` 拥有 factory 弱引用订阅注册表。Settings、
+PR Review 与静态演练场在创建 owner 注册，新增独立 root 也必须注册；订阅原样传递
+逻辑窗口坐标，忽略非活动路由，不能持有窗口或页面强引用。生产入口在
+`Window::show()` 后安装，以实际 MainWindow adapter 身份过滤独立窗口及其他鼠标键。
+macOS hook 同样只发布一次，原生 monitor 保留独立 chrome/release 通道。松开坐标
+绝不成为外部按下，因此内部按下后拖动或在外部松开仍保留选区与菜单。全量关闭、仅
+popover 关闭和互斥 claim 仍保持既有 Dialog/Toast 与 peer 生命周期。原生交互仍须
+验收，testing backend 通过不能证明平台绘制或性能。
 
 凭据与 Endpoint 分组保留页面草稿，只有 Save 才提交。AI Agent 改为通过
 `AiAgentConfiguration { active_id, profiles }` 与

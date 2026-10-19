@@ -3,6 +3,50 @@ import { GitHubFloatingElevation } from "github_elevation.slint";
 import { TransientOverlayState } from "../state/transient_overlay_state.slint";
 import { FloatingOverlayBridge, FloatingOverlayRect } from "../state/floating_overlay_bridge.slint";
 
+// Observe the actual window press after its target handles it. This zero-size
+// node never grabs input or focus; bounds are logical window coordinates even
+// when the surface is nested or mounted in an independent factory global graph.
+// Mount only while open: its initialization stamps historical samples, while
+// actual input dispatch instantiates the live tree before publishing a new one.
+export component GitHubPopoverDismissGuard inherits Rectangle {
+    in property <bool> open: false;
+    in property <FloatingOverlayRect> surface-bounds;
+    in property <FloatingOverlayRect> trigger-bounds;
+    callback dismiss-requested();
+    private property <int> pointer-press-revision: TransientOverlayState.pointer-press-revision;
+    private property <int> observed-press-revision: -1;
+    private property <bool> initialized: false;
+
+    width: 0px;
+    height: 0px;
+    background: transparent;
+
+    init => {
+        // A keyboard-opened/conditionally mounted surface must not replay a
+        // press that occurred before its guard existed.
+        root.observed-press-revision = TransientOverlayState.pointer-press-revision;
+        root.initialized = true;
+    }
+
+    changed pointer-press-revision => {
+        if root.initialized && root.observed-press-revision != root.pointer-press-revision {
+            root.observed-press-revision = root.pointer-press-revision;
+            let x = TransientOverlayState.pointer-press-x;
+            let y = TransientOverlayState.pointer-press-y;
+            if root.open && !root.contains(root.surface-bounds, x, y)
+                    && !root.contains(root.trigger-bounds, x, y) {
+                root.dismiss-requested();
+            }
+        }
+    }
+
+    pure function contains(bounds: FloatingOverlayRect, x: length, y: length) -> bool {
+        return bounds.width > 0px && bounds.height > 0px
+            && x >= bounds.x && x < bounds.x + bounds.width
+            && y >= bounds.y && y < bounds.y + bounds.height;
+    }
+}
+
 // Primer ActionMenu is an ActionList inside AnchoredOverlay. This shell owns
 // the shared Overlay surface and collision-aware placement. Coordinates are in
 // the component's parent space so callers can anchor from any page layer.
@@ -11,9 +55,9 @@ import { FloatingOverlayBridge, FloatingOverlayRect } from "../state/floating_ov
 // 1. Escape, chrome dismiss-revision, and peer exclusive-generation are owned
 //    here via dismiss-requested. Opening claims exclusivity so readiness /
 //    filter / file menus switch on the first click without page-local wiring.
-// 2. Page blank outside clicks stay on each host's sibling TouchArea under the
-//    menu and under chrome that must keep receiving clicks. A full-viewport
-//    hit target inside this z:10000 surface would swallow those triggers.
+// 2. The shared guard observes post-dispatch outside presses against the live
+//    surface and trigger without consuming the clicked control. No host scrim
+//    or per-control dismissal wiring is needed.
 export component GitHubActionMenu inherits FocusScope {
     in property <bool> open: false;
     // Opt-in Primer placement uses the requested side/alignment with collision fallback.
@@ -34,6 +78,13 @@ export component GitHubActionMenu inherits FocusScope {
     in property <length> anchor-y: 0px;
     in property <length> anchor-width: 0px;
     in property <length> anchor-height: 0px;
+    // Placement anchors use parent space; outside dismissal uses window space.
+    // Positioned wrappers such as Select may override the actual trigger rect.
+    in property <FloatingOverlayRect> dismiss-trigger-bounds: {
+        x: root.absolute-position.x - root.x + root.anchor-x,
+        y: root.absolute-position.y - root.y + root.anchor-y,
+        width: root.anchor-width, height: root.anchor-height,
+    };
     in property <length> menu-width: 256px;
     in property <length> content-height: 0px;
     in property <length> menu-max-height: 600px;
@@ -46,6 +97,9 @@ export component GitHubActionMenu inherits FocusScope {
     in property <length> reveal-offset: -1px;
     in property <length> reveal-height: 0px;
     callback dismiss-requested();
+    // User scrolling may clip the focused descendant. The owning control
+    // chooses its keyboard fallback; editable menus keep their input focus.
+    callback scroll-interacted();
     out property <bool> opens-above:
         root.use-adaptive-placement
         ? root.adaptive-bounds.y + root.adaptive-bounds.height <= root.anchor-y - root.anchor-gap
@@ -160,6 +214,16 @@ export component GitHubActionMenu inherits FocusScope {
         : min(root.desired-height, root.opens-above ? root.space-above : root.space-below);
     z: 10000;
 
+    if root.open: GitHubPopoverDismissGuard {
+        open: root.open;
+        surface-bounds: {
+            x: root.absolute-position.x, y: root.absolute-position.y,
+            width: root.width, height: root.height,
+        };
+        trigger-bounds: root.dismiss-trigger-bounds;
+        dismiss-requested => { root.dismiss-requested(); }
+    }
+
     GitHubFloatingElevation {
         target-width: root.width;
         target-height: root.height;
@@ -175,8 +239,7 @@ export component GitHubActionMenu inherits FocusScope {
         background: GitHubTheme.canvas-overlay;
         clip: true;
 
-        // Own blank areas so the page-level outside-click scrim cannot receive
-        // events through the menu.
+        // Own blank areas so page controls cannot receive events through the menu.
         TouchArea { mouse-cursor: default; }
 
         menu-scroll := Flickable {
@@ -187,6 +250,7 @@ export component GitHubActionMenu inherits FocusScope {
             content-x: 0px;
             content-y <=> root.scroll-offset-y;
             interactive: true;
+            flicked => { root.scroll-interacted(); }
 
             content-host := Rectangle {
                 width: menu-scroll.width;

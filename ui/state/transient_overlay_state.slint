@@ -1,6 +1,6 @@
 // Shared dismissal bridge for transient UI surfaces.
 //
-// Three channels stay separate on purpose:
+// Three dismissal channels stay separate on purpose:
 // 1. dismiss-all / dismiss-revision — native title-bar, docked-shell, and host
 //    blank-area clicks. Dialog/Toast/ActionMenu/Diff-settings all listen.
 // 2. dismiss-popovers / popover-dismiss-revision — input interactions that
@@ -13,16 +13,31 @@
 // closed-open-menu latches when dismiss-revision actually closes an open
 // ActionMenu/Diff-settings surface so a same-gesture trigger click cannot
 // toggle it back open (native title-bar dismiss + trigger race).
+//
+// A post-dispatch pointer sample is observational, not a dismissal channel.
+// Each mounted global graph receives logical window coordinates exactly once;
+// shared popover guards decide whether their own live bounds contain the press.
+// Publishing it must not dismiss Dialogs/Toasts or consume the target's event.
 export global TransientOverlayState {
     out property <int> dismiss-revision: 0;
     out property <int> popover-dismiss-revision: 0;
     out property <int> exclusive-generation: 0;
     out property <bool> closed-open-menu: false;
+    out property <length> pointer-press-x: 0px;
+    out property <length> pointer-press-y: 0px;
+    out property <int> pointer-press-revision: 0;
     callback dismiss-all();
     callback dismiss-popovers();
     callback claim-exclusive();
     callback note-closed-open-menu();
     callback consume-closed-open-menu();
+    callback pointer-pressed(length, length);
+
+    pointer-pressed(x, y) => {
+        root.pointer-press-x = x;
+        root.pointer-press-y = y;
+        root.pointer-press-revision += 1;
+    }
 
     dismiss-all => {
         root.dismiss-revision += 1;

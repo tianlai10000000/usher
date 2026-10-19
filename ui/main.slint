@@ -623,7 +623,6 @@ export component MainWindow inherits Window {
         // status bar without exposing that spacer.
         page-stack.height + 4px;
     callback settings-page-viewport-changed(length, length);
-    callback settings-select-pointer-released(length, length);
     callback settings-select-dismiss();
     private property <int> select-dismiss-revision: TransientOverlayState.dismiss-revision;
     changed select-dismiss-revision => {
@@ -983,11 +982,7 @@ export component MainWindow inherits Window {
     }
 
     post-dispatch-pointer-released(x, y) => {
-        GitHubSelectState.pointer-released(x, y);
         if root.current-route == Route.UiComponents { UiComponentsBridge.pointer-released(x, y); }
-        if root.current-route == Route.Settings {
-            root.settings-select-pointer-released(x, y);
-        }
     }
 
     restore-navigation-drawer-state(expanded) => {
@@ -2024,7 +2019,7 @@ export component MainWindow inherits Window {
         // Settings is mounted in a full-window factory host at z:1200 so its
         // own dialogs can cover application chrome. Raise the shared status
         // surface above that host while Settings is an ordinary page; otherwise
-        // the host hides every status popup and its outside-click layer. Any
+        // the host hides every status popup. Any
         // modal lowers the bar again so the factory/root dialog keeps ownership.
         z: (root.current-route == Route.Settings || (UiComponentsFeature.independent && root.current-route == Route.UiComponents)) && !root.modal-overlay-visible
             ? 1210
@@ -2314,10 +2309,9 @@ export component MainWindow inherits Window {
     // A title-bar ActionMenu must live at the window root. Rendering it as a
     // descendant of the 46px action strip makes the menu depend on overflow
     // across the PR page's stacking layer and can leave it invisible or
-    // non-interactive on macOS. Page outside-click and mutual-exclusive first
-    // clicks are owned by the PR workspace (under its chrome) plus
-    // TransientOverlayState for title-bar/shell chrome — not a root scrim above
-    // the page, which would consume the switching click on Diff/file menus.
+    // non-interactive on macOS. The shared ActionMenu observes outside presses
+    // after dispatch, including events consumed inside independent factories.
+    // Peer menus retain exclusive-claim switching without a root pointer scrim.
     // Instantiated only on macOS while PR Review is the active route; on
     // other platforms and routes the measure Texts and ActionMenu tree do
     // not exist at all instead of idling hidden.
@@ -2393,7 +2387,7 @@ export component MainWindow inherits Window {
         private property <length> popup-height:
             16px + 28px + 8px + max(20px, popup-detail-wrapped-measure.preferred-height) + 16px;
 
-        GitHubActionMenu {
+        readiness-popup := GitHubActionMenu {
             // The overlay itself is now `if`-gated on macOS + PR Review, so
             // existence already implies the old `visible` precondition.
             open: root.workflow-pr-readiness-popup-open;

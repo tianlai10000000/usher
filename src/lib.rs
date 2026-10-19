@@ -945,8 +945,8 @@ pub fn main() {
         }
     };
     // The production backend creates its real window adapter during show().
-    // Native AppKit monitors precede Slint focus assignment. Classify input
-    // presses in the shared post-dispatch hook on every backend.
+    // Observe pointer presses in the shared post-dispatch hook on every backend;
+    // shared popovers classify their own bounds across independent UI roots.
     if let Err(error) = transient_input::install(&ui) {
         startup::exit_failure("The native input bridge could not be installed", &error);
     }

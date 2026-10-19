@@ -251,9 +251,9 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
 
     function begin-diff-selection(line: int, col: int, side: string) {
         // Selectable code owns the pointer press, so the workspace's blank-area
-        // dismiss layer cannot observe it. Close both workspace-local and
-        // root-mounted transient popovers before preserving the code-selection
-        // gesture below.
+        // dismiss layer cannot observe it. Close workspace-local popovers;
+        // the shell readiness menu observes the same post-dispatch press
+        // independently, preserving the code-selection gesture below.
         root.active-popover = "";
         TransientOverlayState.dismiss-popovers();
 
@@ -741,8 +741,8 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
 
     // Consume clicks on non-interactive workspace areas so they cannot reach
     // the pull-request list retained underneath this full-window overlay.
-    // Also dismiss the root-mounted readiness ActionMenu via the shared chrome
-    // channel so blank clicks close it without a page-covering root scrim.
+    // The shell readiness menu independently observes post-dispatch outside
+    // presses, without a page-covering root scrim.
     TouchArea {
         x: root.shell-leading-inset;
         width: root.content-width;
@@ -1146,6 +1146,11 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                 y: 50px;
                 caret-x: files-changed-toolbar.diff-settings-caret-x;
                 open: root.active-popover == "diff-settings";
+                dismiss-trigger-bounds: {
+                    x: diff-settings-button.absolute-position.x,
+                    y: diff-settings-button.absolute-position.y,
+                    width: diff-settings-button.width, height: diff-settings-button.height,
+                };
                 pending-view <=> root.pending-diff-view;
                 pending-ignore-whitespace <=> root.pending-ignore-whitespace;
                 ignore-whitespace-supported: root.ignore-whitespace-supported;

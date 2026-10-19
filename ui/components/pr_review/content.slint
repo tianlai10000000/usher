@@ -5,7 +5,8 @@ import { TransientOverlayState } from "../../state/transient_overlay_state.slint
 import { WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffTextSlice, WorkflowPrDiffGlyphRange, WorkflowPrDiffGlyphRect, WorkflowPrDiffFindMatch, WorkflowPrFileExtensionFilter } from "./shell.slint";
 import { GitHubTooltip } from "../github_tooltip.slint";
 import { GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint";
-import { GitHubActionListItem, GitHubActionMenu } from "../github_action_menu.slint";
+import { GitHubActionListItem, GitHubActionMenu, GitHubPopoverDismissGuard } from "../github_action_menu.slint";
+import { FloatingOverlayRect } from "../../state/floating_overlay_bridge.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubCompactElevation } from "../github_elevation.slint";
 import { GitHubSpinner } from "../github_spinner.slint";
@@ -963,6 +964,7 @@ export component GitHubDiffViewChoice inherits Rectangle {
 
 export component GitHubDiffSettingsPopover inherits Rectangle {
     in property <bool> open: false;
+    in property <FloatingOverlayRect> dismiss-trigger-bounds;
     // Tip of the upward Primer caret, relative to this popover's left edge.
     // Callers set this to the trigger-button center minus the panel's x so the
     // caret stays under the gear even when the panel is edge-clamped.
@@ -1025,6 +1027,16 @@ export component GitHubDiffSettingsPopover inherits Rectangle {
     background: root.bg-default;
     // Caret draws above the top edge; do not clip it.
     clip: false;
+
+    if root.open: GitHubPopoverDismissGuard {
+        open: root.open;
+        surface-bounds: {
+            x: root.absolute-position.x, y: root.absolute-position.y,
+            width: root.width, height: root.height,
+        };
+        trigger-bounds: root.dismiss-trigger-bounds;
+        dismiss-requested => { root.dismiss-requested(); }
+    }
 
     // The visual overlay must also own its complete pointer area. Without this
     // mounted hit target, blank areas of the popover allow hover to reach the

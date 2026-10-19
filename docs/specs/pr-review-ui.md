@@ -181,6 +181,16 @@ both take effect in that same call; other features' modal state remains intact.
 This input check does not flush layout or copy models.
 Local exclusive claims stamp the expected host generation before publishing;
 peer host claims dismiss factory popovers without echoing the new opener's claim.
+The factory registers a weak pointer subscriber with `src/transient_input.rs`
+at creation. The real MainWindow dispatch hook publishes each left press once in
+unchanged window coordinates to the shell and active factory globals, including
+on macOS. ActionMenu, Select and Diff settings use the shared
+`GitHubPopoverDismissGuard`; no readiness-specific pointer state is needed.
+Outside presses close the affected menu even when controls, scroll viewports or
+selectable Diff code consume the event. Interior and trigger bounds preserve the
+original click or selection. Releases do not dismiss, text-input focus does not
+blanket-close popovers, and route cleanup is not forwarded into shell revisions.
+Retain explicit dismiss channels, peer exclusivity and Dialog/Toast lifecycles.
 Placement adapts rectangles to the existing shared Floating UI bridge.
 
 Fixed actions use 30 literal-kind leaves, `PrReviewTooltipState`, and one
@@ -201,7 +211,14 @@ factory 外层 FocusScope 不通过点击或 Tab 获取焦点。非 Tab 快捷�
 跨越 factory 边界，modal 时禁止穿入主壳。原生快捷键可能先于 Slint changed 发布；
 共享快捷键入口与 PR Tab adapter 在准入前从实际 owner 同步唯一 modal 布尔值，打开和
 关闭均在同一调用生效，不能清除其他功能的 modal，也不推进布局或复制 model。互斥 claim 先登记预期宿主代次，避免回声关闭
-刚打开的菜单；几何复用共享 Floating UI adapter。30 种固定 Tooltip 动作用 literal 叶子、
+刚打开的菜单。factory 创建时向 `src/transient_input.rs` 注册弱引用指针订阅，真实
+MainWindow dispatch hook 将每次左键按下按原始窗口坐标仅发布一次到主壳和活动
+factory global，macOS 也遵循同一规则。ActionMenu、Select 与 Diff settings 复用
+`GitHubPopoverDismissGuard`，无需 readiness 专属指针状态；控件、滚动视口或可选择
+Diff 代码消费外部按下也能关闭相关菜单。表面与触发器边界保留原点击和选区；松开不
+触发关闭，输入焦点不再无条件关闭所有 popover，路由清理不回传为主壳 revision。
+显式关闭、peer 互斥及 Dialog/Toast 生命周期保持，几何复用共享 Floating UI adapter。
+30 种固定 Tooltip 动作用 literal 叶子、
 单个 transient Portal 和各自常驻 I18n 测量/绘制 Surface；路径、时间等动态 metadata
 继续使用通用双槽例外，不能用于固定动作。完整语言包、语言顺序、即时刷新及不复制
 model 的要求与国际化规格一致。
@@ -236,6 +253,14 @@ root 导入，修改这些输入仍可能使 MainWindow 与 PR 包同时失效�
   isolation, heavy-document teardown, locale reentry, immediate generic/fixed
   Tooltip revocation, two-way real popover exclusivity, real keyboard/Tab crossing
   and weak-handle release controls.
+- Exercise shared outside dismissal on shell and factory ActionMenu, Select
+  and Diff settings: blank content, a consumed tab/button click and selectable
+  Diff code must close the outside menu without losing the target action.
+  Include English and a packaged non-source locale, interior/trigger controls,
+  first-click peer switching and inside-press/outside-release drags. Verify
+  inactive and dropped factory subscribers, detached same-geometry windows and
+  non-left buttons do not publish; a stale press cannot close a new opener.
+  Record native platform coverage separately from testing-backend assertions.
 - Run architecture/UI-policy positive and negative fixtures and the two i18n
   build-path Python suites. Inspect static, integrated-preview and dev-shell
   feature ownership, including nested DTO types and original-input watches.

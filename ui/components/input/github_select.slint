@@ -28,16 +28,6 @@ export global GitHubSelectState {
         root.open = false;
     }
 
-    public function pointer-released(x: length, y: length) {
-        if root.open
-            && !(x >= root.surface.x && x < root.surface.x + root.surface.width
-                && y >= root.surface.y && y < root.surface.y + root.surface.height)
-            && !(x >= root.anchor-x && x < root.anchor-x + root.anchor-width
-                && y >= root.anchor-y && y < root.anchor-y + root.anchor-height) {
-            root.close(false);
-        }
-    }
-
     public function toggle(owner: string, value: string, index: int,
             x: length, y: length, width: length, height: length) {
         if root.open && root.owner == owner {
@@ -176,12 +166,21 @@ export component GitHubSelectPopup inherits FocusScope {
         anchor-y: GitHubSelectState.anchor-y - root.absolute-position.y - root.viewport-y;
         anchor-width: GitHubSelectState.anchor-width;
         anchor-height: GitHubSelectState.anchor-height;
+        // The floating host already positions this menu at x/y=0. Its placement
+        // anchor is not in that positioned parent's space; use the real trigger.
+        dismiss-trigger-bounds: {
+            x: GitHubSelectState.anchor-x, y: GitHubSelectState.anchor-y,
+            width: GitHubSelectState.anchor-width, height: GitHubSelectState.anchor-height,
+        };
         menu-width: root.popup-width;
         menu-max-height: 264px;
         content-height: root.list-content-height + GitHubMetrics.size-8;
         reveal-offset: root.active-option-offset;
         reveal-height: GitHubMetrics.size-32 + GitHubMetrics.size-8;
         dismiss-requested => { GitHubSelectState.close(false); }
+        // An option scrolled out of the clipping viewport loses native key
+        // delivery. Keep this options-only menu's ancestor capture reachable.
+        scroll-interacted => { menu.focus(); }
 
         Rectangle {
             x: GitHubMetrics.size-4;

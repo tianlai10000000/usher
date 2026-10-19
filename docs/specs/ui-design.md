@@ -753,9 +753,10 @@ expanded/collapsed, and success confirmation.
   viewport anchors from a verified zero-offset origin plus local offsets rather
   than inherited coordinates that count the component offset twice. Test pointer
   release on both plain and grouped triggers over multiple layout frames.
-  Outside dismissal observes pointer release after the target handles its click, including
-  sidebar/title/status chrome and the isolated Settings factory; it must not
-  intercept that click or restore focus away from the clicked control. The
+  Outside dismissal uses the shared dispatched left press and window-coordinate
+  surface/trigger bounds, including the isolated Settings factory; a release
+  cannot dismiss a menu after an interior press. It must not intercept the
+  target's click or restore focus away from the clicked control. The
   full-window keyboard scope must disable automatic pointer focus acquisition.
   Tab/Shift+Tab and standalone Backtab close with
   `GitHubSelectState.close(restore-before-tab)`, then bubble. The flag defaults
@@ -765,6 +766,11 @@ expanded/collapsed, and success confirmation.
   the current item and choosing its next/previous peer. Closing must neither
   restart at the directory nor stop at the opener. Escape always restores focus;
   outside-pointer dismissal keeps `close(false)`.
+  User scrolling emits ActionMenu `scroll-interacted`; Select focuses its visible
+  menu scope before a clipped active option can lose the next Home/End/arrow key.
+  Programmatic reveal must not emit that interaction or override option focus.
+  / 用户滚动通过 `scroll-interacted` 让 Select 聚焦可见菜单作用域，避免活动项滚出视口
+  后丢失下一导航键；程序化 reveal 不得触发该交互或覆盖选项焦点。
   References: [Primer Select](https://primer.style/product/components/select/)
   and [SelectPanel dismissal](https://primer.style/product/components/select-panel/).
 - 表单 Select 使用共享 `GitHubSelectPopup`、`GitHubSelectOption` 与
@@ -788,8 +794,8 @@ expanded/collapsed, and success confirmation.
   活动选项焦点必须限定到当前展开的选择器，隐藏菜单不得抢焦点。带偏移的示例触发器从
   已验证的零偏移原点加局部偏移计算视口锚点，避免继承坐标重复计入组件偏移；验收普通
   与分组触发器在鼠标释放后跨多个布局帧保持展开。
-  窗口级鼠标释放在目标处理完点击后通知关闭，覆盖侧栏、标题栏、状态栏与 Settings
-  factory；全窗口键盘作用域关闭鼠标自动获取焦点，
+  外部关闭使用共享派发后左键按下及窗口坐标中的表面/触发器边界，覆盖独立 Settings
+  factory；内部按下后在外部松开不得关闭菜单。全窗口键盘作用域关闭鼠标自动获取焦点，
   不得拦截首次点击或抢走目标焦点。
   Inbox 与静态演练场通过 `src/focus_navigation.rs` 共用 mounted-host Tab 遍历。
   演练场 capture scope 转发普通快捷键；Tab/Shift+Tab 与独立 Backtab 先关闭 Select
@@ -831,34 +837,47 @@ expanded/collapsed, and success confirmation.
   init/change notifications must not repeat the claim. / 初始 `open: true` 与
   后续打开共用幂等路径：先标记下一互斥代际，再 claim、初始化滚动定位并获取焦点；
   关闭复位 guard，不能漏掉首次 claim，也不能因 init/change 重复通知再次 claim。
-  Each host still mounts a sibling
-  blank outside-click TouchArea under the menu—and under chrome that must keep
-  receiving clicks. ActionMenu itself must not paint a full-viewport hit target
-  at its overlay z, or filter/popover switching would only close instead of
-  retargeting. A click in the native title bar advances `dismiss-revision` so
-  an open ActionMenu closes without consuming the native title-bar action.
-  Triggers that live in that chrome dismiss zone must use
-  `GitHubActionMenuTriggerArea` (press-state open/close) so the same click
-  cannot dismiss then toggle-reopen; `dismiss-requested` must close, never
-  toggle. Pointer presses inside a currently focused or newly focused native
-  text input use the application input bridge's popover-only dismissal channel:
-  Select, ActionMenu, and Diff-settings close after the input receives the
-  press, while Dialog and Toast lifecycles remain unchanged.
-  [`src/transient_input.rs`](../../src/transient_input.rs) scopes the actual
-  window-dispatch hook to MainWindow's adapter. Flickable may delay forwarding
-  the child press, so window post-dispatch alone does not guarantee TextInput
-  focus. Classify the left press immediately; retain only a miss's original
-  point and route. Its real left release consumes that pending identity and
-  retries the original point once if the route is unchanged. Exit/deactivation
-  cancels it; successful presses are not repeated, and other buttons/adapters
-  do not consume it. Release coordinates never become an outside press. This
-  bridge adds no timer/polling; macOS native forwarding remains separate and
-  production avoids duplicate delivery. Verify short/held clicks and real
-  selection dragged outside. / Flickable 可能延迟子节点 press，窗口 post-dispatch
-  不等于 TextInput 已聚焦。主窗口左键按下先立即分类，仅未命中者保存原坐标与路由；
-  实际左键松开派发后取出 pending，同路由才按原按下点补分类一次。离开窗口或失活
-  取消，已命中者不重复，其他键/adapter 不消费。松开坐标绝不作为外部按下，不新增
-  Timer/轮询；macOS 原生转发保持独立并避免重复。验收包含短击、长按与真实越界拖选。
+  [`GitHubPopoverDismissGuard`](../../ui/components/github_action_menu.slint)
+  centralizes outside dismissal for ActionMenu (including Select) and Diff
+  settings. It observes `TransientOverlayState.pointer-pressed`, compares live
+  surface and trigger rectangles in window coordinates, and closes only on an
+  outside left press. ActionMenu converts parent-local anchors; Select supplies
+  its absolute anchor explicitly because its floating host independently moves
+  the menu. Diff settings receives the actual gear trigger rectangle. Do not
+  infer anchors from a caret, fixed gap or estimated position. This works when
+  a button, tab, viewport or selectable code consumes the click; the target
+  still receives that same interaction. Interior and trigger presses stay under
+  the owning control's policy. A new opener must not consume an older press.
+  No menu adds a full-viewport input shield at its overlay z. Hosts may retain
+  blank-area layers for their own input ownership, but menu dismissal must not
+  depend on those layers. Native title-bar clicks retain `dismiss-revision`;
+  chrome triggers use `GitHubActionMenuTriggerArea` so dismissal cannot toggle
+  them open again. `dismiss-requested` closes, never toggles.
+  [`src/transient_input.rs`](../../src/transient_input.rs) filters the actual
+  post-dispatch hook by MainWindow adapter identity and publishes each left
+  press once, even on macOS. Independent Settings, PR Review and static
+  playground roots register weak subscribers at creation; future factory roots
+  must register too. Broadcast unchanged logical window coordinates only to
+  active routes, without retaining their roots or forwarding dismissal revisions
+  back to the shell. Integrated roots already share the shell global. The native
+  macOS monitor retains its separate chrome/release forwarding; it must not
+  publish this pointer signal again. Release coordinates are never classified
+  as an outside press, and text-input focus no longer blanket-dismisses menus.
+  Native text-field blur still follows the visible field bounds. Existing full,
+  popover-only and exclusive-claim channels keep their separate lifecycles;
+  generic pointer observation must not dismiss Dialogs or Toasts.
+  / `GitHubPopoverDismissGuard` 统一处理 ActionMenu（含 Select）与 Diff settings
+  的外部关闭，按真实派发后左键按下与窗口坐标中的实时表面/触发器边界判断。ActionMenu
+  转换父级局部锚点；Select 显式传绝对锚点，Diff settings 传齿轮真实边界，不按 caret
+  或固定间距推算。控件/视口/代码消费点击也必须保留原操作；内部与触发器按下按所属
+  控件策略处理，新打开者不得消费旧按下。菜单不铺整页命中遮罩，不依赖页面空白层。
+  `transient_input` 按实际 adapter 过滤，每次左键按下仅广播一次，macOS 同样如此；
+  独立 factory 在创建时注册弱引用订阅，仅活动路由接收原始窗口坐标，不持有页面、
+  不回传关闭 revision。macOS monitor 保留独立 chrome/release 通道，不重复发布。
+  松开不判定外部关闭，输入焦点不无条件关闭菜单；Dialog/Toast 与显式关闭、互斥生命周期
+  保持。验收根层及 factory 的菜单、输入框内外、未聚焦按钮/Tab、代码选择、触发器互切、
+  内部按下外部松开、旧按下与新菜单；以相同几何的独立窗口、非左键、非活动/已销毁页面
+  为负例。记录原生平台覆盖，testing backend 通过不代表平台绘制或性能验收。
   Independent factory global graphs need an explicit two-way exclusive-claim
   bridge. The static playground stamps the next host generation before its
   claim, ignores that echo, and forwards external host claims only as

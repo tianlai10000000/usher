@@ -316,22 +316,6 @@ export component GitHubWorkflowPage inherits GitHubPageView {
 
         // Mount the compact repository ActionMenu on the shell (after tabs /
         // panels) so it paints above them. Header-local popups were covered.
-        if root.repository-details-open: Rectangle {
-            x: -root.absolute-position.x;
-            y: -root.absolute-position.y;
-            width: 9999px;
-            height: 9999px;
-            z: 300;
-            background: transparent;
-
-            TouchArea {
-                width: parent.width;
-                height: parent.height;
-                mouse-cursor: default;
-                clicked => { root.repository-details-open = false; }
-            }
-        }
-
         if root.repository-details-open: GitHubActionMenu {
             z: 302;
             open: root.repository-details-open;

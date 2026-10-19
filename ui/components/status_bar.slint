@@ -518,23 +518,6 @@ export component GitHubStatusBar inherits Rectangle {
                 }
             }
     
-    // Click-outside-to-close overlay (covers area above status bar only)
-    if active-popup != ActivePopup.None : Rectangle {
-        x: -root.absolute-position.x;
-        y: -root.absolute-position.y;
-        width: 9999px;
-        height: root.absolute-position.y;
-        background: transparent;
-        
-        TouchArea {
-            width: 100%;
-            height: 100%;
-            clicked => {
-                root.active-popup = ActivePopup.None;
-            }
-        }
-    }
-    
     // Popup overlay - Primer AnchoredOverlay flips above this bottom anchor and
     // scrolls internally if the window is shorter than its content.
     if active-popup != ActivePopup.None : GitHubActionMenu {

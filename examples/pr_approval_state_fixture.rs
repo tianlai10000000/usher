@@ -351,5 +351,9 @@ fn main() -> Result<(), slint::PlatformError> {
     if args.iter().any(|arg| arg == "--detail") {
         show_review(&ui, &rows.borrow()[0], &locale);
     }
-    ui.run()
+    ui.show()?;
+    // This fixture has no native chrome monitor. Forward real window pointer
+    // events through the same post-dispatch channel as the application.
+    usher_lib::install_transient_input_bridge(&ui)?;
+    slint::run_event_loop()
 }

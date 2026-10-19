@@ -9,8 +9,9 @@ slint::slint! {
         from "ui/components/navigation/github_underline_nav.slint";
     import { GitHubFixedThreeTabs } from "ui/components/navigation/github_fixed_tabs.slint";
     import { GitHubSelectState } from "ui/components/input/github_select.slint";
+    import { TransientOverlayState } from "ui/state/transient_overlay_state.slint";
     import { I18n } from "@i18n";
-    export { GitHubUnderlineNavVariant, GitHubTabItem, GitHubTabOverflowState, GitHubSelectState }
+    export { GitHubUnderlineNavVariant, GitHubTabItem, GitHubTabOverflowState, GitHubSelectState, TransientOverlayState }
     export component TabHarness inherits Window {
         width: 900px;
         height: 400px;
@@ -367,8 +368,9 @@ fn additional_tabs_and_large_counts_overflow_as_whole_items() {
             );
             more.mock_single_click(slint::platform::PointerEventButton::Left);
             settle();
-            ui.global::<GitHubSelectState>()
-                .invoke_pointer_released(4.0, 350.0);
+            ui.global::<TransientOverlayState>()
+                .invoke_pointer_pressed(4.0, 350.0);
+            settle();
             assert!(
                 !ui.global::<GitHubSelectState>().get_open(),
                 "outside pointer dismisses More"

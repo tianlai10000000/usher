@@ -13,8 +13,9 @@ slint::slint! {
     import { GitHubSelectPopup, GitHubSelectOption, GitHubSelectState } from "ui/components/input/github_select.slint";
     import { GitHubSettingsSectionMenuButton } from "ui/components/settings/github_settings_controls.slint";
     import { GitHubScrollView } from "ui/components/github_scroll_view.slint";
+    import { TransientOverlayState } from "ui/state/transient_overlay_state.slint";
     import { I18n } from "@i18n";
-    export { GitHubSelectState }
+    export { GitHubSelectState, TransientOverlayState }
     export component SelectPlacementHarness inherits Window {
         width: 900px; height: 700px;
         in property <length> host-x: 0px;
@@ -232,6 +233,11 @@ fn shared_select_keeps_internal_scrolling_keyboard_pointer_and_dismissal() {
             "scrolling menu options keeps it open"
         );
         press(&window, Key::Home);
+        assert_eq!(
+            GitHubSelectState::get(&window).get_active_index(),
+            0,
+            "Home must reach the menu after scrolling its focused option out of view"
+        );
         press(&window, Key::Return);
         assert_eq!(window.get_selection(), 0);
         click_trigger(&window);
@@ -247,7 +253,8 @@ fn shared_select_keeps_internal_scrolling_keyboard_pointer_and_dismissal() {
         assert!(!state.get_open() && state.get_restore_focus());
         assert_eq!(window.get_selection(), 2);
         click_trigger(&window);
-        state.invoke_pointer_released(899.0, 699.0);
+        TransientOverlayState::get(&window).invoke_pointer_pressed(899.0, 699.0);
+        settle();
         assert!(!state.get_open() && !state.get_restore_focus());
     }
 }
@@ -273,13 +280,13 @@ fn click_visible_trigger(window: &ClippedSelectHarness) {
         position,
         button: PointerEventButton::Left,
     });
+    TransientOverlayState::get(window).invoke_pointer_pressed(position.x, position.y);
     window
         .window()
         .dispatch_event(WindowEvent::PointerReleased {
             position,
             button: PointerEventButton::Left,
         });
-    GitHubSelectState::get(window).invoke_pointer_released(position.x, position.y);
 }
 
 #[test]

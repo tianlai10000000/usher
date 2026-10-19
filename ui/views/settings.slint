@@ -7,6 +7,7 @@ import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
 import { GitHubTooltipOverlayHost } from "../components/github_tooltip_overlay.slint";
 import { TooltipOverlayState } from "../state/tooltip_overlay_state.slint";
 export { TooltipOverlayState } from "../state/tooltip_overlay_state.slint";
+export { TransientOverlayState } from "../state/transient_overlay_state.slint";
 import { GitHubHookTooltipOverlay, HookTooltipState } from "../components/settings/github_hook_tooltip.slint";
 export { HookTooltipState, HookTooltipKind } from "../components/settings/github_hook_tooltip.slint";
 import {
@@ -85,12 +86,7 @@ export component GitHubSettingsPage inherits Window {
     callback open-log-directory();
     callback export-diagnostics();
     callback dismiss-select();
-    callback select-pointer-released(length, length);
     dismiss-select => { AgentTooltipState.dismiss(); GitHubSelectState.close(false); }
-    select-pointer-released(x, y) => {
-        GitHubSelectState.pointer-released(
-            x + root.absolute-position.x, y + root.absolute-position.y);
-    }
 
     in-out property <bool> simulate-crash-active: false;
     in-out property <bool> reveal-git-tokens: false;

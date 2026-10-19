@@ -63,9 +63,16 @@ fn create_page(window: &MainWindow) -> Result<GitHubUiComponentsWindow, slint::P
     // Slint's shared-window constructor temporarily installs its own root.
     let host = i_slint_core::window::WindowInner::from_pub(window.window());
     let shell = host.component();
-    let page = GitHubUiComponentsWindow::new_with_existing_window(window.window());
+    let result = GitHubUiComponentsWindow::new_with_existing_window(window.window());
     host.set_component(&shell);
-    page
+    let page = result?;
+    crate::transient_input::register_pointer_root(window, &page, |page, x, y| {
+        if page.get_route_active() {
+            page.global::<usher_ui_components::TransientOverlayState>()
+                .invoke_pointer_pressed(x, y);
+        }
+    });
+    Ok(page)
 }
 
 #[doc(hidden)]
@@ -155,7 +162,6 @@ pub fn install(window: &MainWindow) {
     window
         .global::<crate::UiComponentsBridge>()
         .on_pointer_released(move |x, y| {
-            with_page(&slot, |page| page.invoke_select_pointer_released(x, y));
             if trace {
                 if let Some(window) = weak.upgrade() {
                     fixture::trace_pointer(&window, x, y);

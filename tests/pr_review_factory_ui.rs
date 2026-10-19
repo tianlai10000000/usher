@@ -14,8 +14,9 @@ use slint::platform::{Key, PointerEventButton, WindowEvent};
 use slint::{ComponentHandle, LogicalSize, Model, ModelRc, VecModel};
 use std::{cell::Cell, rc::Rc, time::Duration};
 use usher_lib::{
-    MainWindow, PrReviewBridge, PrReviewUiRoot, Route, WorkflowPrDiffLine,
-    install_pr_review_fixture, pr_review_fixture_view,
+    MainWindow, PrDiffBridge, PrReviewBridge, PrReviewUiRoot, Route, WorkflowPrDiffLine,
+    WorkflowPrDiffRowMetric, WorkflowPrDiffSelectionHit, WorkflowPrDiffVirtualRow,
+    WorkflowPrDiffVirtualWindow, install_pr_review_fixture, pr_review_fixture_view,
 };
 
 fn window() -> MainWindow {
@@ -78,6 +79,35 @@ fn top_tree(mut item: ItemRc) -> ItemTreeRc {
         item = parent;
     }
     item.item_tree().clone()
+}
+
+fn macos_merged_review() -> (MainWindow, PrReviewUiRoot) {
+    let window = window();
+    usher_lib::install_transient_input_bridge(&window).expect("real window pointer forwarding");
+    window.set_platform_is_macos(true);
+    window.set_show_navigation_drawer(false);
+    usher_lib::install_floating_overlay_positioning(&window);
+    install_pr_review_fixture(&window);
+    let page = pr_review_fixture_view(&window);
+    let review = page.global::<PrReviewBridge>();
+    review.set_workflow_pr_review_visible(true);
+    review.set_workflow_pr_review_loading(false);
+    review.set_workflow_pr_merge_readiness_kind("merged".into());
+    review.set_workflow_pr_merge_readiness_label("Merged".into());
+    review.set_workflow_pr_merge_readiness_detail(
+        "This Pull Request has already been merged.".into(),
+    );
+    window.set_current_route(Route::PrReview);
+    flush(&window);
+    (window, page)
+}
+
+fn click_readiness(window: &MainWindow) {
+    ElementHandle::find_by_element_id(window, "GitHubMergeReadinessBadge::badge-touch")
+        .next()
+        .expect("real title-bar readiness trigger")
+        .mock_single_click(PointerEventButton::Left);
+    flush(window);
 }
 
 #[test]
@@ -377,6 +407,7 @@ fn route_exit_revokes_metadata_tooltips_and_transients_without_clearing_models()
 #[test]
 fn real_pr_popover_and_shell_version_menu_claim_exclusivity_in_both_directions() {
     let window = window();
+    usher_lib::install_transient_input_bridge(&window).unwrap();
     usher_lib::install_floating_overlay_positioning(&window);
     window.set_platform_is_macos(false);
     window.set_show_navigation_drawer(false);
@@ -415,13 +446,200 @@ fn real_pr_popover_and_shell_version_menu_claim_exclusivity_in_both_directions()
     assert_eq!(menus(), 1);
     assert_eq!(host.get_exclusive_generation(), before + 2);
 
-    // Bypass the Version outside-click shield with a real focused key event.
-    focus_label(&window, "Open Diff view settings");
-    key(&window, Key::Return);
+    // The shared outside observer preserves this first factory control click.
+    ElementHandle::find_by_element_id(&page, "GitHubPullRequestReviewPage::diff-settings-button")
+        .next()
+        .expect("real PR Diff settings trigger")
+        .mock_single_click(PointerEventButton::Left);
     flush(&window);
     assert!(open(), "the new PR opener must not receive its own echo");
     assert_eq!(menus(), 0, "the PR claim closes the shell Version peer");
     assert_eq!(host.get_exclusive_generation(), before + 3);
+}
+
+#[test]
+fn macos_readiness_closes_on_factory_blank_click_without_a_root_pointer_shield() {
+    let (window, page) = macos_merged_review();
+    let review = page.global::<PrReviewBridge>();
+
+    for locale in ["en", "zh-CN"] {
+        slint::select_bundled_translation(locale).expect("packaged locale");
+        i_slint_core::translations::mark_all_translations_dirty();
+        review.set_workflow_pr_merge_readiness_label(
+            usher_i18n::translate_for(locale, "pr_review.readiness.merged")
+                .as_ref()
+                .into(),
+        );
+        review.set_workflow_pr_merge_readiness_detail(
+            usher_i18n::translate_for(locale, "pr_review.readiness_detail.merged")
+                .as_ref()
+                .into(),
+        );
+        flush(&window);
+        click_readiness(&window);
+        assert!(window.get_workflow_pr_readiness_popup_open());
+
+        ElementHandle::find_by_element_id(&window, "GitHubActionMenu::menu-surface")
+            .next()
+            .expect("root-mounted readiness surface")
+            .mock_single_click(PointerEventButton::Left);
+        flush(&window);
+        assert!(
+            window.get_workflow_pr_readiness_popup_open(),
+            "clicking inside the status detail keeps it open"
+        );
+
+        ElementHandle::find_by_element_id(
+            &page,
+            "GitHubPullRequestReviewPage::pr-header-bottom-rule",
+        )
+        .next()
+        .expect("non-interactive factory header divider")
+        .mock_single_click(PointerEventButton::Left);
+        flush(&window);
+        assert!(
+            !window.get_workflow_pr_readiness_popup_open(),
+            "{locale}: factory blank clicks must dismiss the root readiness popup"
+        );
+
+        click_readiness(&window);
+        assert!(window.get_workflow_pr_readiness_popup_open());
+        click_readiness(&window);
+        assert!(
+            !window.get_workflow_pr_readiness_popup_open(),
+            "the same trigger still closes the status detail"
+        );
+    }
+}
+
+#[test]
+fn macos_readiness_and_factory_diff_settings_switch_on_the_first_click() {
+    let (window, page) = macos_merged_review();
+    let diff_open = || {
+        ElementHandle::find_by_element_type_name(&page, "GitHubDiffSettingsPopover")
+            .next()
+            .is_some()
+    };
+    click_readiness(&window);
+    assert!(window.get_workflow_pr_readiness_popup_open());
+    ElementHandle::find_by_element_id(&page, "GitHubPullRequestReviewPage::diff-settings-button")
+        .next()
+        .expect("real factory Diff view trigger")
+        .mock_single_click(PointerEventButton::Left);
+    flush(&window);
+    assert!(!window.get_workflow_pr_readiness_popup_open());
+    assert!(diff_open(), "the switching click opens Diff view settings");
+
+    click_readiness(&window);
+    assert!(window.get_workflow_pr_readiness_popup_open());
+    assert!(!diff_open(), "the reverse click opens only readiness");
+
+    page.global::<usher_ui_pr_review::TransientOverlayState>()
+        .invoke_dismiss_all();
+    flush(&window);
+    assert!(
+        window.get_workflow_pr_readiness_popup_open(),
+        "local cleanup is not a user outside-click and must not echo to the shell"
+    );
+    window.invoke_dismiss_transient_popovers();
+    flush(&window);
+    assert!(!window.get_workflow_pr_readiness_popup_open());
+}
+
+#[test]
+fn macos_readiness_closes_when_a_factory_tab_consumes_the_same_click() {
+    let (window, page) = macos_merged_review();
+    let review = page.global::<PrReviewBridge>();
+    let selected = Rc::new(Cell::new(-1));
+    let observed = selected.clone();
+    review.on_workflow_pr_review_select_tab(move |tab| observed.set(tab));
+
+    for locale in ["en", "zh-CN"] {
+        slint::select_bundled_translation(locale).expect("packaged locale");
+        i_slint_core::translations::mark_all_translations_dirty();
+        review.set_workflow_pr_review_tab(2);
+        selected.set(-1);
+        flush(&window);
+        click_readiness(&window);
+        assert!(window.get_workflow_pr_readiness_popup_open());
+        let conversation = format!(
+            "{}, 0",
+            usher_i18n::translate_for(locale, "pr_review.conversation")
+        );
+        ElementHandle::find_by_accessible_label(&page, conversation.as_str())
+            .next()
+            .expect("mounted Conversation tab")
+            .mock_single_click(PointerEventButton::Left);
+        flush(&window);
+        assert_eq!(selected.get(), 0, "the tab receives the switching click");
+        assert_eq!(review.get_workflow_pr_review_tab(), 0);
+        assert!(
+            !window.get_workflow_pr_readiness_popup_open(),
+            "{locale}: an interactive page target also dismisses readiness"
+        );
+    }
+}
+
+#[test]
+fn macos_readiness_closes_on_selectable_factory_diff_code_without_losing_the_press() {
+    let (window, page) = macos_merged_review();
+    let review = page.global::<PrReviewBridge>();
+    review.set_workflow_pr_review_tab(2);
+    review.set_workflow_pr_review_selected_file_index(0);
+    review.set_workflow_pr_review_selected_file_path("src/lib.rs".into());
+    review.set_workflow_pr_review_code_loading(false);
+    let line = WorkflowPrDiffLine {
+        old_line: 1,
+        new_line: 1,
+        kind: "context".into(),
+        content: "let value = 1;".into(),
+        source_index: 0,
+        ..Default::default()
+    };
+    review.set_workflow_pr_review_lines(ModelRc::new(VecModel::from(vec![line.clone()])));
+    review.set_workflow_pr_review_line_metrics(ModelRc::new(VecModel::from(vec![
+        WorkflowPrDiffRowMetric {
+            kind: "context".into(),
+            columns: 14,
+            double_hunk: false,
+        },
+    ])));
+    let diff = page.global::<PrDiffBridge>();
+    diff.on_workflow_pr_review_layout_diff_virtual_window(move |_, _, _, _, _, _, _, _| {
+        WorkflowPrDiffVirtualWindow {
+            rows: ModelRc::new(VecModel::from(vec![WorkflowPrDiffVirtualRow {
+                index: 0,
+                start: 0.0,
+                size: 22.0,
+                line: line.clone(),
+            }])),
+            scroll_offset: 0.0,
+            content_height: 22.0,
+        }
+    });
+    let selections = Rc::new(Cell::new(0));
+    let observed = selections.clone();
+    diff.on_workflow_pr_review_resolve_diff_selection(move |_, _, _, _, _, _, _, _, _, _| {
+        observed.set(observed.get() + 1);
+        WorkflowPrDiffSelectionHit { line: 0, column: 0 }
+    });
+    review.set_workflow_pr_review_line_content_revision(1);
+    flush(&window);
+    click_readiness(&window);
+    assert!(window.get_workflow_pr_readiness_popup_open());
+    ElementHandle::find_by_element_id(&page, "GitHubPullRequestReviewPage::unified-code")
+        .next()
+        .expect("real factory unified diff code")
+        .mock_single_click(PointerEventButton::Left);
+    flush(&window);
+    assert!(
+        selections.get() > 0,
+        "code selection receives the same press"
+    );
+    assert!(
+        !window.get_workflow_pr_readiness_popup_open(),
+        "selectable diff code dismisses the shell status detail"
+    );
 }
 
 #[test]

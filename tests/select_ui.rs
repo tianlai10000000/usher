@@ -8,13 +8,31 @@ use std::time::Duration;
 use i_slint_backend_testing::ElementHandle;
 use slint::platform::{Key, PointerEventButton, WindowEvent};
 use slint::{ComponentHandle, LogicalSize};
-use usher_lib::{MainWindow, Route};
+use usher_lib::{MainWindow, Route, install_transient_input_bridge};
+
+fn pointer_click(window: &MainWindow, position: slint::LogicalPosition) {
+    window
+        .window()
+        .dispatch_event(WindowEvent::PointerMoved { position });
+    window.window().dispatch_event(WindowEvent::PointerPressed {
+        position,
+        button: PointerEventButton::Left,
+    });
+    window
+        .window()
+        .dispatch_event(WindowEvent::PointerReleased {
+            position,
+            button: PointerEventButton::Left,
+        });
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(16));
+}
 
 #[test]
 fn showcase_select_layout_and_popup_stay_inside_their_surfaces() {
     i_slint_backend_testing::init_no_event_loop();
     let window = MainWindow::new().unwrap();
     playground::install(&window);
+    install_transient_input_bridge(&window).expect("real pointer dispatch bridge");
     slint::select_bundled_translation("en").unwrap();
     window.set_show_navigation_drawer(false);
     window.set_platform_is_macos(false);
@@ -100,12 +118,7 @@ fn showcase_select_layout_and_popup_stay_inside_their_surfaces() {
         assert_eq!(
             grouped.accessible_expanded(),
             Some(true),
-            "grouped opens before observer"
-        );
-        let anchor = grouped.absolute_position();
-        window.invoke_post_dispatch_pointer_released(
-            anchor.x + grouped.size().width / 2.0,
-            anchor.y + grouped.size().height / 2.0,
+            "grouped opens after its real pointer press and release"
         );
         for _ in 0..3 {
             i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
@@ -209,7 +222,7 @@ fn showcase_select_layout_and_popup_stay_inside_their_surfaces() {
             assert!((row.absolute_position().x - position.x - 4.0).abs() < 0.5);
             assert!((row.size().width - size.width + 8.0).abs() < 0.5);
         }
-        window.invoke_post_dispatch_pointer_released(1.0, height - 1.0);
+        pointer_click(&window, slint::LogicalPosition::new(1.0, height - 1.0));
         assert!(
             ElementHandle::find_by_element_id(&window, "GitHubSelectPopup::menu")
                 .next()

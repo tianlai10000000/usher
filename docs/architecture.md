@@ -366,6 +366,7 @@ language callback.
 | `src/diagnostics.rs`, `src/diagnostics/archive.rs` | Sentinel, retention scheduling and directory reveal stay in the facade; the archive owner serializes private temporary-file completion, unique publication and retention to five archives before success. The shared logging severity contract distinguishes normal lifecycle records from failure/fallback diagnostics; `src/logger/debug_logger.rs::flush_application_log` directly flushes the real application file sink after the final cleanup summary and `MainWindow`-drop record. See [Diagnostic logging](specs/diagnostics.md). |
 | `src/startup.rs` | Elapsed/delta startup timeline plus the one-shot post-first-frame queue used to defer disk hydration and expensive image projection. |
 | `src/platform/` | Cross-platform native integration boundary. `macos.rs` owns AppKit appearance (forced Light/Dark or follow-system for Auto), title-bar accessories, window-interaction notifications, the native-title-bar click bridge for dismissible transient overlays, macOS PR-review font registration, the `NSSound` click, and live Auto theme updates. It also owns paired shutdown removal for its event monitor, window/theme observers, and detached-preview resize observers. `windows.rs` owns Windows theme detection and `MessageBeep`; `linux.rs` owns XDG Portal theme detection and non-blocking desktop sound playback. `mod.rs` exposes the shared API, Auto theme watch enablement with a 1s poll fallback on all platforms, plus opening a directory in the OS file manager (Finder/Explorer/`xdg-open`). |
+| `src/transient_input.rs`, `src/transient_input/observers.rs` | MainWindow adapter-scoped native text-field blur and one post-dispatch left-press publication. The observer registry routes unchanged window coordinates to weak factory subscribers; creation owners register once and gate route activity. Callbacks run outside the registry borrow, and dead roots/hosts are pruned. Shared Slint guards own popover bounds and dismissal. |
 | `src/shutdown.rs`, `src/shutdown/pipeline.rs` | Ordered shutdown coordination: async producer drains, original-thread producer stops, blocking background barriers, then original-thread UI/AppKit and logger cleanup. A dispatch-failure fallback skips UI/AppKit tasks. Shared phase ownership preserves priorities and once-only completion. |
 | `src/single_instance.rs` | Process lock plus a bounded file-signal activation channel that reveals and focuses the existing window when a second launch is attempted. |
 | `src/tray.rs` | Desktop tray integration and tray-driven lifecycle actions. macOS routes completed left/right mouse-up events, temporarily attaches `NSStatusItem.menu` for native `performClick:` tracking, then detaches it to restore primary clicks. The tracking guard retains native objects across the nested run loop and suppresses activation-observer reopening. Quit uses `tray.quit`; the `src/lib.rs` locale callback refreshes it through `tray::sync_language`. `src/tray/animation.rs` owns the event-loop timer and elapsed-time frame selection for the orca jump; platform adapters preload original-colour native images (non-template on macOS), restore the selected static icon and stop playback before tray teardown. Native menu acceptance remains pending. See [Tray behavior](specs/tray.md). |
@@ -542,7 +543,7 @@ or ambiguous ancestry fails; this source proof does not replace native UI accept
 | `ui/components/github_fixed_tooltip_anchor.slint`, `ui/components/workflow/github_pr_factory_tooltip_anchors.slint` | Shared action-neutral anchor geometry/lease mechanics and PR-specific literal action leaves. Production PR widgets depend on these owners directly; they must not import the development showcase tree. |
 | `ui/components/github_floating_overlay.slint` | Shared full-window floating-placement boundary. The raw geometry tree is private; persistent root portals consume `GitHubTransientFloatingOverlayHost`, whose `active` input alone controls internal visibility. Feature code may supply anchors and fixed content, but may not instantiate the geometry host directly, multiply it per action, or hide it with opacity. |
 | `ui/state/tooltip_overlay_state.slint` | Window-root tooltip portal state (text, anchor rectangle, preferred placement/alignment, claim token, lease heartbeat). |
-| `ui/components/github_action_menu.slint` | Shared Primer ActionMenu/AnchoredOverlay surface with focus ownership, Escape dismissal, peer exclusive-claim on open, viewport collision placement, bounded vertical scrolling, reusable ActionList rows, and `GitHubActionMenuTriggerArea` press-state open/close so title-bar chrome dismiss cannot dismiss-then-reopen on the same click. Page blank outside-click stays on each host's sibling TouchArea. `ui/state/transient_overlay_state.slint` owns chrome `dismiss-revision` and popover `exclusive-generation`. |
+| `ui/components/github_action_menu.slint` | Shared Primer ActionMenu/AnchoredOverlay surface with focus ownership, Escape dismissal, peer exclusive-claim on open, viewport collision placement, bounded vertical scrolling, reusable ActionList rows, and `GitHubActionMenuTriggerArea` press-state open/close so title-bar chrome dismiss cannot dismiss-then-reopen on the same click. `GitHubPopoverDismissGuard` provides shared surface/trigger bounds checks from dispatched window presses, including clicks consumed by page controls. `ui/state/transient_overlay_state.slint` owns pointer publication, explicit dismissal revisions and popover exclusivity; `src/transient_input.rs` broadcasts to the shell and weakly registered active factories. |
 | `ui/components/page/github_page_header.slint` | Shared Primer PageHeader foundation for title, description, leading visual, divider, and trailing actions. |
 | `ui/components/button/github_copy_button.slint` | Shared GitHub CopyToClipboardButton interaction for every icon-copy action. It owns the transient Copy→Check state and `Copied!` tooltip; feature callbacks return clipboard-write success. |
 | `ui/components/jobs/` | Reusable GitHub Actions-style run, Job, Step, and log presentation. It accepts normalized snapshots and never executes workflow commands. |
@@ -828,7 +829,11 @@ Tooltip kinds share one factory-root transient portal with independent I18n
 measure/paint surfaces; runtime metadata keeps the generic two-slot exception.
 The factory captures ordinary shortcuts and bubbles Tab after local controls,
 then delegates mounted-host traversal to `focus_navigation`. Root modal shields
-and existing PR/AI/sidebar layer ordering remain in force. See
+and existing PR/AI/sidebar layer ordering remain in force. PR creation registers
+a weak pointer subscriber with `transient_input`, as Settings and the static
+playground do. Shared menu guards receive the same dispatched window coordinates
+across independent globals, so consumed page clicks dismiss outside popovers
+without intercepting their controls or forwarding route-cleanup revisions. See
 [PR Review UI](specs/pr-review-ui.md); compilation and testing-backend evidence
 alone do not establish native painting or build-performance acceptance.
 
@@ -836,7 +841,8 @@ Ordinary static `ui-components` builds also generate an independent library-modu
 product through `usher-ui-components`. MainWindow imports only its feature host
 and protocol stubs, with no transitive showcase source input. The feature-owned
 `UiComponentsBridge` is bound directly by `src/ui_components/`; it mirrors full
-window/content geometry, theme and font, forwards dismissal and pointer release,
+window/content geometry, theme and font, forwards explicit dismissal and optional
+pointer-release diagnostics,
 and adapts generated feedback DTOs to the existing application controllers. One
 transparent full-window product retains its global identities after first use;
 `create_page` creates it against MainWindow's actual `WindowAdapter`, so destroyed
@@ -998,13 +1004,17 @@ The grouped showcase trigger resolves its anchor from the zero-offset plain
 trigger's viewport origin plus its own local offset, avoiding duplicated
 component offsets from an unverified inherited `absolute-position`. Both showcase
 menus scope active-option focus to their open owner.
-There is no full-page input scrim. The existing window pointer observer reports
-outside releases after the target handles its click; the Settings bridge forwards page-local
-coordinates into its isolated global graph. The Select excludes its trigger and
-resolved surface from dismissal, forwards native/chrome dismissal as well, and
-does not restore trigger focus after an outside click. The full-window keyboard
-scope disables pointer focus acquisition, so other controls act on the first
-click. Escape and selection retain trigger focus restoration.
+There is no full-page input scrim. ActionMenu, Select and Diff settings use
+`GitHubPopoverDismissGuard` to compare the real dispatched left press with live
+surface and trigger bounds in window coordinates. ActionMenu converts its
+parent-local anchor; Select supplies an explicit absolute anchor because its
+floating host moves the menu independently. Outside dismissal does not restore
+trigger focus or consume the target control's click. Escape and selection retain
+trigger focus restoration; explicit dismiss and exclusive-claim channels remain
+separate from pointer observation. User scrolling emits ActionMenu
+`scroll-interacted`; Select moves focus to its visible menu scope so clipping
+the active option cannot discard the next key. Programmatic option reveal does
+not emit this interaction.
 
 The window pointer bridge restores text-field blur semantics across ordinary and
 independently generated page trees. On a primary press, it clears a focused
@@ -1013,19 +1023,20 @@ padding. [`src/transient_input.rs`](../src/transient_input.rs) walks down the mo
 pointer coordinates through container offsets, transforms and viewport clips;
 mapping upward from an independent factory product can omit its host offset.
 This remains reliable when a `Flickable` consumes blank presses and preserves
-first-click focus transfer. All platforms use the real post-dispatch window hook,
-but Flickable may still delay forwarding a child press. The hook classifies each
-left press immediately and retains only a miss's original point and route.
-After the actual left release dispatches, it consumes that pending press and
-retries the original point once on the same route. Pointer exit/deactivation
-cancels it; successful presses are not repeated and other buttons/adapters do
-not consume it. The bridge adds no timer or polling. Production installs it after
-`Window::show()` and compares actual adapter identity, keeping detached windows
-outside the MainWindow scope. The macOS native monitor forwards chrome and
-release events; it does not classify text inputs. The production macOS hook
-avoids duplicate pointer forwarding, while the public fixture entry forwards
-both phases. Release coordinates are never classified as an outside press, so a
-selection drag released outside its field retains focus and selection.
+first-click focus transfer. Popover dismissal no longer depends on discovering
+text-input focus or replaying a deferred child press: the actual post-dispatch
+window hook publishes each left press once to `TransientOverlayState`;
+`src/transient_input/observers.rs` owns the weak factory subscriber registry. Settings, PR Review and the static playground register at
+their creation owners; new independent roots must do the same. Subscribers use
+unchanged logical window coordinates, ignore inactive routes and do not retain
+windows or pages. Installation follows `Window::show()` and filters by actual
+MainWindow adapter identity, excluding detached windows and other mouse buttons.
+The hook publishes once on macOS too; the native monitor retains its separate
+chrome/release path. Release coordinates never become an outside press, so an
+inside press dragged or released outside preserves its selection and open menu.
+The full-dismiss, popover-only and exclusive-claim channels retain their existing
+Dialog/Toast and peer lifecycles. Native interaction checks remain required;
+testing-backend assertions do not establish platform painting or performance.
 
 Credential and endpoint groups retain page-local drafts until their Save commands.
 AI Agent instead manages an arbitrary stable-id registry through

@@ -79,22 +79,28 @@ selection state; changing one example must not select an item in the other.
 - Keep the existing content insets, section-directory absolute-to-viewport
   conversion, return-to-top links and bottom scroll reachability. The shell's
   page viewport must be hidden while the independent gallery is active.
-- Host dismissal, text-input popover dismissal and post-dispatch pointer release
-  must reach the factory. Root notification, Dialog and modal chrome retain
-  their existing ordering and application ownership.
-  [`src/transient_input.rs`](../../src/transient_input.rs) owns classification
-  through the actual post-dispatch window hook on every platform. A scrollable
-  Flickable can still delay child press delivery beyond that hook. Classify each
-  MainWindow left press immediately; only a miss retains its original logical
-  position and route. After its actual left release dispatches, consume that
-  pending press and classify the original point once more only if the route is
-  unchanged. A successful initial classification must not repeat. Pointer exit
-  or window deactivation cancels pending work; other adapters/buttons do not
-  consume it. Do not classify release coordinates or add timers/polling.
-  Installation follows `Window::show()` and filters by actual MainWindow adapter
-  identity. macOS's native monitor forwards chrome/release events rather than
-  classifying inputs; its production hook avoids duplicate pointer forwarding.
-  The public test entry still forwards both pointer phases.
+- The creation owner registers the static factory once with
+  `src/transient_input/observers.rs`. Its weak subscriber forwards unchanged
+  logical window coordinates to the local `TransientOverlayState` only while
+  the route is active; the full-window root stays at `(0, 0)`. Registration must
+  not retain either page or host. The actual MainWindow post-dispatch hook in
+  `src/transient_input.rs` publishes each left press once on every backend,
+  including macOS, independently of delayed Flickable child focus. Shared
+  `GitHubPopoverDismissGuard` handles outside bounds for ActionMenu, Select and
+  Diff settings without consuming the target press; Select supplies its absolute
+  trigger bounds. Release events do not dismiss and input focus no longer closes
+  all popovers. Explicit dismissal and root notification/Dialog/modal ownership
+  remain unchanged. Installation follows `Window::show()`; actual adapter
+  identity excludes detached windows and non-left buttons are ignored. The
+  native macOS chrome/release path does not republish the shared press signal.
+  Verify active/inactive and dropped subscribers, another host, consumed
+  button/input presses, interior/trigger controls, first-click peer switching,
+  stale presses and inside-press/outside-release drags. Record native coverage
+  separately from testing-backend checks.
+  / 静态 factory 创建时向共享弱引用注册表登记一次，仅活动路由按原始窗口坐标接收
+  左键按下；不得持有页面/宿主。共享 guard 处理菜单、Select 与 Diff settings 外部
+  边界，保留原操作；松开和输入焦点不再无条件关闭弹层。以非活动/已销毁订阅、其他
+  host/adapter、非左键及内部按下外部松开为负例，原生覆盖单独记录。
 - Exclusive popover claims cross both global graphs through
   `src/ui_components/popover.rs` and `UiComponentsBridge`. A local claim closes
   host peers and stamps the expected next host generation before claiming, so
@@ -129,7 +135,8 @@ selection state; changing one example must not select an item in the other.
   publishing. Apply the full Tooltip acceptance matrix to the static product.
 
 页面、滚动和浮层属于同一个全窗口 factory；首次访问后保留工厂根，离开路由释放
-文档并清理临时状态。宿主几何、字体、主题、dismiss 与 pointer release 都必须同步。
+文档并清理临时状态。宿主几何、字体、主题与显式 dismiss 必须同步；派发后左键按下
+通过共享弱引用注册表广播，pointer release 仅保留诊断用途，不再负责关闭。
 工厂必须使用实际负责绘制的宿主 `WindowAdapter`；首次创建在同一 event-loop turn
 保存并立即恢复 MainWindow 根，随后才处理构造结果、同步状态和绑定应用 callback。
 返回错误也须先恢复，临时根安装期间不得让出执行或调度应用工作。
