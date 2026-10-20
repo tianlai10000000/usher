@@ -203,7 +203,9 @@ Shell 提供页头/页脚之间未缩进的 `body-x/y/width/height`，既有
 `content-x/y/width/height` 则继续由 `body-padding` 派生安全区，保持原几何兼容。
 整段正文滚动使用原始垂直边界，把上下留白放进滚动内容；静态正文继续使用安全区。
 AI Agent 与 `GitHubDialogEnhance` 遵循完整正文滚动契约。Project 已使用 Shell 零
-padding 与内容自有 16px 留白；PR Commit 选择是有意采用零 padding 的贴边列表。
+padding 与内容自有 16px 留白；PR Commit 选择是有意采用零 padding 的贴边列表，
+复用 `GitHubScrollView` 的满宽视口与溢出时覆盖式滚动条，不为隐藏滚动条预留右侧槽位。
+共享外壳保留上下轮廓与圆角描边，不绘制中间的左右竖边；Commit 范围标题也只绘制上下分隔线。
 Hook 保持有界表单，仅 code editor 滚动，不能再增加同轴外层 ScrollView；其余静态/
 有界消费者保留既有安全区布局。详见 [Dialog 契约](specs/ui-design.md#dialog--弹窗)
 及 [已核对消费者清单（归档：docs/validation/header-controls-20261015/README.md）](local-archives.md#validation-experiments-20261016)。

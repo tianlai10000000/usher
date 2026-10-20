@@ -15,7 +15,7 @@ import { GitHubIconButton } from "../../components/button/github_icon_button.sli
 import { GitHubTooltip } from "../../components/github_tooltip.slint";
 import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint";
 import { GitHubCenteredLoadingState } from "../../components/github_spinner.slint";
-import { GitHubPassiveScrollView, GitHubVirtualListScrollbar, ListView } from "../../components/github_scroll_view.slint";
+import { GitHubScrollView, GitHubPassiveScrollView, GitHubVirtualListScrollbar, ListView } from "../../components/github_scroll_view.slint";
 import { GitHubActionListItem, GitHubActionMenu, GitHubActionMenuTriggerArea } from "../../components/github_action_menu.slint";
 import { PullRequestReviewPageContract } from "../../features/pr_review/contract.slint";
 import { I18n } from "@i18n";
@@ -3941,16 +3941,12 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             root.commit-range-dialog-open = false;
         }
 
-            if root.commit-range-dialog-open: commit-range-scroll := ScrollView {
+            if root.commit-range-dialog-open: commit-range-scroll := GitHubScrollView {
                 x: commit-dialog-frame.content-x;
                 y: commit-dialog-frame.content-y;
                 width: commit-dialog-frame.content-width;
                 height: commit-dialog-frame.content-height;
                 z: 3100;
-                horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
-                vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
-                content-height: commit-range-content.preferred-height;
-
                 commit-range-content := VerticalLayout {
                     width: commit-range-scroll.visible-width;
                     spacing: 0px;
@@ -4029,9 +4025,19 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                     Rectangle {
                         width: parent.width;
                         height: 42px;
-                        border-width: 1px;
-                        border-color: root.github-border-default;
                         background: root.github-bg-muted;
+                        Rectangle {
+                            y: 0px;
+                            width: parent.width;
+                            height: 1px;
+                            background: root.github-border-default;
+                        }
+                        Rectangle {
+                            y: parent.height - 1px;
+                            width: parent.width;
+                            height: 1px;
+                            background: root.github-border-default;
+                        }
                         Text {
                             x: 24px;
                             width: parent.width - 48px;

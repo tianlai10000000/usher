@@ -37,6 +37,8 @@ export component GitHubPassiveScrollView inherits Rectangle {
 
 // Application-owned vertical viewport with GitHub/Primer semantic scrollbar
 // colors. Content stays one mounted layout tree while scrolling/resizing.
+// The viewport always spans the full width. The scrollbar overlays overflowing
+// content; edge-to-edge Dialog lists must not reserve a hidden scrollbar gutter.
 export component GitHubScrollView inherits Rectangle {
     in-out property <length> viewport_x <=> scroll-area.content-x;
     in-out property <length> viewport_y <=> scroll-area.content-y;

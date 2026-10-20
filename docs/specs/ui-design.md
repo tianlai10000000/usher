@@ -1090,6 +1090,11 @@ expanded/collapsed, and success confirmation.
 - `GitHubScrollView`: the application-owned mounted viewport and semantic
   scrollbar foundation. It must preserve models while scrolling, support
   track and thumb pointer interaction, and never depend on Material styling.
+  Its scrollbar overlays the full-width viewport only when content overflows;
+  hiding it must not reserve a right gutter or narrow an edge-to-edge Dialog
+  list. `GitHubDialog` owns symmetric body geometry, not a scrollbar allowance.
+  滚动条仅在内容溢出时覆盖于满宽视口，隐藏时不得预留右侧槽位或缩窄 Dialog
+  贴边列表。`GitHubDialog` 只负责对称正文几何，不预留滚动条宽度。
 - `GitHubProgressBar`: the shared determinate/indeterminate semantic progress
   track; callers provide the visible operation label and status.
 - `GitHubSpinner`: the only indeterminate spinner implementation; callers
@@ -1186,7 +1191,11 @@ expanded/collapsed, and success confirmation.
 - `GitHubDialog`: root-layer modal/non-modal overlay with owned backdrop input,
   stable header/body/footer safe areas, visible close control, close/Esc
   semantics, initial focus ownership, consistent action ordering, and a
-  full-window narrow layout at the small breakpoint. Root Dialog hosts paint
+  full-window narrow layout at the small breakpoint. The surface retains its
+  top/bottom outline and rounded corner strokes without straight side borders;
+  edge-list section headings likewise use horizontal dividers only.
+  外壳保留上下轮廓与圆角描边，去除左右直线边框；贴边列表的分区标题同样只画横向分隔线。
+  Root Dialog hosts paint
   above application chrome, so a modal backdrop covers the complete window,
   including the native-title-bar inset and any persistent status bar. A route
   host that occupies only the main content column supplies the complete window

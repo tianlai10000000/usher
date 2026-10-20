@@ -2,7 +2,7 @@
 use slint::{ComponentHandle, LogicalSize, Model, ModelRc, VecModel};
 use std::{cell::RefCell, rc::Rc, time::Duration};
 use usher_lib::PrReviewUiExt;
-use usher_lib::{MainWindow, Route, WorkflowPullRequestItem};
+use usher_lib::{MainWindow, Route, WorkflowPrCommit, WorkflowPullRequestItem};
 
 type Rows = Rc<RefCell<Vec<WorkflowPullRequestItem>>>;
 
@@ -140,6 +140,33 @@ fn return_after_preview(ui: &MainWindow, rows: Rows) {
     });
 }
 
+fn show_commit_range(ui: &MainWindow, count: i32) {
+    let commits = (0..count)
+        .map(|index| {
+            let short_sha = format!("{:07x}", index + 1);
+            let sha = format!("{short_sha}{:033x}", index + 1);
+            WorkflowPrCommit {
+                short_sha: short_sha.into(),
+                sha: sha.into(),
+                title: format!(
+                    "fix(dialog): align commit picker content and scrollbar geometry — 提交 {}",
+                    index + 1
+                )
+                .into(),
+                author: "Offline reviewer".into(),
+                identity_action: "Offline reviewer authored".into(),
+                date_label: "Oct 20, 2026".into(),
+                ..Default::default()
+            }
+        })
+        .collect::<Vec<_>>();
+    let review = ui.pr_review();
+    let bridge = review.global::<usher_lib::PrReviewBridge>();
+    bridge.set_workflow_pr_review_commit_count(count);
+    bridge.set_workflow_pr_review_commits(ModelRc::new(VecModel::from(commits)));
+    bridge.set_workflow_pr_commit_range_dialog_open(true);
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     let locale = args
@@ -147,6 +174,16 @@ fn main() -> Result<(), slint::PlatformError> {
         .find(|pair| pair[0] == "--locale")
         .map(|pair| pair[1].clone())
         .unwrap_or_else(|| "en".into());
+    let commit_range_count = args
+        .windows(2)
+        .find(|pair| pair[0] == "--commit-range")
+        .map(|pair| {
+            let count = pair[1]
+                .parse::<i32>()
+                .expect("--commit-range requires a positive integer");
+            assert!(count > 0, "--commit-range requires a positive integer");
+            count
+        });
     let ui = MainWindow::new()?;
     usher_lib::install_floating_overlay_positioning(&ui);
     slint::select_bundled_translation(&locale).expect("use a packaged locale such as en or zh-CN");
@@ -348,8 +385,11 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
     show_list(&ui, &rows);
-    if args.iter().any(|arg| arg == "--detail") {
+    if args.iter().any(|arg| arg == "--detail") || commit_range_count.is_some() {
         show_review(&ui, &rows.borrow()[0], &locale);
+    }
+    if let Some(count) = commit_range_count {
+        show_commit_range(&ui, count);
     }
     ui.show()?;
     // This fixture has no native chrome monitor. Forward real window pointer

@@ -142,6 +142,12 @@ fn generic_dialog_long_body_scrolls_to_chrome_edges_with_moving_padding_in_both_
         let text = find(&window, "GitHubDialogEnhance::content-text");
         let top = surface.absolute_position().y + 56.0;
         let bottom = surface.absolute_position().y + surface.size().height - 64.0;
+        near(
+            viewport.absolute_position().x,
+            surface.absolute_position().x + 16.0,
+        );
+        near(viewport.size().width, surface.size().width - 32.0);
+        near(text.size().width, viewport.size().width);
         near(viewport.absolute_position().y, top);
         near(viewport.size().height, bottom - top);
         near(text.absolute_position().y, top + 16.0);
@@ -189,6 +195,12 @@ fn generic_dialog_short_body_retains_safe_padding_without_artificial_scroll() {
         let text = find(&window, "GitHubDialogEnhance::content-text");
         let body_top = surface.absolute_position().y + 56.0;
         let body_bottom = surface.absolute_position().y + surface.size().height - 64.0;
+        near(
+            viewport.absolute_position().x,
+            surface.absolute_position().x + 16.0,
+        );
+        near(viewport.size().width, surface.size().width - 32.0);
+        near(text.size().width, viewport.size().width);
         near(viewport.absolute_position().y, body_top);
         near(viewport.size().height, body_bottom - body_top);
         near(text.absolute_position().y, body_top + 16.0);

@@ -174,9 +174,28 @@ export component GitHubDialog inherits FocusScope {
             ? root.viewport-height
             : min(root.dialog-height, root.viewport-height - GitHubMetrics.size-32);
         border-radius: root.narrow-fullscreen ? 0px : GitHubMetrics.radius-large;
-        border-width: root.narrow-fullscreen ? 0px : GitHubMetrics.border-thin;
-        border-color: GitHubTheme.border-default;
         background: GitHubTheme.canvas-default;
+    }
+
+    // Retain the top/bottom outline and rounded corners without drawing the
+    // straight side borders. Only these decoration bands are clipped; body
+    // content and its scroll viewport keep their existing rectangular bounds.
+    for bottom in [false, true]: Rectangle {
+        visible: !root.narrow-fullscreen;
+        x: dialog-surface.x;
+        y: dialog-surface.y + (bottom ? dialog-surface.height - self.height : 0px);
+        width: dialog-surface.width;
+        height: GitHubMetrics.radius-large;
+        clip: true;
+        Rectangle {
+            y: bottom ? parent.height - self.height : 0px;
+            width: parent.width;
+            height: dialog-surface.height;
+            border-radius: GitHubMetrics.radius-large;
+            border-width: GitHubMetrics.border-thin;
+            border-color: GitHubTheme.border-default;
+            background: transparent;
+        }
     }
 
     // Keep all chrome in the component root coordinate system. Feature body

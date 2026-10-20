@@ -274,8 +274,12 @@ The shell exposes raw `body-x/y/width/height` between its header/footer, while
 top/bottom padding inside the scrolling content; static bodies retain the padded
 geometry. AI Agent and `GitHubDialogEnhance` use that full-body contract. Project
 already uses zero shell padding with content-owned 16 px spacing; PR commit
-selection intentionally uses a zero-padding edge list. Hook forms remain bounded
-with only the code editor scrolling, avoiding an extra same-axis outer scroll.
+selection intentionally uses a zero-padding edge list with `GitHubScrollView`'s
+full-width viewport and overflow-only overlay scrollbar, without a hidden right
+gutter. The shared shell retains its rounded top/bottom outline without straight
+side borders; the Commit range heading similarly draws only horizontal dividers.
+Hook forms remain bounded with only the code editor scrolling, avoiding an extra
+same-axis outer scroll.
 The remaining static/bounded consumers retain their existing safe-area layout.
 See the [Dialog contract](specs/ui-design.md#dialog--弹窗) and
 [checked consumer inventory（归档：docs/validation/header-controls-20261015/README.md）](local-archives.md#validation-experiments-20261016).
