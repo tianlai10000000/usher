@@ -1,11 +1,13 @@
+use std::sync::OnceLock;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle, Style, Theme, ThemeSet};
 use syntect::parsing::{SyntaxReference, SyntaxSet};
 
-use crate::git::PullRequestDiffLine;
+use crate::git::{DiffLineKind, PullRequestDiffLine};
 
 pub(super) struct HighlightResources {
     syntax_set: SyntaxSet,
+    typescript_syntax_set: OnceLock<SyntaxSet>,
     github_theme: Theme,
 }
 
@@ -23,7 +25,22 @@ impl HighlightResources {
         );
         Self {
             syntax_set,
+            typescript_syntax_set: OnceLock::new(),
             github_theme,
+        }
+    }
+
+    fn syntax_set_for_path(&self, path: &str) -> &SyntaxSet {
+        if matches!(
+            path_extension(path).as_str(),
+            "ts" | "tsx" | "vue" | "svelte"
+        ) {
+            // Syntect's defaults omit TypeScript. JavaScript misparses typed
+            // return values and can leave later source inside a template string.
+            self.typescript_syntax_set
+                .get_or_init(two_face::syntax::extra_newlines)
+        } else {
+            &self.syntax_set
         }
     }
 }
@@ -63,68 +80,158 @@ pub(super) fn highlight_diff_lines_cancellable(
     if cancelled() {
         return None;
     }
-    let syntax_set = &resources.syntax_set;
-    let github_theme = &resources.github_theme;
+    let syntax_set = resources.syntax_set_for_path(path);
     let extension = path_extension(path);
     let default_syntax = syntax_for_path(syntax_set, path);
-    let mut syntax = default_syntax;
-    let mut highlighter = HighlightLines::new(syntax, github_theme);
+    let has_deletions = lines.iter().any(|line| line.kind == DiffLineKind::Deletion);
+    // A diff interleaves two source files. Removed text must never change the
+    // parser state used for additions or for the head version of context rows.
+    let mut highlighters = [
+        HighlightLines::new(default_syntax, &resources.github_theme),
+        HighlightLines::new(default_syntax, &resources.github_theme),
+    ];
     let mut highlighted = Vec::with_capacity(lines.len());
     for (index, line) in lines.iter().enumerate() {
         if cancelled() {
             return None;
         }
         let expanded = expand_tabs(line.content.as_str(), 4);
-        if matches!(line.kind.as_str(), "hunk" | "meta") {
-            syntax = if extension == "vue" {
-                syntax_for_vue_hunk(syntax_set, lines, index + 1)
-            } else {
-                default_syntax
-            };
-            highlighter = HighlightLines::new(syntax, github_theme);
+        if line.kind == DiffLineKind::Hunk {
+            for (side, highlighter) in highlighters.iter_mut().enumerate() {
+                if side == 0 && !has_deletions {
+                    continue;
+                }
+                let hunk = lines[index + 1..]
+                    .iter()
+                    .take_while(|line| line.kind != DiffLineKind::Hunk)
+                    .filter(|line| source_side_includes(line.kind, side));
+                let syntax = if extension == "vue" {
+                    syntax_for_vue_hunk(syntax_set, hunk.clone())
+                } else {
+                    default_syntax
+                };
+                *highlighter = HighlightLines::new(syntax, &resources.github_theme);
+                if matches!(
+                    syntax.name.as_str(),
+                    "JavaScript" | "TypeScript" | "TypeScriptReact" | "CSS"
+                ) && hunk_starts_in_block_comment(hunk, &mut cancelled)?
+                {
+                    // The opener can be in hidden context. Prime only parser
+                    // state; synthetic text must never enter paint or copy.
+                    let _ = highlighter.highlight_line("/*\n", syntax_set);
+                }
+            }
             highlighted.push(plain_line(expanded, [0xff, 0x57, 0x60, 0x6a]));
             continue;
         }
-
-        if extension == "vue"
-            && let Some(next_syntax) = vue_tag_next_syntax(syntax_set, expanded.trim())
-        {
-            let mut tag_highlighter =
-                HighlightLines::new(syntax_by_name(syntax_set, "HTML"), github_theme);
-            let highlighted_input = format!("{expanded}\n");
-            highlighted.push(
-                tag_highlighter
-                    .highlight_line(highlighted_input.as_str(), syntax_set)
-                    .map(styled_line)
-                    .unwrap_or_else(|_| plain_line(expanded, [0xff, 0x24, 0x29, 0x2f])),
-            );
-            syntax = next_syntax;
-            highlighter = HighlightLines::new(syntax, github_theme);
+        if line.kind == DiffLineKind::Meta {
+            // A no-newline marker is not source and cannot end a comment/string.
+            highlighted.push(plain_line(expanded, [0xff, 0x57, 0x60, 0x6a]));
             continue;
         }
-
-        let highlighted_input = format!("{expanded}\n");
+        if has_deletions && line.kind == DiffLineKind::Context {
+            highlight_source_line(
+                resources,
+                syntax_set,
+                &mut highlighters[0],
+                path,
+                &extension,
+                &expanded,
+                false,
+            );
+        }
+        let side = usize::from(line.kind != DiffLineKind::Deletion);
         highlighted.push(
-            match highlighter.highlight_line(highlighted_input.as_str(), syntax_set) {
-                Ok(ranges) => styled_line(ranges),
-                Err(error) => {
-                    log::debug!(
-                        "[Workflow][PR Review] Syntax highlighting fallback: path={} error={}",
-                        path,
-                        error
-                    );
-                    plain_line(expanded, [0xff, 0x24, 0x29, 0x2f])
-                }
-            },
+            highlight_source_line(
+                resources,
+                syntax_set,
+                &mut highlighters[side],
+                path,
+                &extension,
+                &expanded,
+                true,
+            )
+            .expect("a visible source line always produces tokens"),
         );
     }
     (!cancelled()).then_some(highlighted)
 }
 
+fn source_side_includes(kind: DiffLineKind, side: usize) -> bool {
+    kind == DiffLineKind::Context
+        || kind
+            == if side == 0 {
+                DiffLineKind::Deletion
+            } else {
+                DiffLineKind::Addition
+            }
+}
+
+fn hunk_starts_in_block_comment<'a>(
+    lines: impl Iterator<Item = &'a PullRequestDiffLine>,
+    cancelled: &mut impl FnMut() -> bool,
+) -> Option<bool> {
+    for line in lines {
+        if cancelled() {
+            return None;
+        }
+        let text = line.content.trim();
+        if text.is_empty() {
+            continue;
+        }
+        // Require a closing delimiter after an unbroken JSDoc-style prefix.
+        // A multiplication continuation such as `* factor` alone is not enough.
+        if text.starts_with("*/") {
+            return Some(true);
+        }
+        if !text.starts_with('*') || text.starts_with("**") {
+            return Some(false);
+        }
+        if text.contains("*/") {
+            return Some(true);
+        }
+    }
+    Some(false)
+}
+
+fn highlight_source_line<'a>(
+    resources: &'a HighlightResources,
+    syntax_set: &'a SyntaxSet,
+    highlighter: &mut HighlightLines<'a>,
+    path: &str,
+    extension: &str,
+    expanded: &str,
+    render: bool,
+) -> Option<HighlightedLine> {
+    let input = format!("{expanded}\n");
+    let result = if extension == "vue"
+        && let Some(syntax) = vue_tag_next_syntax(syntax_set, expanded.trim())
+    {
+        *highlighter = HighlightLines::new(syntax, &resources.github_theme);
+        HighlightLines::new(syntax_by_name(syntax_set, "HTML"), &resources.github_theme)
+            .highlight_line(&input, syntax_set)
+    } else {
+        highlighter.highlight_line(&input, syntax_set)
+    };
+    render.then(|| {
+        result.map(styled_line).unwrap_or_else(|error| {
+            log::debug!(
+                "[Workflow][PR Review] Syntax highlighting fallback: path={path} error={error}"
+            );
+            plain_line(expanded.to_owned(), [0xff, 0x24, 0x29, 0x2f])
+        })
+    })
+}
+
 fn syntax_for_path<'a>(syntax_set: &'a SyntaxSet, path: &str) -> &'a SyntaxReference {
     let extension = path_extension(path);
-    if matches!(extension.as_str(), "ts" | "tsx" | "vue" | "svelte") {
-        return syntax_by_name(syntax_set, "JavaScript");
+    if matches!(extension.as_str(), "ts" | "tsx") {
+        return syntax_set
+            .find_syntax_by_extension(&extension)
+            .unwrap_or_else(|| syntax_by_name(syntax_set, "TypeScript"));
+    }
+    if matches!(extension.as_str(), "vue" | "svelte") {
+        return syntax_by_name(syntax_set, "TypeScript");
     }
     if matches!(extension.as_str(), "scss" | "sass") {
         return syntax_by_name(syntax_set, "CSS");
@@ -140,16 +247,27 @@ fn syntax_for_path<'a>(syntax_set: &'a SyntaxSet, path: &str) -> &'a SyntaxRefer
 
 fn syntax_for_vue_hunk<'a>(
     syntax_set: &'a SyntaxSet,
-    lines: &[PullRequestDiffLine],
-    start: usize,
+    lines: impl Iterator<Item = &'a PullRequestDiffLine>,
 ) -> &'a SyntaxReference {
-    let hunk = lines[start..]
-        .iter()
-        .take_while(|line| line.kind != crate::git::DiffLineKind::Hunk)
-        .map(|line| line.content.trim())
-        .collect::<Vec<_>>();
+    let hunk = lines.map(|line| line.content.trim()).collect::<Vec<_>>();
     if hunk.first().is_some_and(|line| line.starts_with('<')) {
         return syntax_by_name(syntax_set, "HTML");
+    }
+    if hunk.iter().any(|line| {
+        [
+            "import ",
+            "export ",
+            "const ",
+            "let ",
+            "function ",
+            "interface ",
+            "type ",
+            "return ",
+        ]
+        .iter()
+        .any(|prefix| line.starts_with(prefix))
+    }) {
+        return syntax_by_name(syntax_set, "TypeScript");
     }
     let css_declaration_count = hunk
         .iter()
@@ -171,12 +289,17 @@ fn syntax_for_vue_hunk<'a>(
     {
         return syntax_by_name(syntax_set, "CSS");
     }
-    syntax_by_name(syntax_set, "JavaScript")
+    syntax_by_name(syntax_set, "TypeScript")
 }
 
 fn vue_tag_next_syntax<'a>(syntax_set: &'a SyntaxSet, line: &str) -> Option<&'a SyntaxReference> {
     if line.starts_with("<script") {
-        return Some(syntax_by_name(syntax_set, "JavaScript"));
+        let language = if line.contains("lang=\"ts\"") || line.contains("lang='ts'") {
+            "TypeScript"
+        } else {
+            "JavaScript"
+        };
+        return Some(syntax_by_name(syntax_set, language));
     }
     if line.starts_with("<style") {
         return Some(syntax_by_name(syntax_set, "CSS"));
@@ -402,6 +525,9 @@ pub(super) fn character_columns(character: char) -> u32 {
 }
 
 #[cfg(test)]
+mod comment_tests;
+
+#[cfg(test)]
 mod tests {
     use std::collections::HashSet;
     use std::sync::LazyLock;
@@ -445,7 +571,7 @@ mod tests {
     }
 
     #[test]
-    fn highlights_typescript_with_javascript_fallback() {
+    fn highlights_typescript_with_its_own_grammar() {
         let lines = vec![PullRequestDiffLine {
             old_line: 0,
             new_line: 1,
@@ -540,20 +666,21 @@ mod tests {
 
     #[test]
     fn switches_vue_regions_and_uses_github_dark_contrast() {
+        let syntax_set = TEST_RESOURCES.syntax_set_for_path("src/Dialog.vue");
         assert_eq!(
-            vue_tag_next_syntax(&TEST_RESOURCES.syntax_set, "<script setup lang=\"ts\">")
-                .expect("script tag should select JavaScript")
+            vue_tag_next_syntax(syntax_set, "<script setup lang=\"ts\">")
+                .expect("typed script tag should select TypeScript")
                 .name,
-            "JavaScript"
+            "TypeScript"
         );
         assert_eq!(
-            vue_tag_next_syntax(&TEST_RESOURCES.syntax_set, "<style scoped>")
+            vue_tag_next_syntax(syntax_set, "<style scoped>")
                 .expect("style tag should select CSS")
                 .name,
             "CSS"
         );
         assert_eq!(
-            vue_tag_next_syntax(&TEST_RESOURCES.syntax_set, "</style>")
+            vue_tag_next_syntax(syntax_set, "</style>")
                 .expect("closing style tag should select HTML")
                 .name,
             "HTML"

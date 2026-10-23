@@ -13,7 +13,7 @@ This specification is the portable contract for the current pull-request capabil
 | List/query/pagination / 列表、查询及分页 | `src/workflow/pr_list.rs`, `pr_list_state.rs`; `ui/components/workflow/github_pr_flow.slint`, `github_pr_list_components.slint`; [product boundary](#product-boundary--产品边界) | `cargo test --lib --locked workflow::pr_list`; `cargo test --test pagination_ui --locked`; `cargo test --test pr_list_status_layout_ui --locked`; `cargo test --test pr_list_menu_ui --locked` |
 | Approval, mutations and shared state / 批准、远端变更及共享状态 | `src/workflow/pr_data.rs`; `pr_review/controller/actions.rs`, `actions/{reviews,remote,presentation}.rs`; [execution flow](#execution-and-state-flow--执行与状态流) | `cargo test --lib --locked workflow::pr_data`; `cargo test --lib --locked workflow::pr_review::controller::actions`; `cargo test --test pr_review_core_journeys --locked` |
 | Diff/source, Find and selection / Diff、源码、Find 及选区 | `pr_review/{hunk,diff_model,diff_projection,find_worker,find_bridge,selection,text_geometry,virtual_list}.rs`; `controller/diff_bindings.rs`; `ui/features/pr_review/diff_bridge.slint` | `cargo test --lib --locked workflow::pr_review`; [search](search.md), [text layout](text-layout.md) and [virtual scrolling](virtual-scrolling.md) matrices / 对应验收矩阵 |
-| Highlight/lifecycle completion / 高亮及生命周期回写 | `pr_review/state.rs`; `controller/{highlight_session,highlighting,highlight_completion,lifecycle}.rs`; [controller ownership](#controller-ownership--控制器职责) | Focused library tests above; native Release A/B before adopting memory-policy changes / 上方定向单测及内存策略采用前的原生 Release A/B |
+| Highlight/lifecycle completion / 高亮及生命周期回写 | `syntax_highlight.rs` (TypeScript/TSX, side isolation and hunk comment recovery / TypeScript/TSX、两侧隔离及 hunk 注释恢复); `pr_review/state.rs`; `controller/{highlight_session,highlighting,highlight_completion,lifecycle}.rs`; [controller ownership](#controller-ownership--控制器职责) | `cargo test --lib --locked workflow::syntax_highlight`; focused controller tests above; native Release A/B before adopting memory-policy changes / 语法与上方控制器定向单测，内存策略采用前仍需原生 Release A/B |
 | Provider behavior and failure / Provider 行为及失败 | `src/git/{provider,model,locator,json}.rs`, provider modules; [adapter contract](#provider-adapter-contract--provider-适配契约) | `cargo test --lib --locked git::`; [security](security-boundaries.md) and [HTTP](http.md) negative fixtures / 负例 |
 | UI root, factory and model ownership / UI root、工厂及 model 归属 | [PR Review UI](pr-review-ui.md); `crates/usher-ui-pr-review/`, `pr_review/ui.rs`, `ui/{context,input}.rs`, `ui/features/pr_review/` | `cargo test --test pr_review_factory_ui --locked`; architecture/UI-policy and native matrices / 结构、UI 门禁及原生矩阵 |
 | Conflicts / 冲突 | [PR conflict browsing](pr-conflicts.md) owns the independent snapshot and workspace lifecycle / 独立快照及工作区生命周期归该规格 | Its focused and native checklist / 该规格的定向及原生清单 |
@@ -237,8 +237,11 @@ idle retirement drops detached resources on the blocking worker, outside cache
 and session locks. Final controller destruction remains the existing CPU-only
 teardown path; this does not introduce a global deferred-destruction service.
 
-The current slot holds a lazily initialized bundled `SyntaxSet`/`Theme` graph;
-retired in-flight leases can temporarily keep an older graph alive. Synchronized
+The current slot holds a lazily initialized bundled `SyntaxSet`/`Theme` graph.
+`HighlightResources` now also owns an optional, lazy `two-face` syntax set for
+TypeScript-family paths; this addition is outside the recorded B7 runtime
+measurements. A graph count still counts resource owners, not contained syntax
+sets. Retired in-flight leases can temporarily keep an older graph alive. Synchronized
 lazy grammar/regex internals can mutate and grow as builtin languages initialize,
 so a graph count is not a byte bound. Each file still creates fresh
 `ParseState`/`HighlightState` and output; the cache retains no file text, selected
@@ -271,8 +274,10 @@ B7 的 `controller/highlight_cache.rs` 为每个控制器持有一个当前内�
 过期结果。正常空闲释放在 blocking Worker、缓存锁及会话锁之外析构；最终控制器
 销毁沿用既有 CPU 资源清理路径，不增加全局延迟析构服务。
 
-当前槽持有一个惰性初始化的内置 `SyntaxSet`/`Theme` 图；执行中的旧 lease 可暂时
-保留旧图。线程安全的惰性语法/正则缓存可随内置语言初始化而变化、增长，图数量
+当前槽持有一个惰性初始化的内置 `SyntaxSet`/`Theme` 图。`HighlightResources` 现在
+还拥有一个可选、惰性的 `two-face` 语法集，用于 TypeScript 相关路径；该新增内容
+不在已有 B7 运行时测量范围内。图数量仍统计资源 owner，不统计其中的语法集数量。
+执行中的旧 lease 可暂时保留旧图。线程安全的惰性语法/正则缓存可随语言初始化而变化、增长，图数量
 不是字节上限。每个文件仍创建新的 `ParseState`/`HighlightState` 和结果；缓存
 不保留文件正文、所选路径、token 或逐文件解析历史。会话 `is_loaded` 与
 `highlight_controller_grammar_cache_entries` 描述不同的当前 owner，不涵盖所有
@@ -646,6 +651,20 @@ rebuilt during scrolling.
 10.1. Opening the commit selector lazily reuses the provider-neutral PR commit list. Saving `All commits` restores the original cached detail without a network request. Saving a contiguous range compares the commit before the selected start (or the PR base SHA) with the selected end through the provider repository compare endpoint. Changing ranges invalidates highlighted/source caches and stale range responses cannot replace a newer selection.
 11. The normalized `viewed` field controls the local `Viewed files` filter. Provider adapters whose similarly named field has different semantics must normalize it to `false` instead of exposing that provider field as review progress.
 11.1. PR diff source remains upright across every grammar. Syntax colors and bold weight may vary, but theme-provided italic scopes are normalized away before paint and text geometry.
+11.2. Syntax parser state is independent for the old and new sides of a Diff;
+context advances both sides, and meta rows never advance or reset either parser.
+At a fresh JavaScript/TypeScript/CSS hunk, a contiguous initial `*` comment tail ending in
+`*/` may restore the hidden block-comment opener only in parser state. Synthetic
+text must not enter tokens, source columns, selection or clipboard output. Vue
+script cues take precedence over colon-based CSS inference. Regressions compare
+visible tokens with complete-source highlighting and retain ordinary comments,
+multiline strings, arithmetic and CSS controls.
+11.3. `.ts` and `.tsx` use the packaged TypeScript/TSX grammars rather than a
+JavaScript fallback. Vue `script lang="ts"` and inferred script hunks use
+TypeScript, including typed async returns followed by template literals and
+JSDoc comments. `HighlightResources` lazily loads the additional `two-face`
+syntax set only for `.ts`, `.tsx`, `.vue` or `.svelte`; its existing resource-slot
+lifecycle and per-file parser ownership still apply.
 12. Syntax highlighting is produced in Rust with `syntect` using the selected file path; Slint receives styled token models and never parses source languages. The Files changed code column supports GitHub-style drag selection (Unified and Split) without a separate selection mode: selection geometry uses the measured monospace cell advance and display columns (including tabs and wide glyphs), wrapped rows keep Slint auto-wrap (`TextInput.word-wrap`) and use its native UTF-8 selection geometry so continuation-line double-click paints the complete logical word, and line-number gutters plus `+`/`-` markers stay outside the selectable region. Wrapped Unified gutter glyphs use the same natural first-line font box as wrapped code; unwrapped rows retain the nominal 22px slot. Double-click expands to the same character-class run (alphanumeric/`_`, whitespace, or other punctuation), and triple-click selects the full code column line; the multi-click streak is owned by the review workspace so virtual-window projection cannot break the gesture. ⌘/Ctrl+F opens a compact editor-style find bar in the selected-file toolbar (GitHub's PR Files changed page has no first-party find chrome and relies on browser find-in-page; Usher mirrors the CodeMirror/GitHub file-editor find panel: query, `current/total` or `No results`, previous/next, and close). Matching is case-insensitive over copyable code columns only and uses `usher-search` for Unicode-safe non-overlapping occurrences. Enter/Shift+Enter navigate each occurrence in source order with wraparound, including multiple matches on one logical line. Viewport reveal follows Blink `CenterIfNeeded`: a fully visible active match does not scroll; a partially or fully hidden match is centered and clamped to content bounds. Wrapped code resolves the occurrence to its visual subline first, so multiple visible matches on one visual line change only highlight/counter. The PR adapter performs one command-time calculation and at most one viewport write; it has no Find positioning timer, viewport observer, recycled-row geometry report, or persistent reveal state. Width/height changes and scrolling never reposition the active match. Mounted overscan rows use bounded paint-only match models: the active match is Blink orange `#ff9632` and other matches are Blink yellow `#ffff00`; these models never read or write viewport state. Escape closes find before clearing a selection. Hunk headers (`@@ … @@`) and meta rows are never selectable and are omitted from ⌘/Ctrl+A ranges and clipboard text, matching GitHub. Cross-row pointer hit testing walks the projected model's actual per-row wrap heights and word-wrap boundaries, so dragging forward or backward into a wrapped endpoint can stop at an exact character instead of treating visual rows as logical diff rows. The diff Flickable must not arbitrate pointer drags: vertical code drags remain selection gestures, while wheel/touchpad and scrollbar scrolling stay enabled. Multi-line ranges copy newline-joined plain text through a silent clipboard write; ⌘/Ctrl+A selects the complete Unified diff or the active Split pane, and Escape clears the active range. Switching file, tab, diff view, or the line-model revision clears selection. Selection must preserve exact virtualization: no whole-file TextInput or duplicate token model may be created; only mounted overscan delegates own lightweight read-only TextInput instances for wrapped selection rendering.
 12.1. Find reveal is an explicit one-shot operation. Only Enter, Shift+Enter,
 or the Find previous/next controls calculate and write a target viewport.
@@ -778,6 +797,16 @@ overscan model，直接拖拽滑块与释放后渲染完全相同的换行内容
 10.1. 打开 commit 选择器时按需复用 Provider-neutral PR commit 列表。保存 `All commits` 直接恢复原始缓存且不发网络请求；保存连续范围时，通过 Provider 仓库 compare endpoint 比较所选起点之前的 commit（或 PR base SHA）与所选终点。切换范围会失效高亮/源码缓存，旧范围响应不得覆盖较新的选择。
 11. 归一化后的 `viewed` 字段驱动本地 `Viewed files` 筛选；若某 Provider 的同名字段语义不同，adapter 必须将其归一化为 `false`，不得把该 Provider 字段冒充审核进度。
 11.1. PR diff 源码在所有语法下都保持正体。语法颜色和粗体可以变化，但主题提供的斜体 scope 必须在绘制与文字几何计算前统一移除。
+11.2. Diff 的旧侧与新侧必须持有独立语法解析状态；context 同时推进两侧，meta 行
+不得推进或重置任一解析器。JavaScript/TypeScript/CSS 新 hunk 若以连续的 `*` 注释尾部开始并以
+`*/` 结束，可以只在解析状态中恢复隐藏的块注释起点；合成文本不得进入 token、源码
+列宽、选区或剪贴板。Vue script 线索优先于按冒号推断 CSS。回归必须将可见 token 与
+完整源码高亮对照，并保留正常注释、多行字符串、算术和 CSS 对照。
+11.3. `.ts` 和 `.tsx` 使用内置 TypeScript/TSX 语法，不能回退到 JavaScript。Vue
+`script lang="ts"` 与推断出的 script hunk 使用 TypeScript，覆盖带类型的 async 返回值
+后接模板字符串、JSDoc 注释的场景。`HighlightResources` 仅在 `.ts`、`.tsx`、`.vue` 或
+`.svelte` 首次需要时惰性加载额外的 `two-face` 语法集，继续遵守既有资源槽生命周期
+与逐文件解析状态归属。
 12. 语法高亮由 Rust 使用 `syntect` 并根据当前文件路径生成；Slint 只接收带样式的 token model，不解析源码语言。Files changed 代码栏支持 GitHub 风格拖拽选中（Unified/Split），无需单独进入选择模式：选区几何使用实测等宽字符步进与显示列（含 Tab 和双宽字符），换行时只绘制实际命中的视觉片段，行号栏与 `+`/`-` 不在可选区域内。双击按相同字符类扩展选中单词（字母数字/`_`、空白、其余标点各自成组），三击选中整行代码列；连击状态保存在审核工作区，避免虚拟窗口投影打断手势。⌘/Ctrl+F 在选中文件工具栏打开紧凑的编辑器式查找栏（GitHub 的 PR Files changed 没有应用内查找，网页依赖浏览器检索；Usher 对齐 CodeMirror/GitHub 文件编辑器查找面板：查询框、`当前/总数` 或 `No results`、上一个/下一个、关闭）。匹配只覆盖可复制代码列，并通过 `usher-search` 生成 Unicode 安全、非重叠的命中；Enter/Shift+Enter 按源码顺序首尾循环，逻辑同一行内的每次出现均为独立结果。视口揭示遵循 Blink `CenterIfNeeded`：活动命中完整可见时不滚动，部分或完全不可见时居中并按内容边界夹紧；软换行代码先解析到命中所在视觉子行，因此同一可见视觉行的多个结果只切高亮与计数。PR adapter 只在命令执行时计算一次并至多写一次 viewport；不存在 Find 定位 timer、viewport observer、回收行几何上报或持久 reveal 状态，宽高变化与滚动均不得重新定位当前命中。已挂载 overscan 行使用有界、仅绘制用途的匹配 model：当前命中使用 Blink 橙色 `#ff9632`，其他命中使用 Blink 黄色 `#ffff00`，这些 model 绝不读写 viewport 状态。Escape 先关闭查找再清除选区。Hunk 头（`@@ … @@`）与 meta 行不可选中，且不会出现在 ⌘/Ctrl+A 选区或剪贴板文本中，行为与 GitHub 一致。Diff Flickable 不得仲裁指针拖动：代码区垂直拖动始终属于选中手势，滚轮/触控板与滚动条仍可滚动。跨行选区以换行拼接纯文本并静默写入剪贴板；⌘/Ctrl+A 选中完整 Unified diff 或当前 Split 侧，Escape 清除选区。切换文件、Tab、Diff view 或 line-model revision 时清除选区。选中必须保留精确虚拟化：不得创建整文件 TextInput 或重复 token model，只有已挂载 overscan delegate 才拥有用于换行选区渲染的轻量只读 TextInput。
 12.1. Find 揭示是显式的一次性操作，只有 Enter、Shift+Enter 或 Find 上一个/下一个
 控件可以计算并写入目标 viewport。输入清空过期结果，当前后台扫描完成时原子选中/高亮

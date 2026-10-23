@@ -118,8 +118,10 @@ Release 性能验收。挂起状态通过现有 PR State Store 的强类型 Acti
 控制器仅拥有当前 PR 的缓存，不为每个访问过的 PR
 保存一份；更换 PR 会使请求代次失效、分离资源槽、清空请求级缓存，新结果就绪时
 替换审核 model。已有 Worker 可在旧 lease 上完成，但不能重新填入替换后的资源槽。
-B7 保留一个当前的惰性内置 `SyntaxSet`/`Theme` 槽，执行中的旧 lease 可暂时保留
-旧图。线程安全的惰性语法/正则内部缓存可变、可增长，图数量不是字节上限。每个
+B7 保留一个当前的惰性内置 `SyntaxSet`/`Theme` 槽。当前 `HighlightResources` 还拥有
+一个可选、惰性的 `two-face` 语法集，用于 TypeScript 相关路径；该新增内容不在已有
+B7 运行时测量范围内。图数量统计资源 owner，而不是其中的语法集数量。执行中的旧
+lease 可暂时保留旧图。线程安全的惰性语法/正则内部缓存可变、可增长，图数量不是字节上限。每个
 文件仍创建新的 `ParseState`/`HighlightState` 和结果；缓存不加入文件正文、所选
 路径、token 或逐文件解析历史。会话 `is_loaded` 与
 `highlight_controller_grammar_cache_entries` 描述不同的当前 owner，不涵盖所有
@@ -1440,6 +1442,15 @@ PR 列表评审结论在 adapter 边界统一为“需要评审”“已批准�
 `workflow/pr_list.rs` 同时拥有可移植查询语法和逻辑分页边界。默认查询为 `is:pr is:open`；顶层状态操作只有 Open/Closed，归一化状态另含 merged 与关闭未合并。Controller 对每次 query/page 响应做序列保护。GitLab 只合并满足当前逻辑页所需的有界 closed/merged 前缀，确定最终可见行后才补全 approvals；Gitee 公有版仅在 v5 无法表达的精确子集或关键词搜索中扫描，且最多读取 30 个 Provider 分页。
 
 仓库 PR 列表归现有 Workflow 的 PR Tab 所有。`workflow/pr_list.rs` 在 event loop 之外读取当前项目持久化的 `repo_project_id`、`repo_type`，并且只在进入或用户切换页码时，通过 `src/git/` 懒加载对应的 10 条远端数据。GitHub 保留搜索接口提供的总数，并发请求当前页每个 PR 的详情，从而补齐源分支和目标分支名称。控制器在将列表值传给 Slint 前，把可解析的 Provider 更新时间统一格式化为东八区（UTC+08:00），并在 Provider 提供时使用准确总数驱动顶部总数和底部分页。页面默认显式查询 open 状态，用户可切换 open/closed/merged/all；请求序号保证旧项目、旧筛选或旧页码的延迟响应不会覆盖当前视图。请求成功且零条数据时显示随筛选状态变化的插画空状态；网络、鉴权或响应结构异常仍使用独立且可重试的错误状态。点击列表行后导航到全窗口 `Route.PrReview`；Workflow 组件实例会被销毁，但列表/root model 状态继续保留，因此 Back 可在不重载列表的情况下重建 PR Tab。审核路由拥有 GitHub 风格的 Conversation、Commits、Files changed 三个 Tab。Conversation 与 Commits 的 *内容* 只在第一次选中时通过 Provider-neutral model 加载：GitHub 组合 PR detail、issue comments、reviews，以及 issue timeline 活动（`committed` 批量、`merged` 与部分系统事件）；Gitee 公版 v5 使用 PR detail/comments/commits，并从 commits 与合并元数据合成提交/合并活动；Gitee 企业版 v8 使用 MR detail/notes/commits，并根据 detail 中 `general_reviewers` / `primary_reviewers` 的 `approve_status` 生成评审摘要；在展开嵌套 `notes[].note` 后同样合成活动，普通评论正文从 `note` / 嵌套 `note.note` / `comment` / 字符串 `content` 读取（忽略对象形态的 `content`），MR commit 时间取 `created_at`；GitLab 使用 MR detail/notes/commits，合成同一套可移植的 `commits`/`commit`/`merged` 行并过滤重复系统 note。Tab 角标数字不等待 Conversation/Commits Tab 激活：它们来自随 diff 加载携带的轻量 PR/MR 摘要字段（`commit_count`、`conversation_count`、`files.length`）。若 Provider 省略总数，adapter 可发起一次有界计数探测（GitHub/GitLab 的 Link/`X-Total` + `per_page=1`；Gitee 公有版短页 `per_page=100`；Gitee 企业版 diffs `commits_size`、MR `user_notes_count`/`notes_count`，或 `with_page=true&per_page=1` + `meta.total_count`）。完整 Conversation 时间线与 commits 列表仍只在打开对应 Tab（或 commit 选择器）时懒加载。Provider-neutral 终结器把每个 `commits` 头与其后连续的 `commit` 行作为一个不可拆分的块排序，因此即使各提交 authored time 不同，三家 Provider 的 GitHub 风格 `added N commits` 记录也不会与提交列表分离。Conversation 批次内的 commit 子行与 Commits Tab（含 Files changed 的 commit 选择器）均按从新到旧展示；adapter 仍把列表归一为从旧到新，控制器在连续范围比较前把展示索引映射回去。远端 review 或 merge 成功后会使 Conversation 时间线缓存失效；若 Conversation 正处于激活状态，则立即重新加载。Files changed 控制器加载并归一化所选 PR diff，根据文件路径构建可折叠目录树，并让路径筛选、目录展开和上一项/下一项文件导航保持本地操作。其 commit 选择器复用懒加载提交列表，把连续范围分发到各 Provider 的仓库 compare endpoint；原始 PR detail 和已加载范围在当前审核期间保持缓存。`workflow/syntax_highlight.rs` 在 UI 层之外使用 `syntect` 把当前文件转换为适配主题的 token model，同时保留 Tab 和显示列宽。切换文件或展开 hunk 时，旧行 model 会保留到新高亮 model 完成，再由 event loop 原子替换；只有真正切换文件时才重置 viewport。点击 hunk 时先记录被点击行的实际屏幕位置。model 替换后，目标 delegate 上报布局后的内容位置，Slint 在有界的多个布局帧内重复应用由此得到的视觉锚点。该方案不再估算软换行行高：仍存在的 hunk 控件保持在指针下方；若分隔行消失，首条新增源码占据原控件位置。在 macOS 上，原生 live-resize 通知会冻结审核工作区的内部几何尺寸，并把每条可见行的 token repeater 临时替换为一个纯等宽文本节点；live resize 结束时恢复最终几何尺寸和完整的 token 着色组件树。
+
+`workflow/syntax_highlight.rs` 为 `.ts`/`.tsx` 使用内置 TypeScript/TSX 语法，为 Vue
+带类型的 script 区域及推断出的 script hunk 使用 TypeScript。额外的 `two-face` 语法集
+只在 `.ts`、`.tsx`、`.vue` 或 `.svelte` 首次需要时由既有资源 owner 惰性加载，防止
+带类型的 async 返回值和模板字符串把后续注释、代码误留在字符串内。Diff 旧侧与新侧
+的解析状态相互隔离，并在 hunk 边界重置。JavaScript/TypeScript/CSS hunk 若以
+已闭合、星号前缀的块注释尾部开始，只在解析状态中
+恢复隐藏起点；meta 行不改变任一侧状态。Vue script 线索优先于冒号 CSS fallback。
+Token 文本与显示列宽仍是原始展开源码，由绘制、选区和复制共用。
 
 Gitee 企业版 Conversation 只使用 PAT 鉴权的 v8 API。detail/current-state URL 已在路径中携带 PR IID 时，不再把同一个 IID 重复作为 `pr_id`。只有 MR detail 的评审人字段明确返回 `approved` 或 `rejected` 才生成评审行。应用不调用依赖浏览器会话的 `/pull_requests/{iid}/activities`，也不保存、不转发、不记录浏览器 Cookie。Provider 原生话术不得进入 Slint。合并人从 `merged_by` 等专用详情字段取得；若这些字段只有邮箱/账号标签，则静默调用文档定义的项目成员接口做账号精确匹配，以成员资料的 `name` 与头像补全展示，用户目录作为静默 fallback。Merge commit 的 `committer_name` 只是更低优先级的 Git 身份。模糊目录结果必须拒绝，完整邮箱地址不得作为操作人标签，且绝不以 PR 作者作为合并人回退。GitLab 同样只使用 `merged_by` 并禁止 PR 作者回退；GitHub 保持原生 `actor.login` 展示。
 
